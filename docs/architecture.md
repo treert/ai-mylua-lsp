@@ -81,16 +81,26 @@ flowchart TB
 ### 3.2 工作区级索引（workspace-wide 必备）
 
 - **文件发现**：`.gitignore`、用户 exclude、globs；支持 5 万级路径。
-- **符号与引用索引**：为 **definition / references / workspace/symbol** 维护可增量更新的结构（例如符号表、引用发生列表、模块图）。
+- **符号与引用索引**：为 **definition / references / workspace/symbol** 维护可增量更新的结构（例如 **工作区全局符号合并表**、`local = require` **绑定边**、引用发生列表）；**不**依赖「未 require 则不可见」的模块隔离模型，见 §3.4。
 - **AST 驻留策略**：全量 AST 不强制常驻；可采用 **摘要 + 按需解析** 或 **分层缓存**；**查询语义**仍覆盖全工作区，与 [`requirements.md`](requirements.md) 一致。
 - **监听与批量变更**：`didChangeWatchedFiles`、去抖、合并重索引；**可取消**长任务。
 
 ### 3.3 语义模型与查询
 
-- **作用域与模块解析**：`require` 边、反向依赖；变更影响范围用于 **增量** 重算。
+- **作用域**：遵守 Lua **`local` / 块 / 闭包**；在此之上，对工作区采用 **「全局已加载」** 合并模型，**不**把可见性绑死在「必须先 require 才看见」的模块树上。约定见 [`requirements.md`](requirements.md) §3.2.1。
+- **`local = require`：** 维护 **字符串 → 文件** 的静态解析结果，以及 **局部名 → 目标文件 `return` 值** 的绑定边；明细见 [`cross-file-indexing.md`](cross-file-indexing.md)。
+- **增量**：单文件差量更新 **聚合索引**（全局分片、`RequireByReturn`、可选引用表）；**不必**每次全库重建。详见 [`cross-file-indexing.md`](cross-file-indexing.md) §1、§4。
 - **内部 API**：`resolve_definition`、`references_in_workspace`、`workspace_symbols`、`document_symbols`、`hover` 等，由 LSP handlers 薄封装。
 
-### 3.4 诊断流水线
+### 3.4 跨文件索引与引用（详细设计另文）
+
+**语义**：全局已见 + `local xxx = require("…")` 绑定到目标文件 **`return`**；类型名工作区合并；与真实 `package.loaded` 无关。
+
+**「数据库」类比**：单文件 **DocumentSummary** 可 **并行** 生成；**工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）即 **内存逻辑库**。既可 **两阶段**（全部摘要 → 再 merge），也可 **每文件完成即 merge**（渐进完整）— 不必死板等待「全库解析完毕」才有跨文件能力，见 [`cross-file-indexing.md`](cross-file-indexing.md) §1。
+
+**数据结构、增量管线、`goto`/`hover`/`references` 热路径与待决清单** 均维护在 **[`cross-file-indexing.md`](cross-file-indexing.md)**（讨论稿）。
+
+### 3.5 诊断流水线
 
 - **解析诊断** 与 **跨文件语义诊断** 分队列；后者在大仓库下受 **调度与配置** 约束。
 - 遵守 **`$/cancelRequest`**。
@@ -120,4 +130,4 @@ flowchart TB
 
 ## 7. 变更约定
 
-- 变更 **Monorepo 目录约定、子工程边界、索引持久化格式、grammar 版本策略** 时，更新本文与 [`implementation-roadmap.md`](implementation-roadmap.md)。
+- 变更 **Monorepo 目录约定、子工程边界、索引持久化格式、grammar 版本策略** 时，更新本文、[`implementation-roadmap.md`](implementation-roadmap.md) 及 [`cross-file-indexing.md`](cross-file-indexing.md)（若涉及跨文件索引）。

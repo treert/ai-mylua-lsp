@@ -5,7 +5,7 @@
 ## 强制规则（给 AI）
 
 1. **在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`ai-readme.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
-2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档，避免文档与代码脱节。
+2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档（跨文件索引见 [`docs/cross-file-indexing.md`](docs/cross-file-indexing.md)），避免文档与代码脱节。
 
 ## 项目目标
 实现 lua vscode 插件，支持语法高亮，语义跳转，hover tips, 诊断，outline 等功能。
