@@ -10,8 +10,23 @@
 ## 项目目标
 实现 lua vscode 插件，支持语法高亮，语义跳转，hover tips, 诊断，outline 等功能。
 **需要支持 emmylua 类型的类型注释。**
+**仅支持 Lua 5.3 及以上版本。**
 对性能有较高要求，需要支持5万个lua文件级别。
+
+**方案取向（需求分析阶段）**
+
+- **全工作区能力**：定义、**所有引用**、**工作区符号** 均为硬性目标，而非「仅打开文件」级能力。
+- **解析与高亮**：**自研 Tree-sitter** 置于 **LSP** 内，负责 **语法树** 与增量解析；**基色高亮**以 **自研 TextMate** 为主；**LSP semantic tokens** 在 TextMate 之上叠加语义着色（如全局/局部等），与 Tree-sitter **不冲突、分工不同**。
+- **分体工程**：**VS Code Extension** 与 **LSP Server** **分开实现、可分开发布**，可并行开发；LSP 可独立服务其他编辑器或工具。
+- **仓库**：**Monorepo**（单仓）管理文法、LSP、扩展等，详见 [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md) §2。
 
 ## 开发进度
 
-### 需求整理，模块拆分
+### 需求分析
+- 文档见 [`docs/README.md`](docs/README.md)（需求、架构、路线图与技术倾向）。
+
+### Monorepo 骨架
+- 已按计划创建顶层目录：`grammar/`、`lsp/`、`vscode-extension/`（各含 README）；根目录 [`README.md`](README.md) 说明布局。
+
+### 后续
+- 定稿 **LSP 实现语言等** 技术栈后，在 `grammar/` / `lsp/` / `vscode-extension/` 内落地实现与单仓 CI。

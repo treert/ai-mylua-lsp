@@ -1,0 +1,29 @@
+# Dependencies & caches
+node_modules/
+.pnp/
+.pnp.js
+
+# Build / artifacts
+dist/
+out/
+target/
+build/
+*.vsix
+
+# IDE / OS
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json.sample
+Thumbs.db
+.DS_Store
+
+# Logs & temp
+*.log
+.tmp/
+tmp/
+
+# Tree-sitter / native (common)
+*.dylib
+*.so
+*.dll
