@@ -28,5 +28,13 @@
 ### Monorepo 骨架
 - 已按计划创建顶层目录：`grammar/`、`lsp/`、`vscode-extension/`（各含 README）；根目录 [`README.md`](README.md) 说明布局。
 
+### 测试与资源文件
+
+| 路径 | 用途 |
+|------|------|
+| [`assets/lua5.4/`](assets/lua5.4/) | Lua 5.4 标准库 EmmyLua 类型注释（`basic.lua`、`string.lua`、`table.lua`、`math.lua`、`io.lua`、`os.lua` 等 11 个文件），作为内置类型定义的参考来源 |
+| [`tests/lua-root/test.lua`](tests/lua-root/test.lua) | 基础测试入口：`require`、EmmyLua `---@class` 注解、成员函数定义 |
+| [`tests/lua-root/json.lua`](tests/lua-root/json.lua) | 真实第三方库（json4lua）：闭包模块模式、table 方法、复杂控制流，用于验证解析与索引能力 |
+
 ### 后续
 - 定稿 **LSP 实现语言等** 技术栈后，在 `grammar/` / `lsp/` / `vscode-extension/` 内落地实现与单仓 CI。
