@@ -375,17 +375,17 @@ local px = obj.pos.x   -- hover 在 x 上需要沿链推出字段类型
 
 | 设置项 | 建议值 | 说明 |
 |--------|--------|------|
-| `lua.gotoDefinition.strategy` | `auto \| single \| list` | `auto`：有明显最佳候选则单跳，否则多目标 |
-| `lua.references.strategy` | `best \| merge \| select` | `best`：只查最佳候选；`merge`：多候选并集；`select`：先选再查 |
-| `lua.globalConflict.strategy` | `auto \| single \| list` | 全局同名冲突决议策略 |
-| `lua.index.cacheMode` | `summary \| memory` | 默认 `summary` |
-| `lua.index.cacheLocation` | `user \| workspace` | 默认 `user` |
-| `lua.workspace.indexMode` | `merged \| isolated` | 多根工作区默认 `merged` |
-| `lua.workspaceSymbol.grouping` | `flat \| grouped` | 默认 `flat` |
-| `lua.diagnostics.emmyTypeMismatchSeverity` | `error` | Emmy 字段赋值不兼容 |
-| `lua.diagnostics.emmyUnknownFieldSeverity` | `error` | Emmy 类型下不存在字段 |
-| `lua.diagnostics.luaErrorSeverity` | `error` | Lua 路径高确定性错误 |
-| `lua.diagnostics.luaWarningSeverity` | `warning` | Lua 路径保守提示 |
+| `mylua.gotoDefinition.strategy` | `auto \| single \| list` | `auto`：有明显最佳候选则单跳，否则多目标 |
+| `mylua.references.strategy` | `best \| merge \| select` | `best`：只查最佳候选；`merge`：多候选并集；`select`：先选再查 |
+| `mylua.globalConflict.strategy` | `auto \| single \| list` | 全局同名冲突决议策略 |
+| `mylua.index.cacheMode` | `summary \| memory` | 默认 `summary` |
+| `mylua.index.cacheLocation` | `user \| workspace` | 默认 `user` |
+| `mylua.workspace.indexMode` | `merged \| isolated` | 多根工作区默认 `merged` |
+| `mylua.workspaceSymbol.grouping` | `flat \| grouped` | 默认 `flat` |
+| `mylua.diagnostics.emmyTypeMismatchSeverity` | `error` | Emmy 字段赋值不兼容 |
+| `mylua.diagnostics.emmyUnknownFieldSeverity` | `error` | Emmy 类型下不存在字段 |
+| `mylua.diagnostics.luaErrorSeverity` | `error` | Lua 路径高确定性错误 |
+| `mylua.diagnostics.luaWarningSeverity` | `warning` | Lua 路径保守提示 |
 
 ---
 
