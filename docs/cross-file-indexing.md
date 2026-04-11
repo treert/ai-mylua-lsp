@@ -409,6 +409,47 @@ local px = obj.pos.x
   - **字段存在但赋值不兼容**：默认诊断为 **`error`**，但允许用户配置降级。
   - **字段不存在**：读取与写入都默认报 **`unknown field`**，默认诊断为 **`error`**，但允许用户配置降级。
 
+### 6.6.3 诊断总体策略（已定）
+
+- 第一阶段诊断采用**平衡型**策略：
+  - **Emmy 路径**默认严格，按强约束语义报错
+  - **Lua 路径**默认保守，只对高确定性问题给出诊断
+- 诊断语义与导航/类型传播语义保持一致：
+  - 一旦命中 **明确 Emmy 类型**，就完全按 Emmy 路径处理
+  - 未命中 Emmy 的对象，才按 **Lua `table shape` 路径**处理
+- 配置层允许用户调整默认 severity，但不改变这两条路径的基础语义边界。
+
+#### 6.6.4 Lua 路径诊断（已定）
+
+Lua 路径第一阶段只对**高确定性**问题出诊断；一般性的动态性、候选不完整、普通 `nil` 风险默认只保留在内部语义层。
+
+默认规则如下：
+
+- **显式 `nil` 成员访问或赋值**：默认 **`error`**
+  - 例如 `local x = nil; x.a = 1`
+- **显式非对象值的成员访问或赋值**：默认 **`error`**
+  - 例如 `local x = 1; print(x.a)`
+- **开放 / 动态结构上的未知字段访问**：默认 **`warning`**
+- **封闭 shape 上明确不存在的字段访问**：默认 **`error`**
+- **字段赋值类型与当前静态 shape 明显冲突**：默认 **`warning`**
+  - 例如 `local t = { x = 1 }; t.x = {}`
+- **字段先被置为 `nil`，后续继续深层访问其子字段**：默认 **`warning`**
+  - 例如 `local t = { x = { y = 1 } }; t.x = nil; print(t.x.y)`
+- **联合候选里仍有合法路径支持当前字段**：默认 **不报诊断**
+
+这条规则与前文保持一致：
+
+- Lua 路径允许对象 shape 演化与联合类型存在
+- 只有在静态上足够确定“这里很可能就是错的”时，才默认对外给出诊断
+
+#### 6.6.5 Lua 路径诊断配置（已定）
+
+- Lua 路径诊断第一阶段采用**默认简单分组，后续可扩展单规则配置**的方式。
+- 建议先提供两组配置：
+  - **Lua 高确定性错误**的 severity 配置
+  - **Lua 保守提示**的 severity 配置
+- 内部仍保留更细的诊断原因，后续若需要，可再扩展到按规则单独配置（如 `nilAccess`、`unknownField`、`shapeConflict`）。
+
 ### 6.7 全局 table 特殊支持（已定）
 
 - 全局 table 作为 **跨文件共同定义** 的结构，需要特殊支持；多个文件里的链式写入都应注册到同一个工作区级 `GlobalTable`。
@@ -451,6 +492,8 @@ local px = obj.pos.x
 | `lua.workspace.indexMode` | `merged \| isolated` | 多根工作区默认 `merged`，允许配置为按 root 隔离。 |
 | `lua.diagnostics.emmyTypeMismatchSeverity` | 默认 `error` | Emmy 字段存在但赋值类型不兼容时的诊断级别；允许用户降级。 |
 | `lua.diagnostics.emmyUnknownFieldSeverity` | 默认 `error` | Emmy 类型下读取/写入不存在字段时的诊断级别；允许用户降级。 |
+| `lua.diagnostics.luaErrorSeverity` | 默认 `error` | Lua 路径下高确定性错误的诊断级别，例如显式 `nil` 访问、显式非对象值成员访问、封闭 shape 未知字段。 |
+| `lua.diagnostics.luaWarningSeverity` | 默认 `warning` | Lua 路径下保守提示的诊断级别，例如开放结构未知字段、shape 冲突、字段置 `nil` 后继续深层访问。 |
 
 说明：
 

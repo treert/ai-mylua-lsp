@@ -96,13 +96,18 @@ flowchart TB
 
 **语义**：全局已见 + `local xxx = require("…")` 绑定到目标文件 **`return`**；类型名工作区合并；与真实 `package.loaded` 无关。
 
-**「数据库」类比**：单文件 **DocumentSummary** 可 **并行** 生成；**工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）即 **内存逻辑库**。既可 **两阶段**（全部摘要 → 再 merge），也可 **每文件完成即 merge**（渐进完整）— 不必死板等待「全库解析完毕」才有跨文件能力，见 [`cross-file-indexing.md`](cross-file-indexing.md) §1。
+**索引策略**：采用 **摘要驱动的混合式渐进索引**。单文件 **`DocumentSummary`** 可并行生成，并流式 merge 到 **工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）。查询层显式区分索引状态，允许首轮扫描期间“渐进可用但可能不完整”，见 [`cross-file-indexing.md`](cross-file-indexing.md) §1、§5.6。
+
+**Lua table 与 Emmy**：链式字段 Hover / Goto / References 依赖 **函数摘要 + 局部类型事实 + table shape**。每个 Lua table 字面值按节点 identity 建模，单文件内可持续更新 shape；但一旦命中 **明确 Emmy 类型**，就完全切换到 Emmy 语义，不再混用 table shape，见 [`cross-file-indexing.md`](cross-file-indexing.md) §6.5、§6.6。
+
+**全局 table**：跨文件允许对同一全局路径做结构合并，并保留逐段节点树、完整路径索引与来源候选；当候选歧义较高时，`goto`、`hover`、`references` 采用不同程度的保守回退，见 [`cross-file-indexing.md`](cross-file-indexing.md) §6.7 与 §5.5。
 
 **数据结构、增量管线、`goto`/`hover`/`references` 热路径与待决清单** 均维护在 **[`cross-file-indexing.md`](cross-file-indexing.md)**（讨论稿）。
 
 ### 3.5 诊断流水线
 
 - **解析诊断** 与 **跨文件语义诊断** 分队列；后者在大仓库下受 **调度与配置** 约束。
+- **诊断分层**：采用 **Emmy 路径严格、Lua 路径保守** 的平衡策略。命中明确 Emmy 类型后，字段类型不兼容与 `unknown field` 默认按 **`error`** 处理；纯 Lua 路径仅对高确定性问题报诊断（如显式 `nil` 成员访问、显式非对象值成员访问、封闭 shape 未知字段），其余更倾向 `warning` 或内部保留，见 [`cross-file-indexing.md`](cross-file-indexing.md) §6.6.2 - §6.6.5。
 - 遵守 **`$/cancelRequest`**。
 
 ## 4. LSP 能力映射（全工作区目标）

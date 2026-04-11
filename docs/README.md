@@ -10,7 +10,7 @@
 |------|------|
 | [`requirements.md`](requirements.md) | 功能/非功能需求、Tree-sitter 主线、workspace-wide 硬性范围、文法自主与定制演进 |
 | [`architecture.md`](architecture.md) | Extension / LSP / Grammar 三分解、数据流；跨文件索引 **概要** |
-| [`cross-file-indexing.md`](cross-file-indexing.md) | **跨文件** 语义模型、DocumentSummary、聚合索引、增量与 `references`（**讨论稿**） |
+| [`cross-file-indexing.md`](cross-file-indexing.md) | **跨文件** 语义模型、DocumentSummary、聚合索引、增量、`references`、诊断与缓存/工作区边界（**讨论稿**） |
 | [`implementation-roadmap.md`](implementation-roadmap.md) | 阶段门禁、**已定 Monorepo** 布局与 CI、技术栈倾向（Rust/Go LSP + TS 扩展） |
 
 仓库级入口与 AI 规则见根目录 [`ai-readme.md`](../ai-readme.md)。
