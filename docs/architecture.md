@@ -88,26 +88,26 @@ flowchart TB
 ### 3.3 语义模型与查询
 
 - **作用域**：遵守 Lua **`local` / 块 / 闭包**；在此之上，对工作区采用 **「全局已加载」** 合并模型，**不**把可见性绑死在「必须先 require 才看见」的模块树上。约定见 [`requirements.md`](requirements.md) §3.2.1。
-- **`local = require`：** 维护 **字符串 → 文件** 的静态解析结果，以及 **局部名 → 目标文件 `return` 值** 的绑定边；明细见 [`cross-file-indexing.md`](cross-file-indexing.md)。
-- **增量**：单文件差量更新 **聚合索引**（全局分片、`RequireByReturn`、可选引用表）；**不必**每次全库重建。详见 [`cross-file-indexing.md`](cross-file-indexing.md) §4.1、§4.2。
+- **`local = require`：** 维护 **字符串 → 文件** 的静态解析结果，以及 **局部名 → 目标文件 `return` 值** 的绑定边；语义约定见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.2。
+- **增量**：单文件差量更新 **聚合索引**（全局分片、`RequireByReturn`、可选引用表）；**不必**每次全库重建。详见 [`index-architecture.md`](index-architecture.md) §6.1–§6.2。
 - **内部 API**：`resolve_definition`、`references_in_workspace`、`workspace_symbols`、`document_symbols`、`hover` 等，由 LSP handlers 薄封装。
 
 ### 3.4 跨文件索引与引用（详细设计另文）
 
 **语义**：全局已见 + `local xxx = require("…")` 绑定到目标文件 **`return`**；类型名工作区合并；与真实 `package.loaded` 无关。
 
-**索引策略**：采用 **摘要驱动的混合式渐进索引**。单文件 **`DocumentSummary`** 可并行生成，并流式 merge 到 **工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）。查询层显式区分索引状态，允许首轮扫描期间“渐进可用但可能不完整”，见 [`cross-file-indexing.md`](cross-file-indexing.md) §4.1、§4.3。
+**索引策略**：采用 **摘要驱动的混合式渐进索引**。单文件 **`DocumentSummary`** 可并行生成，并流式 merge 到 **工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）。查询层显式区分索引状态，允许首轮扫描期间“渐进可用但可能不完整”，见 [`index-architecture.md`](index-architecture.md) §6.1。
 
-**Lua table 与 Emmy**：链式字段 Hover / Goto / References 依赖 **函数摘要 + 局部类型事实 + table shape**。每个 Lua table 字面值按节点 identity 建模，单文件内可持续更新 shape；但一旦命中 **明确 Emmy 类型**，就完全切换到 Emmy 语义，不再混用 table shape，见 [`cross-file-indexing.md`](cross-file-indexing.md) §3.3、§3.4。
+**Lua table 与 Emmy**：链式字段 Hover / Goto / References 依赖 **函数摘要 + 局部类型事实 + table shape**。每个 Lua table 字面值按节点 identity 建模，单文件内可持续更新 shape；但一旦命中 **明确 Emmy 类型**，就完全切换到 Emmy 语义，不再混用 table shape，见 [`index-architecture.md`](index-architecture.md) §4.3–§4.4。
 
-**全局 table**：跨文件允许对同一全局路径做结构合并，并保留逐段节点树、完整路径索引与来源候选；当候选歧义较高时，`goto`、`hover`、`references` 采用不同程度的保守回退，见 [`cross-file-indexing.md`](cross-file-indexing.md) §6.1 与 §5.2。
+**全局 table**：跨文件允许对同一全局路径做结构合并，并保留逐段节点树、完整路径索引与来源候选；当候选歧义较高时，`goto`、`hover`、`references` 采用不同程度的保守回退，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §3.1 与 §2.2。
 
-**数据结构、增量管线、`goto`/`hover`/`references` 热路径与待决清单** 均维护在 **[`cross-file-indexing.md`](cross-file-indexing.md)**（讨论稿）。
+**索引内部架构**（数据模型、类型推断、构建与维护）维护在 **[`index-architecture.md`](index-architecture.md)**；**LSP 能力的协议层需求** 维护在 **[`lsp-semantic-spec.md`](lsp-semantic-spec.md)**（均为讨论稿）。
 
 ### 3.5 诊断流水线
 
 - **解析诊断** 与 **跨文件语义诊断** 分队列；后者在大仓库下受 **调度与配置** 约束。
-- **诊断分层**：采用 **Emmy 路径严格、Lua 路径保守** 的平衡策略。命中明确 Emmy 类型后，字段类型不兼容与 `unknown field` 默认按 **`error`** 处理；纯 Lua 路径仅对高确定性问题报诊断（如显式 `nil` 成员访问、显式非对象值成员访问、封闭 shape 未知字段），其余更倾向 `warning` 或内部保留，见 [`cross-file-indexing.md`](cross-file-indexing.md) §5.4。
+- **诊断分层**：采用 **Emmy 路径严格、Lua 路径保守** 的平衡策略。命中明确 Emmy 类型后，字段类型不兼容与 `unknown field` 默认按 **`error`** 处理；纯 Lua 路径仅对高确定性问题报诊断（如显式 `nil` 成员访问、显式非对象值成员访问、封闭 shape 未知字段），其余更倾向 `warning` 或内部保留，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §2.4。
 - 遵守 **`$/cancelRequest`**。
 
 ## 4. LSP 能力映射（全工作区目标）
@@ -135,4 +135,4 @@ flowchart TB
 
 ## 7. 变更约定
 
-- 变更 **Monorepo 目录约定、子工程边界、索引持久化格式、grammar 版本策略** 时，更新本文、[`implementation-roadmap.md`](implementation-roadmap.md) 及 [`cross-file-indexing.md`](cross-file-indexing.md)（若涉及跨文件索引）。
+- 变更 **Monorepo 目录约定、子工程边界、索引持久化格式、grammar 版本策略** 时，更新本文、[`implementation-roadmap.md`](implementation-roadmap.md)、[`index-architecture.md`](index-architecture.md)（若涉及索引结构）及 [`lsp-semantic-spec.md`](lsp-semantic-spec.md)（若涉及 LSP 能力需求）。

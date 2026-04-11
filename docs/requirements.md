@@ -52,7 +52,7 @@
 - **例外（模块返回值绑定）**：仅当源码为  
   `local <name> = require("<路径或模块名>")`  
   时，将 `<name>` **绑定**到 **被解析目标文件** 的 **`return` 表达式**所代表的模块值（类型/形状由 AST + Emmy 近似）；用于跳转/Hover「这个局部是哪个文件 return 出来的」。  
-  **字符串 → 文件** 的解析须 **可配置**（根目录、`package.path` 风格、别名等），与 [`cross-file-indexing.md`](cross-file-indexing.md) §1.2 及 [`architecture.md`](architecture.md) §3.4 概要一致。
+  **字符串 → 文件** 的解析须 **可配置**（根目录、`package.path` 风格、别名等），与 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.2 及 [`architecture.md`](architecture.md) §3.4 概要一致。
 - **其它形态的 `require`**（无 `local`、表达式再包一层等）：**不要求**一律建成与 `return` 的绑定；实现可逐步扩展，但不与本条「全局已见」模型冲突。
 
 ### 3.3 Hover
@@ -99,4 +99,4 @@
 
 ## 7. 文档维护
 
-- 变更 **架构、数据流、索引策略、文法边界或对外配置项** 时，同步更新 [`architecture.md`](architecture.md)、[`cross-file-indexing.md`](cross-file-indexing.md)（若跨文件行为变化）与本文。
+- 变更 **架构、数据流、索引策略、文法边界或对外配置项** 时，同步更新 [`architecture.md`](architecture.md)、[`lsp-semantic-spec.md`](lsp-semantic-spec.md)（若跨文件行为变化）与本文。
