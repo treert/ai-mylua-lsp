@@ -161,11 +161,69 @@
 - 全局名 / 类型名：**一次分片查找**。
 - **链式字段 hover**：按“表达式 → 基础类型 → 字段类型 → 下一段字段类型”逐段解析；优先命中 `FunctionSummary`、`LocalTypeFacts`、`TableShape` / Emmy 字段信息，而非仅依赖名字表。
 
-### 5.5 `textDocument/references`
+### 5.5 `textDocument/references`（已定）
 
-- 朴素：`Postings[name]` + 语义过滤。
-- 混合：`symbolId → refs` 懒惰维护；定义变更置脏 **引用簇**；大任务分段 + `$/cancelRequest`。
-- **产品界定**：同名多义下，**「与当前光标同一决议」** vs **「所有同名出现」**（可配置）。
+#### 5.5.1 总体语义
+
+- `references` 默认查找的是 **与当前光标同一决议的语义目标**，而不是所有同名文本出现。
+- 变量名与字段名都需要先完成语义决议，再基于其身份查找读写引用。
+- 这意味着：
+  - **局部变量** 先区分作用域与闭包捕获关系；
+  - **全局变量** 先区分普通全局、链式全局路径与 `GlobalNodeId`；
+  - **字段** 先区分其宿主属于 Emmy 字段、普通 Lua table 字段，还是全局 table 字段。
+- 标准 LSP `textDocument/references` 返回的是 **位置列表**，不直接携带 read/write 元数据；但服务端内部索引应保存这些信息，供过滤、排序和未来扩展使用。
+
+#### 5.5.2 内部引用分类
+
+- 第一阶段内部引用索引显式记录：
+  - `read`
+  - `write`
+  - `readwrite` / `unknown`
+- 内部索引统一收集 **声明/定义/读/写** 位点；最终响应 `textDocument/references` 时，严格按 LSP 的 `includeDeclaration` 参数裁剪结果。
+
+#### 5.5.3 身份模型
+
+`references` 的目标身份按语义类别区分：
+
+- **局部变量**：按 `LocalSymbolId` 建模；闭包捕获沿用同一个 `LocalSymbolId`。
+- **全局变量 / 全局链路**：同时保留两层身份：
+  - 主身份：`GlobalNodeId`
+  - 辅助索引：全局名 / 完整路径字符串
+- **Emmy 字段**：同时保留两层身份：
+  - 主查询身份：`TypeId + FieldName + DeclSite`
+  - 展示/简化身份：`TypeId + FieldName`
+- **普通 Lua table shape 字段**：同时保留两层身份：
+  - 主查询身份：`TableShapeId + FieldKey + OriginSite`
+  - 简化身份：`TableShapeId + FieldKey`
+- **全局 table 字段**：同时保留两层身份：
+  - 主查询身份：`GlobalNodeId + FieldKey + OriginSite`
+  - 简化身份：`GlobalNodeId + FieldKey`
+
+#### 5.5.4 `OriginSite` / 来源锚点
+
+- 字段身份内部保留 **完整来源集合**，包括：
+  - 注解来源
+  - 首次写入来源
+  - 其他补充来源
+- 同时为外部查询选择一个 **主锚点**，用于稳定 identity、缓存键与增量失效。
+- 主锚点优先级：
+  - 显式注解 / 声明来源优先
+  - 否则取首次把该字段引入该身份的写入位点
+
+#### 5.5.5 候选策略
+
+- 当光标位置存在多个候选身份时，`references` 默认只查 **最佳候选**。
+- 但底层索引仍保留候选集合，不在查询前丢失信息。
+- `references` 与 `goto definition` 共享同一套候选评分来源：
+  - **显式类型来源优先**（Emmy 定义 / 显式注解 / 显式绑定链）
+  - 纯 shape 推断结果优先级较低
+- 与 `goto definition` 不同的是，`references` 在分数接近时更保守，更容易回退到 **多候选** 策略，避免把不同语义目标误并到一起。
+
+#### 5.5.6 实现建议
+
+- 朴素实现：`Postings[name]` + 语义过滤。
+- 混合实现：`symbolId → refs` 懒惰维护；定义变更置脏 **引用簇**；大任务分段 + `$/cancelRequest`。
+- 热路径上，建议优先解析当前光标的目标身份，再去 postings / symbol 索引中查找对应引用，而不是先做纯文本同名检索。
 
 ### 5.6 冷启动与持久化（可选）
 
@@ -315,20 +373,20 @@ local px = obj.pos.x
 | 设置项 | 建议值 | 说明 |
 |--------|--------|------|
 | `lua.gotoDefinition.strategy` | `auto \| single \| list` | `auto`：有明显最佳候选则单跳，否则多目标；`single`：尽量直接跳最佳候选；`list`：优先展示候选列表。 |
+| `lua.references.strategy` | `best \| merge \| select` | `best`：只查最佳候选；`merge`：多个候选身份的引用做并集；`select`：先选候选，再查对应引用。 |
 | `lua.diagnostics.emmyTypeMismatchSeverity` | 默认 `error` | Emmy 字段存在但赋值类型不兼容时的诊断级别；允许用户降级。 |
 | `lua.diagnostics.emmyUnknownFieldSeverity` | 默认 `error` | Emmy 类型下读取/写入不存在字段时的诊断级别；允许用户降级。 |
 
 说明：
 
 - `goto definition` 的“最佳候选”默认按 **显式类型来源优先** 排序：Emmy 定义 / 显式注解优先于纯 shape 推断结果。
-- `references` 相关设置暂未定案，仍以后续章节讨论为准。
+- `references` 默认语义是“**同一决议的语义目标**”，不是所有同名文本出现；若需要更保守或更全面的行为，可通过 `lua.references.strategy` 调整。
 
 ---
 
 ## 7. 待讨论 / 待决清单（建议 PR 或评审时勾选）
 
 - [ ] 全局同名冲突的 **默认策略**（路径优先 / 全列候选 / …）。
-- [ ] `references` 默认语义（§4.5）与 LSP 选项命名。
 - [ ] 索引 **磁盘格式** 与 grammar/LSP 版本 **无效化** 规则。
 - [ ] 多根工作区、exclude glob 与索引 **一致性**。
 
