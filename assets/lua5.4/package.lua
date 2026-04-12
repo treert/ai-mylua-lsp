@@ -44,12 +44,6 @@ package.cpath = ""
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-package.preload)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-package.preload"])
 package.preload = {}
 
----@version lua5.1
---A table used by *require* to control how to load modules.
---
---Each entry in this table is a searcher function. When looking for a module, *require* calls each of these searchers in ascending order, with the module name (the argument given to *require*) as its sole parameter. The function can return another function (the module loader) or a string explaining why it did not find that module (or nil if it has nothing to say). Lua initializes this table with four functions.
-package.loaders = {}
-
 --- Dynamically links the host program with the C library `libname`.
 ---
 --- If `funcname` is "*", then it only links with the library, making the

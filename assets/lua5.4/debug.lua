@@ -30,12 +30,6 @@ debug = {}
 -- [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-debug.debug)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-debug.debug"])
 function debug.debug() end
 
---- Returns the environment of object o.
----@version lua5.1
----@param o any
----@return table
-function debug.getfenv(o) end
-
 --- Returns the current hook settings of the thread, as three values: the
 --- current hook function, the current hook mask, and the current hook count
 --- (as set by the `debug.sethook` function).
@@ -143,14 +137,6 @@ function debug.getuservalue(u, n) end
 ---@return any    value
 -- [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-debug.getupvalue)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-debug.getupvalue"])
 function debug.getupvalue(f, up) end
-
--- Sets the environment of the given `object` to the given `table`. Returns `object`.
----@version lua5.1
----@generic T
----@param object T
----@param env    table
----@return T object
-function debug.setfenv(object, env) end
 
 ---@alias hookmask string
 ---|'"c"' # the hook is called every time Lua calls a function;

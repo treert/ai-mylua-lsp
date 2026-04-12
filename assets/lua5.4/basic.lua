@@ -82,12 +82,6 @@ function error(message, level) end
 ---@class _G @A global variable (not a function) that holds the global environment. Lua itself does not use this variable; changing its value does not affect any environment, nor vice versa. [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-_G)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-_G"])
 _G = {}
 
----Returns the current environment in use by the function. *f* can be a Lua function or a number that specifies the function at that stack level: Level 1 is the function calling `getfenv`. If the given function is not a Lua function, or if f is 0, `getfenv` returns the global environment. The default for *f* is 1.
----@version lua5.1
----@param f? function
----@return table
-function getfenv(f) end
-
 --- If `object` does not have a metatable, returns **nil**. Otherwise, if the
 --- object's metatable has a `"__metatable"` field, returns the associated
 --- value. Otherwise, returns the metatable of the given object.
@@ -151,19 +145,6 @@ function load(chunk, chunkname, mode, env) end
 ---@param env? any
 -- [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-loadfile)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-loadfile"])
 function loadfile(filename, mode, env) end
-
--- Similar to `load`, but gets the chunk from the given string. To load and run a given string, use the idiom assert(loadstring(s))() When absent, chunkname defaults to the given string.
----@version lua5.1
----@param text       string
----@param chunkname? string
----@return function
----@return string error_message
-function loadstring(text, chunkname) end
-
--- Creates a `module`. If there is a table in package.loaded[name], this table is the `module`. Otherwise, if there is a global table t with the given name, this table is the module. Otherwise creates a new table t and sets it as the value of the global name and the value of package.loaded[name]. This function also initializes t._NAME with the given name, t._M with the module (t itself), and t._PACKAGE with the package name (the full module name minus last component; see below). Finally, module sets t as the new environment of the current function and the new value of package.loaded[name], so that *require* returns t.
----@version lua5.1
----@param name string
-function module(name, ...) end
 
 --- Allows a program to traverse all fields of a table. Its first argument is
 --- a table and its second argument is an index in this table. `next` returns
@@ -291,13 +272,6 @@ function require(modname) end
 function select(index, ...) end
 
 
---- Sets the environment to be used by the given function. f can be a Lua function or a number that specifies the function at that stack level: Level 1 is the function calling `setfenv`.`setfenv` returns the given function. As a special case, when f is 0 `setfenv` changes the environment of the running thread. In this case, `setfenv`  returns no values.
----@version lua5.1
----@param f     function|integer
----@param table table
----@return function
-function setfenv(f, table) end
-
 --- Sets the metatable for the given table. (To change the metatable of other
 --- types from Lua code, you must use the debug library.) If `metatable`
 --- is **nil**, removes the metatable of the given table. If the original
@@ -379,15 +353,6 @@ function warn(message, ...) end
 ---@return any
 -- [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-xpcall)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-xpcall"])
 function xpcall(f, msgh, arg1, ...) end
-
---- Returns the elements from the given table. This function is equivalent to
---   ```return list[i], list[i+1], ..., list[j]```
---   except that the above code can be written only for a fixed number of elements. By default, *i* is 1 and *j* is the length of the list, as defined by the length operator 
----@version lua5.1
----@param list table
----@param i?   integer
----@param j?   integer
-function unpack(list, i, j) end
 
 --- Loads the given module. The function starts by looking into the
 --- 'package.loaded' table to determine whether `modname` is already

@@ -35,13 +35,6 @@ function math.asin(x) end
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.atan)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.atan"])
 function math.atan(y, x) end
 
--- Returns the arc tangent of y/x (in radians), but uses the signs of both parameters to find the quadrant of the result. (It also handles correctly the case of x being zero.)
----@version lua<5.2
----@param y number
----@param x number
----@return number
-function math.atan2(y, x) end
-
 --- Returns the smallest integer larger than or equal to `x`.
 ---@param x number
 ---@return integer
@@ -52,12 +45,6 @@ function math.ceil(x) end
 ---@param x number
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.cos)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.cos"])
 function math.cos(x) end
-
--- Returns the hyperbolic cosine of x.
----@version <lua5.2
----@param x number
----@return number
-function math.cosh(x) end
 
 --- Converts the angle `x` from radians to degrees.
 ---@param x number
@@ -82,20 +69,6 @@ function math.floor(x) end
 ---@param y number
 ---@return number
 function math.fmod(x, y) end
-
--- Returns m and e such that x = m2e, e is an integer and the absolute value of m is in the range [0.5, 1) (or zero when x is zero).
----@version <lua5.2
----@param x number
----@return number m
----@return number e
-function math.frexp(x) end
-
----@version lua<5.2
----@param m number
----@param e number
----@return number
---[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.abs)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.abs"])
-function math.ldexp(m, e) end
 
 --- Returns the logarithm of `x` in the given base. The default for `base` is
 --- *e* (so that the function returns the natural logarithm of `x`).
@@ -128,13 +101,6 @@ function math.min(x, ...) end
 ---@return number
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.modf)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.modf"])
 function math.modf(x) end
-
---Returns xy. (You can also use the expression x^y to compute this value.)
----@version <lua5.2
----@param x number
----@param y number
----@return number
-function math.pow(x, y) end
 
 --- Converts the angle `x` from degrees to radians.'
 ---@param x number
@@ -175,12 +141,6 @@ function math.randomseed(x, y) end
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.sin)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.sin"])
 function math.sin(x) end
 
--- Returns the hyperbolic sine of x.
----@version <lua5.2
----@param x number
----@return number
-function math.sinh(x) end
-
 --- Returns the square root of `x`. (You can also use the expression `x^0.5` to
 --- compute this value.)
 ---@param x number
@@ -193,12 +153,6 @@ function math.sqrt(x) end
 ---@return number
 --[`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-math.tan)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-math.tan"])
 function math.tan(x) end
-
---Returns the hyperbolic tangent of x.
----@version <lua5.2
----@param x number
----@return number
-function math.tanh(x) end
 
 --- If the value `x` is convertible to an *integer*, returns that *integer*.
 --- Otherwise, returns `fail`.
