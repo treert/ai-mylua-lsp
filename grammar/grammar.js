@@ -33,6 +33,7 @@ module.exports = grammar({
     $.short_string_content_double,
     $.short_string_content_single,
     $.comment,
+    $._col0_block_end,
   ],
 
   extras: $ => [
@@ -103,23 +104,28 @@ module.exports = grammar({
 
     goto_statement: $ => seq('goto', field('name', $.identifier)),
 
-    do_statement: $ => seq('do', optional($._block), 'end'),
+    _block_end: $ => choice('end', $._col0_block_end),
+
+    do_statement: $ => seq('do', optional($._block), $._block_end),
 
     while_statement: $ => seq(
       'while', field('condition', $._expression),
-      'do', optional($._block), 'end',
+      'do', optional($._block), $._block_end,
     ),
 
     repeat_statement: $ => seq(
       'repeat', optional($._block),
-      'until', field('condition', $._expression),
+      choice(
+        seq('until', field('condition', $._expression)),
+        $._col0_block_end,
+      ),
     ),
 
     if_statement: $ => seq(
       'if', field('condition', $._expression), 'then', optional($._block),
       repeat($.elseif_clause),
       optional($.else_clause),
-      'end',
+      $._block_end,
     ),
 
     elseif_clause: $ => seq(
@@ -133,13 +139,13 @@ module.exports = grammar({
       field('start', $._expression), ',',
       field('stop', $._expression),
       optional(seq(',', field('step', $._expression))),
-      'do', optional($._block), 'end',
+      'do', optional($._block), $._block_end,
     ),
 
     for_generic_statement: $ => seq(
       'for', field('names', $.name_list),
       'in', field('values', $.expression_list),
-      'do', optional($._block), 'end',
+      'do', optional($._block), $._block_end,
     ),
 
     function_declaration: $ => seq(
@@ -285,7 +291,7 @@ module.exports = grammar({
     function_body: $ => seq(
       field('parameters', $.parameter_list),
       optional($._block),
-      'end',
+      $._block_end,
     ),
 
     parameter_list: $ => seq(

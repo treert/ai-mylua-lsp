@@ -1,0 +1,177 @@
+================================================================================
+Indented nested if inside function — normal parse
+================================================================================
+
+function foo()
+  if true then
+    print("ok")
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (true)
+        (function_call_statement
+          (function_call
+            callee: (variable (identifier))
+            arguments: (arguments
+              (expression_list
+                (string (short_string (short_string_content_double)))))))))))
+
+================================================================================
+Indented nested while inside function — normal parse
+================================================================================
+
+function foo()
+  while true do
+    break
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (while_statement
+        condition: (true)
+        (break_statement)))))
+
+================================================================================
+Indented nested for inside function — normal parse
+================================================================================
+
+function foo()
+  for i = 1, 10 do
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (for_numeric_statement
+        name: (identifier)
+        start: (number)
+        stop: (number)))))
+
+================================================================================
+Indented repeat inside function — normal parse
+================================================================================
+
+function foo()
+  repeat
+  until true
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (repeat_statement
+        condition: (true)))))
+
+================================================================================
+Indented do block inside function — normal parse
+================================================================================
+
+function foo()
+  do
+    local x = 1
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (do_statement
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list (number)))))))
+
+================================================================================
+Two top-level functions — normal parse
+================================================================================
+
+function foo()
+end
+function bar()
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)))
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list))))
+
+================================================================================
+Top-level local and assignment — normal parse
+================================================================================
+
+local x = 1
+y = 2
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list (identifier))
+    values: (expression_list (number)))
+  (assignment_statement
+    left: (variable_list (variable (identifier)))
+    right: (expression_list (number))))
+
+================================================================================
+Deeply nested indented code — normal parse
+================================================================================
+
+function foo()
+  if true then
+    while true do
+      for i = 1, 10 do
+        break
+      end
+    end
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (true)
+        (while_statement
+          condition: (true)
+          (for_numeric_statement
+            name: (identifier)
+            start: (number)
+            stop: (number)
+            (break_statement)))))))

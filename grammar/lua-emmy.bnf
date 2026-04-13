@@ -155,6 +155,7 @@ shebang          ::= '#!' <any chars> EOL           (* [external], first line on
 #   - Expressions use explicit precedence layers instead of flat `exp binop exp`
 #   - Comments are explicit tree nodes
 #   - 5.4-only productions are marked [lua5.4]
+#   - Column-0 block boundary: see §2.1.1 below
 #
 # Operator precedence table (lowest → highest, per Lua §3.4.8):
 #
@@ -179,6 +180,33 @@ shebang          ::= '#!' <any chars> EOL           (* [external], first line on
 chunk          ::= [ shebang ] block
 
 block          ::= { statement } [ return_statement ]
+
+_block_end     ::= 'end' | _col0_block_end    (* [external] *)
+
+# ----------------------------------------------------------------------------
+# 2.1.1  Column-0 block boundary  [custom extension]
+# ----------------------------------------------------------------------------
+#
+# When a statement-starting token (keyword, identifier, or ':') appears at
+# column 0 (no leading whitespace on the line), the external scanner emits a
+# zero-width _col0_block_end token.  This is accepted by all block-closing
+# positions as an alternative to 'end' (or 'until expr' for repeat).
+#
+# Effect: nested blocks are forcibly terminated when a column-0 statement is
+# encountered, even without a matching 'end'.  This means:
+#   - Correctly indented code parses normally ('end' is matched as usual).
+#   - Missing 'end' errors are caught at the NEXT top-level statement instead
+#     of propagating to EOF.
+#   - Code that places nested statements at column 0 (no indentation) will
+#     produce parse errors.  This is intentional.
+#
+# Trigger condition (in scanner.c):
+#   valid_symbols[COL0_BLOCK_END] && column == 0 && lookahead is [a-zA-Z_:]
+#
+# Affected productions (all use _block_end instead of 'end'):
+#   do_statement, while_statement, if_statement,
+#   for_numeric_statement, for_generic_statement, function_body
+# Special: repeat_statement accepts choice('until' expr, _col0_block_end)
 
 # ----------------------------------------------------------------------------
 # 2.2  Statements
@@ -210,23 +238,24 @@ break_statement            ::= 'break'
 
 goto_statement             ::= 'goto' Name
 
-do_statement               ::= 'do' block 'end'
+do_statement               ::= 'do' block _block_end
 
-while_statement            ::= 'while' expression 'do' block 'end'
+while_statement            ::= 'while' expression 'do' block _block_end
 
-repeat_statement           ::= 'repeat' block 'until' expression
+repeat_statement           ::= 'repeat' block
+                                ( 'until' expression | _col0_block_end )
 
 if_statement               ::= 'if' expression 'then' block
                                 { 'elseif' expression 'then' block }
                                 [ 'else' block ]
-                                'end'
+                                _block_end
 
 for_numeric_statement      ::= 'for' Name '=' expression ',' expression
                                 [ ',' expression ]
-                                'do' block 'end'
+                                'do' block _block_end
 
 for_generic_statement      ::= 'for' name_list 'in' expression_list
-                                'do' block 'end'
+                                'do' block _block_end
 
 function_declaration       ::= 'function' function_name function_body
 
@@ -333,7 +362,7 @@ arguments         ::= '(' [ expression_list ] ')'
 
 function_definition ::= 'function' function_body
 
-function_body       ::= '(' [ parameter_list ] ')' block 'end'
+function_body       ::= '(' [ parameter_list ] ')' block _block_end
 
 parameter_list      ::= name_list [ ',' '...' ]
                       | '...'

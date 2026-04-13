@@ -45,8 +45,10 @@
 | 文件 | 说明 |
 |------|------|
 | [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式、table/function/prefix 完整语法；EmmyLua 注解产生式已定义 |
-| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短字符串（全部 Lua 5.3+ 转义）、长字符串、所有注释类型、shebang |
-| [`grammar/test/corpus/`](grammar/test/corpus/) | 29 个回归测试，100% 通过 |
+| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短字符串（全部 Lua 5.3+ 转义）、长字符串、所有注释类型、shebang、**column-0 块边界** |
+| [`grammar/test/corpus/`](grammar/test/corpus/) | 37 个回归测试，100% 通过 |
+
+**定制扩展 — Column-0 块边界**：行首 column 0 处的关键字/标识符强制关闭未配对的嵌套块，让缺少 `end` 的错误在下一个顶层语句处即时报出。嵌套代码必须缩进。详见 BNF §2.1.1。
 
 - 无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/` 全部 11 个标准库桩文件。
 - 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`

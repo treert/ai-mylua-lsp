@@ -31,14 +31,15 @@
 - **Lua**：以 5.3+ 为准；与 5.4 差异点用注释或 feature 在文法中标注，便于日后开关。
 - **EmmyLua**：在 `---` 文档/语义注释内拆出独立规则（`@class`、`@field`、`@param`、`@return`、`@type`、`@alias` 等），产出可查询节点，供 LSP 注解层绑定；勿把 Emmy 标成「运行时 Lua 关键字」。
 - **错误恢复**：依赖 Tree-sitter 默认错误恢复行为；复杂 case 在 corpus 里固定。
+- **Column-0 块边界**（定制扩展）：当关键字或标识符出现在行首（column 0）时，强制关闭所有未配对的嵌套块。缺少 `end` 的错误在下一个顶层语句处就能报出，而非等到 EOF。**代价**：嵌套代码必须缩进（至少 1 空白），否则会报错。详见 [`lua-emmy.bnf`](lua-emmy.bnf) §2.1.1。
 
 ### 当前实现状态
 
 | 文件 | 说明 |
 |------|------|
 | `grammar.js` | Lua 5.3+/5.4 完整可执行语法（15 种语句、12 级优先级表达式、table/function/prefix 表达式）；EmmyLua 注解结构已定义（grammar.js 中包含产生式，但当前作为 comment token 统一扫描）。 |
-| `src/scanner.c` | 外部扫描器：短字符串（含全部 Lua 5.3+ 转义序列）、长字符串 `[=[...]=]`、所有注释类型（短注释 / 长注释 / `---` 文档注释）、shebang。 |
-| `test/corpus/` | 29 个回归测试（语句 + 表达式），100% 通过。 |
+| `src/scanner.c` | 外部扫描器：短字符串（含全部 Lua 5.3+ 转义序列）、长字符串 `[=[...]=]`、所有注释类型（短注释 / 长注释 / `---` 文档注释）、shebang、column-0 块边界检测。 |
+| `test/corpus/` | 37 个回归测试（语句 + 表达式 + column-0 边界），100% 通过。 |
 
 已通过以下文件的无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/*.lua`（全部 11 个标准库桩文件）。
 
