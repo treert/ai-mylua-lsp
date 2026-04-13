@@ -61,9 +61,9 @@ lsp/
 | `textDocument/hover` | 已实现（定义源码 + EmmyLua 注解 + 文档注释） |
 | `textDocument/references` | 已实现（单文件 local scope + 全工作区全局引用） |
 | `workspace/symbol` | 已实现（全局函数/变量模糊搜索） |
-| `textDocument/semanticTokens/full` | 占位（capability 已声明，返回空 tokens） |
+| `textDocument/semanticTokens/full` | 已实现（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符） |
 
-**模块结构**（12 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`diagnostics.rs`、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
+**模块结构**（13 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`semantic_tokens.rs`（语义着色）、`diagnostics.rs`、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
 
 详见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md)。
 

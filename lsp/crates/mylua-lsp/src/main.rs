@@ -5,6 +5,7 @@ mod goto;
 mod hover;
 mod references;
 mod scope;
+mod semantic_tokens;
 mod symbols;
 mod types;
 mod util;
@@ -219,11 +220,19 @@ impl LanguageServer for Backend {
 
     async fn semantic_tokens_full(
         &self,
-        _params: SemanticTokensParams,
+        params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let data = semantic_tokens::collect_semantic_tokens(
+            doc.tree.root_node(),
+            doc.text.as_bytes(),
+        );
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
-            data: vec![],
+            data,
         })))
     }
 }

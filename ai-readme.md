@@ -73,7 +73,7 @@
 - **workspace/symbol**：全局函数/变量模糊搜索
 - **EmmyLua 注解解析**：从 `---` 注释文本提取结构化注解
 - **全局符号表**：跨文件全局函数/变量索引 + `require` 路径映射
-- **semantic tokens**：capability 已声明（占位，后续填充）
+- **semantic tokens**：遍历 AST 产出真实 token（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符）
 
 - 构建：`cd lsp && cargo build`
 - 测试：`cargo test`
@@ -90,6 +90,5 @@
 - 调试：F5 启动 Extension Development Host
 
 ### 后续
-- semantic tokens 真实实现（语义着色）。
 - 5 万文件规模硬化（增量索引、内存优化）。
 - rename、completion、code action 等。
