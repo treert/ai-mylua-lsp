@@ -1,0 +1,43 @@
+use tower_lsp_server::ls_types::*;
+use crate::types::DefKind;
+use crate::workspace_index::WorkspaceIndex;
+
+pub fn search_workspace_symbols(
+    query: &str,
+    index: &WorkspaceIndex,
+) -> Vec<SymbolInformation> {
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+
+    for (name, entries) in &index.globals {
+        if query.is_empty() || name.to_lowercase().contains(&query_lower) {
+            for entry in entries {
+                let kind = match entry.kind {
+                    DefKind::GlobalFunction | DefKind::LocalFunction => SymbolKind::FUNCTION,
+                    _ => SymbolKind::VARIABLE,
+                };
+
+                #[allow(deprecated)]
+                results.push(SymbolInformation {
+                    name: name.clone(),
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location: Location {
+                        uri: entry.uri.clone(),
+                        range: entry.selection_range.clone(),
+                    },
+                    container_name: None,
+                });
+            }
+        }
+    }
+
+    results.sort_by(|a, b| {
+        let a_exact = a.name.to_lowercase() == query_lower;
+        let b_exact = b.name.to_lowercase() == query_lower;
+        b_exact.cmp(&a_exact).then_with(|| a.name.cmp(&b.name))
+    });
+
+    results
+}

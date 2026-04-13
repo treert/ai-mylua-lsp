@@ -49,7 +49,7 @@ lsp/
 - **构建**：`cd lsp && cargo build`（需先 `cd grammar && npx tree-sitter generate` 确保 `parser.c` 存在）。
 - **`vscode-extension`** 通过 `spawn` 启动 `target/debug/mylua-lsp`（开发）或打包后的二进制（发布）。
 
-### 当前实现（阶段 B 完成）
+### 当前实现（阶段 C 完成）
 
 | LSP 能力 | 状态 |
 |----------|------|
@@ -59,13 +59,11 @@ lsp/
 | `textDocument/documentSymbol` | 已实现（顶层 function / local / assignment 提取） |
 | `textDocument/definition` | 已实现（local 作用域解析 + 全局符号表 + require 跳转） |
 | `textDocument/hover` | 已实现（定义源码 + EmmyLua 注解 + 文档注释） |
+| `textDocument/references` | 已实现（单文件 local scope + 全工作区全局引用） |
+| `workspace/symbol` | 已实现（全局函数/变量模糊搜索） |
 | `textDocument/semanticTokens/full` | 占位（capability 已声明，返回空 tokens） |
 
-**模块结构**：`main.rs`（入口）+ `server` 逻辑拆分为 `scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`diagnostics.rs`、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
-
-### 后续路线
-
-1. **阶段 C**：全工作区 **references**、**workspace/symbol**、规模与增量硬化。
+**模块结构**（12 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`diagnostics.rs`、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
 
 详见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md)。
 

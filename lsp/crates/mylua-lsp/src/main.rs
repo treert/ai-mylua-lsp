@@ -3,11 +3,13 @@ mod document;
 mod emmy;
 mod goto;
 mod hover;
+mod references;
 mod scope;
 mod symbols;
 mod types;
 mod util;
 mod workspace_index;
+mod workspace_symbol;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -84,6 +86,8 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                references_provider: Some(OneOf::Left(true)),
+                workspace_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -183,6 +187,34 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         Ok(hover::hover(doc, uri, position, &idx, &docs))
+    }
+
+    async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let include_declaration = params.context.include_declaration;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        Ok(references::find_references(
+            doc,
+            uri,
+            position,
+            include_declaration,
+            &idx,
+            &docs,
+        ))
+    }
+
+    async fn symbol(
+        &self,
+        params: WorkspaceSymbolParams,
+    ) -> Result<Option<WorkspaceSymbolResponse>> {
+        let idx = self.index.lock().unwrap();
+        let results = workspace_symbol::search_workspace_symbols(&params.query, &idx);
+        Ok(Some(WorkspaceSymbolResponse::Flat(results)))
     }
 
     async fn semantic_tokens_full(
