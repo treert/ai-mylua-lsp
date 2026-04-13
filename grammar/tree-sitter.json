@@ -1,0 +1,16 @@
+{
+  "grammars": [
+    {
+      "name": "lua",
+      "camelcase": "Lua",
+      "scope": "source.lua",
+      "path": ".",
+      "file-types": ["lua"],
+      "injection-regex": "lua"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT"
+  }
+}

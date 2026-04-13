@@ -1,0 +1,730 @@
+# ============================================================================
+# Lua 5.3+ / EmmyLua  —  Extended BNF Grammar Specification
+# ============================================================================
+#
+# This file is the **formal grammar reference** for the Tree-sitter parser
+# in this repository.  It covers:
+#
+#   Part 1  Lexical rules (terminals)
+#   Part 2  Lua 5.3 / 5.4 executable syntax
+#   Part 3  EmmyLua structured-comment sub-grammar
+#   Part 4  Tree-sitter implementation notes
+#
+# Notation (ISO 14977 EBNF with light extensions):
+#
+#   { A }        zero or more repetitions of A
+#   [ A ]        optional A
+#   A | B        alternative
+#   'x'          terminal string / keyword
+#   ( A )        grouping
+#   (* … *)      inline comment (EBNF standard)
+#   #            line comment (this file only, NOT part of Lua)
+#   [external]   handled by the external scanner (scanner.c)
+#   [lua5.4]     Lua-5.4-only production; may be gated by a feature flag
+#
+# ============================================================================
+
+
+# ############################################################################
+#  Part 1 — Lexical Rules (Terminals)
+# ############################################################################
+
+# ----------------------------------------------------------------------------
+# 1.1  Identifiers
+# ----------------------------------------------------------------------------
+
+Name               ::= /[a-zA-Z_][a-zA-Z0-9_]*/   (* excluding reserved keywords *)
+
+# ----------------------------------------------------------------------------
+# 1.2  Keywords (reserved words)
+# ----------------------------------------------------------------------------
+
+KEYWORDS           ::= 'and' | 'break' | 'do' | 'else' | 'elseif' | 'end'
+                     | 'false' | 'for' | 'function' | 'goto' | 'if' | 'in'
+                     | 'local' | 'nil' | 'not' | 'or' | 'repeat' | 'return'
+                     | 'then' | 'true' | 'until' | 'while'
+
+# ----------------------------------------------------------------------------
+# 1.3  Numerals
+# ----------------------------------------------------------------------------
+
+Numeral        ::= IntegerLiteral | FloatLiteral
+
+IntegerLiteral ::= DecimalInteger | HexInteger
+DecimalInteger ::= /[0-9]+/
+HexInteger     ::= /0[xX][0-9a-fA-F]+/
+
+FloatLiteral   ::= DecimalFloat | HexFloat
+DecimalFloat   ::= /[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?/
+                  | /[0-9]+[eE][+-]?[0-9]+/
+                  | /\.[0-9]+([eE][+-]?[0-9]+)?/
+HexFloat       ::= /0[xX][0-9a-fA-F]+\.[0-9a-fA-F]*([pP][+-]?[0-9]+)?/
+                  | /0[xX][0-9a-fA-F]+[pP][+-]?[0-9]+/
+                  | /0[xX]\.[0-9a-fA-F]+([pP][+-]?[0-9]+)?/
+
+# ----------------------------------------------------------------------------
+# 1.4  Strings
+# ----------------------------------------------------------------------------
+
+LiteralString ::= ShortString | LongString
+
+ShortString   ::= '"' { short_string_char | escape_sequence } '"'
+                 | "'" { short_string_char | escape_sequence } "'"
+(* [external] — Handled by the external scanner because Lua escape
+   sequences are context-sensitive and can span multiple characters.
+
+   short_string_char: any byte except '\', the closing quote, '\r', '\n'.
+   Unescaped newlines are illegal in short strings.
+
+   escape_sequence: '\' followed by one of:
+     a b f n r t v \\ \" \'        single-char escapes
+     \r | \n | \r\n                 escaped newline (literal newline in string)
+     x HH                          hex escape (exactly 2 hex digits)
+     DDD                            decimal escape (1-3 decimal digits, value <= 255)
+     u '{' HHHH+ '}'               UTF-8 escape (Lua 5.3+, 1+ hex digits)
+     z <whitespace*>               skip subsequent whitespace incl. newlines (Lua 5.3+)
+*)
+
+LongString    ::= long_bracket_string              (* [external] *)
+(* Long brackets: [[...]], [=[...]=], [==[...]==], etc.
+   The opening/closing level (number of '=' signs) must match.
+   Handled by the external scanner because Tree-sitter's regex
+   engine cannot express balanced bracket matching. *)
+
+# ----------------------------------------------------------------------------
+# 1.5  Comments
+# ----------------------------------------------------------------------------
+
+comment          ::= short_comment | long_comment | emmy_comment
+
+short_comment    ::= '--' <any chars except newline, not starting with '[=' or '-'> EOL
+(* Excludes '---' (emmy_comment) and '--[=*[' (long_comment) prefixes.
+   A '--' followed by exactly one more '-' then non-'-' is still short_comment.
+   Disambiguation order: long_comment > emmy_comment > short_comment. *)
+
+long_comment     ::= '--' long_bracket_string       (* [external] *)
+(* e.g.  --[[ multi-line comment ]]
+         --[=[ another level ]=]           *)
+
+emmy_comment     ::= emmy_line { emmy_continuation }
+(* See Part 3 for the internal structure of emmy_comment *)
+
+# ----------------------------------------------------------------------------
+# 1.6  Shebang
+# ----------------------------------------------------------------------------
+
+shebang          ::= '#!' <any chars> EOL           (* [external], first line only *)
+
+# ----------------------------------------------------------------------------
+# 1.7  Operators & Punctuation
+# ----------------------------------------------------------------------------
+
+(* Arithmetic *)
+'+' '-' '*' '/' '//' '%' '^'
+
+(* Bitwise *)
+'&' '|' '~'  '>>' '<<'
+
+(* Relational *)
+'==' '~=' '<' '<=' '>' '>='
+
+(* Logical *)
+'and' 'or' 'not'
+
+(* String concatenation *)
+'..'
+
+(* Length *)
+'#'
+
+(* Assignment & misc *)
+'=' '.' ':' '::' ';' ',' '...'
+
+(* Brackets *)
+'(' ')' '[' ']' '{' '}'
+
+(* Attribute delimiters [lua5.4] *)
+'<' '>'
+
+
+# ############################################################################
+#  Part 2 — Lua 5.3+ Executable Syntax
+# ############################################################################
+#
+# Based on Lua 5.4 Reference Manual §9, with modifications:
+#   - Expressions use explicit precedence layers instead of flat `exp binop exp`
+#   - Comments are explicit tree nodes
+#   - 5.4-only productions are marked [lua5.4]
+#
+# Operator precedence table (lowest → highest, per Lua §3.4.8):
+#
+#   1.  or                                   left
+#   2.  and                                  left
+#   3.  <  >  <=  >=  ~=  ==                left
+#   4.  |                                    left
+#   5.  ~                                    left
+#   6.  &                                    left
+#   7.  <<  >>                               left
+#   8.  ..                                   right
+#   9.  +  -                                 left
+#  10.  *  /  //  %                          left
+#  11.  not  #  - (unary)  ~ (unary)         unary (right)
+#  12.  ^                                    right
+#
+
+# ----------------------------------------------------------------------------
+# 2.1  Program structure
+# ----------------------------------------------------------------------------
+
+chunk          ::= [ shebang ] block
+
+block          ::= { statement } [ return_statement ]
+
+# ----------------------------------------------------------------------------
+# 2.2  Statements
+# ----------------------------------------------------------------------------
+
+statement      ::= ';'
+                 | assignment_statement
+                 | function_call_statement
+                 | label_statement
+                 | break_statement
+                 | goto_statement
+                 | do_statement
+                 | while_statement
+                 | repeat_statement
+                 | if_statement
+                 | for_numeric_statement
+                 | for_generic_statement
+                 | function_declaration
+                 | local_function_declaration
+                 | local_declaration
+
+assignment_statement       ::= variable_list '=' expression_list
+
+function_call_statement    ::= function_call
+
+label_statement            ::= '::' Name '::'
+
+break_statement            ::= 'break'
+
+goto_statement             ::= 'goto' Name
+
+do_statement               ::= 'do' block 'end'
+
+while_statement            ::= 'while' expression 'do' block 'end'
+
+repeat_statement           ::= 'repeat' block 'until' expression
+
+if_statement               ::= 'if' expression 'then' block
+                                { 'elseif' expression 'then' block }
+                                [ 'else' block ]
+                                'end'
+
+for_numeric_statement      ::= 'for' Name '=' expression ',' expression
+                                [ ',' expression ]
+                                'do' block 'end'
+
+for_generic_statement      ::= 'for' name_list 'in' expression_list
+                                'do' block 'end'
+
+function_declaration       ::= 'function' function_name function_body
+
+local_function_declaration ::= 'local' 'function' Name function_body
+
+local_declaration          ::= 'local' attribute_name_list [ '=' expression_list ]
+
+return_statement           ::= 'return' [ expression_list ] [ ';' ]
+
+# ----------------------------------------------------------------------------
+# 2.3  Names and variables
+# ----------------------------------------------------------------------------
+
+function_name  ::= Name { '.' Name } [ ':' Name ]
+
+variable_list  ::= variable { ',' variable }
+
+variable       ::= Name
+                 | prefix_expression '[' expression ']'
+                 | prefix_expression '.' Name
+
+name_list      ::= Name { ',' Name }
+
+attribute_name_list ::= Name attribute { ',' Name attribute }
+
+attribute      ::= [ '<' Name '>' ]                (* [lua5.4] <const> | <close> *)
+
+# ----------------------------------------------------------------------------
+# 2.4  Expressions — precedence climbing
+# ----------------------------------------------------------------------------
+
+expression_list ::= expression { ',' expression }
+
+expression     ::= or_expression
+
+or_expression  ::= and_expression { 'or' and_expression }             (* prec 1, left *)
+
+and_expression ::= comparison     { 'and' comparison }                (* prec 2, left *)
+
+comparison     ::= bitor_expression
+                   { ( '<' | '<=' | '>' | '>=' | '==' | '~=' )
+                     bitor_expression }                               (* prec 3, left *)
+
+bitor_expression   ::= bitxor_expression { '|' bitxor_expression }    (* prec 4, left *)
+
+bitxor_expression  ::= bitand_expression { '~' bitand_expression }    (* prec 5, left *)
+
+bitand_expression  ::= shift_expression  { '&' shift_expression }     (* prec 6, left *)
+
+shift_expression   ::= concat_expression
+                       { ( '<<' | '>>' ) concat_expression }          (* prec 7, left *)
+
+concat_expression  ::= additive_expression [ '..' concat_expression ] (* prec 8, right *)
+(* Right-recursive: 'a .. b .. c' parses as 'a .. (b .. c)'. *)
+
+additive_expression    ::= multiplicative_expression
+                           { ( '+' | '-' ) multiplicative_expression } (* prec 9, left *)
+
+multiplicative_expression ::= unary_expression
+                              { ( '*' | '/' | '//' | '%' )
+                                unary_expression }                     (* prec 10, left *)
+
+unary_expression   ::= ( 'not' | '#' | '-' | '~' ) unary_expression  (* prec 11, right *)
+                     | power_expression
+
+power_expression   ::= primary_expression [ '^' unary_expression ]    (* prec 12, right *)
+
+primary_expression ::= 'nil'
+                     | 'false'
+                     | 'true'
+                     | Numeral
+                     | LiteralString
+                     | '...'
+                     | function_definition
+                     | prefix_expression
+                     | table_constructor
+
+# ----------------------------------------------------------------------------
+# 2.5  Prefix expressions and function calls
+# ----------------------------------------------------------------------------
+
+(* NOTE: prefix_expression and function_call are mutually recursive.
+   In Tree-sitter this creates a GLR conflict between:
+     prefix_expression -> function_call
+     function_call     -> prefix_expression args
+   This is resolved via 'conflicts' in grammar.js. *)
+
+prefix_expression ::= Name
+                    | function_call
+                    | '(' expression ')'
+                    | prefix_expression '[' expression ']'
+                    | prefix_expression '.' Name
+
+function_call     ::= prefix_expression arguments
+                    | prefix_expression ':' Name arguments
+
+arguments         ::= '(' [ expression_list ] ')'
+                    | table_constructor
+                    | LiteralString
+
+# ----------------------------------------------------------------------------
+# 2.6  Function definitions
+# ----------------------------------------------------------------------------
+
+function_definition ::= 'function' function_body
+
+function_body       ::= '(' [ parameter_list ] ')' block 'end'
+
+parameter_list      ::= name_list [ ',' '...' ]
+                      | '...'
+
+# ----------------------------------------------------------------------------
+# 2.7  Table constructors
+# ----------------------------------------------------------------------------
+
+table_constructor ::= '{' [ field_list ] '}'
+
+field_list        ::= field { field_separator field } [ field_separator ]
+
+field             ::= '[' expression ']' '=' expression
+                    | Name '=' expression
+                    | expression
+
+field_separator   ::= ',' | ';'
+
+
+# ############################################################################
+#  Part 3 — EmmyLua Structured-Comment Sub-Grammar
+# ############################################################################
+#
+# EmmyLua annotations live inside '---' doc-comment lines.  They are NOT Lua
+# keywords — the '@xxx' tags are only meaningful after the '---' prefix.
+#
+# The external scanner detects '---' at line start and hands the rest of the
+# line to the EmmyLua sub-grammar.  Multiple consecutive '---' lines form a
+# single doc-comment block.
+#
+
+# ----------------------------------------------------------------------------
+# 3.1  Comment block structure
+# ----------------------------------------------------------------------------
+
+emmy_line          ::= '---' ( emmy_annotation | emmy_alias_member | emmy_doc_line )
+
+emmy_continuation  ::= '---' ( emmy_annotation | emmy_alias_member | emmy_doc_line )
+(* Consecutive '---' lines are grouped into one emmy_comment node.
+   The grouping heuristic: no blank / non-'---' lines in between. *)
+
+emmy_doc_line      ::= <any text not starting with '@' or '|'>
+(* Free-form documentation text, preserved as a node for Hover display. *)
+
+# ----------------------------------------------------------------------------
+# 3.2  Annotations
+# ----------------------------------------------------------------------------
+
+emmy_annotation    ::= emmy_class
+                     | emmy_field
+                     | emmy_param
+                     | emmy_return
+                     | emmy_type_annotation
+                     | emmy_alias
+                     | emmy_generic
+                     | emmy_enum
+                     | emmy_overload
+                     | emmy_vararg
+                     | emmy_diagnostic
+                     | emmy_deprecated
+                     | emmy_async
+                     | emmy_version
+                     | emmy_see
+                     | emmy_nodiscard
+                     | emmy_cast
+                     | emmy_source
+                     | emmy_unknown_tag
+
+# ---- @class ----------------------------------------------------------------
+
+emmy_class         ::= '@class' Name [ ':' emmy_parent_list ]
+                        [ emmy_description ]
+
+emmy_parent_list   ::= Name { ',' Name }
+
+# ---- @field ----------------------------------------------------------------
+
+emmy_field         ::= '@field' [ field_visibility ] field_key emmy_type_expr
+                        [ emmy_description ]
+
+field_visibility   ::= 'public' | 'protected' | 'private' | 'package'
+
+field_key          ::= Name
+                     | '[' emmy_type_expr ']'
+
+# ---- @param ----------------------------------------------------------------
+
+emmy_param         ::= '@param' param_name [ '?' ] emmy_type_expr
+                        [ emmy_description ]
+
+param_name         ::= Name | '...'
+
+# ---- @return ---------------------------------------------------------------
+
+emmy_return        ::= '@return' emmy_type_list [ Name ]
+                        [ emmy_description ]
+
+# ---- @type -----------------------------------------------------------------
+
+emmy_type_annotation ::= '@type' emmy_type_expr [ emmy_description ]
+
+(* The annotation is named 'emmy_type_annotation' (not 'emmy_type') to avoid
+   collision with the type expression production 'emmy_type_expr'. *)
+
+# ---- @alias ----------------------------------------------------------------
+
+emmy_alias         ::= '@alias' Name emmy_type_expr
+                        [ emmy_description ]
+
+(* Alias enum values appear as continuation lines: *)
+
+emmy_alias_member  ::= '|' emmy_type_expr [ '#' emmy_description ]
+
+# ---- @generic --------------------------------------------------------------
+
+emmy_generic       ::= '@generic' generic_param { ',' generic_param }
+
+generic_param      ::= Name [ ':' emmy_type_expr ]
+
+# ---- @enum -----------------------------------------------------------------
+
+emmy_enum          ::= '@enum' Name
+
+# ---- @overload -------------------------------------------------------------
+
+emmy_overload      ::= '@overload' emmy_fun_type
+
+# ---- @vararg ---------------------------------------------------------------
+
+emmy_vararg        ::= '@vararg' emmy_type_expr
+
+# ---- @diagnostic -----------------------------------------------------------
+
+emmy_diagnostic    ::= '@diagnostic' diagnostic_action
+                        [ ':' diagnostic_name_list ]
+
+diagnostic_action  ::= 'disable' | 'enable' | 'disable-next-line'
+                     | 'disable-line' | 'enable-next-line' | 'enable-line'
+
+diagnostic_name_list ::= Name { ',' Name }
+
+# ---- @deprecated -----------------------------------------------------------
+
+emmy_deprecated    ::= '@deprecated' [ emmy_description ]
+
+# ---- @async ----------------------------------------------------------------
+
+emmy_async         ::= '@async'
+
+# ---- @version --------------------------------------------------------------
+
+emmy_version       ::= '@version' version_constraint { ',' version_constraint }
+
+version_constraint ::= [ '>' | '>=' | '<' | '<=' ] version_id
+
+version_id         ::= Name { '.' Name }
+(* Allows dotted identifiers: lua5.3, lua5.4, 5.3, jit, etc. *)
+
+# ---- @see ------------------------------------------------------------------
+
+emmy_see           ::= '@see' Name { '.' Name } [ '#' Name ]
+
+# ---- @nodiscard ------------------------------------------------------------
+
+emmy_nodiscard     ::= '@nodiscard'
+
+# ---- @cast -----------------------------------------------------------------
+
+emmy_cast          ::= '@cast' Name emmy_type_expr
+
+# ---- @source ---------------------------------------------------------------
+
+emmy_source        ::= '@source' LiteralString
+
+# ---- Unknown tags (forward-compatible) -------------------------------------
+
+emmy_unknown_tag   ::= '@' Name <rest-of-line>
+
+# ---- Description text ------------------------------------------------------
+
+emmy_description   ::= <rest-of-line text, may include inline markdown / links>
+(* Captured as a single text node for Hover display.  Not further parsed. *)
+
+# ----------------------------------------------------------------------------
+# 3.3  EmmyLua Type Expressions
+# ----------------------------------------------------------------------------
+#
+# Type expressions have their own precedence:
+#
+#   Lowest   '|'    union type         left
+#            '?'    optional suffix    postfix
+#            '[]'   array suffix       postfix
+#   Highest  atom / function / table   —
+#
+
+emmy_type_expr     ::= emmy_union_type
+
+emmy_union_type    ::= emmy_optional_type { '|' emmy_optional_type }
+
+emmy_optional_type ::= emmy_array_type [ '?' ]
+
+emmy_array_type    ::= emmy_atom_type { '[]' }
+
+emmy_atom_type     ::= emmy_literal_type
+                     | emmy_name_type
+                     | emmy_fun_type
+                     | emmy_table_type
+                     | emmy_paren_type
+                     | emmy_variadic_type
+
+# Literal types
+emmy_literal_type  ::= LiteralString                (* e.g. '"hello"' *)
+                     | Numeral                       (* e.g. 42 *)
+                     | 'true' | 'false'
+                     | 'nil'
+
+# Named type (possibly generic)
+emmy_name_type     ::= Name [ '<' emmy_type_list '>' ]
+
+# Function type
+emmy_fun_type      ::= 'fun' '(' [ emmy_fun_param_list ] ')'
+                        [ ':' emmy_type_list ]
+
+emmy_fun_param_list ::= emmy_fun_param { ',' emmy_fun_param }
+
+emmy_fun_param     ::= Name ':' emmy_type_expr       (* named parameter *)
+                     | emmy_type_expr                  (* positional / type-only *)
+                     | '...' [ ':' emmy_type_expr ]    (* variadic *)
+(* Disambiguation: if Name is followed by ':', it is the parameter name;
+   otherwise the Name begins a type expression.  In Tree-sitter this is a
+   1-token lookahead resolved via conflicts or GLR. *)
+
+# Table literal type
+(* 'table<K,V>' is parsed as emmy_name_type with Name='table' + generic args,
+   since 'table' is a valid Name.  emmy_table_type handles only the '{...}'
+   inline-field syntax, avoiding ambiguity. *)
+emmy_table_type    ::= '{' [ emmy_table_field_list ] '}'
+
+emmy_table_field_list ::= emmy_table_field { ',' emmy_table_field }
+
+emmy_table_field   ::= Name ':' emmy_type_expr
+                     | '[' emmy_type_expr ']' ':' emmy_type_expr
+
+# Parenthesized type (for grouping in unions, etc.)
+emmy_paren_type    ::= '(' emmy_type_expr ')'
+
+# Variadic type in parameter position
+emmy_variadic_type ::= '...' emmy_type_expr
+
+# Type list (for multi-return, generic args, etc.)
+emmy_type_list     ::= emmy_type_expr { ',' emmy_type_expr }
+
+
+# ############################################################################
+#  Part 4 — Tree-sitter Implementation Notes
+# ############################################################################
+#
+# 4.1  External Scanner (scanner.c)
+# -----------------------------------
+# The following tokens require hand-written C scanning:
+#
+#   - LongString / LongComment
+#       Balanced long brackets '[==[...]==%s]' cannot be expressed
+#       with Tree-sitter regex. The scanner counts '=' signs to
+#       match opening and closing brackets.
+#
+#   - Shebang
+#       '#!' is only valid on the very first line of the source file.
+#       The scanner checks byte offset == 0.
+#
+#   - Block comment start detection
+#       '--[' followed by optional '=' and '[' must be disambiguated
+#       from '--' (short comment) and '-- [' (short comment that
+#       happens to start with a bracket).
+#
+# 4.2  extras (Whitespace & Comments)
+# -----------------------------------
+# In grammar.js, the extras array should include:
+#
+#   extras: $ => [
+#     /\s+/,
+#     $.comment,
+#   ],
+#
+# This lets whitespace and all comment forms appear between any two
+# tokens without polluting every production.
+#
+# emmy_comment is a *named* node (not hidden), so it is queryable
+# and will appear in the CST adjacent to declarations for ANN binding.
+#
+# 4.3  Precedence & Associativity Mapping
+# ----------------------------------------
+# The precedence layers in Part 2 (§2.4) map to Tree-sitter as follows:
+#
+#   | BNF layer                   | prec value | associativity       |
+#   |-----------------------------|-----------|---------------------|
+#   | or_expression               |  1        | prec.left           |
+#   | and_expression              |  2        | prec.left           |
+#   | comparison                  |  3        | prec.left           |
+#   | bitor_expression            |  4        | prec.left           |
+#   | bitxor_expression           |  5        | prec.left           |
+#   | bitand_expression           |  6        | prec.left           |
+#   | shift_expression            |  7        | prec.left           |
+#   | concat_expression           |  8        | prec.right          |
+#   | additive_expression         |  9        | prec.left           |
+#   | multiplicative_expression   | 10        | prec.left           |
+#   | unary_expression            | 11        | prec (right/unary)  |
+#   | power_expression            | 12        | prec.right          |
+#
+# EmmyLua type expression precedence:
+#
+#   | BNF layer               | prec value | associativity |
+#   |-------------------------|-----------|---------------|
+#   | emmy_union_type ('|')   | 1         | prec.left     |
+#   | emmy_optional_type ('?')| 2         | postfix       |
+#   | emmy_array_type ('[]')  | 3         | postfix       |
+#   | emmy_atom_type          | —         | —             |
+#
+# 4.4  Inlined Rules
+# ------------------
+# Intermediate precedence layers (e.g. and_expression, comparison)
+# may be marked 'inline' in grammar.js if they should not create
+# dedicated CST nodes.  However, for query ergonomics, it is often
+# better to keep binary_expression as a unified named node with
+# an 'operator' field, and use the prec values only for
+# disambiguation.  The recommended Tree-sitter pattern:
+#
+#   binary_expression: $ => choice(
+#     prec.left(1,  seq(field('left', $._expression), 'or',  field('right', $._expression))),
+#     prec.left(2,  seq(field('left', $._expression), 'and', field('right', $._expression))),
+#     ...
+#   ),
+#
+# 4.5  Conflicts
+# --------------
+# Known GLR conflicts that require 'conflicts' in grammar.js:
+#
+#   1. prefix_expression vs function_call
+#      Both prefix_expression and function_call can start with Name
+#      and recurse into each other.  Tree-sitter needs:
+#        conflicts: $ => [
+#          [$.prefix_expression, $.function_call_statement],
+#          [$.prefix_expression, $.function_call],
+#        ],
+#
+#   2. variable vs function_call
+#      'a.b.c(x)' — is 'a.b' a variable or the prefix of a function call?
+#      The parser cannot decide until seeing '('.
+#
+#   3. assignment_statement vs function_call_statement
+#      'foo(...)' is a valid statement (function call) but 'foo' is also
+#      a valid start of 'variable_list = expression_list'.  The '='
+#      disambiguates, but Tree-sitter may need help.
+#
+# 4.6  EmmyLua Sub-Grammar Integration
+# ------------------------------------
+# Two approaches for integrating '---' lines:
+#
+#   (a) Treat emmy_comment as an extras sibling of comment.
+#       Pro: appears everywhere automatically.
+#       Con: harder to associate with the *following* declaration.
+#
+#   (b) Include emmy_comment explicitly in statement-level rules:
+#         statement ::= emmy_comment? ( assignment | ... )
+#       Pro: tight parent-child relationship in the CST.
+#       Con: more verbose grammar.
+#
+#   Recommended: approach (a) for parsing, with a post-parse query or
+#   heuristic in the LSP's ANN layer to bind each emmy_comment to
+#   its adjacent declaration based on source position.
+#
+# 4.7  Node Naming Conventions
+# ----------------------------
+# To keep the CST navigable and consistent with this BNF:
+#
+#   | BNF production              | Tree-sitter node name              |
+#   |-----------------------------|------------------------------------|
+#   | chunk                       | source_file                        |
+#   | block                       | block                              |
+#   | statement (each variant)    | assignment_statement, ...           |
+#   | expression (unified)        | binary_expression, unary_expression,|
+#   |                             | prefix_expression, ...              |
+#   | function_call               | function_call                      |
+#   | function_definition         | function_definition                |
+#   | table_constructor           | table_constructor                  |
+#   | emmy_comment                | emmy_comment                       |
+#   | emmy_class ... emmy_see     | emmy_class, emmy_field, ...        |
+#   | emmy_type_annotation        | emmy_type_annotation               |
+#   | emmy_type_expr (unified)    | emmy_type                          |
+#   | emmy_union_type             | emmy_union_type                    |
+#   | emmy_fun_type               | emmy_function_type                 |
+#   | emmy_table_type             | emmy_table_type                    |
+#   | emmy_name_type              | emmy_name_type                     |
+#   | emmy_literal_type           | emmy_literal_type                  |

@@ -1,0 +1,267 @@
+================================================================================
+Break statement
+================================================================================
+
+break
+
+---
+
+(source_file
+  (break_statement))
+
+================================================================================
+Do block
+================================================================================
+
+do
+end
+
+---
+
+(source_file
+  (do_statement))
+
+================================================================================
+Label and goto
+================================================================================
+
+::done::
+goto done
+
+---
+
+(source_file
+  (label_statement
+    name: (identifier))
+  (goto_statement
+    name: (identifier)))
+
+================================================================================
+While loop
+================================================================================
+
+while true do
+end
+
+---
+
+(source_file
+  (while_statement
+    condition: (true)))
+
+================================================================================
+Repeat until
+================================================================================
+
+repeat
+until true
+
+---
+
+(source_file
+  (repeat_statement
+    condition: (true)))
+
+================================================================================
+If elseif else
+================================================================================
+
+if a then
+elseif b then
+else
+end
+
+---
+
+(source_file
+  (if_statement
+    condition: (variable
+      (identifier))
+    (elseif_clause
+      condition: (variable
+        (identifier)))
+    (else_clause)))
+
+================================================================================
+Numeric for
+================================================================================
+
+for i = 1, 10 do
+end
+
+---
+
+(source_file
+  (for_numeric_statement
+    name: (identifier)
+    start: (number)
+    stop: (number)))
+
+================================================================================
+Numeric for with step
+================================================================================
+
+for i = 10, 1, -1 do
+end
+
+---
+
+(source_file
+  (for_numeric_statement
+    name: (identifier)
+    start: (number)
+    stop: (number)
+    step: (unary_expression
+      operand: (number))))
+
+================================================================================
+Generic for
+================================================================================
+
+for k, v in pairs(t) do
+end
+
+---
+
+(source_file
+  (for_generic_statement
+    names: (name_list
+      (identifier)
+      (identifier))
+    values: (expression_list
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments
+          (expression_list
+            (variable
+              (identifier))))))))
+
+================================================================================
+Function declaration
+================================================================================
+
+function foo()
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name
+      (identifier))
+    body: (function_body
+      parameters: (parameter_list))))
+
+================================================================================
+Method declaration
+================================================================================
+
+function t:method()
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name
+      (identifier)
+      method: (identifier))
+    body: (function_body
+      parameters: (parameter_list))))
+
+================================================================================
+Local function
+================================================================================
+
+local function f()
+end
+
+---
+
+(source_file
+  (local_function_declaration
+    name: (identifier)
+    body: (function_body
+      parameters: (parameter_list))))
+
+================================================================================
+Local declaration
+================================================================================
+
+local x = 1
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (number))))
+
+================================================================================
+Local with attribute
+================================================================================
+
+local x <const> = 42
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list
+      (identifier)
+      (attribute
+        name: (identifier)))
+    values: (expression_list
+      (number))))
+
+================================================================================
+Return statement
+================================================================================
+
+return 1, 2
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (number)
+      (number))))
+
+================================================================================
+Assignment
+================================================================================
+
+x = 1
+
+---
+
+(source_file
+  (assignment_statement
+    left: (variable_list
+      (variable
+        (identifier)))
+    right: (expression_list
+      (number))))
+
+================================================================================
+Function call statement
+================================================================================
+
+print("hello")
+
+---
+
+(source_file
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (expression_list
+          (string
+            (short_string
+              (short_string_content_double))))))))

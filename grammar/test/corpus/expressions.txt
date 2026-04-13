@@ -1,0 +1,182 @@
+================================================================================
+Nil, true, false
+================================================================================
+
+return nil, true, false
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (nil)
+      (true)
+      (false))))
+
+================================================================================
+Numbers
+================================================================================
+
+return 42, 0xFF
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (number)
+      (number))))
+
+================================================================================
+Vararg
+================================================================================
+
+return ...
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (vararg_expression))))
+
+================================================================================
+Concatenation right associativity
+================================================================================
+
+return a .. b .. c
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (binary_expression
+        left: (variable (identifier))
+        right: (binary_expression
+          left: (variable (identifier))
+          right: (variable (identifier)))))))
+
+================================================================================
+Power right associativity
+================================================================================
+
+return 2 ^ 3 ^ 4
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (binary_expression
+        left: (number)
+        right: (binary_expression
+          left: (number)
+          right: (number))))))
+
+================================================================================
+Unary operator
+================================================================================
+
+return -x
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (unary_expression
+        operand: (variable (identifier))))))
+
+================================================================================
+Table constructor
+================================================================================
+
+return {1, x = 2}
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (table_constructor
+        (field_list
+          (field
+            value: (number))
+          (field
+            key: (identifier)
+            value: (number)))))))
+
+================================================================================
+Anonymous function
+================================================================================
+
+return function() end
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (function_definition
+        body: (function_body
+          parameters: (parameter_list))))))
+
+================================================================================
+Field access
+================================================================================
+
+return a.b
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (variable
+        object: (variable (identifier))
+        field: (identifier)))))
+
+================================================================================
+Index access
+================================================================================
+
+return t[1]
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (variable
+        object: (variable (identifier))
+        index: (number)))))
+
+================================================================================
+Method call
+================================================================================
+
+obj:method()
+
+---
+
+(source_file
+  (function_call_statement
+    (function_call
+      callee: (variable (identifier))
+      method: (identifier)
+      arguments: (arguments))))
+
+================================================================================
+Parenthesized expression
+================================================================================
+
+return (1)
+
+---
+
+(source_file
+  (return_statement
+    (expression_list
+      (parenthesized_expression
+        (number)))))

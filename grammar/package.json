@@ -1,0 +1,26 @@
+{
+  "name": "tree-sitter-lua-emmy",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for Lua 5.3+ with EmmyLua annotations",
+  "main": "bindings/node",
+  "keywords": ["tree-sitter", "lua", "emmylua", "parser"],
+  "license": "MIT",
+  "dependencies": {
+    "nan": "^2.22.0"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.3"
+  },
+  "scripts": {
+    "generate": "tree-sitter generate",
+    "test": "tree-sitter test",
+    "parse": "tree-sitter parse"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.lua",
+      "file-types": ["lua"],
+      "injection-regex": "lua"
+    }
+  ]
+}

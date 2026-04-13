@@ -36,5 +36,21 @@
 | [`tests/lua-root/test.lua`](tests/lua-root/test.lua) | 基础测试入口：`require`、EmmyLua `---@class` 注解、成员函数定义 |
 | [`tests/lua-root/json.lua`](tests/lua-root/json.lua) | 真实第三方库（json4lua）：闭包模块模式、table 方法、复杂控制流，用于验证解析与索引能力 |
 
+### Grammar — Tree-sitter 解析器（阶段 A 核心）
+
+**BNF 规范**：[`grammar/lua-emmy.bnf`](grammar/lua-emmy.bnf) — Lua 5.3+/5.4 EBNF + EmmyLua 子语法。
+
+**解析器实现**（已完成并通过验证）：
+
+| 文件 | 说明 |
+|------|------|
+| [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式、table/function/prefix 完整语法；EmmyLua 注解产生式已定义 |
+| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短字符串（全部 Lua 5.3+ 转义）、长字符串、所有注释类型、shebang |
+| [`grammar/test/corpus/`](grammar/test/corpus/) | 29 个回归测试，100% 通过 |
+
+- 无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/` 全部 11 个标准库桩文件。
+- 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
+
 ### 后续
-- 定稿 **LSP 实现语言等** 技术栈后，在 `grammar/` / `lsp/` / `vscode-extension/` 内落地实现与单仓 CI。
+- 定稿 **LSP 实现语言等** 技术栈后，在 `lsp/` / `vscode-extension/` 内落地实现与单仓 CI。
+- EmmyLua 注释当前作为统一 comment token 扫描；后续将拆分为结构化子节点以支持 LSP ANN 层绑定。
