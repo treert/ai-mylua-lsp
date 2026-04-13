@@ -1,3 +1,4 @@
+mod completion;
 mod diagnostics;
 mod document;
 mod emmy;
@@ -154,6 +155,7 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                completion_provider: Some(CompletionOptions::default()),
                 references_provider: Some(OneOf::Left(true)),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
@@ -289,6 +291,18 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         Ok(hover::hover(doc, uri, position, &idx, &docs))
+    }
+
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        let items = completion::complete(doc, uri, position, &idx);
+        Ok(Some(CompletionResponse::Array(items)))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
