@@ -62,12 +62,22 @@ impl Backend {
         };
 
         if let Some(tree) = tree {
-            let diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
+            let mut diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
 
             self.index
                 .lock()
                 .unwrap()
                 .update_document(&uri, &tree, text.as_bytes());
+
+            {
+                let idx = self.index.lock().unwrap();
+                let semantic = diagnostics::collect_semantic_diagnostics(
+                    tree.root_node(),
+                    text.as_bytes(),
+                    &idx,
+                );
+                diags.extend(semantic);
+            }
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
