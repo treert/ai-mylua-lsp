@@ -49,11 +49,20 @@ lsp/
 - **构建**：`cd lsp && cargo build`（需先 `cd grammar && npx tree-sitter generate` 确保 `parser.c` 存在）。
 - **`vscode-extension`** 通过 `spawn` 启动 `target/debug/mylua-lsp`（开发）或打包后的二进制（发布）。
 
-### 实现顺序（与路线图一致）
+### 当前实现（阶段 A 完成）
 
-1. **阶段 A**：`initialize`、文档同步、Tree-sitter 解析 + 基础语法诊断、`documentSymbol`；协商 **semantic tokens**（可先占位）。
-2. **阶段 B**：Emmy 注解绑定、跨文件定义、Hover、轻量全库索引。
-3. **阶段 C**：全工作区 **references**、**workspace/symbol**、规模与增量硬化。
+| LSP 能力 | 状态 |
+|----------|------|
+| `initialize` / `initialized` / `shutdown` | 已实现 |
+| `textDocument/didOpen` / `didChange` / `didClose` | 已实现（Full sync + Tree-sitter 解析） |
+| `textDocument/publishDiagnostics` | 已实现（ERROR / MISSING 节点转诊断） |
+| `textDocument/documentSymbol` | 已实现（顶层 function / local / assignment 提取） |
+| `textDocument/semanticTokens/full` | 占位（capability 已声明，返回空 tokens） |
+
+### 后续路线
+
+1. **阶段 B**：Emmy 注解绑定、跨文件定义、Hover、轻量全库索引。
+2. **阶段 C**：全工作区 **references**、**workspace/symbol**、规模与增量硬化。
 
 详见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md)。
 
