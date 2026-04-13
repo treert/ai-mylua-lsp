@@ -53,7 +53,7 @@
 - 无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/` 全部 11 个标准库桩文件。
 - 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
 
-### LSP — Rust 语言服务器（阶段 A 完成）
+### LSP — Rust 语言服务器（阶段 B 完成）
 
 **技术栈**：Rust + `tower-lsp-server` 0.23 + `tree-sitter` 0.26 + `tokio`。
 
@@ -61,18 +61,21 @@
 |------|------|
 | [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
 | [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
-| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（阶段 A 完整） |
+| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（阶段 B 完整，10 个模块） |
 
 **已实现 LSP 能力**：
 - `initialize` / `shutdown` / 文档同步（Full sync）
 - **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
 - **documentSymbol**：顶层 function / local / assignment 提取为大纲
+- **goto definition**：local 作用域解析（block/function/for 参数）+ 全局符号表 + `require` 跨文件跳转
+- **hover**：定义源码展示 + EmmyLua 注解（`@param`/`@return`/`@type`/`@class`）+ 文档注释
+- **EmmyLua 注解解析**：从 `---` 注释文本提取结构化注解
+- **全局符号表**：跨文件全局函数/变量索引 + `require` 路径映射
 - **semantic tokens**：capability 已声明（占位，后续填充）
 
 - 构建：`cd lsp && cargo build`
 - 测试：`cargo test`
 
 ### 后续
-- 阶段 B：EmmyLua 注释拆分为结构化子节点、Emmy 注解绑定、跨文件定义、Hover、轻量全库索引。
 - 阶段 C：全工作区 references / workspace symbol、5 万文件硬化。
 - `vscode-extension/` 实现。

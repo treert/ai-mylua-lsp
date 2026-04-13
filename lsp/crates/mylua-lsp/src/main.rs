@@ -1,3 +1,14 @@
+mod diagnostics;
+mod document;
+mod emmy;
+mod goto;
+mod hover;
+mod scope;
+mod symbols;
+mod types;
+mod util;
+mod workspace_index;
+
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -5,190 +16,15 @@ use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
-struct Document {
-    text: String,
-    tree: tree_sitter::Tree,
-}
+use document::Document;
+use workspace_index::WorkspaceIndex;
 
 struct Backend {
     client: Client,
     parser: Mutex<tree_sitter::Parser>,
     documents: Mutex<HashMap<Uri, Document>>,
+    index: Mutex<WorkspaceIndex>,
 }
-
-fn ts_point_to_position(point: tree_sitter::Point) -> Position {
-    Position {
-        line: point.row as u32,
-        character: point.column as u32,
-    }
-}
-
-fn ts_node_to_range(node: tree_sitter::Node) -> Range {
-    Range {
-        start: ts_point_to_position(node.start_position()),
-        end: ts_point_to_position(node.end_position()),
-    }
-}
-
-fn node_text<'a>(node: tree_sitter::Node<'a>, source: &'a [u8]) -> &'a str {
-    node.utf8_text(source).unwrap_or("<error>")
-}
-
-// ---------------------------------------------------------------------------
-// Diagnostics: collect ERROR / MISSING nodes from the parse tree
-// ---------------------------------------------------------------------------
-
-fn collect_diagnostics(root: tree_sitter::Node, source: &[u8]) -> Vec<Diagnostic> {
-    let mut diagnostics = Vec::new();
-    let mut cursor = root.walk();
-    collect_errors_recursive(&mut cursor, source, &mut diagnostics);
-    diagnostics
-}
-
-fn collect_errors_recursive(
-    cursor: &mut tree_sitter::TreeCursor,
-    source: &[u8],
-    diagnostics: &mut Vec<Diagnostic>,
-) {
-    let node = cursor.node();
-    if node.is_error() {
-        diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node),
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("mylua".to_string()),
-            message: format!("Syntax error near '{}'", truncate(node_text(node, source), 40)),
-            ..Default::default()
-        });
-    } else if node.is_missing() {
-        diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node),
-            severity: Some(DiagnosticSeverity::ERROR),
-            source: Some("mylua".to_string()),
-            message: format!("Missing '{}'", node.kind()),
-            ..Default::default()
-        });
-    }
-
-    if node.has_error() && cursor.goto_first_child() {
-        loop {
-            collect_errors_recursive(cursor, source, diagnostics);
-            if !cursor.goto_next_sibling() {
-                break;
-            }
-        }
-        cursor.goto_parent();
-    }
-}
-
-fn truncate(s: &str, max: usize) -> String {
-    if s.len() <= max {
-        s.replace('\n', "\\n")
-    } else {
-        format!("{}...", &s[..max].replace('\n', "\\n"))
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Document symbols: top-level functions, locals, assignments
-// ---------------------------------------------------------------------------
-
-fn collect_document_symbols(root: tree_sitter::Node, source: &[u8]) -> Vec<DocumentSymbol> {
-    let mut symbols = Vec::new();
-    let mut cursor = root.walk();
-
-    if !cursor.goto_first_child() {
-        return symbols;
-    }
-
-    loop {
-        let node = cursor.node();
-        match node.kind() {
-            "function_declaration" => {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = node_text(name_node, source).to_string();
-                    #[allow(deprecated)]
-                    symbols.push(DocumentSymbol {
-                        name,
-                        detail: None,
-                        kind: SymbolKind::FUNCTION,
-                        tags: None,
-                        deprecated: None,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(name_node),
-                        children: None,
-                    });
-                }
-            }
-            "local_function_declaration" => {
-                if let Some(name_node) = node.child_by_field_name("name") {
-                    let name = node_text(name_node, source).to_string();
-                    #[allow(deprecated)]
-                    symbols.push(DocumentSymbol {
-                        name,
-                        detail: Some("local".to_string()),
-                        kind: SymbolKind::FUNCTION,
-                        tags: None,
-                        deprecated: None,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(name_node),
-                        children: None,
-                    });
-                }
-            }
-            "local_declaration" => {
-                if let Some(names_node) = node.child_by_field_name("names") {
-                    for i in 0..names_node.named_child_count() {
-                        if let Some(id_node) = names_node.named_child(i as u32) {
-                            if id_node.kind() == "identifier" {
-                                let name = node_text(id_node, source).to_string();
-                                #[allow(deprecated)]
-                                symbols.push(DocumentSymbol {
-                                    name,
-                                    detail: Some("local".to_string()),
-                                    kind: SymbolKind::VARIABLE,
-                                    tags: None,
-                                    deprecated: None,
-                                    range: ts_node_to_range(node),
-                                    selection_range: ts_node_to_range(id_node),
-                                    children: None,
-                                });
-                            }
-                        }
-                    }
-                }
-            }
-            "assignment_statement" => {
-                if let Some(left_node) = node.child_by_field_name("left") {
-                    if let Some(first_var) = left_node.named_child(0) {
-                        let name = node_text(first_var, source).to_string();
-                        #[allow(deprecated)]
-                        symbols.push(DocumentSymbol {
-                            name,
-                            detail: None,
-                            kind: SymbolKind::VARIABLE,
-                            tags: None,
-                            deprecated: None,
-                            range: ts_node_to_range(node),
-                            selection_range: ts_node_to_range(first_var),
-                            children: None,
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        if !cursor.goto_next_sibling() {
-            break;
-        }
-    }
-
-    symbols
-}
-
-// ---------------------------------------------------------------------------
-// Semantic tokens legend (stub — no tokens produced yet)
-// ---------------------------------------------------------------------------
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
@@ -210,10 +46,6 @@ fn semantic_tokens_legend() -> SemanticTokensLegend {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Backend implementation
-// ---------------------------------------------------------------------------
-
 impl Backend {
     fn parse_and_store(&self, uri: Uri, text: String, version: Option<i32>) {
         let tree = {
@@ -222,19 +54,21 @@ impl Backend {
         };
 
         if let Some(tree) = tree {
-            let diagnostics = collect_diagnostics(tree.root_node(), text.as_bytes());
+            let diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
+
+            self.index
+                .lock()
+                .unwrap()
+                .update_document(&uri, &tree, text.as_bytes());
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
-                Document {
-                    text,
-                    tree,
-                },
+                Document { text, tree },
             );
 
             let client = self.client.clone();
             tokio::spawn(async move {
-                client.publish_diagnostics(uri, diagnostics, version).await;
+                client.publish_diagnostics(uri, diags, version).await;
             });
         }
     }
@@ -248,6 +82,8 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::FULL,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                definition_provider: Some(OneOf::Left(true)),
+                hover_provider: Some(HoverProviderCapability::Simple(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -303,6 +139,10 @@ impl LanguageServer for Backend {
             .lock()
             .unwrap()
             .remove(&params.text_document.uri);
+        self.index
+            .lock()
+            .unwrap()
+            .remove_document(&params.text_document.uri);
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
@@ -316,8 +156,33 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&params.text_document.uri) else {
             return Ok(None);
         };
-        let symbols = collect_document_symbols(doc.tree.root_node(), doc.text.as_bytes());
-        Ok(Some(DocumentSymbolResponse::Nested(symbols)))
+        let syms = symbols::collect_document_symbols(doc.tree.root_node(), doc.text.as_bytes());
+        Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
+
+    async fn goto_definition(
+        &self,
+        params: GotoDefinitionParams,
+    ) -> Result<Option<GotoDefinitionResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        Ok(goto::goto_definition(doc, uri, position, &idx))
+    }
+
+    async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        Ok(hover::hover(doc, uri, position, &idx, &docs))
     }
 
     async fn semantic_tokens_full(
@@ -345,6 +210,7 @@ async fn main() {
             client,
             parser: Mutex::new(parser),
             documents: Mutex::new(HashMap::new()),
+            index: Mutex::new(WorkspaceIndex::new()),
         }
     });
     Server::new(stdin, stdout, socket).serve(service).await;
