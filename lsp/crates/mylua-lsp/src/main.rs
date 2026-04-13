@@ -5,6 +5,7 @@ mod emmy;
 mod goto;
 mod hover;
 mod references;
+mod rename;
 mod scope;
 mod semantic_tokens;
 mod symbols;
@@ -157,6 +158,10 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions::default()),
                 references_provider: Some(OneOf::Left(true)),
+                rename_provider: Some(OneOf::Right(RenameOptions {
+                    prepare_provider: Some(true),
+                    work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
+                })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
@@ -322,6 +327,28 @@ impl LanguageServer for Backend {
             &idx,
             &docs,
         ))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: TextDocumentPositionParams,
+    ) -> Result<Option<PrepareRenameResponse>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        Ok(rename::prepare_rename(doc, params.position))
+    }
+
+    async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
+        let uri = &params.text_document_position.text_document.uri;
+        let position = params.text_document_position.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        Ok(rename::rename(doc, uri, position, &params.new_name, &idx, &docs))
     }
 
     async fn symbol(
