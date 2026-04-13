@@ -78,7 +78,18 @@
 - 构建：`cd lsp && cargo build`
 - 测试：`cargo test`
 
+### VS Code Extension（已实现）
+
+| 文件 | 说明 |
+|------|------|
+| [`vscode-extension/package.json`](vscode-extension/package.json) | 扩展清单：语言注册、TextMate grammar、配置项 |
+| [`vscode-extension/syntaxes/lua.tmLanguage.json`](vscode-extension/syntaxes/lua.tmLanguage.json) | TextMate grammar：关键字、字符串、数字、注释、EmmyLua 注解着色 |
+| [`vscode-extension/src/extension.ts`](vscode-extension/src/extension.ts) | LSP 客户端：启动 `mylua-lsp` 二进制（开发时自动查找 `lsp/target/debug/`） |
+
+- 构建：`cd vscode-extension && npm install && npm run compile`
+- 调试：F5 启动 Extension Development Host
+
 ### 后续
-- `vscode-extension/` 实现（TextMate grammar + 扩展骨架 + 拉起 LSP server）。
 - semantic tokens 真实实现（语义着色）。
 - 5 万文件规模硬化（增量索引、内存优化）。
+- rename、completion、code action 等。
