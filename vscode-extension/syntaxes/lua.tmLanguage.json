@@ -15,6 +15,9 @@
     { "include": "#constant" },
     { "include": "#function-definition" },
     { "include": "#function-call" },
+    { "include": "#method-call" },
+    { "include": "#label" },
+    { "include": "#local-function" },
     { "include": "#operator" },
     { "include": "#variable" }
   ],
@@ -120,6 +123,29 @@
       "match": "\\b([a-zA-Z_][a-zA-Z0-9_.]*)\\s*(?=\\()",
       "captures": {
         "1": { "name": "entity.name.function.call.lua" }
+      }
+    },
+    "method-call": {
+      "match": "(:)\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "keyword.operator.lua" },
+        "2": { "name": "entity.name.function.method.lua" }
+      }
+    },
+    "label": {
+      "match": "(::)\\s*([a-zA-Z_][a-zA-Z0-9_]*)\\s*(::)",
+      "captures": {
+        "1": { "name": "punctuation.definition.label.begin.lua" },
+        "2": { "name": "entity.name.label.lua" },
+        "3": { "name": "punctuation.definition.label.end.lua" }
+      }
+    },
+    "local-function": {
+      "match": "\\b(local)\\s+(function)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
+      "captures": {
+        "1": { "name": "keyword.control.lua" },
+        "2": { "name": "keyword.control.lua" },
+        "3": { "name": "entity.name.function.lua" }
       }
     },
     "operator": {
