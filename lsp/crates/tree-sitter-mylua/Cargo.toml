@@ -1,0 +1,15 @@
+[package]
+name = "tree-sitter-mylua"
+version = "0.1.0"
+edition = "2021"
+description = "Tree-sitter grammar for Lua 5.3+ with EmmyLua annotations"
+license = "MIT"
+
+[dependencies]
+tree-sitter-language = "0.1"
+
+[dev-dependencies]
+tree-sitter = "0.26"
+
+[build-dependencies]
+cc = "1"

@@ -53,6 +53,20 @@
 - 无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/` 全部 11 个标准库桩文件。
 - 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
 
+### LSP — Rust 语言服务器（阶段 A 最小骨架）
+
+**技术栈**：Rust + `tower-lsp-server` 0.23 + `tree-sitter` 0.26 + `tokio`。
+
+| 路径 | 说明 |
+|------|------|
+| [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
+| [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
+| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server：`initialize` + 文档同步 + Tree-sitter 解析，通过 stdio 通信 |
+
+- 构建：`cd lsp && cargo build`
+- 测试：`cargo test -p tree-sitter-mylua`（验证 grammar 加载与解析）
+
 ### 后续
-- 定稿 **LSP 实现语言等** 技术栈后，在 `lsp/` / `vscode-extension/` 内落地实现与单仓 CI。
+- 追加 LSP 能力：语法诊断、`documentSymbol`、`semantic tokens` 占位（阶段 A 完整）。
 - EmmyLua 注释当前作为统一 comment token 扫描；后续将拆分为结构化子节点以支持 LSP ANN 层绑定。
+- `vscode-extension/` 实现。

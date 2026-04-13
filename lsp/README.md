@@ -23,21 +23,31 @@
 
 若坚持用 **TypeScript** 写 LSP：需单独评估 Tree-sitter **node-addon** / WASM / 子进程隔离及 **5 万文件索引** 内存画像；见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md) §4。
 
-### 若采用 Rust：建议技术栈（可随调研微调 crate 名）
+### 技术栈（已定）
 
-| 层级 | 建议 |
-|------|------|
-| **异步运行时** | **tokio**（stdio 上读写字节流、可取消任务）。 |
-| **LSP 框架** | **tower-lsp**（或同等：封装 `initialize`、按需实现 `textDocument/*`、`workspace/*`）。 |
-| **协议类型** | **lsp-types**（与框架配套）。 |
-| **解析** | **tree-sitter** crate + **同仓 grammar 包装 crate**（path 指向 `../grammar` 生成源码，由 `build.rs` 调用 `cc` 编译 **C parser**）。 |
-| **序列化** | **serde** / **serde_json**。 |
+| 层级 | 选定 | 版本 |
+|------|------|------|
+| **异步运行时** | `tokio` | 1 |
+| **LSP 框架** | `tower-lsp-server`（tower-lsp 社区活跃 fork） | 0.23 |
+| **协议类型** | `ls-types`（tower-lsp-server 内置 re-export） | — |
+| **解析** | `tree-sitter` crate + `tree-sitter-mylua`（同仓 path 依赖） | 0.26 |
+| **序列化** | `serde` / `serde_json` | 1 |
 
-### 工程形态（Monorepo）
+### 工程结构（已实现）
 
-- 本目录可为 **单 package** `lsp/`（根上 `Cargo.toml`）或 `lsp/crates/mylua-lsp` + `lsp/crates/tree-sitter-mylua`，便于 **path 依赖** grammar；选定后更新 `Cargo.toml`，并同步 [docs/architecture.md](../docs/architecture.md)。
-- **产物**：一个可执行文件（如 `mylua-lsp`），默认 **stdio**；保留日后 **socket** 的扩展空间。
-- **`vscode-extension`**：配置中指定该二进制路径（开发时指向 `cargo run` / `target/debug`，发布时随扩展打包或文档约定安装路径）。
+```
+lsp/
+  Cargo.toml                        # workspace root
+  crates/
+    tree-sitter-mylua/              # 包装 crate：build.rs 编译 grammar/src/ 的 C parser
+      Cargo.toml / build.rs / src/lib.rs
+    mylua-lsp/                      # LSP server 可执行文件
+      Cargo.toml / src/main.rs
+```
+
+- **产物**：`mylua-lsp` 单一可执行文件，默认 **stdio** 通信。
+- **构建**：`cd lsp && cargo build`（需先 `cd grammar && npx tree-sitter generate` 确保 `parser.c` 存在）。
+- **`vscode-extension`** 通过 `spawn` 启动 `target/debug/mylua-lsp`（开发）或打包后的二进制（发布）。
 
 ### 实现顺序（与路线图一致）
 

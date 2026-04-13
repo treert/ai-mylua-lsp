@@ -1,0 +1,17 @@
+[package]
+name = "mylua-lsp"
+version = "0.1.0"
+edition = "2021"
+description = "Lua 5.3+ Language Server with EmmyLua support"
+license = "MIT"
+
+[[bin]]
+name = "mylua-lsp"
+path = "src/main.rs"
+
+[dependencies]
+tower-lsp-server = "0.23"
+tokio = { version = "1", features = ["full"] }
+tree-sitter = "0.26"
+tree-sitter-mylua = { path = "../tree-sitter-mylua" }
+serde_json = "1"
