@@ -61,7 +61,7 @@
 |------|------|
 | [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
 | [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
-| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（阶段 C 完整，12 个模块） |
+| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（16 个模块） |
 
 **已实现 LSP 能力**：
 - `initialize` / `shutdown` / 文档同步（Full sync）
@@ -73,7 +73,10 @@
 - **workspace/symbol**：全局函数/变量模糊搜索
 - **EmmyLua 注解解析**：从 `---` 注释文本提取结构化注解
 - **全局符号表**：跨文件全局函数/变量索引 + `require` 路径映射
+- **completion**：局部变量 + 全局名 + 关键字自动补全
+- **rename**：单文件 local + 全工作区全局符号重命名（含 prepareRename）
 - **semantic tokens**：遍历 AST 产出真实 token（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符）
+- **语义诊断**：未定义全局变量 warning（区分 local/builtin/全局符号表）
 
 - 构建：`cd lsp && cargo build`
 - 测试：`cargo test`

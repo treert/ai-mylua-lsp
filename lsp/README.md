@@ -60,10 +60,13 @@ lsp/
 | `textDocument/definition` | 已实现（local 作用域解析 + 全局符号表 + require 跳转） |
 | `textDocument/hover` | 已实现（定义源码 + EmmyLua 注解 + 文档注释） |
 | `textDocument/references` | 已实现（单文件 local scope + 全工作区全局引用） |
+| `textDocument/completion` | 已实现（局部变量 + 全局名 + 关键字） |
+| `textDocument/rename` | 已实现（prepare + 单文件 local + 全工作区全局） |
 | `workspace/symbol` | 已实现（全局函数/变量模糊搜索） |
 | `textDocument/semanticTokens/full` | 已实现（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符） |
+| `textDocument/publishDiagnostics`（语义） | 已实现（未定义全局变量 warning） |
 
-**模块结构**（14 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`workspace_scanner.rs`（工作区文件扫描 + require 路径解析）、`semantic_tokens.rs`（语义着色）、`diagnostics.rs`、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
+**模块结构**（16 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`workspace_scanner.rs`（工作区文件扫描 + require 路径解析）、`completion.rs`（自动补全）、`rename.rs`（重命名）、`semantic_tokens.rs`（语义着色）、`diagnostics.rs`（语法 + 语义诊断）、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
 
 **工作区扫描**：`initialized` 时自动递归扫描所有 `.lua` 文件，构建 `require_map`（模块名 -> 文件 URI）和全局符号表。`didChangeWatchedFiles` 处理增量变更。
 
