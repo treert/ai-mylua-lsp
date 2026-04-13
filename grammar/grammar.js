@@ -34,6 +34,7 @@ module.exports = grammar({
     $.short_string_content_single,
     $.comment,
     $._col0_block_end,
+    $.emmy_line,
   ],
 
   extras: $ => [
@@ -88,7 +89,10 @@ module.exports = grammar({
       $.function_declaration,
       $.local_function_declaration,
       $.local_declaration,
+      $.emmy_comment,
     ),
+
+    emmy_comment: $ => prec.left(repeat1($.emmy_line)),
 
     assignment_statement: $ => seq(
       field('left', $.variable_list),

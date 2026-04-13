@@ -138,7 +138,10 @@ fn split_first_word(s: &str) -> (&str, &str) {
     }
 }
 
-/// Collect consecutive `---` comment lines immediately before a given node.
+/// Collect EmmyLua comment lines immediately before a given node.
+/// Checks for both:
+///   - `emmy_comment` nodes (structured, from grammar) containing `emmy_line` children
+///   - Legacy `comment` tokens starting with `---` (fallback)
 pub fn collect_preceding_comments<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
@@ -147,13 +150,30 @@ pub fn collect_preceding_comments<'a>(
     let mut sibling = node.prev_sibling();
 
     while let Some(prev) = sibling {
-        if prev.kind() == "comment" {
-            let text = prev.utf8_text(source).unwrap_or("");
-            if text.starts_with("---") {
-                comments.push(text.to_string());
+        match prev.kind() {
+            "emmy_comment" => {
+                let mut lines = Vec::new();
+                for i in 0..prev.named_child_count() {
+                    if let Some(line_node) = prev.named_child(i as u32) {
+                        if line_node.kind() == "emmy_line" {
+                            lines.push(line_node.utf8_text(source).unwrap_or("").to_string());
+                        }
+                    }
+                }
+                // emmy_comment children are ordered, but we're walking siblings backward
+                comments.extend(lines.into_iter().rev());
                 sibling = prev.prev_sibling();
                 continue;
             }
+            "comment" => {
+                let text = prev.utf8_text(source).unwrap_or("");
+                if text.starts_with("---") {
+                    comments.push(text.to_string());
+                    sibling = prev.prev_sibling();
+                    continue;
+                }
+            }
+            _ => {}
         }
         break;
     }

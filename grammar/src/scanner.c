@@ -9,6 +9,7 @@ enum TokenType {
   SHORT_STRING_CONTENT_SINGLE,
   COMMENT,
   COL0_BLOCK_END,
+  EMMY_LINE,
 };
 
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
@@ -61,7 +62,6 @@ static bool scan_long_string_external(TSLexer *lexer) {
         advance(lexer);
       }
       if (close_level == level && lexer->lookahead == ']') {
-        /* Don't consume the final ']' — grammar.js expects it */
         lexer->result_symbol = LONG_STRING_CONTENT;
         return true;
       }
@@ -151,11 +151,34 @@ static bool scan_short_string_content(TSLexer *lexer, char quote) {
   }
 }
 
-static bool scan_comment(TSLexer *lexer) {
+/* Scan a --- line. Returns true if this is an emmy doc comment (---...).
+   Consumes '---' + rest of line. */
+static bool scan_emmy_line(TSLexer *lexer) {
+  /* We're positioned at the first '-'. Consume '---'. */
+  advance(lexer); /* - */
+  advance(lexer); /* - */
+  advance(lexer); /* - */
+  /* Consume rest of line */
+  while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+    advance(lexer);
+  }
+  lexer->result_symbol = EMMY_LINE;
+  lexer->mark_end(lexer);
+  return true;
+}
+
+/* Try to scan a comment. If it's a --- line AND EMMY_LINE is valid, returns false
+   so the caller can try emmy_line instead. */
+static bool scan_comment(TSLexer *lexer, bool emmy_valid) {
   if (lexer->lookahead != '-') return false;
   advance(lexer);
   if (lexer->lookahead != '-') return false;
   advance(lexer);
+
+  /* Check for --- (emmy doc comment) */
+  if (lexer->lookahead == '-' && emmy_valid) {
+    return false; /* Let caller handle as EMMY_LINE */
+  }
 
   /* Try long comment: --[=*[ ... ]=*] */
   if (lexer->lookahead == '[') {
@@ -164,8 +187,6 @@ static bool scan_comment(TSLexer *lexer) {
       lexer->result_symbol = COMMENT;
       return true;
     }
-    /* Not a valid long bracket, fall through to short comment.
-       We already consumed '--[' so just read to EOL. */
     while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
       advance(lexer);
     }
@@ -173,7 +194,7 @@ static bool scan_comment(TSLexer *lexer) {
     return true;
   }
 
-  /* Short comment or EmmyLua: consume to end of line */
+  /* Short comment (including --- when emmy not valid): consume to EOL */
   while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
     advance(lexer);
   }
@@ -224,10 +245,7 @@ bool tree_sitter_lua_external_scanner_scan(
     }
   }
 
-  /* Column-0 block end: zero-width token emitted when a statement-starting
-     character appears at column 0 and the parser is inside a nested block.
-     The parser only offers COL0_BLOCK_END as valid when inside a block that
-     expects 'end' or 'until', so top-level statements are not affected. */
+  /* Column-0 block end */
   if (valid_symbols[COL0_BLOCK_END] && lexer->get_column(lexer) == 0) {
     int32_t c = lexer->lookahead;
     bool is_stmt_start = (c >= 'a' && c <= 'z')
@@ -240,22 +258,77 @@ bool tree_sitter_lua_external_scanner_scan(
     }
   }
 
-  /* Skip whitespace before trying comment scan */
+  /* Skip whitespace */
   while (lexer->lookahead == ' ' || lexer->lookahead == '\t' ||
          lexer->lookahead == '\r' || lexer->lookahead == '\n') {
     skip_ws(lexer);
   }
 
-  /* Comment (all types): --, --[[ ]], --- */
-  if (valid_symbols[COMMENT] && lexer->lookahead == '-') {
-    if (scan_comment(lexer)) {
-      lexer->mark_end(lexer);
-      return true;
+  /* EmmyLua line or Comment */
+  if (lexer->lookahead == '-') {
+    /* Peek ahead: is this --- ? */
+    lexer->mark_end(lexer);
+
+    /* Check if --- and EMMY_LINE is valid */
+    if (valid_symbols[EMMY_LINE]) {
+      /* Peek: need at least three dashes */
+      advance(lexer);
+      if (lexer->lookahead == '-') {
+        advance(lexer);
+        if (lexer->lookahead == '-') {
+          /* This is ---... : emit as EMMY_LINE.
+             We've consumed '--', now the third '-' is lookahead.
+             Reset and re-scan cleanly. */
+          lexer->mark_end(lexer); /* back to after '--' */
+          /* Actually let's just consume the rest as emmy */
+          advance(lexer); /* consume third '-' */
+          while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+            advance(lexer);
+          }
+          lexer->result_symbol = EMMY_LINE;
+          lexer->mark_end(lexer);
+          return true;
+        }
+      }
+      /* Not ---; fall through. We consumed 1-2 dashes already.
+         Continue as regular comment. */
+      if (valid_symbols[COMMENT]) {
+        /* We already consumed '--', finish as comment */
+        if (lexer->lookahead == '[') {
+          advance(lexer);
+          if (scan_long_bracket_content(lexer)) {
+            lexer->result_symbol = COMMENT;
+            lexer->mark_end(lexer);
+            return true;
+          }
+          while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+            advance(lexer);
+          }
+          lexer->result_symbol = COMMENT;
+          lexer->mark_end(lexer);
+          return true;
+        }
+        while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+          advance(lexer);
+        }
+        lexer->result_symbol = COMMENT;
+        lexer->mark_end(lexer);
+        return true;
+      }
+      return false;
+    }
+
+    /* EMMY_LINE not valid, try as plain COMMENT */
+    if (valid_symbols[COMMENT]) {
+      if (scan_comment(lexer, false)) {
+        lexer->mark_end(lexer);
+        return true;
+      }
     }
     return false;
   }
 
-  /* Long string content: after '[' has been consumed by grammar */
+  /* Long string content */
   if (valid_symbols[LONG_STRING_CONTENT]) {
     return scan_long_string_external(lexer);
   }

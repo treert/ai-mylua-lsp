@@ -66,8 +66,11 @@ fn visit_node(
     let kind = node.kind();
 
     match kind {
-        "comment" => {
+        "comment" | "emmy_line" => {
             emit_node(node, TT_COMMENT, 0, collector);
+        }
+        "emmy_comment" => {
+            // Recurse into emmy_line children
         }
         "number" => {
             emit_node(node, TT_NUMBER, 0, collector);
