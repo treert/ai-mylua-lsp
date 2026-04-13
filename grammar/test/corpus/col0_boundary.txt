@@ -2,9 +2,35 @@
 Indented nested if inside function — normal parse
 ================================================================================
 
-function foo()
-  if true then
-    print("ok")
+function foo(a, b, c)
+  if a > 0 then
+    print("positive")
+    local x = a + b
+    local y = x * c
+    return x, y
+  elseif a < 0 then
+    print("negative")
+    return -a
+  else
+    print("zero")
+    return 0
+  end
+end
+function bar()
+  local t = {1, 2, 3, key = "value"}
+  for i = 1, #t do
+    print(t[i])
+  end
+  while true do
+    if t[1] > 0 then
+      break
+    end
+  end
+  repeat
+    local z = 1
+  until z > 0
+  do
+    local w = "hello"
   end
 end
 
@@ -14,15 +40,106 @@ end
   (function_declaration
     name: (function_name (identifier))
     body: (function_body
-      parameters: (parameter_list)
+      parameters: (parameter_list
+        (identifier)
+        (identifier)
+        (identifier))
       (if_statement
-        condition: (true)
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number))
         (function_call_statement
           (function_call
             callee: (variable (identifier))
             arguments: (arguments
               (expression_list
-                (string (short_string (short_string_content_double)))))))))))
+                (string (short_string (short_string_content_double)))))))
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list
+            (binary_expression
+              left: (variable (identifier))
+              right: (variable (identifier)))))
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list
+            (binary_expression
+              left: (variable (identifier))
+              right: (variable (identifier)))))
+        (return_statement
+          (expression_list
+            (variable (identifier))
+            (variable (identifier))))
+        (elseif_clause
+          condition: (binary_expression
+            left: (variable (identifier))
+            right: (number))
+          (function_call_statement
+            (function_call
+              callee: (variable (identifier))
+              arguments: (arguments
+                (expression_list
+                  (string (short_string (short_string_content_double)))))))
+          (return_statement
+            (expression_list
+              (unary_expression
+                operand: (variable (identifier))))))
+        (else_clause
+          (function_call_statement
+            (function_call
+              callee: (variable (identifier))
+              arguments: (arguments
+                (expression_list
+                  (string (short_string (short_string_content_double)))))))
+          (return_statement
+            (expression_list (number)))))))
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (local_declaration
+        names: (attribute_name_list (identifier))
+        values: (expression_list
+          (table_constructor
+            (field_list
+              (field value: (number))
+              (field value: (number))
+              (field value: (number))
+              (field key: (identifier) value: (string (short_string (short_string_content_double))))))))
+      (for_numeric_statement
+        name: (identifier)
+        start: (number)
+        stop: (unary_expression
+          operand: (variable (identifier)))
+        (function_call_statement
+          (function_call
+            callee: (variable (identifier))
+            arguments: (arguments
+              (expression_list
+                (variable
+                  object: (variable (identifier))
+                  index: (variable (identifier))))))))
+      (while_statement
+        condition: (true)
+        (if_statement
+          condition: (binary_expression
+            left: (variable
+              object: (variable (identifier))
+              index: (number))
+            right: (number))
+          (break_statement)))
+      (repeat_statement
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list (number)))
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number)))
+      (do_statement
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list
+            (string (short_string (short_string_content_double)))))))))
 
 ================================================================================
 Indented nested while inside function — normal parse
