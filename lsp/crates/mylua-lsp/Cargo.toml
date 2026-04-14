@@ -5,6 +5,10 @@ edition = "2021"
 description = "Lua 5.3+ Language Server with EmmyLua support"
 license = "MIT"
 
+[lib]
+name = "mylua_lsp"
+path = "src/lib.rs"
+
 [[bin]]
 name = "mylua-lsp"
 path = "src/main.rs"
