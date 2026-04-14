@@ -2,13 +2,18 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::{Range, Uri};
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
+use crate::types::{DefKind, GlobalEntry};
 use crate::type_system::TypeFact;
+use crate::util::ts_node_to_range;
 
 /// Workspace-level aggregation of all per-file summaries.
 ///
 /// This is the "bridge" between single-file `DocumentSummary` instances
 /// and cross-file queries (goto/hover/references/diagnostics).
 /// See `index-architecture.md` §2.2.
+///
+/// Also maintains legacy `globals` and `require_map` fields for backward
+/// compatibility with existing LSP handlers during the transition period.
 #[derive(Debug)]
 pub struct WorkspaceAggregation {
     /// All file summaries, keyed by URI.
@@ -22,6 +27,12 @@ pub struct WorkspaceAggregation {
     /// Resolved cross-file type cache; entries are lazily populated and
     /// marked dirty on upstream signature changes.
     pub resolution_cache: HashMap<CacheKey, CachedResolution>,
+
+    // -- Legacy compatibility fields (same shape as old WorkspaceIndex) --
+    /// Global name → entries, consumed by goto/hover/references/completion/diagnostics.
+    pub globals: HashMap<String, Vec<GlobalEntry>>,
+    /// Module path → target URI, consumed by goto for require resolution.
+    pub require_map: HashMap<String, Uri>,
 }
 
 /// A single candidate definition for a global name.
@@ -75,6 +86,8 @@ impl WorkspaceAggregation {
             type_shard: HashMap::new(),
             require_by_return: HashMap::new(),
             resolution_cache: HashMap::new(),
+            globals: HashMap::new(),
+            require_map: HashMap::new(),
         }
     }
 
@@ -83,6 +96,7 @@ impl WorkspaceAggregation {
     /// Performs a name-level diff: removes old contributions from this URI,
     /// inserts new ones, and marks affected resolution cache entries as dirty
     /// if the file's signature fingerprint changed.
+    /// Also synchronizes legacy `globals` field for backward compatibility.
     pub fn upsert_summary(&mut self, summary: DocumentSummary) {
         let uri = summary.uri.clone();
         let old_fingerprint = self
@@ -104,6 +118,21 @@ impl WorkspaceAggregation {
                     selection_range: gc.selection_range,
                     source_uri: uri.clone(),
                 });
+
+            let def_kind = match gc.kind {
+                GlobalContributionKind::Function => DefKind::GlobalFunction,
+                _ => DefKind::GlobalVariable,
+            };
+            self.globals
+                .entry(gc.name.clone())
+                .or_default()
+                .push(GlobalEntry {
+                    name: gc.name.clone(),
+                    kind: def_kind,
+                    range: gc.range,
+                    selection_range: gc.selection_range,
+                    uri: uri.clone(),
+                });
         }
 
         for td in &summary.type_definitions {
@@ -119,6 +148,8 @@ impl WorkspaceAggregation {
         }
 
         for rb in &summary.require_bindings {
+            self.require_map.insert(rb.module_path.clone(), uri.clone());
+
             if let Some(target_uri) = self.resolve_module_to_uri(&rb.module_path) {
                 self.require_by_return
                     .entry(target_uri)
@@ -145,6 +176,23 @@ impl WorkspaceAggregation {
         self.summaries.remove(uri);
     }
 
+    /// Legacy compatibility: update index from raw AST (used during workspace scan
+    /// for files that haven't gone through summary_builder yet).
+    pub fn update_document_legacy(
+        &mut self,
+        uri: &Uri,
+        tree: &tree_sitter::Tree,
+        source: &[u8],
+    ) {
+        self.remove_legacy_globals(uri);
+        self.scan_globals_legacy(uri, tree.root_node(), source);
+    }
+
+    /// Legacy compatibility: set require mapping directly.
+    pub fn set_require_mapping(&mut self, module_path: String, uri: Uri) {
+        self.require_map.insert(module_path, uri);
+    }
+
     fn remove_contributions(&mut self, uri: &Uri) {
         self.global_shard.retain(|_, candidates| {
             candidates.retain(|c| &c.source_uri != uri);
@@ -156,13 +204,68 @@ impl WorkspaceAggregation {
             !candidates.is_empty()
         });
 
-        // Remove as target (this file was required by others).
         self.require_by_return.remove(uri);
-        // Remove as source (this file required others).
         self.require_by_return.retain(|_, deps| {
             deps.retain(|d| &d.source_uri != uri);
             !deps.is_empty()
         });
+
+        self.remove_legacy_globals(uri);
+    }
+
+    fn remove_legacy_globals(&mut self, uri: &Uri) {
+        self.globals.retain(|_, entries| {
+            entries.retain(|e| &e.uri != uri);
+            !entries.is_empty()
+        });
+    }
+
+    fn scan_globals_legacy(
+        &mut self,
+        uri: &Uri,
+        root: tree_sitter::Node,
+        source: &[u8],
+    ) {
+        use crate::util::node_text;
+        let mut cursor = root.walk();
+        if !cursor.goto_first_child() {
+            return;
+        }
+        loop {
+            let node = cursor.node();
+            match node.kind() {
+                "function_declaration" => {
+                    if let Some(name_node) = node.child_by_field_name("name") {
+                        let name = node_text(name_node, source).to_string();
+                        self.globals.entry(name.clone()).or_default().push(GlobalEntry {
+                            name,
+                            kind: DefKind::GlobalFunction,
+                            range: ts_node_to_range(node),
+                            selection_range: ts_node_to_range(name_node),
+                            uri: uri.clone(),
+                        });
+                    }
+                }
+                "assignment_statement" => {
+                    if let Some(left_node) = node.child_by_field_name("left") {
+                        if let Some(first_var) = left_node.named_child(0) {
+                            let name = node_text(first_var, source).to_string();
+                            self.globals.entry(name.clone()).or_default().push(GlobalEntry {
+                                name,
+                                kind: DefKind::GlobalVariable,
+                                range: ts_node_to_range(node),
+                                selection_range: ts_node_to_range(first_var),
+                                uri: uri.clone(),
+                            });
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
     }
 
     /// Mark resolution cache entries as dirty when a file's signature changes.

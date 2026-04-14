@@ -29,15 +29,15 @@ use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
+use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
-use workspace_index::WorkspaceIndex;
 
 struct Backend {
     client: Client,
     parser: Mutex<tree_sitter::Parser>,
     documents: Mutex<HashMap<Uri, Document>>,
-    index: Mutex<WorkspaceIndex>,
+    index: Mutex<WorkspaceAggregation>,
     workspace_roots: Mutex<Vec<PathBuf>>,
     config: Mutex<LspConfig>,
 }
@@ -56,13 +56,8 @@ impl Backend {
         if let Some(tree) = tree {
             let mut diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
 
-            // Build DocumentSummary (parallel to old index, will replace it in step 4)
-            let _summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
-
-            self.index
-                .lock()
-                .unwrap()
-                .update_document(&uri, &tree, text.as_bytes());
+            let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            self.index.lock().unwrap().upsert_summary(summary);
 
             {
                 let idx = self.index.lock().unwrap();
@@ -100,10 +95,8 @@ impl Backend {
             parser.parse(text.as_bytes(), None)
         };
         if let Some(tree) = tree {
-            self.index
-                .lock()
-                .unwrap()
-                .update_document(&uri, &tree, text.as_bytes());
+            let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            self.index.lock().unwrap().upsert_summary(summary);
             self.documents.lock().unwrap().insert(uri, Document { text, tree });
         }
     }
@@ -264,7 +257,7 @@ impl LanguageServer for Backend {
                     }
                 }
                 FileChangeType::DELETED => {
-                    self.index.lock().unwrap().remove_document(&change.uri);
+                    self.index.lock().unwrap().remove_file(&change.uri);
                     self.documents.lock().unwrap().remove(&change.uri);
                 }
                 _ => {}
@@ -443,7 +436,7 @@ async fn main() {
             client,
             parser: Mutex::new(parser),
             documents: Mutex::new(HashMap::new()),
-            index: Mutex::new(WorkspaceIndex::new()),
+            index: Mutex::new(WorkspaceAggregation::new()),
             workspace_roots: Mutex::new(Vec::new()),
             config: Mutex::new(LspConfig::default()),
         }

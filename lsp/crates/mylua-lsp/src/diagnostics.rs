@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::util::{ts_node_to_range, node_text, truncate};
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 const LUA_BUILTINS: &[&str] = &[
     "print", "type", "tostring", "tonumber", "error", "assert", "pcall", "xpcall",
@@ -22,7 +22,7 @@ pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8]) -> Vec<Diagno
 pub fn collect_semantic_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let locals = collect_all_locals(root, source);
@@ -98,7 +98,7 @@ fn check_undefined_globals(
     source: &[u8],
     locals: &HashSet<String>,
     builtins: &HashSet<&str>,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     diagnostics: &mut Vec<Diagnostic>,
 ) {
     let node = cursor.node();

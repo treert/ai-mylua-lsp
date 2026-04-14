@@ -1,10 +1,10 @@
 use tower_lsp_server::ls_types::*;
 use crate::types::DefKind;
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 pub fn search_workspace_symbols(
     query: &str,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
 ) -> Vec<SymbolInformation> {
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();

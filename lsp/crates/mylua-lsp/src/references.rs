@@ -4,14 +4,14 @@ use crate::document::Document;
 use crate::scope;
 use crate::types::DefKind;
 use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position};
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 pub fn find_references(
     doc: &Document,
     uri: &Uri,
     position: Position,
     include_declaration: bool,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
 ) -> Option<Vec<Location>> {
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
@@ -166,7 +166,7 @@ fn collect_idents_recursive(
 fn find_global_references(
     name: &str,
     include_declaration: bool,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
 ) -> Vec<Location> {
     let mut locations = Vec::new();

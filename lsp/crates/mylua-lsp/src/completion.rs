@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::util::{node_text, position_to_byte_offset};
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 const LUA_KEYWORDS: &[&str] = &[
     "and", "break", "do", "else", "elseif", "end",
@@ -15,7 +15,7 @@ pub fn complete(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
 ) -> Vec<CompletionItem> {
     let prefix = get_prefix(doc, position);
     let mut items = Vec::new();
@@ -180,7 +180,7 @@ fn add_if_match(
 }
 
 fn collect_global_completions(
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     prefix: &str,
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::references;
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 pub fn prepare_rename(
     doc: &Document,
@@ -23,7 +23,7 @@ pub fn rename(
     uri: &Uri,
     position: Position,
     new_name: &str,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
 ) -> Option<WorkspaceEdit> {
     let locations = references::find_references(

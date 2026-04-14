@@ -1,14 +1,14 @@
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::scope;
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
 
 pub fn goto_definition(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
         return Some(GotoDefinitionResponse::Scalar(Location {
@@ -47,7 +47,7 @@ pub fn goto_definition(
 fn try_require_goto(
     doc: &Document,
     ident_node: tree_sitter::Node,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let parent = ident_node.parent()?;
     if parent.kind() != "variable" {

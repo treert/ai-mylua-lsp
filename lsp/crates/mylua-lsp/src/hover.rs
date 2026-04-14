@@ -4,13 +4,13 @@ use crate::emmy::{collect_preceding_comments, parse_emmy_comments, format_annota
 use crate::scope;
 use crate::types::DefKind;
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
-use crate::workspace_index::WorkspaceIndex;
+use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &WorkspaceIndex,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
