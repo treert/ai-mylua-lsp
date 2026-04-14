@@ -294,8 +294,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let idx = self.index.lock().unwrap();
-        Ok(goto::goto_definition(doc, uri, position, &idx))
+        let mut idx = self.index.lock().unwrap();
+        Ok(goto::goto_definition(doc, uri, position, &mut idx))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -305,8 +305,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri, position, &idx, &docs))
+        let mut idx = self.index.lock().unwrap();
+        Ok(hover::hover(doc, uri, position, &mut idx, &docs))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -316,8 +316,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let idx = self.index.lock().unwrap();
-        let items = completion::complete(doc, uri, position, &idx);
+        let mut idx = self.index.lock().unwrap();
+        let items = completion::complete(doc, uri, position, &mut idx);
         Ok(Some(CompletionResponse::Array(items)))
     }
 

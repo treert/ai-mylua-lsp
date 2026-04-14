@@ -1,6 +1,8 @@
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
+use crate::resolver;
 use crate::scope;
+use crate::type_system::{TypeFact, SymbolicStub};
 use crate::aggregation::WorkspaceAggregation;
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
 
@@ -8,7 +10,7 @@ pub fn goto_definition(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &WorkspaceAggregation,
+    index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
         return Some(GotoDefinitionResponse::Scalar(Location {
@@ -20,6 +22,15 @@ pub fn goto_definition(
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let name = node_text(ident_node, doc.text.as_bytes());
+
+    // Field expression goto: `obj.field` → resolve and jump to field definition
+    if let Some(parent) = ident_node.parent() {
+        if parent.kind() == "field_expression" {
+            if let Some(result) = goto_field_expression(parent, doc, uri, index) {
+                return Some(result);
+            }
+        }
+    }
 
     if let Some(target) = try_require_goto(doc, ident_node, index) {
         return Some(target);
@@ -39,6 +50,40 @@ pub fn goto_definition(
         } else if !locations.is_empty() {
             return Some(GotoDefinitionResponse::Array(locations));
         }
+    }
+
+    None
+}
+
+fn goto_field_expression(
+    field_expr: tree_sitter::Node,
+    doc: &Document,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> Option<GotoDefinitionResponse> {
+    let source = doc.text.as_bytes();
+    let object = field_expr.child_by_field_name("object")?;
+    let field = field_expr.child_by_field_name("field")?;
+    let field_name = node_text(field, source).to_string();
+
+    let base_text = node_text(object, source);
+    let base_fact = if let Some(summary) = index.summaries.get(uri) {
+        if let Some(ltf) = summary.local_type_facts.get(base_text) {
+            ltf.type_fact.clone()
+        } else {
+            TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
+        }
+    } else {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
+    };
+
+    let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
+
+    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
+        return Some(GotoDefinitionResponse::Scalar(Location {
+            uri: def_uri,
+            range: def_range,
+        }));
     }
 
     None
