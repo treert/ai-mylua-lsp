@@ -51,6 +51,11 @@
           "default": "",
           "description": "Path to mylua-lsp executable. If empty, uses bundled or PATH."
         },
+        "mylua.debug.fileLog": {
+          "type": "boolean",
+          "default": true,
+          "description": "Write debug log to .vscode/mylua-lsp.log in the workspace."
+        },
         "mylua.runtime.version": {
           "type": "string",
           "enum": ["5.3", "5.4"],

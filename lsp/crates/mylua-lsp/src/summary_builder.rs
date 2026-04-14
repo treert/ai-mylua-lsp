@@ -26,6 +26,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         table_shapes: HashMap::new(),
         next_shape_id: 0,
         pending_type_annotation: None,
+        pending_class: None,
     };
 
     let root = tree.root_node();
@@ -60,6 +61,8 @@ struct BuildContext<'a> {
     next_shape_id: u32,
     /// `---@type X` annotation pending attachment to the next local declaration.
     pending_type_annotation: Option<String>,
+    /// Class being built across consecutive emmy_comment nodes.
+    pending_class: Option<(String, Vec<TypeFieldDef>)>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -86,21 +89,28 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
     loop {
         let node = cursor.node();
         match node.kind() {
-            "local_declaration" => visit_local_declaration(ctx, node),
+            "local_declaration" => {
+                flush_pending_class(ctx, node);
+                visit_local_declaration(ctx, node);
+            }
             "local_function_declaration" => {
+                flush_pending_class(ctx, node);
                 ctx.pending_type_annotation = None;
                 visit_local_function(ctx, node);
             }
             "function_declaration" => {
+                flush_pending_class(ctx, node);
                 ctx.pending_type_annotation = None;
                 visit_function_declaration(ctx, node);
             }
             "assignment_statement" => {
+                flush_pending_class(ctx, node);
                 ctx.pending_type_annotation = None;
                 visit_assignment(ctx, node);
             }
             "emmy_comment" => visit_emmy_comment(ctx, node),
             _ => {
+                flush_pending_class(ctx, node);
                 ctx.pending_type_annotation = None;
             }
         }
@@ -533,6 +543,20 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 // Emmy comments (type definitions)
 // ---------------------------------------------------------------------------
 
+/// Flush any pending @class definition into type_definitions.
+/// Called when a non-emmy_comment node is encountered.
+fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    if let Some((cname, fields)) = ctx.pending_class.take() {
+        lsp_log!("[flush_class] '{}' with {} fields: {:?}", cname, fields.len(), fields.iter().map(|f| &f.name).collect::<Vec<_>>());
+        ctx.type_definitions.push(TypeDefinition {
+            name: cname,
+            kind: TypeDefinitionKind::Class,
+            fields,
+            range: ts_node_to_range(node),
+        });
+    }
+}
+
 fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let mut lines = Vec::new();
     for i in 0..node.named_child_count() {
@@ -545,14 +569,11 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let text = lines.join("\n");
     let annotations = parse_emmy_comments(&text);
 
-    let mut current_class: Option<(String, Vec<TypeFieldDef>)> = None;
-    let mut has_class_or_alias = false;
-
     for ann in &annotations {
         match ann {
             EmmyAnnotation::Class { name, .. } => {
-                has_class_or_alias = true;
-                if let Some((cname, fields)) = current_class.take() {
+                // Flush any previous pending class before starting a new one
+                if let Some((cname, fields)) = ctx.pending_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
                         kind: TypeDefinitionKind::Class,
@@ -560,10 +581,10 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         range: ts_node_to_range(node),
                     });
                 }
-                current_class = Some((name.clone(), Vec::new()));
+                ctx.pending_class = Some((name.clone(), Vec::new()));
             }
             EmmyAnnotation::Field { name: fname, type_text, .. } => {
-                if let Some((_, ref mut fields)) = current_class {
+                if let Some((_, ref mut fields)) = ctx.pending_class {
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
                         type_fact: emmy_type_text_to_fact(type_text),
@@ -572,14 +593,12 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
             }
             EmmyAnnotation::Type { type_text, .. } => {
-                if current_class.is_none() {
-                    // Standalone @type: set as pending for the next local declaration
+                if ctx.pending_class.is_none() {
                     ctx.pending_type_annotation = Some(type_text.clone());
                 }
             }
             EmmyAnnotation::Alias { name, type_text } => {
-                has_class_or_alias = true;
-                if let Some((cname, fields)) = current_class.take() {
+                if let Some((cname, fields)) = ctx.pending_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
                         kind: TypeDefinitionKind::Class,
@@ -598,19 +617,6 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             _ => {}
         }
     }
-
-    if let Some((cname, fields)) = current_class.take() {
-        ctx.type_definitions.push(TypeDefinition {
-            name: cname,
-            kind: TypeDefinitionKind::Class,
-            fields,
-            range: ts_node_to_range(node),
-        });
-    }
-
-    // Don't clear pending_type if we only had @type (no @class/@alias)
-    // pending_type was already set above and will be consumed by visit_local_declaration
-    let _ = has_class_or_alias;
 }
 
 // ---------------------------------------------------------------------------

@@ -26,7 +26,8 @@ pub fn hover(
         ident_node.parent().map_or("none", |p| p.kind()),
     );
 
-    // Try field expression hover: walk up ancestors to find field_expression
+    // Try field expression hover: walk up ancestors to find field_expression or
+    // a `variable` node that contains a dot (e.g. `x.a` on the LHS of assignment).
     {
         let mut n = ident_node;
         for _ in 0..4 {
@@ -37,6 +38,15 @@ pub fn hover(
                         return Some(result);
                     }
                     break;
+                }
+                if p.kind() == "variable" {
+                    let var_text = node_text(p, doc.text.as_bytes());
+                    if var_text.contains('.') {
+                        if let Some(result) = hover_dotted_variable(var_text, ident_text, uri, index, all_docs) {
+                            return Some(result);
+                        }
+                        break;
+                    }
                 }
                 n = p;
             } else {
@@ -72,6 +82,66 @@ pub fn hover(
     }
 
     None
+}
+
+fn hover_dotted_variable(
+    var_text: &str,
+    field_ident: &str,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    all_docs: &std::collections::HashMap<Uri, Document>,
+) -> Option<Hover> {
+    let parts: Vec<&str> = var_text.splitn(2, '.').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let base_name = parts[0];
+    let field_chain: Vec<String> = parts[1].split('.').map(|s| s.to_string()).collect();
+
+    lsp_log!("[hover_dotted] base='{}' fields={:?} target='{}'", base_name, field_chain, field_ident);
+
+    let base_fact = if let Some(summary) = index.summaries.get(uri) {
+        if let Some(ltf) = summary.local_type_facts.get(base_name) {
+            ltf.type_fact.clone()
+        } else {
+            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
+        }
+    } else {
+        TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
+    };
+
+    lsp_log!("[hover_dotted] base_fact={:?}", base_fact);
+    let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
+    lsp_log!("[hover_dotted] resolved type={:?} def_uri={:?}", resolved.type_fact, resolved.def_uri);
+
+    let type_display = format_resolved_type(&resolved.type_fact);
+
+    if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
+        if all_docs.contains_key(def_uri) {
+            let fake_def = crate::types::Definition {
+                name: field_ident.to_string(),
+                kind: DefKind::GlobalVariable,
+                range: *def_range,
+                selection_range: *def_range,
+                uri: def_uri.clone(),
+            };
+            return build_hover_for_definition(&fake_def, all_docs, Some(&type_display));
+        }
+    }
+
+    let mut parts = Vec::new();
+    parts.push(format!("```lua\n(field) {}\n```", field_ident));
+    if type_display != "unknown" {
+        parts.push(format!("Type: `{}`", type_display));
+    }
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range: None,
+    })
 }
 
 fn hover_field_expression(

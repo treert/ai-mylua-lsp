@@ -200,8 +200,9 @@ impl LanguageServer for Backend {
     async fn initialized(&self, _: InitializedParams) {
         {
             let roots = self.workspace_roots.lock().unwrap();
+            let cfg = self.config.lock().unwrap();
             if let Some(root) = roots.first() {
-                logger::init(root);
+                logger::init(root, cfg.debug.file_log);
             }
         }
         self.client

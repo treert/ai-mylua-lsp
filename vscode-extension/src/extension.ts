@@ -40,6 +40,9 @@ function collectLspConfig(): Record<string, unknown> {
     references: {
       strategy: cfg.get('references.strategy'),
     },
+    debug: {
+      fileLog: cfg.get('debug.fileLog'),
+    },
   };
 }
 

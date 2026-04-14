@@ -24,10 +24,19 @@ pub fn goto_definition(
     let name = node_text(ident_node, doc.text.as_bytes());
 
     // Field expression goto: `obj.field` → resolve and jump to field definition
+    // Handles both `field_expression` (RHS) and `variable` (LHS assignment) nodes.
     if let Some(parent) = ident_node.parent() {
         if parent.kind() == "field_expression" {
             if let Some(result) = goto_field_expression(parent, doc, uri, index) {
                 return Some(result);
+            }
+        }
+        if parent.kind() == "variable" {
+            let var_text = node_text(parent, doc.text.as_bytes());
+            if var_text.contains('.') {
+                if let Some(result) = goto_dotted_variable(var_text, uri, index) {
+                    return Some(result);
+                }
             }
         }
     }
@@ -52,6 +61,38 @@ pub fn goto_definition(
         }
     }
 
+    None
+}
+
+fn goto_dotted_variable(
+    var_text: &str,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> Option<GotoDefinitionResponse> {
+    let parts: Vec<&str> = var_text.splitn(2, '.').collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let base_name = parts[0];
+    let field_chain: Vec<String> = parts[1].split('.').map(|s| s.to_string()).collect();
+
+    let base_fact = if let Some(summary) = index.summaries.get(uri) {
+        if let Some(ltf) = summary.local_type_facts.get(base_name) {
+            ltf.type_fact.clone()
+        } else {
+            TypeFact::Stub(SymbolicStub::GlobalRef { name: base_name.to_string() })
+        }
+    } else {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name: base_name.to_string() })
+    };
+
+    let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
+    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
+        return Some(GotoDefinitionResponse::Scalar(Location {
+            uri: def_uri,
+            range: def_range,
+        }));
+    }
     None
 }
 

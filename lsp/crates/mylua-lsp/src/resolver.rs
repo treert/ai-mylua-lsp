@@ -411,16 +411,23 @@ fn resolve_emmy_field(
     field: &str,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    // Find the type definition and look up the field
     let candidates = match agg.type_shard.get(type_name) {
         Some(c) => c,
-        None => return ResolvedType::unknown(),
+        None => {
+            lsp_log!("[resolve_emmy_field] type '{}' not found in type_shard (keys: {:?})", type_name, agg.type_shard.keys().collect::<Vec<_>>());
+            return ResolvedType::unknown();
+        }
     };
+
+    lsp_log!("[resolve_emmy_field] type '{}' has {} candidates", type_name, candidates.len());
 
     for candidate in candidates {
         if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
             for td in &summary.type_definitions {
                 if td.name == type_name {
+                    lsp_log!("[resolve_emmy_field] found class '{}' with {} fields: {:?}",
+                        type_name, td.fields.len(),
+                        td.fields.iter().map(|f| &f.name).collect::<Vec<_>>());
                     for tf in &td.fields {
                         if tf.name == field {
                             return ResolvedType {

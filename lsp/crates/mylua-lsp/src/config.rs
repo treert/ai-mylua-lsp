@@ -12,6 +12,20 @@ pub struct LspConfig {
     #[serde(rename = "gotoDefinition")]
     pub goto_definition: GotoDefinitionConfig,
     pub references: ReferencesConfig,
+    pub debug: DebugConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DebugConfig {
+    #[serde(rename = "fileLog")]
+    pub file_log: bool,
+}
+
+impl Default for DebugConfig {
+    fn default() -> Self {
+        Self { file_log: true }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
