@@ -16,37 +16,50 @@ const TM_DEFINITION: u32 = 1 << 1;
 #[allow(dead_code)]
 const TM_READONLY: u32 = 1 << 2;
 
+struct RawToken {
+    line: u32,
+    start: u32,
+    length: u32,
+    token_type: u32,
+    modifiers: u32,
+}
+
 struct TokenCollector {
-    tokens: Vec<SemanticToken>,
-    prev_line: u32,
-    prev_start: u32,
+    tokens: Vec<RawToken>,
 }
 
 impl TokenCollector {
     fn new() -> Self {
-        Self {
-            tokens: Vec::new(),
-            prev_line: 0,
-            prev_start: 0,
-        }
+        Self { tokens: Vec::new() }
     }
 
     fn push(&mut self, line: u32, start: u32, length: u32, token_type: u32, modifiers: u32) {
-        let delta_line = line - self.prev_line;
-        let delta_start = if delta_line == 0 {
-            start - self.prev_start
-        } else {
-            start
-        };
-        self.tokens.push(SemanticToken {
-            delta_line,
-            delta_start,
-            length,
-            token_type,
-            token_modifiers_bitset: modifiers,
-        });
-        self.prev_line = line;
-        self.prev_start = start;
+        self.tokens.push(RawToken { line, start, length, token_type, modifiers });
+    }
+
+    fn into_semantic_tokens(mut self) -> Vec<SemanticToken> {
+        self.tokens.sort_by(|a, b| a.line.cmp(&b.line).then(a.start.cmp(&b.start)));
+        let mut result = Vec::with_capacity(self.tokens.len());
+        let mut prev_line: u32 = 0;
+        let mut prev_start: u32 = 0;
+        for tok in &self.tokens {
+            let delta_line = tok.line - prev_line;
+            let delta_start = if delta_line == 0 {
+                tok.start - prev_start
+            } else {
+                tok.start
+            };
+            result.push(SemanticToken {
+                delta_line,
+                delta_start,
+                length: tok.length,
+                token_type: tok.token_type,
+                token_modifiers_bitset: tok.modifiers,
+            });
+            prev_line = tok.line;
+            prev_start = tok.start;
+        }
+        result
     }
 }
 
@@ -54,7 +67,7 @@ pub fn collect_semantic_tokens(root: tree_sitter::Node, source: &[u8]) -> Vec<Se
     let mut collector = TokenCollector::new();
     let mut cursor = root.walk();
     visit_node(&mut cursor, source, &mut collector);
-    collector.tokens
+    collector.into_semantic_tokens()
 }
 
 fn visit_node(
