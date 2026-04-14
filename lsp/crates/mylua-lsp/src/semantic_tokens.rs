@@ -1,126 +1,79 @@
+use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::util::node_text;
 
-// Legend indices must match the order in semantic_tokens_legend() in main.rs
-const TT_FUNCTION: u32 = 0;
-const TT_VARIABLE: u32 = 1;
-const TT_PARAMETER: u32 = 2;
-const TT_KEYWORD: u32 = 3;
-const TT_STRING: u32 = 4;
-const TT_NUMBER: u32 = 5;
-const TT_COMMENT: u32 = 6;
-const TT_OPERATOR: u32 = 7;
+const TT_VARIABLE: u32 = 0;
+const TM_DEFAULT_LIBRARY: u32 = 1 << 0;
 
-const TM_DECLARATION: u32 = 1 << 0;
-const TM_DEFINITION: u32 = 1 << 1;
-#[allow(dead_code)]
-const TM_READONLY: u32 = 1 << 2;
-
-struct RawToken {
-    line: u32,
-    start: u32,
-    length: u32,
-    token_type: u32,
-    modifiers: u32,
-}
-
-struct TokenCollector {
-    tokens: Vec<RawToken>,
-}
-
-impl TokenCollector {
-    fn new() -> Self {
-        Self { tokens: Vec::new() }
-    }
-
-    fn push(&mut self, line: u32, start: u32, length: u32, token_type: u32, modifiers: u32) {
-        self.tokens.push(RawToken { line, start, length, token_type, modifiers });
-    }
-
-    fn into_semantic_tokens(mut self) -> Vec<SemanticToken> {
-        self.tokens.sort_by(|a, b| a.line.cmp(&b.line).then(a.start.cmp(&b.start)));
-        let mut result = Vec::with_capacity(self.tokens.len());
-        let mut prev_line: u32 = 0;
-        let mut prev_start: u32 = 0;
-        for tok in &self.tokens {
-            let delta_line = tok.line - prev_line;
-            let delta_start = if delta_line == 0 {
-                tok.start - prev_start
-            } else {
-                tok.start
-            };
-            result.push(SemanticToken {
-                delta_line,
-                delta_start,
-                length: tok.length,
-                token_type: tok.token_type,
-                token_modifiers_bitset: tok.modifiers,
-            });
-            prev_line = tok.line;
-            prev_start = tok.start;
-        }
-        result
+pub fn semantic_tokens_legend() -> SemanticTokensLegend {
+    SemanticTokensLegend {
+        token_types: vec![SemanticTokenType::VARIABLE],
+        token_modifiers: vec![SemanticTokenModifier::DEFAULT_LIBRARY],
     }
 }
 
 pub fn collect_semantic_tokens(root: tree_sitter::Node, source: &[u8]) -> Vec<SemanticToken> {
-    let mut collector = TokenCollector::new();
+    let locals = collect_all_locals(root, source);
+    let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
-    visit_node(&mut cursor, source, &mut collector);
-    collector.into_semantic_tokens()
+    collect_variable_tokens(&mut cursor, source, &locals, &mut raw);
+
+    raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
+
+    let mut result = Vec::with_capacity(raw.len());
+    let mut prev_line: u32 = 0;
+    let mut prev_start: u32 = 0;
+    for &(line, col, length, modifiers) in &raw {
+        let delta_line = line - prev_line;
+        let delta_start = if delta_line == 0 { col - prev_start } else { col };
+        result.push(SemanticToken {
+            delta_line,
+            delta_start,
+            length,
+            token_type: TT_VARIABLE,
+            token_modifiers_bitset: modifiers,
+        });
+        prev_line = line;
+        prev_start = col;
+    }
+    result
 }
 
-fn visit_node(
+/// Emit a semantic token for every identifier that is a variable reference
+/// (not a field access or method name). Globals get `defaultLibrary`, locals get 0.
+fn collect_variable_tokens(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
-    collector: &mut TokenCollector,
+    locals: &HashSet<String>,
+    tokens: &mut Vec<(u32, u32, u32, u32)>,
 ) {
     let node = cursor.node();
-    let kind = node.kind();
 
-    match kind {
-        "comment" | "emmy_line" => {
-            emit_node(node, TT_COMMENT, 0, collector);
-        }
-        "emmy_comment" => {
-            // Recurse into emmy_line children
-        }
-        "number" => {
-            emit_node(node, TT_NUMBER, 0, collector);
-        }
-        "short_string" | "long_string" | "string" => {
-            if kind == "string" {
-                // recurse into children
-            } else {
-                emit_node(node, TT_STRING, 0, collector);
-                return;
+    if node.kind() == "identifier" && !is_field_or_method(node) {
+        let name = node_text(node, source);
+        let modifiers = if name == "self" {
+            if is_inside_colon_method(node) {
+                return; // implicit local in : method, let TextMate handle
             }
-        }
-        "short_string_content_double" | "short_string_content_single" | "long_string_content" => {
-            return;
-        }
-        "nil" | "true" | "false" | "vararg_expression" => {
-            emit_node(node, TT_KEYWORD, 0, collector);
-        }
-        "break_statement" => {
-            emit_node(node, TT_KEYWORD, 0, collector);
-            return;
-        }
-        "identifier" => {
-            if let Some(parent) = node.parent() {
-                let (tt, tm) = classify_identifier(node, parent, source);
-                emit_node(node, tt, tm, collector);
+            TM_DEFAULT_LIBRARY
+        } else if locals.contains(name) {
+            0
+        } else {
+            TM_DEFAULT_LIBRARY
+        };
+        let start = node.start_position();
+        let end = node.end_position();
+        if start.row == end.row {
+            let length = (end.column - start.column) as u32;
+            if length > 0 {
+                tokens.push((start.row as u32, start.column as u32, length, modifiers));
             }
-            return;
-        }
-        _ => {
-            emit_keywords_in_node(node, source, collector);
         }
     }
 
     if cursor.goto_first_child() {
         loop {
-            visit_node(cursor, source, collector);
+            collect_variable_tokens(cursor, source, locals, tokens);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -129,114 +82,112 @@ fn visit_node(
     }
 }
 
-fn classify_identifier(
-    node: tree_sitter::Node,
-    parent: tree_sitter::Node,
-    _source: &[u8],
-) -> (u32, u32) {
-    let parent_kind = parent.kind();
-    match parent_kind {
-        "function_name" => (TT_FUNCTION, TM_DEFINITION),
-        "function_declaration" => {
-            if parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id()) {
-                (TT_FUNCTION, TM_DEFINITION)
-            } else {
-                (TT_VARIABLE, 0)
+/// Returns true if this identifier is a field access (obj.field),
+/// method name (obj:method), or non-root part of function_name (function a.b:c → b, c).
+fn is_field_or_method(node: tree_sitter::Node) -> bool {
+    if let Some(parent) = node.parent() {
+        match parent.kind() {
+            "variable" => {
+                parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id())
+            }
+            "function_call" => {
+                parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id())
+            }
+            "function_name" => {
+                parent.child(0).map(|n| n.id()) != Some(node.id())
+            }
+            _ => false,
+        }
+    } else {
+        false
+    }
+}
+
+/// Check if this node is inside a `:` method body (where `self` is an implicit local).
+fn is_inside_colon_method(node: tree_sitter::Node) -> bool {
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "function_body" {
+            if let Some(gp) = parent.parent() {
+                if gp.kind() == "function_declaration" {
+                    if let Some(fname) = gp.child_by_field_name("name") {
+                        return fname.child_by_field_name("method").is_some();
+                    }
+                }
+            }
+            return false;
+        }
+        current = parent;
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Local name collection
+// ---------------------------------------------------------------------------
+
+fn collect_all_locals(root: tree_sitter::Node, source: &[u8]) -> HashSet<String> {
+    let mut locals = HashSet::new();
+    let mut cursor = root.walk();
+    collect_locals_recursive(&mut cursor, source, &mut locals);
+    locals
+}
+
+fn collect_locals_recursive(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    locals: &mut HashSet<String>,
+) {
+    let node = cursor.node();
+    match node.kind() {
+        "local_declaration" => {
+            if let Some(names) = node.child_by_field_name("names") {
+                collect_identifiers_in(names, source, locals);
             }
         }
         "local_function_declaration" => {
-            if parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id()) {
-                (TT_FUNCTION, TM_DECLARATION | TM_DEFINITION)
-            } else {
-                (TT_VARIABLE, 0)
+            if let Some(name) = node.child_by_field_name("name") {
+                locals.insert(node_text(name, source).to_string());
             }
         }
-        "local_declaration" | "attribute_name_list" => (TT_VARIABLE, TM_DECLARATION),
         "for_numeric_statement" => {
-            if parent.child_by_field_name("name").map(|n| n.id()) == Some(node.id()) {
-                (TT_VARIABLE, TM_DECLARATION)
-            } else {
-                (TT_VARIABLE, 0)
+            if let Some(name) = node.child_by_field_name("name") {
+                locals.insert(node_text(name, source).to_string());
             }
         }
-        "name_list" => {
-            if let Some(grandparent) = parent.parent() {
-                match grandparent.kind() {
-                    "for_generic_statement" => (TT_VARIABLE, TM_DECLARATION),
-                    "parameter_list" | "_parameter_list_content" => (TT_PARAMETER, TM_DECLARATION),
-                    _ => (TT_VARIABLE, 0),
-                }
-            } else {
-                (TT_VARIABLE, 0)
+        "for_generic_statement" => {
+            if let Some(names) = node.child_by_field_name("names") {
+                collect_identifiers_in(names, source, locals);
             }
         }
-        "parameter_list" | "_parameter_list_content" => (TT_PARAMETER, TM_DECLARATION),
-        "function_call" => {
-            if parent.child_by_field_name("callee").map(|n| n.id()) == Some(node.id()) {
-                (TT_FUNCTION, 0)
-            } else if parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id()) {
-                (TT_FUNCTION, 0)
-            } else {
-                (TT_VARIABLE, 0)
+        "function_body" => {
+            if let Some(params) = node.child_by_field_name("parameters") {
+                collect_identifiers_in(params, source, locals);
             }
         }
-        "goto_statement" | "label_statement" => (TT_VARIABLE, 0),
-        _ => (TT_VARIABLE, 0),
+        _ => {}
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            collect_locals_recursive(cursor, source, locals);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
     }
 }
 
-fn emit_node(node: tree_sitter::Node, token_type: u32, modifiers: u32, collector: &mut TokenCollector) {
-    let start = node.start_position();
-    let end_pos = node.end_position();
-
-    if start.row == end_pos.row {
-        let length = (end_pos.column - start.column) as u32;
-        if length > 0 {
-            collector.push(start.row as u32, start.column as u32, length, token_type, modifiers);
-        }
-    } else {
-        // Multi-line: just mark the first line
-        let first_line_end = node.utf8_text(&[]).map(|t| {
-            t.find('\n').unwrap_or(t.len())
-        }).unwrap_or(0);
-        if first_line_end > 0 {
-            collector.push(start.row as u32, start.column as u32, first_line_end as u32, token_type, modifiers);
+/// Recursively collect all identifier names within a node subtree.
+fn collect_identifiers_in(node: tree_sitter::Node, source: &[u8], locals: &mut HashSet<String>) {
+    if node.kind() == "identifier" {
+        locals.insert(node_text(node, source).to_string());
+        return;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            collect_identifiers_in(child, source, locals);
         }
     }
-}
-
-fn emit_keywords_in_node(
-    node: tree_sitter::Node,
-    source: &[u8],
-    collector: &mut TokenCollector,
-) {
-    for i in 0..node.child_count() {
-        if let Some(child) = node.child(i as u32) {
-            if !child.is_named() {
-                let text = node_text(child, source);
-                if is_lua_keyword(text) {
-                    emit_node(child, TT_KEYWORD, 0, collector);
-                } else if is_lua_operator(text) {
-                    emit_node(child, TT_OPERATOR, 0, collector);
-                }
-            }
-        }
-    }
-}
-
-fn is_lua_keyword(s: &str) -> bool {
-    matches!(
-        s,
-        "and" | "break" | "do" | "else" | "elseif" | "end" | "false" | "for"
-            | "function" | "goto" | "if" | "in" | "local" | "nil" | "not" | "or"
-            | "repeat" | "return" | "then" | "true" | "until" | "while"
-    )
-}
-
-fn is_lua_operator(s: &str) -> bool {
-    matches!(
-        s,
-        "+" | "-" | "*" | "/" | "//" | "%" | "^" | "#" | "&" | "|" | "~" | ">>"
-            | "<<" | ".." | "==" | "~=" | "<" | "<=" | ">" | ">=" | "=" | "..."
-    )
 }

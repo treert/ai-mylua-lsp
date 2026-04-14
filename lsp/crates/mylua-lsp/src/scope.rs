@@ -109,6 +109,23 @@ fn search_scope(
                     }
                 }
             }
+            if name == "self" {
+                if let Some(parent) = scope_node.parent() {
+                    if parent.kind() == "function_declaration" {
+                        if let Some(fname) = parent.child_by_field_name("name") {
+                            if let Some(method_node) = fname.child_by_field_name("method") {
+                                return Some(Definition {
+                                    name: "self".to_string(),
+                                    kind: DefKind::Parameter,
+                                    range: ts_node_to_range(method_node),
+                                    selection_range: ts_node_to_range(method_node),
+                                    uri: uri.clone(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             None
         }
         _ => None,

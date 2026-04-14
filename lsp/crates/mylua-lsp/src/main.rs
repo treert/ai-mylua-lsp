@@ -35,23 +35,7 @@ struct Backend {
 }
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
-    SemanticTokensLegend {
-        token_types: vec![
-            SemanticTokenType::FUNCTION,
-            SemanticTokenType::VARIABLE,
-            SemanticTokenType::PARAMETER,
-            SemanticTokenType::KEYWORD,
-            SemanticTokenType::STRING,
-            SemanticTokenType::NUMBER,
-            SemanticTokenType::COMMENT,
-            SemanticTokenType::OPERATOR,
-        ],
-        token_modifiers: vec![
-            SemanticTokenModifier::DECLARATION,
-            SemanticTokenModifier::DEFINITION,
-            SemanticTokenModifier::READONLY,
-        ],
-    }
+    semantic_tokens::semantic_tokens_legend()
 }
 
 impl Backend {
