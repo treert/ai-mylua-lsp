@@ -11,6 +11,7 @@ mod rename;
 mod scope;
 mod semantic_tokens;
 mod summary;
+mod summary_builder;
 mod symbols;
 mod table_shape;
 mod type_system;
@@ -54,6 +55,9 @@ impl Backend {
 
         if let Some(tree) = tree {
             let mut diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
+
+            // Build DocumentSummary (parallel to old index, will replace it in step 4)
+            let _summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
 
             self.index
                 .lock()
