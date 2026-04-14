@@ -25,6 +25,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         local_type_facts: HashMap::new(),
         table_shapes: HashMap::new(),
         next_shape_id: 0,
+        pending_type_annotation: None,
     };
 
     let root = tree.root_node();
@@ -57,6 +58,8 @@ struct BuildContext<'a> {
     local_type_facts: HashMap<String, LocalTypeFact>,
     table_shapes: HashMap<TableShapeId, TableShape>,
     next_shape_id: u32,
+    /// `---@type X` annotation pending attachment to the next local declaration.
+    pending_type_annotation: Option<String>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -64,6 +67,10 @@ impl<'a> BuildContext<'a> {
         let id = TableShapeId(self.next_shape_id);
         self.next_shape_id += 1;
         id
+    }
+
+    fn take_pending_type(&mut self) -> Option<String> {
+        self.pending_type_annotation.take()
     }
 }
 
@@ -84,7 +91,10 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             "function_declaration" => visit_function_declaration(ctx, node),
             "assignment_statement" => visit_assignment(ctx, node),
             "emmy_comment" => visit_emmy_comment(ctx, node),
-            _ => {}
+            _ => {
+                // Any non-emmy, non-local node clears the pending @type
+                ctx.pending_type_annotation = None;
+            }
         }
         if !cursor.goto_next_sibling() {
             break;
@@ -97,6 +107,11 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
 // ---------------------------------------------------------------------------
 
 fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    // Check for preceding `---@type` annotation (either from pending or inline comment)
+    let pending_type = ctx.take_pending_type().or_else(|| {
+        extract_preceding_type_annotation(node, ctx.source)
+    });
+
     let names_node = match node.child_by_field_name("names") {
         Some(n) => n,
         None => return,
@@ -111,6 +126,20 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         };
         let name = node_text(name_node, ctx.source).to_string();
         let range = ts_node_to_range(name_node);
+
+        // If we have an explicit @type annotation, it takes priority
+        if i == 0 {
+            if let Some(ref type_name) = pending_type {
+                let type_fact = emmy_type_text_to_fact(type_name);
+                ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
+                    name: name.clone(),
+                    type_fact,
+                    source: TypeFactSource::EmmyAnnotation,
+                    range,
+                });
+                continue;
+            }
+        }
 
         let value_node = values_node
             .and_then(|v| v.named_child(i as u32));
@@ -137,6 +166,43 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 range,
             });
         }
+    }
+}
+
+/// Extract `---@type X` from a comment node immediately preceding the given node.
+fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    let prev = node.prev_sibling()?;
+    match prev.kind() {
+        "emmy_comment" => {
+            for i in 0..prev.named_child_count() {
+                if let Some(line_node) = prev.named_child(i as u32) {
+                    if line_node.kind() == "emmy_line" {
+                        let text = node_text(line_node, source).trim();
+                        if let Some(rest) = text.strip_prefix("---") {
+                            let rest = rest.trim();
+                            if let Some(rest) = rest.strip_prefix("@type") {
+                                let type_text = rest.trim();
+                                if !type_text.is_empty() {
+                                    return Some(type_text.to_string());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            None
+        }
+        "comment" => {
+            let text = node_text(prev, source).trim();
+            if let Some(rest) = text.strip_prefix("---@type") {
+                let type_text = rest.trim();
+                if !type_text.is_empty() {
+                    return Some(type_text.to_string());
+                }
+            }
+            None
+        }
+        _ => None,
     }
 }
 
@@ -404,15 +470,41 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: ts_node_to_range(var_node),
                 });
             }
-            // Field assignment: `Mgr.foo = expr` (global table extension)
+            // Field assignment: `x.foo = expr`
             "field_expression" | "variable" => {
                 let full_text = node_text(var_node, ctx.source);
                 if full_text.contains('.') {
-                    let name = full_text.to_string();
                     let type_fact = value_node
                         .map(|v| infer_expression_type(ctx, v, 0))
                         .unwrap_or(TypeFact::Unknown);
 
+                    // Check if the base is a known local with a table shape
+                    let parts: Vec<&str> = full_text.splitn(2, '.').collect();
+                    let is_local_field = parts.len() == 2
+                        && ctx.local_type_facts.contains_key(parts[0]);
+
+                    if is_local_field {
+                        let base_name = parts[0];
+                        let field_name = parts[1].to_string();
+                        // Try to update the local's table shape
+                        if let Some(ltf) = ctx.local_type_facts.get(base_name) {
+                            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
+                                let sid = *shape_id;
+                                if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
+                                    shape.set_field(field_name.clone(), FieldInfo {
+                                        name: field_name,
+                                        type_fact,
+                                        def_range: Some(ts_node_to_range(node)),
+                                        assignment_count: 1,
+                                    });
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
+                    // Otherwise treat as global table extension
+                    let name = full_text.to_string();
                     ctx.global_contributions.push(GlobalContribution {
                         name,
                         kind: GlobalContributionKind::TableExtension,
@@ -444,10 +536,12 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let annotations = parse_emmy_comments(&text);
 
     let mut current_class: Option<(String, Vec<TypeFieldDef>)> = None;
+    let mut has_class_or_alias = false;
 
     for ann in &annotations {
         match ann {
             EmmyAnnotation::Class { name, .. } => {
+                has_class_or_alias = true;
                 if let Some((cname, fields)) = current_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
@@ -467,7 +561,14 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     });
                 }
             }
+            EmmyAnnotation::Type { type_text, .. } => {
+                if current_class.is_none() {
+                    // Standalone @type: set as pending for the next local declaration
+                    ctx.pending_type_annotation = Some(type_text.clone());
+                }
+            }
             EmmyAnnotation::Alias { name, type_text } => {
+                has_class_or_alias = true;
                 if let Some((cname, fields)) = current_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
@@ -496,6 +597,10 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             range: ts_node_to_range(node),
         });
     }
+
+    // Don't clear pending_type if we only had @type (no @class/@alias)
+    // pending_type was already set above and will be consumed by visit_local_declaration
+    let _ = has_class_or_alias;
 }
 
 // ---------------------------------------------------------------------------
