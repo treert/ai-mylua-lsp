@@ -45,7 +45,7 @@
 
 ### 阶段 D — 体验与扩展
 
-- **Semantic tokens** 与语义层充分协同（全局变量等着色、modifier 定制）；rename、completion 等可按产品优先级追加。
+- **Semantic tokens** 与语义层充分协同（全局变量 `defaultLibrary` 着色、局部变量标记、`:` 方法 `self` 识别）——**已完成**；rename、completion 等可按产品优先级追加。
 - **定制语法** 试点：在 grammar 中增加受控扩展点并走通一条 LSP 特性（证明文法—语义契约）。
 
 ## 4. 技术栈倾向（需求分析结论草案）

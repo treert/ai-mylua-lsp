@@ -67,15 +67,15 @@
 - `initialize` / `shutdown` / 文档同步（Full sync）
 - **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
 - **documentSymbol**：顶层 function / local / assignment 提取为大纲
-- **goto definition**：local 作用域解析（block/function/for 参数）+ 全局符号表 + `require` 跨文件跳转
-- **hover**：定义源码展示 + EmmyLua 注解（`@param`/`@return`/`@type`/`@class`）+ 文档注释
+- **goto definition**：local 作用域解析（block/function/for 参数 + `:` 方法隐式 `self`）+ 全局符号表 + `require` 跨文件跳转
+- **hover**：定义源码展示 + EmmyLua 注解（`@param`/`@return`/`@type`/`@class`）+ 文档注释；`:` 方法内 `self` 识别为 parameter
 - **references**：单文件 local scope 引用 + 全工作区全局符号引用查找
 - **workspace/symbol**：全局函数/变量模糊搜索
 - **EmmyLua 注解解析**：从 `---` 注释文本提取结构化注解
 - **全局符号表**：跨文件全局函数/变量索引 + `require` 路径映射
 - **completion**：局部变量 + 全局名 + 关键字自动补全
 - **rename**：单文件 local + 全工作区全局符号重命名（含 prepareRename）
-- **semantic tokens**：遍历 AST 产出真实 token（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符）
+- **semantic tokens**：仅标记变量——全局变量标 `variable.defaultLibrary`、局部变量标 `variable`；`:` 方法内 `self` 交由 TextMate 着色；其余（关键字/字符串/注释等）全部交给 TextMate grammar
 - **语义诊断**：未定义全局变量 warning（区分 local/builtin/全局符号表）
 
 - 构建：`cd lsp && cargo build`
