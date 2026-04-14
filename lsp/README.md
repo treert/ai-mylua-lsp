@@ -41,12 +41,26 @@ lsp/
   crates/
     tree-sitter-mylua/              # 包装 crate：build.rs 编译 grammar/src/ 的 C parser
       Cargo.toml / build.rs / src/lib.rs
-    mylua-lsp/                      # LSP server 可执行文件
-      Cargo.toml / src/main.rs
+    mylua-lsp/                      # LSP server：library + thin binary
+      Cargo.toml
+      src/
+        lib.rs                      # 核心库：导出所有模块，供集成测试直接调用
+        main.rs                     # 薄入口：仅启动 stdio LSP server
+      tests/                        # Rust 集成测试
+        test_helpers.rs             # 测试工具：parse_doc / setup_single_file / setup_workspace_from_dir
+        test_parse.rs               # 解析测试
+        test_hover.rs               # Hover 测试
+        test_completion.rs          # 补全测试
+        test_goto.rs                # 跳转定义测试
+        test_diagnostics.rs         # 诊断测试
+        test_symbols.rs             # 文档符号测试
+        test_references.rs          # 引用查找测试
+        test_workspace.rs           # 多文件工作区集成测试
 ```
 
 - **产物**：`mylua-lsp` 单一可执行文件，默认 **stdio** 通信。
 - **构建**：`cd lsp && cargo build`（需先 `cd grammar && npx tree-sitter generate` 确保 `parser.c` 存在）。
+- **测试**：`cd lsp && cargo test --tests`（见下方「独立测试框架」章节）。
 - **`vscode-extension`** 通过 `spawn` 启动 `target/debug/mylua-lsp`（开发）或打包后的二进制（发布）。
 
 ### 当前实现（阶段 C 完成）
@@ -66,7 +80,9 @@ lsp/
 | `textDocument/semanticTokens/full` | 已实现（函数/变量/参数/关键字/字符串/数字/注释/运算符 + declaration/definition 修饰符） |
 | `textDocument/publishDiagnostics`（语义） | 已实现（未定义全局变量 warning） |
 
-**模块结构**（16 个模块）：`main.rs`（入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`workspace_index.rs`（全局符号表 + require 映射）、`workspace_scanner.rs`（工作区文件扫描 + require 路径解析）、`completion.rs`（自动补全）、`rename.rs`（重命名）、`semantic_tokens.rs`（语义着色）、`diagnostics.rs`（语法 + 语义诊断）、`symbols.rs`、`types.rs`、`util.rs`、`document.rs`。
+**架构**：`lib.rs` 导出所有核心模块（library crate），`main.rs` 为薄入口（binary crate）。这种 lib + bin 拆分使核心逻辑可被集成测试直接调用，无需启动完整 LSP 通信。
+
+**模块结构**（24 个模块）：`lib.rs`（库入口 + Backend 定义）、`main.rs`（binary 入口）、`scope.rs`（作用域解析）、`goto.rs`（跳转）、`hover.rs`（悬浮）、`references.rs`（引用查找）、`workspace_symbol.rs`（全库符号搜索）、`emmy.rs`（EmmyLua 注解解析）、`aggregation.rs`（工作区聚合索引）、`workspace_scanner.rs`（工作区文件扫描 + require 路径解析）、`completion.rs`（自动补全）、`rename.rs`（重命名）、`semantic_tokens.rs`（语义着色）、`diagnostics.rs`（语法 + 语义诊断）、`symbols.rs`、`types.rs`、`type_system.rs`、`table_shape.rs`、`resolver.rs`（跨文件类型解析）、`summary.rs`（文件摘要结构）、`summary_builder.rs`（AST → 摘要构建）、`config.rs`（配置体系）、`util.rs`、`document.rs`、`logger.rs`。
 
 **工作区扫描**：`initialized` 时自动递归扫描所有 `.lua` 文件，构建 `require_map`（模块名 -> 文件 URI）和全局符号表。`didChangeWatchedFiles` 处理增量变更。
 

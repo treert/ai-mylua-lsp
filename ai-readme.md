@@ -33,8 +33,12 @@
 | 路径 | 用途 |
 |------|------|
 | [`assets/lua5.4/`](assets/lua5.4/) | Lua 5.4 标准库 EmmyLua 类型注释（`basic.lua`、`string.lua`、`table.lua`、`math.lua`、`io.lua`、`os.lua` 等 11 个文件），作为内置类型定义的参考来源 |
-| [`tests/lua-root/test.lua`](tests/lua-root/test.lua) | 基础测试入口：`require`、EmmyLua `---@class` 注解、成员函数定义 |
-| [`tests/lua-root/json.lua`](tests/lua-root/json.lua) | 真实第三方库（json4lua）：闭包模块模式、table 方法、复杂控制流，用于验证解析与索引能力 |
+| [`tests/lua-root/`](tests/lua-root/) | 基础测试入口：`require`、EmmyLua `---@class` 注解、成员函数定义；真实第三方库（json4lua） |
+| [`tests/complete/`](tests/complete/) | 补全功能测试 Lua fixture（17 个文件）：局部变量、表字段、require、class 方法、智能补全 |
+| [`tests/hover/`](tests/hover/) | Hover 功能测试 Lua fixture（18 个文件）：EmmyLua class、链式调用、require 模块、表展开、函数返回类型 |
+| [`tests/define/`](tests/define/) | 跳转定义测试 Lua fixture（7 个文件）：局部/全局定义、require 跳转、文件夹 init.lua |
+| [`tests/parse/`](tests/parse/) | 解析测试 Lua fixture（2 个文件）：语法错误恢复、各种语句类型 |
+| [`tests/project/`](tests/project/) | 多文件工程级测试 Lua fixture（5 个文件）：全局变量跨文件、枚举段 |
 
 ### Grammar — Tree-sitter 解析器（阶段 A 核心）
 
@@ -61,7 +65,7 @@
 |------|------|
 | [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
 | [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
-| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（23 个模块） |
+| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（lib + bin 架构，24 个模块 + 8 个集成测试文件） |
 
 **已实现 LSP 能力**：
 - `initialize` / `shutdown` / 文档同步（Full sync）
@@ -85,7 +89,27 @@
 - 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
 
 - 构建：`cd lsp && cargo build`
-- 测试：`cargo test`
+- 测试：`cd lsp && cargo test --tests`
+
+**独立测试框架**（无需 VS Code 联调）：
+
+LSP crate 采用 **lib + bin 拆分架构**：`lib.rs` 导出所有核心模块（hover / completion / goto / diagnostics 等），`main.rs` 仅为薄启动入口。集成测试直接调用核心函数，无需 LSP stdio 通信。
+
+| 测试文件 | 测试数 | 覆盖功能 |
+|----------|--------|----------|
+| `test_parse.rs` | 8 | 基础解析、EmmyLua 注解、方法链、for 循环、fixture 文件 |
+| `test_hover.rs` | 7 | 局部变量、表字面量、EmmyLua class 返回类型、链式调用 |
+| `test_completion.rs` | 7 | 局部变量补全、点号字段补全、class 方法、关键字、去重 |
+| `test_goto.rs` | 6 | 局部变量、函数、参数、for 变量、嵌套作用域跳转 |
+| `test_diagnostics.rs` | 4 | 干净代码无诊断、语法错误检测、语义诊断 |
+| `test_symbols.rs` | 5 | 函数声明、方法声明、空文件、fixture 文件 |
+| `test_references.rs` | 4 | 局部引用、参数引用、包含/排除声明选项 |
+| `test_workspace.rs` | 5 | 多文件 hover/completion/goto、require 解析、project 目录 |
+
+测试工具模块 `test_helpers.rs` 提供：`parse_doc()`、`setup_single_file()`、`setup_workspace_from_dir()` 等函数，可从 `tests/` 下的 Lua fixture 目录构建完整工作区上下文。
+
+> **注意**：如果 VS Code 扩展正在运行会锁住 `mylua-lsp.exe`，可用独立 target 目录避免冲突：
+> `$env:CARGO_TARGET_DIR="target-test"; cargo test --tests`
 
 ### VS Code Extension（已实现）
 
