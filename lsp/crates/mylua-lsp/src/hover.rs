@@ -19,17 +19,35 @@ pub fn hover(
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let ident_text = node_text(ident_node, doc.text.as_bytes());
 
-    // Try field expression hover: `obj.field` → resolve chain
-    if let Some(parent) = ident_node.parent() {
-        if parent.kind() == "field_expression" {
-            if let Some(result) = hover_field_expression(parent, doc, uri, index, all_docs) {
-                return Some(result);
+    lsp_log!(
+        "[hover] ident='{}' kind='{}' parent='{}'",
+        ident_text,
+        ident_node.kind(),
+        ident_node.parent().map_or("none", |p| p.kind()),
+    );
+
+    // Try field expression hover: walk up ancestors to find field_expression
+    {
+        let mut n = ident_node;
+        for _ in 0..4 {
+            if let Some(p) = n.parent() {
+                lsp_log!("[hover]   ancestor kind='{}' text='{}'", p.kind(), &node_text(p, doc.text.as_bytes()).chars().take(60).collect::<String>());
+                if p.kind() == "field_expression" {
+                    if let Some(result) = hover_field_expression(p, doc, uri, index, all_docs) {
+                        return Some(result);
+                    }
+                    break;
+                }
+                n = p;
+            } else {
+                break;
             }
         }
     }
 
     if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
         let type_info = resolve_local_type_info(uri, ident_text, index);
+        lsp_log!("[hover] scope resolved '{}', type_info={:?}", ident_text, type_info);
         return build_hover_for_definition(&def, all_docs, type_info.as_deref());
     }
 
@@ -69,7 +87,9 @@ fn hover_field_expression(
     let field_name = node_text(field, source).to_string();
 
     let base_fact = infer_node_type(object, source, uri, index);
+    lsp_log!("[hover_field] base='{}' base_fact={:?} field='{}'", node_text(object, source), base_fact, field_name);
     let resolved = resolver::resolve_field_chain(&base_fact, &[field_name.clone()], index);
+    lsp_log!("[hover_field] resolved={:?}", resolved.type_fact);
 
     let type_display = format_resolved_type(&resolved.type_fact);
 

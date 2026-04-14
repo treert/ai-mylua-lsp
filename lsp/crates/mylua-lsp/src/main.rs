@@ -1,3 +1,5 @@
+#[macro_use]
+mod logger;
 mod aggregation;
 mod completion;
 mod config;
@@ -18,7 +20,6 @@ mod table_shape;
 mod type_system;
 mod types;
 mod util;
-mod workspace_index;
 mod workspace_scanner;
 mod workspace_symbol;
 
@@ -58,6 +59,12 @@ impl Backend {
             let mut diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
 
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            lsp_log!("[index] summary for {:?}: locals={:?} types={:?} globals={}",
+                uri,
+                summary.local_type_facts.keys().collect::<Vec<_>>(),
+                summary.type_definitions.iter().map(|t| &t.name).collect::<Vec<_>>(),
+                summary.global_contributions.len(),
+            );
             self.index.lock().unwrap().upsert_summary(summary);
 
             {
@@ -191,6 +198,12 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        {
+            let roots = self.workspace_roots.lock().unwrap();
+            if let Some(root) = roots.first() {
+                logger::init(root);
+            }
+        }
         self.client
             .log_message(MessageType::INFO, "mylua-lsp initialized, scanning workspace...")
             .await;

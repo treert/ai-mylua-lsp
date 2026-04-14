@@ -148,8 +148,6 @@ impl WorkspaceAggregation {
         }
 
         for rb in &summary.require_bindings {
-            self.require_map.insert(rb.module_path.clone(), uri.clone());
-
             if let Some(target_uri) = self.resolve_module_to_uri(&rb.module_path) {
                 self.require_by_return
                     .entry(target_uri)

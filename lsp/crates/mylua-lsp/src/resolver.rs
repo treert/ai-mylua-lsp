@@ -446,16 +446,19 @@ fn collect_fields(
 
     match fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            for (_, summary) in &agg.summaries {
+            // Only take fields from the first summary that has this shape ID
+            // to avoid cross-file collisions (shape IDs are per-file counters).
+            for (uri, summary) in &agg.summaries {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     for (name, fi) in &shape.fields {
                         fields.push(FieldCompletion {
                             name: name.clone(),
                             type_display: format!("{}", fi.type_fact),
-                            def_uri: None,
+                            def_uri: Some(uri.clone()),
                             def_range: fi.def_range,
                         });
                     }
+                    break;
                 }
             }
         }

@@ -87,12 +87,20 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
         let node = cursor.node();
         match node.kind() {
             "local_declaration" => visit_local_declaration(ctx, node),
-            "local_function_declaration" => visit_local_function(ctx, node),
-            "function_declaration" => visit_function_declaration(ctx, node),
-            "assignment_statement" => visit_assignment(ctx, node),
+            "local_function_declaration" => {
+                ctx.pending_type_annotation = None;
+                visit_local_function(ctx, node);
+            }
+            "function_declaration" => {
+                ctx.pending_type_annotation = None;
+                visit_function_declaration(ctx, node);
+            }
+            "assignment_statement" => {
+                ctx.pending_type_annotation = None;
+                visit_assignment(ctx, node);
+            }
             "emmy_comment" => visit_emmy_comment(ctx, node),
             _ => {
-                // Any non-emmy, non-local node clears the pending @type
                 ctx.pending_type_annotation = None;
             }
         }
@@ -111,6 +119,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let pending_type = ctx.take_pending_type().or_else(|| {
         extract_preceding_type_annotation(node, ctx.source)
     });
+    let prev_kind = node.prev_sibling().map(|s| s.kind().to_string()).unwrap_or_default();
+    lsp_log!("[summary] visit_local_declaration: pending_type={:?} prev_sibling_kind='{}'", pending_type, prev_kind);
 
     let names_node = match node.child_by_field_name("names") {
         Some(n) => n,
@@ -776,8 +786,11 @@ fn infer_operator_type(
             ".." => {
                 return TypeFact::Known(KnownType::String);
             }
-            "==" | "~=" | "<" | "<=" | ">" | ">=" | "and" | "or" | "not" => {
+            "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" => {
                 return TypeFact::Known(KnownType::Boolean);
+            }
+            "and" | "or" => {
+                return TypeFact::Unknown;
             }
             _ => {}
         }

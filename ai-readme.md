@@ -61,22 +61,28 @@
 |------|------|
 | [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
 | [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
-| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（16 个模块） |
+| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（23 个模块） |
 
 **已实现 LSP 能力**：
 - `initialize` / `shutdown` / 文档同步（Full sync）
+- **配置体系**：15 个扩展配置项，通过 `initializationOptions` + `didChangeConfiguration` 下发
 - **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
 - **documentSymbol**：顶层 function / local / assignment 提取为大纲
-- **goto definition**：local 作用域解析（block/function/for 参数 + `:` 方法隐式 `self`）+ 全局符号表 + `require` 跨文件跳转
-- **hover**：定义源码展示 + EmmyLua 注解（`@param`/`@return`/`@type`/`@class`）+ 文档注释；`:` 方法内 `self` 识别为 parameter
-- **references**：单文件 local scope 引用 + 全工作区全局符号引用查找
+- **goto definition**：local 作用域 + 全局符号表 + `require` 跳转 + **字段表达式跨文件跳转**
+- **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **推断类型展示**（链式字段解析）
+- **references**：单文件 local scope + 全工作区全局符号引用
 - **workspace/symbol**：全局函数/变量模糊搜索
-- **EmmyLua 注解解析**：从 `---` 注释文本提取结构化注解
-- **全局符号表**：跨文件全局函数/变量索引 + `require` 路径映射
-- **completion**：局部变量 + 全局名 + 关键字自动补全
-- **rename**：单文件 local + 全工作区全局符号重命名（含 prepareRename）
-- **semantic tokens**：仅标记变量——全局变量标 `variable.defaultLibrary`、局部变量标 `variable`；`:` 方法内 `self` 交由 TextMate 着色；其余（关键字/字符串/注释等）全部交给 TextMate grammar
-- **语义诊断**：未定义全局变量 warning（区分 local/builtin/全局符号表）
+- **EmmyLua 注解**：`@class`/`@field`/`@param`/`@return`/`@type`/`@alias`；`@type` 绑定到紧接 local
+- **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全**
+- **rename**：单文件 local + 全工作区全局（含 prepareRename）
+- **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记
+- **语义诊断**：未定义全局变量 warning
+
+**索引架构（步骤 1-6）**：
+- `summary_builder.rs`：单文件 AST → DocumentSummary
+- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）
+- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护
+- 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
 
 - 构建：`cd lsp && cargo build`
 - 测试：`cargo test`
@@ -92,6 +98,8 @@
 - 构建：`cd vscode-extension && npm install && npm run compile`
 - 调试：F5 启动 Extension Development Host
 
-### 后续
-- 5 万文件规模硬化（增量索引、内存优化）。
-- rename、completion、code action 等。
+### 后续（步骤 7）
+- 索引状态机（Initializing/Ready + 进度通知）。
+- 并行冷启动 + 诊断调度。
+- 磁盘持久化缓存 + 类型感知诊断。
+- 5 万文件规模硬化。
