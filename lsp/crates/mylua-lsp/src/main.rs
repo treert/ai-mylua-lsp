@@ -8,6 +8,7 @@ mod goto;
 mod hover;
 mod references;
 mod rename;
+mod resolver;
 mod scope;
 mod semantic_tokens;
 mod summary;
