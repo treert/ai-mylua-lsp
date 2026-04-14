@@ -14,4 +14,5 @@ tower-lsp-server = "0.23"
 tokio = { version = "1", features = ["full"] }
 tree-sitter = "0.26"
 tree-sitter-mylua = { path = "../tree-sitter-mylua" }
+serde = { version = "1", features = ["derive"] }
 serde_json = "1"

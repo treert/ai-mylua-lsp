@@ -1,4 +1,6 @@
+mod aggregation;
 mod completion;
+mod config;
 mod diagnostics;
 mod document;
 mod emmy;
@@ -8,7 +10,10 @@ mod references;
 mod rename;
 mod scope;
 mod semantic_tokens;
+mod summary;
 mod symbols;
+mod table_shape;
+mod type_system;
 mod types;
 mod util;
 mod workspace_index;
@@ -23,6 +28,7 @@ use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer, LspService, Server};
 
+use config::LspConfig;
 use document::Document;
 use workspace_index::WorkspaceIndex;
 
@@ -32,6 +38,7 @@ struct Backend {
     documents: Mutex<HashMap<Uri, Document>>,
     index: Mutex<WorkspaceIndex>,
     workspace_roots: Mutex<Vec<PathBuf>>,
+    config: Mutex<LspConfig>,
 }
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
@@ -125,6 +132,12 @@ impl Backend {
 
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        if let Some(opts) = params.initialization_options {
+            let cfg = LspConfig::from_value(opts);
+            eprintln!("[mylua-lsp] config: {:?}", cfg);
+            *self.config.lock().unwrap() = cfg;
+        }
+
         let mut roots = Vec::new();
         if let Some(folders) = &params.workspace_folders {
             for folder in folders {
@@ -253,6 +266,12 @@ impl LanguageServer for Backend {
                 _ => {}
             }
         }
+    }
+
+    async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
+        let cfg = LspConfig::from_value(params.settings);
+        eprintln!("[mylua-lsp] config updated: {:?}", cfg);
+        *self.config.lock().unwrap() = cfg;
     }
 
     async fn document_symbol(
@@ -422,6 +441,7 @@ async fn main() {
             documents: Mutex::new(HashMap::new()),
             index: Mutex::new(WorkspaceIndex::new()),
             workspace_roots: Mutex::new(Vec::new()),
+            config: Mutex::new(LspConfig::default()),
         }
     });
     Server::new(stdin, stdout, socket).serve(service).await;

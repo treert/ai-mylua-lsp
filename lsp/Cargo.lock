@@ -257,6 +257,7 @@ dependencies = [
 name = "mylua-lsp"
 version = "0.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "tokio",
  "tower-lsp-server",

@@ -50,6 +50,95 @@
           "type": "string",
           "default": "",
           "description": "Path to mylua-lsp executable. If empty, uses bundled or PATH."
+        },
+        "mylua.runtime.version": {
+          "type": "string",
+          "enum": ["5.3", "5.4"],
+          "default": "5.3",
+          "description": "Assumed Lua runtime version."
+        },
+        "mylua.require.paths": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["?.lua", "?/init.lua"],
+          "description": "Module search path patterns (like package.path)."
+        },
+        "mylua.require.aliases": {
+          "type": "object",
+          "additionalProperties": { "type": "string" },
+          "default": {},
+          "markdownDescription": "Path aliases for require resolution, e.g. `{ \"@\": \"src/\" }`."
+        },
+        "mylua.workspace.include": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/*.lua"],
+          "description": "Glob patterns for files to include in workspace indexing."
+        },
+        "mylua.workspace.exclude": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": ["**/.*", "**/node_modules"],
+          "description": "Glob patterns for files to exclude from workspace indexing."
+        },
+        "mylua.workspace.indexMode": {
+          "type": "string",
+          "enum": ["merged", "isolated"],
+          "default": "merged",
+          "description": "Multi-root workspace strategy: merge all roots or isolate per root."
+        },
+        "mylua.index.cacheMode": {
+          "type": "string",
+          "enum": ["summary", "memory"],
+          "default": "summary",
+          "description": "Index persistence: 'summary' caches DocumentSummary to disk, 'memory' is in-process only."
+        },
+        "mylua.diagnostics.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable or disable all diagnostics."
+        },
+        "mylua.diagnostics.undefinedGlobal": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "warning",
+          "description": "Severity for undefined global variable diagnostics."
+        },
+        "mylua.diagnostics.emmyTypeMismatch": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "error",
+          "description": "Severity when a value doesn't match its Emmy type annotation."
+        },
+        "mylua.diagnostics.emmyUnknownField": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "error",
+          "description": "Severity for accessing an unknown field on an Emmy-typed value."
+        },
+        "mylua.diagnostics.luaFieldError": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "error",
+          "description": "Severity for high-confidence Lua field errors (e.g. indexing nil)."
+        },
+        "mylua.diagnostics.luaFieldWarning": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "warning",
+          "description": "Severity for conservative Lua field warnings (e.g. unknown field on open table)."
+        },
+        "mylua.gotoDefinition.strategy": {
+          "type": "string",
+          "enum": ["auto", "single", "list"],
+          "default": "auto",
+          "description": "Multi-candidate strategy: 'auto' jumps if one best, else shows list."
+        },
+        "mylua.references.strategy": {
+          "type": "string",
+          "enum": ["best", "merge", "select"],
+          "default": "best",
+          "description": "Multi-candidate references: 'best' uses top candidate, 'merge' unions all, 'select' prompts."
         }
       }
     }
