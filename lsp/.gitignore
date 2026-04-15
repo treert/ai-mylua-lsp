@@ -1,5 +1,6 @@
 # Cargo build output
 target/
+target-*/
 
 # OS
 .DS_Store

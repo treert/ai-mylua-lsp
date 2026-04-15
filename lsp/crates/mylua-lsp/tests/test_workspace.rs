@@ -9,9 +9,9 @@ use mylua_lsp::{hover, completion, goto};
 fn workspace_hover_dir() {
     let (docs, mut agg, _parser) = setup_workspace_from_dir("hover");
 
-    // Find the hover1.lua document
+    // Find the hover1.lua document (match exactly, not hover10/hover11)
     let hover1_entry = docs.iter().find(|(uri, _)| {
-        uri.to_string().contains("hover1")
+        uri.to_string().contains("hover1.lua")
     });
     assert!(hover1_entry.is_some(), "should find hover1.lua in workspace");
 

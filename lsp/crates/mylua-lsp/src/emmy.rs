@@ -41,21 +41,7 @@ fn parse_annotation(text: &str) -> Option<EmmyAnnotation> {
     let (tag, rest) = split_first_word(text);
     match tag {
         "class" => {
-            let (name, rest) = split_first_word(rest);
-            let parents = if let Some(rest) = rest.strip_prefix(':') {
-                rest.trim()
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            } else {
-                Vec::new()
-            };
-            Some(EmmyAnnotation::Class {
-                name: name.to_string(),
-                parents,
-                desc: rest.to_string(),
-            })
+            parse_class_annotation(rest)
         }
         "field" => {
             let rest = rest.trim();
@@ -128,6 +114,47 @@ fn parse_annotation(text: &str) -> Option<EmmyAnnotation> {
             text: rest.to_string(),
         }),
     }
+}
+
+/// Parse `@class Name`, `@class Name: Parent`, `@class Name:Parent`, etc.
+fn parse_class_annotation(text: &str) -> Option<EmmyAnnotation> {
+    let text = text.trim();
+    // Find the class name: everything up to whitespace or ':'
+    let name_end = text.find(|c: char| c.is_whitespace() || c == ':').unwrap_or(text.len());
+    let name = &text[..name_end];
+    if name.is_empty() {
+        return None;
+    }
+    let after_name = text[name_end..].trim_start();
+
+    // Parse parents (after ':') and desc (after '@')
+    let (parents, desc) = if let Some(after_colon) = after_name.strip_prefix(':') {
+        let parent_text = after_colon.trim();
+        parse_parents_and_desc(parent_text)
+    } else {
+        (Vec::new(), after_name.to_string())
+    };
+
+    Some(EmmyAnnotation::Class {
+        name: name.to_string(),
+        parents,
+        desc,
+    })
+}
+
+fn parse_parents_and_desc(text: &str) -> (Vec<String>, String) {
+    // Split off desc after '@' (e.g. "Parent @some description")
+    let (parent_part, desc) = if let Some(at_pos) = text.find('@') {
+        (&text[..at_pos], text[at_pos + 1..].trim().to_string())
+    } else {
+        (text, String::new())
+    };
+    let parents: Vec<String> = parent_part
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    (parents, desc)
 }
 
 fn split_first_word(s: &str) -> (&str, &str) {

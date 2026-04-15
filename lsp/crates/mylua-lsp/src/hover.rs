@@ -91,54 +91,69 @@ fn hover_dotted_variable(
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
-    let parts: Vec<&str> = var_text.splitn(2, '.').collect();
-    if parts.len() != 2 {
+    // Try each dot split point from right to left (prefer longest base).
+    // For `A.B.C`, tries: base="A.B" fields=["C"], then base="A" fields=["B","C"].
+    let dot_positions: Vec<usize> = var_text.match_indices('.').map(|(i, _)| i).collect();
+    if dot_positions.is_empty() {
         return None;
     }
-    let base_name = parts[0];
-    let field_chain: Vec<String> = parts[1].split('.').map(|s| s.to_string()).collect();
 
-    lsp_log!("[hover_dotted] base='{}' fields={:?} target='{}'", base_name, field_chain, field_ident);
+    for &pos in dot_positions.iter().rev() {
+        let base_name = &var_text[..pos];
+        let field_chain: Vec<String> = var_text[pos + 1..].split('.').map(|s| s.to_string()).collect();
 
-    let base_fact = if let Some(summary) = index.summaries.get(uri) {
-        if let Some(ltf) = summary.local_type_facts.get(base_name) {
-            ltf.type_fact.clone()
+        lsp_log!("[hover_dotted] base='{}' fields={:?} target='{}'", base_name, field_chain, field_ident);
+
+        let base_fact = if let Some(summary) = index.summaries.get(uri) {
+            if let Some(ltf) = summary.local_type_facts.get(base_name) {
+                ltf.type_fact.clone()
+            } else {
+                TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
+            }
         } else {
             TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
-        }
-    } else {
-        TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
-    };
+        };
 
-    lsp_log!("[hover_dotted] base_fact={:?}", base_fact);
-    let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
-    lsp_log!("[hover_dotted] resolved type={:?} def_uri={:?}", resolved.type_fact, resolved.def_uri);
+        lsp_log!("[hover_dotted] base_fact={:?}", base_fact);
+        let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
+        lsp_log!("[hover_dotted] resolved type={:?} def_uri={:?}", resolved.type_fact, resolved.def_uri);
 
-    let type_display = format_resolved_type(&resolved.type_fact);
+        if resolved.def_uri.is_some() || resolved.type_fact != crate::type_system::TypeFact::Unknown {
+            let type_display = format_resolved_type(&resolved.type_fact);
 
-    if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-        if all_docs.contains_key(def_uri) {
-            let fake_def = crate::types::Definition {
-                name: field_ident.to_string(),
-                kind: DefKind::GlobalVariable,
-                range: *def_range,
-                selection_range: *def_range,
-                uri: def_uri.clone(),
-            };
-            return build_hover_for_definition(&fake_def, all_docs, Some(&type_display));
+            if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
+                if all_docs.contains_key(def_uri) {
+                    let fake_def = crate::types::Definition {
+                        name: field_ident.to_string(),
+                        kind: DefKind::GlobalVariable,
+                        range: *def_range,
+                        selection_range: *def_range,
+                        uri: def_uri.clone(),
+                    };
+                    return build_hover_for_definition(&fake_def, all_docs, Some(&type_display));
+                }
+            }
+
+            let mut parts = Vec::new();
+            parts.push(format!("```lua\n(field) {}\n```", field_ident));
+            if type_display != "unknown" {
+                parts.push(format!("Type: `{}`", type_display));
+            }
+            return Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: parts.join("\n\n"),
+                }),
+                range: None,
+            });
         }
     }
 
-    let mut parts = Vec::new();
-    parts.push(format!("```lua\n(field) {}\n```", field_ident));
-    if type_display != "unknown" {
-        parts.push(format!("Type: `{}`", type_display));
-    }
-
+    // Fallback: show field name even when resolution fails
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
             kind: MarkupKind::Markdown,
-            value: parts.join("\n\n"),
+            value: format!("```lua\n(field) {}\n```", field_ident),
         }),
         range: None,
     })

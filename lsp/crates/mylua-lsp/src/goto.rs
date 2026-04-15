@@ -69,29 +69,34 @@ fn goto_dotted_variable(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
-    let parts: Vec<&str> = var_text.splitn(2, '.').collect();
-    if parts.len() != 2 {
+    // Try each dot split point from right to left (prefer longest base).
+    // For `A.B.C`, tries: base="A.B" fields=["C"], then base="A" fields=["B","C"].
+    let dot_positions: Vec<usize> = var_text.match_indices('.').map(|(i, _)| i).collect();
+    if dot_positions.is_empty() {
         return None;
     }
-    let base_name = parts[0];
-    let field_chain: Vec<String> = parts[1].split('.').map(|s| s.to_string()).collect();
 
-    let base_fact = if let Some(summary) = index.summaries.get(uri) {
-        if let Some(ltf) = summary.local_type_facts.get(base_name) {
-            ltf.type_fact.clone()
+    for &pos in dot_positions.iter().rev() {
+        let base_name = &var_text[..pos];
+        let field_chain: Vec<String> = var_text[pos + 1..].split('.').map(|s| s.to_string()).collect();
+
+        let base_fact = if let Some(summary) = index.summaries.get(uri) {
+            if let Some(ltf) = summary.local_type_facts.get(base_name) {
+                ltf.type_fact.clone()
+            } else {
+                TypeFact::Stub(SymbolicStub::GlobalRef { name: base_name.to_string() })
+            }
         } else {
             TypeFact::Stub(SymbolicStub::GlobalRef { name: base_name.to_string() })
-        }
-    } else {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name: base_name.to_string() })
-    };
+        };
 
-    let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
-    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
-        return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: def_uri,
-            range: def_range,
-        }));
+        let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
+        if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: def_uri,
+                range: def_range,
+            }));
+        }
     }
     None
 }

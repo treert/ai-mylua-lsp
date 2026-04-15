@@ -411,34 +411,47 @@ fn resolve_emmy_field(
     field: &str,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    let candidates = match agg.type_shard.get(type_name) {
-        Some(c) => c,
-        None => {
-            lsp_log!("[resolve_emmy_field] type '{}' not found in type_shard (keys: {:?})", type_name, agg.type_shard.keys().collect::<Vec<_>>());
-            return ResolvedType::unknown();
-        }
-    };
+    // First, try @field annotations in the class definition
+    if let Some(candidates) = agg.type_shard.get(type_name) {
+        lsp_log!("[resolve_emmy_field] type '{}' has {} candidates", type_name, candidates.len());
 
-    lsp_log!("[resolve_emmy_field] type '{}' has {} candidates", type_name, candidates.len());
-
-    for candidate in candidates {
-        if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
-            for td in &summary.type_definitions {
-                if td.name == type_name {
-                    lsp_log!("[resolve_emmy_field] found class '{}' with {} fields: {:?}",
-                        type_name, td.fields.len(),
-                        td.fields.iter().map(|f| &f.name).collect::<Vec<_>>());
-                    for tf in &td.fields {
-                        if tf.name == field {
-                            return ResolvedType {
-                                type_fact: tf.type_fact.clone(),
-                                def_uri: Some(candidate.source_uri.clone()),
-                                def_range: Some(tf.range),
-                            };
+        for candidate in candidates {
+            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+                for td in &summary.type_definitions {
+                    if td.name == type_name {
+                        lsp_log!("[resolve_emmy_field] found class '{}' with {} fields: {:?}",
+                            type_name, td.fields.len(),
+                            td.fields.iter().map(|f| &f.name).collect::<Vec<_>>());
+                        for tf in &td.fields {
+                            if tf.name == field {
+                                return ResolvedType {
+                                    type_fact: tf.type_fact.clone(),
+                                    def_uri: Some(candidate.source_uri.clone()),
+                                    def_range: Some(tf.range),
+                                };
+                            }
                         }
                     }
                 }
             }
+        }
+    } else {
+        lsp_log!("[resolve_emmy_field] type '{}' not found in type_shard", type_name);
+    }
+
+    // Fallback: check global_shard for `type_name.field` — handles functions
+    // defined as `function ClassName.MethodName()` without explicit @field.
+    // These are registered in global_shard via visit_function_declaration, so
+    // an O(1) HashMap lookup is sufficient (no summaries scan needed).
+    let qualified = format!("{}.{}", type_name, field);
+    if let Some(global_candidates) = agg.global_shard.get(&qualified) {
+        if let Some(c) = global_candidates.first() {
+            lsp_log!("[resolve_emmy_field] found '{}' via global_shard fallback", qualified);
+            return ResolvedType::with_location(
+                c.type_fact.clone(),
+                c.source_uri.clone(),
+                c.selection_range,
+            );
         }
     }
 

@@ -105,7 +105,6 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             }
             "assignment_statement" => {
                 flush_pending_class(ctx, node);
-                ctx.pending_type_annotation = None;
                 visit_assignment(ctx, node);
             }
             "emmy_comment" => visit_emmy_comment(ctx, node),
@@ -460,6 +459,10 @@ fn collect_return_types(
 // ---------------------------------------------------------------------------
 
 fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    let pending_type = ctx.take_pending_type().or_else(|| {
+        extract_preceding_type_annotation(node, ctx.source)
+    });
+
     let left = match node.child_by_field_name("left") {
         Some(n) => n,
         None => return,
@@ -478,9 +481,19 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
-                let type_fact = value_node
-                    .map(|v| infer_expression_type(ctx, v, 0))
-                    .unwrap_or(TypeFact::Unknown);
+                let type_fact = if i == 0 {
+                    if let Some(ref type_name) = pending_type {
+                        emmy_type_text_to_fact(type_name)
+                    } else {
+                        value_node
+                            .map(|v| infer_expression_type(ctx, v, 0))
+                            .unwrap_or(TypeFact::Unknown)
+                    }
+                } else {
+                    value_node
+                        .map(|v| infer_expression_type(ctx, v, 0))
+                        .unwrap_or(TypeFact::Unknown)
+                };
 
                 ctx.global_contributions.push(GlobalContribution {
                     name,
@@ -494,9 +507,19 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "field_expression" | "variable" => {
                 let full_text = node_text(var_node, ctx.source);
                 if full_text.contains('.') {
-                    let type_fact = value_node
-                        .map(|v| infer_expression_type(ctx, v, 0))
-                        .unwrap_or(TypeFact::Unknown);
+                    let type_fact = if i == 0 {
+                        if let Some(ref type_name) = pending_type {
+                            emmy_type_text_to_fact(type_name)
+                        } else {
+                            value_node
+                                .map(|v| infer_expression_type(ctx, v, 0))
+                                .unwrap_or(TypeFact::Unknown)
+                        }
+                    } else {
+                        value_node
+                            .map(|v| infer_expression_type(ctx, v, 0))
+                            .unwrap_or(TypeFact::Unknown)
+                    };
 
                     // Check if the base is a known local with a table shape
                     let parts: Vec<&str> = full_text.splitn(2, '.').collect();
