@@ -26,22 +26,440 @@
       "match": "\\A#!.*$",
       "name": "comment.line.shebang.lua"
     },
+
     "emmy-comment": {
       "patterns": [
+        { "include": "#emmy-class" },
+        { "include": "#emmy-field" },
+        { "include": "#emmy-param" },
+        { "include": "#emmy-return" },
+        { "include": "#emmy-type-annotation" },
+        { "include": "#emmy-alias" },
+        { "include": "#emmy-generic" },
+        { "include": "#emmy-overload" },
+        { "include": "#emmy-cast" },
+        { "include": "#emmy-vararg" },
+        { "include": "#emmy-enum" },
+        { "include": "#emmy-diagnostic" },
+        { "include": "#emmy-see" },
+        { "include": "#emmy-version" },
+        { "include": "#emmy-other-tag" },
+        { "include": "#emmy-alias-member" },
+        { "include": "#emmy-doc-line" }
+      ]
+    },
+
+    "emmy-class": {
+      "begin": "(---\\s*)(@class)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "entity.name.type.class.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
         {
-          "match": "(---)(\\s*@(class|field|param|return|type|alias|generic|enum|overload|vararg|diagnostic|deprecated|async|version|see|nodiscard|cast|source))\\b(.*)",
-          "captures": {
-            "1": { "name": "comment.line.documentation.lua" },
-            "2": { "name": "storage.type.annotation.lua" },
-            "4": { "name": "comment.line.documentation.lua" }
-          }
+          "match": ":",
+          "name": "punctuation.separator.inheritance.lua"
         },
         {
-          "match": "---.*$",
-          "name": "comment.line.documentation.lua"
+          "match": "[a-zA-Z_][a-zA-Z0-9_.]*",
+          "name": "entity.other.inherited-class.lua"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.lua"
         }
       ]
     },
+
+    "emmy-field": {
+      "patterns": [
+        {
+          "begin": "(---\\s*)(@field)(?:\\s+(public|protected|private|package))?\\s+(\\[)",
+          "end": "$",
+          "beginCaptures": {
+            "1": { "name": "comment.line.documentation.lua" },
+            "2": { "name": "storage.type.annotation.lua" },
+            "3": { "name": "storage.modifier.lua" },
+            "4": { "name": "punctuation.definition.bracket.begin.lua" }
+          },
+          "name": "comment.line.documentation.lua",
+          "patterns": [
+            { "include": "#emmy-type-expr" }
+          ]
+        },
+        {
+          "begin": "(---\\s*)(@field)(?:\\s+(public|protected|private|package))?\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+          "end": "$",
+          "beginCaptures": {
+            "1": { "name": "comment.line.documentation.lua" },
+            "2": { "name": "storage.type.annotation.lua" },
+            "3": { "name": "storage.modifier.lua" },
+            "4": { "name": "entity.name.tag.lua" }
+          },
+          "name": "comment.line.documentation.lua",
+          "patterns": [
+            { "include": "#emmy-type-expr" }
+          ]
+        }
+      ]
+    },
+
+    "emmy-param": {
+      "begin": "(---\\s*)(@param)\\s+([a-zA-Z_][a-zA-Z0-9_]*|\\.\\.\\.)\\s*(\\?)?",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "variable.parameter.lua" },
+        "4": { "name": "keyword.operator.type.optional.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-return": {
+      "begin": "(---\\s*)(@return)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-type-annotation": {
+      "begin": "(---\\s*)(@type)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-alias": {
+      "begin": "(---\\s*)(@alias)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "entity.name.type.alias.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-generic": {
+      "begin": "(---\\s*)(@generic)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-overload": {
+      "begin": "(---\\s*)(@overload)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-cast": {
+      "begin": "(---\\s*)(@cast)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "variable.other.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-vararg": {
+      "begin": "(---\\s*)(@vararg)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-enum": {
+      "match": "(---\\s*)(@enum)\\s+([a-zA-Z_][a-zA-Z0-9_.]*)(.*)",
+      "captures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "entity.name.type.enum.lua" },
+        "4": { "name": "comment.line.documentation.lua" }
+      }
+    },
+
+    "emmy-diagnostic": {
+      "match": "(---\\s*)(@diagnostic)\\s+(disable|enable|disable-next-line|disable-line|enable-next-line|enable-line)(?:\\s*(:)\\s*([\\w-]+(?:\\s*,\\s*[\\w-]+)*))?",
+      "captures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "keyword.other.diagnostic.lua" },
+        "4": { "name": "punctuation.separator.lua" },
+        "5": { "name": "string.unquoted.diagnostic.lua" }
+      }
+    },
+
+    "emmy-see": {
+      "match": "(---\\s*)(@see)\\s+([a-zA-Z_][a-zA-Z0-9_.#]*)(.*)",
+      "captures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "entity.name.reference.lua" },
+        "4": { "name": "comment.line.documentation.lua" }
+      }
+    },
+
+    "emmy-version": {
+      "begin": "(---\\s*)(@version)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        {
+          "match": "\\b(5\\.1|5\\.2|5\\.3|5\\.4|JIT)\\b",
+          "name": "support.class.lua"
+        },
+        {
+          "match": "[<>]=?",
+          "name": "keyword.operator.lua"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.lua"
+        }
+      ]
+    },
+
+    "emmy-other-tag": {
+      "match": "(---\\s*)(@[a-zA-Z_][a-zA-Z0-9_]*)\\b(.*)",
+      "captures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "comment.line.documentation.lua" }
+      }
+    },
+
+    "emmy-alias-member": {
+      "begin": "(---\\s*)(\\|)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "keyword.operator.type.union.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        {
+          "match": "#.*",
+          "name": "comment.line.documentation.lua"
+        },
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-doc-line": {
+      "match": "---.*$",
+      "name": "comment.line.documentation.lua"
+    },
+
+    "emmy-type-expr": {
+      "patterns": [
+        { "include": "#emmy-type-fun" },
+        { "include": "#emmy-type-table-literal" },
+        { "include": "#emmy-type-paren" },
+        { "include": "#emmy-type-string-literal" },
+        { "include": "#emmy-type-number-literal" },
+        { "include": "#emmy-type-literal-constants" },
+        { "include": "#emmy-type-builtin" },
+        { "include": "#emmy-type-operators" },
+        { "include": "#emmy-type-name" },
+        { "include": "#emmy-type-punctuation" }
+      ]
+    },
+
+    "emmy-type-fun": {
+      "begin": "\\b(fun)\\s*(\\()",
+      "end": "(\\))",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.type.function.lua" },
+        "2": { "name": "punctuation.definition.parameters.begin.lua" }
+      },
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.parameters.end.lua" }
+      },
+      "patterns": [
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "variable.parameter.lua" },
+            "2": { "name": "punctuation.separator.type.lua" }
+          }
+        },
+        {
+          "match": "\\.\\.\\.",
+          "name": "keyword.operator.vararg.lua"
+        },
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-type-table-literal": {
+      "begin": "\\{",
+      "end": "\\}",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.table.begin.lua" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.table.end.lua" }
+      },
+      "patterns": [
+        {
+          "match": "([a-zA-Z_][a-zA-Z0-9_]*)\\s*(:)",
+          "captures": {
+            "1": { "name": "entity.name.tag.lua" },
+            "2": { "name": "punctuation.separator.type.lua" }
+          }
+        },
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-type-paren": {
+      "begin": "\\(",
+      "end": "\\)",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.group.begin.lua" }
+      },
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.group.end.lua" }
+      },
+      "patterns": [
+        { "include": "#emmy-type-expr" }
+      ]
+    },
+
+    "emmy-type-string-literal": {
+      "patterns": [
+        {
+          "match": "\"[^\"]*\"",
+          "name": "string.quoted.double.lua"
+        },
+        {
+          "match": "'[^']*'",
+          "name": "string.quoted.single.lua"
+        }
+      ]
+    },
+
+    "emmy-type-number-literal": {
+      "match": "\\b[0-9]+(\\.[0-9]+)?\\b",
+      "name": "constant.numeric.lua"
+    },
+
+    "emmy-type-literal-constants": {
+      "match": "\\b(nil|true|false)\\b",
+      "name": "constant.language.lua"
+    },
+
+    "emmy-type-builtin": {
+      "match": "\\b(any|boolean|string|number|integer|function|table|thread|userdata|lightuserdata|void|self)\\b",
+      "name": "support.type.lua"
+    },
+
+    "emmy-type-operators": {
+      "patterns": [
+        {
+          "match": "\\[\\]",
+          "name": "keyword.operator.type.array.lua"
+        },
+        {
+          "match": "\\|",
+          "name": "keyword.operator.type.union.lua"
+        },
+        {
+          "match": "\\?",
+          "name": "keyword.operator.type.optional.lua"
+        },
+        {
+          "match": "\\.\\.\\.",
+          "name": "keyword.operator.vararg.lua"
+        }
+      ]
+    },
+
+    "emmy-type-name": {
+      "match": "\\b[a-zA-Z_][a-zA-Z0-9_.]*\\b",
+      "name": "entity.name.type.lua"
+    },
+
+    "emmy-type-punctuation": {
+      "patterns": [
+        {
+          "match": "<",
+          "name": "punctuation.definition.typeparameters.begin.lua"
+        },
+        {
+          "match": ">",
+          "name": "punctuation.definition.typeparameters.end.lua"
+        },
+        {
+          "match": ":",
+          "name": "punctuation.separator.type.lua"
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.lua"
+        },
+        {
+          "match": "\\[",
+          "name": "punctuation.definition.bracket.begin.lua"
+        },
+        {
+          "match": "\\]",
+          "name": "punctuation.definition.bracket.end.lua"
+        }
+      ]
+    },
+
     "block-comment": {
       "begin": "--\\[(=*)\\[",
       "end": "\\]\\1\\]",
