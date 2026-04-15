@@ -78,6 +78,16 @@ pub struct CachedResolution {
     pub dirty: bool,
 }
 
+/// Priority key for sorting candidates: shallower paths (fewer segments) win,
+/// ties broken by shorter total path length, then lexicographic URI string.
+/// Uses full URI string (includes `file:///` scheme), which is fine because all
+/// file URIs share the same prefix so relative ordering is preserved.
+fn uri_priority_key(uri: &Uri) -> (usize, usize, String) {
+    let path = uri.to_string();
+    let depth = path.matches('/').count();
+    (depth, path.len(), path)
+}
+
 impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
@@ -107,44 +117,47 @@ impl WorkspaceAggregation {
         self.remove_contributions(&uri);
 
         for gc in &summary.global_contributions {
-            self.global_shard
+            let candidates = self.global_shard
                 .entry(gc.name.clone())
-                .or_default()
-                .push(GlobalCandidate {
-                    name: gc.name.clone(),
-                    kind: gc.kind.clone(),
-                    type_fact: gc.type_fact.clone(),
-                    range: gc.range,
-                    selection_range: gc.selection_range,
-                    source_uri: uri.clone(),
-                });
+                .or_default();
+            candidates.push(GlobalCandidate {
+                name: gc.name.clone(),
+                kind: gc.kind.clone(),
+                type_fact: gc.type_fact.clone(),
+                range: gc.range,
+                selection_range: gc.selection_range,
+                source_uri: uri.clone(),
+            });
+            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
 
             let def_kind = match gc.kind {
                 GlobalContributionKind::Function => DefKind::GlobalFunction,
                 _ => DefKind::GlobalVariable,
             };
-            self.globals
+            let entries = self.globals
                 .entry(gc.name.clone())
-                .or_default()
-                .push(GlobalEntry {
-                    name: gc.name.clone(),
-                    kind: def_kind,
-                    range: gc.range,
-                    selection_range: gc.selection_range,
-                    uri: uri.clone(),
-                });
+                .or_default();
+            entries.push(GlobalEntry {
+                name: gc.name.clone(),
+                kind: def_kind,
+                range: gc.range,
+                selection_range: gc.selection_range,
+                uri: uri.clone(),
+            });
+            entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
         }
 
         for td in &summary.type_definitions {
-            self.type_shard
+            let candidates = self.type_shard
                 .entry(td.name.clone())
-                .or_default()
-                .push(TypeCandidate {
-                    name: td.name.clone(),
-                    kind: td.kind.clone(),
-                    source_uri: uri.clone(),
-                    range: td.range,
-                });
+                .or_default();
+            candidates.push(TypeCandidate {
+                name: td.name.clone(),
+                kind: td.kind.clone(),
+                source_uri: uri.clone(),
+                range: td.range,
+            });
+            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
         }
 
         for rb in &summary.require_bindings {
@@ -235,26 +248,30 @@ impl WorkspaceAggregation {
                 "function_declaration" => {
                     if let Some(name_node) = node.child_by_field_name("name") {
                         let name = node_text(name_node, source).to_string();
-                        self.globals.entry(name.clone()).or_default().push(GlobalEntry {
+                        let entries = self.globals.entry(name.clone()).or_default();
+                        entries.push(GlobalEntry {
                             name,
                             kind: DefKind::GlobalFunction,
                             range: ts_node_to_range(node),
                             selection_range: ts_node_to_range(name_node),
                             uri: uri.clone(),
                         });
+                        entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
                     }
                 }
                 "assignment_statement" => {
                     if let Some(left_node) = node.child_by_field_name("left") {
                         if let Some(first_var) = left_node.named_child(0) {
                             let name = node_text(first_var, source).to_string();
-                            self.globals.entry(name.clone()).or_default().push(GlobalEntry {
+                            let entries = self.globals.entry(name.clone()).or_default();
+                            entries.push(GlobalEntry {
                                 name,
                                 kind: DefKind::GlobalVariable,
                                 range: ts_node_to_range(node),
                                 selection_range: ts_node_to_range(first_var),
                                 uri: uri.clone(),
                             });
+                            entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
                         }
                     }
                 }

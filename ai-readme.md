@@ -107,8 +107,8 @@
 
 **索引架构（步骤 1-6）**：
 - `summary_builder.rs`：单文件 AST → DocumentSummary
-- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）
-- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护
+- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）；同名全局候选按 URI 路径深度优先排序（浅路径 > 深路径），确保项目级覆盖优先于自动生成 stub
+- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_field_chain` 对 table-extension 全局变量（如 `UE4.Foo = nil` 与 `UE4 = {}` 分开注册）支持 global_shard 限定名回退
 - 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
 
 - 构建：`cd lsp && cargo build`

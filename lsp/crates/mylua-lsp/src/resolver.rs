@@ -41,6 +41,11 @@ pub fn resolve_type(
 
 /// Resolve a chain of field accesses like `obj.pos.x`.
 /// Returns the resolved type of the final field.
+///
+/// When the base is a `GlobalRef`, tracks the qualified global name across
+/// the chain so that table-extension globals (e.g. `UE4.Foo = nil` registered
+/// separately from the `UE4 = {}` table) can be found via `global_shard`
+/// fallback when shape-based field lookup fails.
 pub fn resolve_field_chain(
     base_fact: &TypeFact,
     fields: &[String],
@@ -49,8 +54,32 @@ pub fn resolve_field_chain(
     let mut visited = HashSet::new();
     let mut current = resolve_recursive(base_fact, agg, 0, &mut visited);
 
+    let mut global_prefix = match base_fact {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+        _ => None,
+    };
+
     for field in fields {
-        current = resolve_field_access(&current.type_fact, field, agg, 0, &mut visited);
+        let result = resolve_field_access(&current.type_fact, field, agg, 0, &mut visited);
+
+        if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
+            if let Some(ref prefix) = global_prefix {
+                let qualified = format!("{}.{}", prefix, field);
+                let fallback = try_global_shard_qualified(&qualified, agg, 0, &mut visited);
+                if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
+                    current = fallback;
+                    global_prefix = Some(qualified);
+                    continue;
+                }
+            }
+        }
+
+        current = result;
+        if current.type_fact == TypeFact::Unknown {
+            global_prefix = None;
+        } else {
+            global_prefix = global_prefix.map(|p| format!("{}.{}", p, field));
+        }
     }
 
     current
@@ -228,6 +257,31 @@ fn resolve_global(
             _ => return ResolvedType::unknown(),
         };
         candidates[0].clone()
+    };
+
+    let mut resolved = resolve_recursive(
+        &candidate.type_fact,
+        agg,
+        depth + 1,
+        visited,
+    );
+    resolved.def_uri = Some(candidate.source_uri.clone());
+    resolved.def_range = Some(candidate.selection_range);
+    resolved
+}
+
+/// Fallback for `resolve_field_chain`: try a qualified name (e.g. `UE4.Foo`)
+/// directly in `global_shard`. Handles table-extension globals that were
+/// registered as separate entries rather than as fields on a table shape.
+fn try_global_shard_qualified(
+    qualified: &str,
+    agg: &mut WorkspaceAggregation,
+    depth: usize,
+    visited: &mut HashSet<String>,
+) -> ResolvedType {
+    let candidate = match agg.global_shard.get(qualified) {
+        Some(c) if !c.is_empty() => c[0].clone(),
+        _ => return ResolvedType::unknown(),
     };
 
     let mut resolved = resolve_recursive(

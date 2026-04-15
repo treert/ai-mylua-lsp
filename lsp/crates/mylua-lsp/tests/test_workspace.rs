@@ -73,6 +73,47 @@ fn workspace_project_dir() {
     );
 }
 
+/// When the same global is defined with `---@type` in two files at different path
+/// depths, the shallower file (fewer path segments) should win in resolution.
+#[test]
+fn workspace_global_priority_by_path_depth() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{TypeFact, SymbolicStub, KnownType};
+
+    let shallow_file = (
+        "test_utils.lua",
+        "---@type SubClass\nGLOBAL.Foo = nil\n",
+    );
+    let deep_file = (
+        "deep/nested/base_stub.lua",
+        "---@type BaseClass\nGLOBAL.Foo = nil\n",
+    );
+
+    // Insert deep file first, then shallow — sorting should still put shallow first
+    let (_docs, mut agg, _parser) = setup_workspace(&[deep_file, shallow_file]);
+
+    let candidates = agg.global_shard.get("GLOBAL.Foo")
+        .expect("GLOBAL.Foo should be in global_shard");
+    assert_eq!(candidates.len(), 2, "should have two candidates");
+    assert!(
+        candidates[0].source_uri.to_string().contains("test_utils.lua"),
+        "shallower file should be first candidate, got: {:?}",
+        candidates[0].source_uri,
+    );
+
+    // Verify resolver picks the shallow file's type (SubClass)
+    let resolved = resolver::resolve_type(
+        &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
+        &mut agg,
+    );
+    match &resolved.type_fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => {
+            assert_eq!(name, "SubClass", "resolver should pick the shallower file's type");
+        }
+        other => panic!("expected EmmyType(SubClass), got {:?}", other),
+    }
+}
+
 /// Test multi-file hover: hover2.lua depends on hover2_requrie.lua via require.
 #[test]
 fn workspace_hover_require_resolution() {
