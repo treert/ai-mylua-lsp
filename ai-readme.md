@@ -33,12 +33,35 @@
 | 路径 | 用途 |
 |------|------|
 | [`assets/lua5.4/`](assets/lua5.4/) | Lua 5.4 标准库 EmmyLua 类型注释（`basic.lua`、`string.lua`、`table.lua`、`math.lua`、`io.lua`、`os.lua` 等 11 个文件），作为内置类型定义的参考来源 |
-| [`tests/lua-root/`](tests/lua-root/) | 基础测试入口：`require`、EmmyLua `---@class` 注解、成员函数定义；真实第三方库（json4lua） |
+| [`tests/lua-root/`](tests/lua-root/) | **手工端到端测试目录**（详见下方说明）：用于在 Extension Development Host 中实际体验 LSP 能力 |
 | [`tests/complete/`](tests/complete/) | 补全功能测试 Lua fixture（17 个文件）：局部变量、表字段、require、class 方法、智能补全 |
 | [`tests/hover/`](tests/hover/) | Hover 功能测试 Lua fixture（18 个文件）：EmmyLua class、链式调用、require 模块、表展开、函数返回类型 |
 | [`tests/define/`](tests/define/) | 跳转定义测试 Lua fixture（7 个文件）：局部/全局定义、require 跳转、文件夹 init.lua |
 | [`tests/parse/`](tests/parse/) | 解析测试 Lua fixture（2 个文件）：语法错误恢复、各种语句类型 |
 | [`tests/project/`](tests/project/) | 多文件工程级测试 Lua fixture（5 个文件）：全局变量跨文件、枚举段 |
+
+#### `tests/lua-root/` — 手工端到端测试目录
+
+此目录用作 **Extension Development Host 的工作区**，开发者在其中打开 `.lua` 文件来实际体验 LSP 效果（高亮、hover、补全、跳转、诊断等）。与 `tests/` 下其他目录的区别：其他目录是 Rust 集成测试读取的 fixture，而 `lua-root` 是人手动操作的端到端体验环境。
+
+**启动方式**：运行 `.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows），脚本会自动构建 LSP + 扩展并打开此目录。参见 Skill `.cursor/skills/test-extension/`。
+
+**目录结构与测试重点**：
+
+| 文件 | 覆盖场景 |
+|------|----------|
+| `test.lua` | `require` 跳转（json4lua）、`---@class` 声明 + 成员方法 |
+| `json.lua` | 真实第三方库（json4lua），验证无语法错误解析 |
+| `test_lua_helper.lua` | `---@class` + `---@field`、`---@type` 类型断言、`self` 字段推断、跨文件 `UE4.UMiscSystemLibrary` 链式调用、未定义字段诊断 |
+| `test_lua_2.lua` | 跨文件 `ABC` class 成员方法 + 字段赋值、全局 dotted 表达式 |
+| `UEAnnotation/test_utils.lua` | 多 class 继承（`T3: T1,T2`）、`---@return` 链式调用、UE 风格 stub 重写（`UMiscSystemLibrary_` 继承 `UMiscSystemLibrary`）|
+| `UEAnnotation/ue-comment/ue-comment-xxxxx.lua` | UE4 自动导出注释风格（`--[[ ]]` + `---@class` 继承链）、子目录 require 解析 |
+
+**特殊模式**：
+- **UE4 全局表** — `UE4.UMiscSystemLibrary` 模拟 Unreal Engine Lua 绑定的多层 dotted 全局访问，测试跨文件字段解析和类型推断
+- **Class 继承链** — `UMiscSystemLibrary_ : UMiscSystemLibrary`、`T3 : T1, T2`，测试多继承和方法/字段解析
+- **未定义字段** — `x.no_exist`、`ttt1:f333()` 等，测试语义诊断是否正确报 warning/error
+- **跨文件 self 推断** — `ABC` class 在 `test_lua_helper.lua` 定义，在 `test_lua_2.lua` 扩展方法和字段
 
 ### Grammar — Tree-sitter 解析器（阶段 A 核心）
 
