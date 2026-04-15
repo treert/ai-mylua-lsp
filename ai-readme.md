@@ -76,7 +76,7 @@
 - **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **推断类型展示**（链式字段解析）
 - **references**：单文件 local scope + 全工作区全局符号引用
 - **workspace/symbol**：全局函数/变量模糊搜索
-- **EmmyLua 注解**：`@class`/`@field`/`@param`/`@return`/`@type`/`@alias`；`@type` 绑定到紧接 local
+- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；54 个单元测试
 - **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全**
 - **rename**：单文件 local + 全工作区全局（含 prepareRename）
 - **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记

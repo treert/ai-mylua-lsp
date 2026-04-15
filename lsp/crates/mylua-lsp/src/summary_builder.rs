@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 
 use tower_lsp_server::ls_types::Uri;
 
-use crate::emmy::{collect_preceding_comments, parse_emmy_comments, EmmyAnnotation};
+use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, parse_type_from_str, EmmyAnnotation, EmmyType};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape, TableShapeId, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
@@ -60,7 +60,7 @@ struct BuildContext<'a> {
     table_shapes: HashMap<TableShapeId, TableShape>,
     next_shape_id: u32,
     /// `---@type X` annotation pending attachment to the next local declaration.
-    pending_type_annotation: Option<String>,
+    pending_type_annotation: Option<EmmyType>,
     /// Class being built across consecutive emmy_comment nodes.
     pending_class: Option<(String, Vec<TypeFieldDef>)>,
 }
@@ -72,7 +72,7 @@ impl<'a> BuildContext<'a> {
         id
     }
 
-    fn take_pending_type(&mut self) -> Option<String> {
+    fn take_pending_type(&mut self) -> Option<EmmyType> {
         self.pending_type_annotation.take()
     }
 }
@@ -148,8 +148,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
-            if let Some(ref type_name) = pending_type {
-                let type_fact = emmy_type_text_to_fact(type_name);
+            if let Some(ref type_expr) = pending_type {
+                let type_fact = emmy_type_to_fact(type_expr);
                 ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                     name: name.clone(),
                     type_fact,
@@ -189,7 +189,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 }
 
 /// Extract `---@type X` from a comment node immediately preceding the given node.
-fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> Option<EmmyType> {
     let prev = node.prev_sibling()?;
     match prev.kind() {
         "emmy_comment" => {
@@ -202,7 +202,7 @@ fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> 
                             if let Some(rest) = rest.strip_prefix("@type") {
                                 let type_text = rest.trim();
                                 if !type_text.is_empty() {
-                                    return Some(type_text.to_string());
+                                    return Some(parse_type_from_str(type_text));
                                 }
                             }
                         }
@@ -216,7 +216,7 @@ fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> 
             if let Some(rest) = text.strip_prefix("---@type") {
                 let type_text = rest.trim();
                 if !type_text.is_empty() {
-                    return Some(type_text.to_string());
+                    return Some(parse_type_from_str(type_text));
                 }
             }
             None
@@ -329,16 +329,18 @@ fn build_function_summary(
     // Extract params from Emmy annotations
     for ann in &annotations {
         match ann {
-            EmmyAnnotation::Param { name: pname, type_text, .. } => {
+            EmmyAnnotation::Param { name: pname, type_expr, .. } => {
                 emmy_annotated = true;
                 params.push(ParamInfo {
                     name: pname.clone(),
-                    type_fact: emmy_type_text_to_fact(type_text),
+                    type_fact: emmy_type_to_fact(type_expr),
                 });
             }
-            EmmyAnnotation::Return { type_text, .. } => {
+            EmmyAnnotation::Return { return_types, .. } => {
                 emmy_annotated = true;
-                returns.push(emmy_type_text_to_fact(type_text));
+                for rt in return_types {
+                    returns.push(emmy_type_to_fact(rt));
+                }
             }
             _ => {}
         }
@@ -482,8 +484,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
                 let type_fact = if i == 0 {
-                    if let Some(ref type_name) = pending_type {
-                        emmy_type_text_to_fact(type_name)
+                    if let Some(ref type_expr) = pending_type {
+                        emmy_type_to_fact(type_expr)
                     } else {
                         value_node
                             .map(|v| infer_expression_type(ctx, v, 0))
@@ -508,8 +510,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let full_text = node_text(var_node, ctx.source);
                 if full_text.contains('.') {
                     let type_fact = if i == 0 {
-                        if let Some(ref type_name) = pending_type {
-                            emmy_type_text_to_fact(type_name)
+                        if let Some(ref type_expr) = pending_type {
+                            emmy_type_to_fact(type_expr)
                         } else {
                             value_node
                                 .map(|v| infer_expression_type(ctx, v, 0))
@@ -606,21 +608,21 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
                 ctx.pending_class = Some((name.clone(), Vec::new()));
             }
-            EmmyAnnotation::Field { name: fname, type_text, .. } => {
+            EmmyAnnotation::Field { name: fname, type_expr, .. } => {
                 if let Some((_, ref mut fields)) = ctx.pending_class {
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
-                        type_fact: emmy_type_text_to_fact(type_text),
+                        type_fact: emmy_type_to_fact(type_expr),
                         range: ts_node_to_range(node),
                     });
                 }
             }
-            EmmyAnnotation::Type { type_text, .. } => {
+            EmmyAnnotation::Type { type_expr, .. } => {
                 if ctx.pending_class.is_none() {
-                    ctx.pending_type_annotation = Some(type_text.clone());
+                    ctx.pending_type_annotation = Some(type_expr.clone());
                 }
             }
-            EmmyAnnotation::Alias { name, type_text } => {
+            EmmyAnnotation::Alias { name, type_expr } => {
                 if let Some((cname, fields)) = ctx.pending_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
@@ -635,7 +637,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: Vec::new(),
                     range: ts_node_to_range(node),
                 });
-                let _ = type_text;
+                let _ = type_expr;
             }
             _ => {}
         }
@@ -889,52 +891,6 @@ fn extract_table_shape(
         if !cursor.goto_next_sibling() {
             break;
         }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Emmy type text → TypeFact
-// ---------------------------------------------------------------------------
-
-fn emmy_type_text_to_fact(type_text: &str) -> TypeFact {
-    let text = type_text.trim();
-    if text.is_empty() {
-        return TypeFact::Unknown;
-    }
-
-    // Union types: "string|number"
-    if text.contains('|') {
-        let parts: Vec<TypeFact> = text
-            .split('|')
-            .map(|s| emmy_type_text_to_fact(s.trim()))
-            .collect();
-        if parts.len() == 1 {
-            return parts.into_iter().next().unwrap();
-        }
-        return TypeFact::Union(parts);
-    }
-
-    // Optional: "string?"
-    if let Some(base) = text.strip_suffix('?') {
-        return TypeFact::Union(vec![
-            emmy_type_text_to_fact(base),
-            TypeFact::Known(KnownType::Nil),
-        ]);
-    }
-
-    match text {
-        "nil" => TypeFact::Known(KnownType::Nil),
-        "boolean" => TypeFact::Known(KnownType::Boolean),
-        "number" => TypeFact::Known(KnownType::Number),
-        "integer" => TypeFact::Known(KnownType::Integer),
-        "string" => TypeFact::Known(KnownType::String),
-        "table" => TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX))),
-        "function" => TypeFact::Known(KnownType::Function(FunctionSignature {
-            params: Vec::new(),
-            returns: Vec::new(),
-        })),
-        "any" => TypeFact::Unknown,
-        _ => TypeFact::Known(KnownType::EmmyType(text.to_string())),
     }
 }
 
