@@ -26,6 +26,20 @@
       ],
       "preLaunchTask": "npm: compile",
       "sourceMaps": true
+    },
+    {
+      "name": "Test Extension (lua-root)",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "${workspaceFolder}/../tests/lua-root"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/out/**/*.js"
+      ],
+      "preLaunchTask": "npm: compile",
+      "sourceMaps": true
     }
   ]
 }
