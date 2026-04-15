@@ -78,14 +78,16 @@ pub struct CachedResolution {
     pub dirty: bool,
 }
 
-/// Priority key for sorting candidates: shallower paths (fewer segments) win,
-/// ties broken by shorter total path length, then lexicographic URI string.
-/// Uses full URI string (includes `file:///` scheme), which is fine because all
-/// file URIs share the same prefix so relative ordering is preserved.
-fn uri_priority_key(uri: &Uri) -> (usize, usize, String) {
+/// Priority key for sorting candidates (smaller = higher priority):
+/// 1. Paths containing "annotation" (case-insensitive) come first
+/// 2. Shallower paths (fewer `/` segments) win
+/// 3. Shorter total path length as tiebreaker
+/// 4. Lexicographic URI string for full determinism
+fn uri_priority_key(uri: &Uri) -> (u8, usize, usize, String) {
     let path = uri.to_string();
+    let has_annotation = if path.to_ascii_lowercase().contains("annotation") { 0 } else { 1 };
     let depth = path.matches('/').count();
-    (depth, path.len(), path)
+    (has_annotation, depth, path.len(), path)
 }
 
 impl WorkspaceAggregation {
