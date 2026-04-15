@@ -96,5 +96,9 @@ pub fn path_to_uri(path: &Path) -> Option<Uri> {
         std::env::current_dir().ok()?.join(path)
     };
     let normalized = abs.to_string_lossy().replace('\\', "/");
-    format!("file:///{}", normalized).parse().ok()
+    if cfg!(windows) {
+        format!("file:///{}", normalized).parse().ok()
+    } else {
+        format!("file://{}", normalized).parse().ok()
+    }
 }

@@ -154,7 +154,11 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     let s = uri.to_string();
     let path_str = s.strip_prefix("file:///")?;
     let decoded = percent_decode(path_str);
-    Some(PathBuf::from(decoded))
+    if cfg!(not(windows)) {
+        Some(PathBuf::from(format!("/{}", decoded)))
+    } else {
+        Some(PathBuf::from(decoded))
+    }
 }
 
 fn percent_decode(s: &str) -> String {
