@@ -53,7 +53,7 @@
         },
         "mylua.debug.fileLog": {
           "type": "boolean",
-          "default": true,
+          "default": false,
           "description": "Write debug log to .vscode/mylua-lsp.log in the workspace."
         },
         "mylua.runtime.version": {

@@ -26,8 +26,8 @@ pub fn hover(
         ident_node.parent().map_or("none", |p| p.kind()),
     );
 
-    // Try field expression hover: walk up ancestors to find field_expression or
-    // a `variable` node that contains a dot (e.g. `x.a` on the LHS of assignment).
+    // Try field expression hover: walk up ancestors to find field_expression,
+    // a `variable` node that contains a dot, or a `function_name` in a declaration.
     {
         let mut n = ident_node;
         for _ in 0..4 {
@@ -42,10 +42,20 @@ pub fn hover(
                 if p.kind() == "variable" {
                     let var_text = node_text(p, doc.text.as_bytes());
                     if var_text.contains('.') {
-                        if let Some(result) = hover_dotted_variable(var_text, ident_text, uri, index, all_docs) {
-                            return Some(result);
+                        let last_field = var_text.rsplit('.').next().unwrap_or("");
+                        if ident_text == last_field {
+                            if let Some(result) = hover_dotted_variable(var_text, ident_text, uri, index, all_docs) {
+                                return Some(result);
+                            }
+                            break;
                         }
-                        break;
+                    }
+                }
+                if p.kind() == "function_name" {
+                    if let Some(decl) = p.parent() {
+                        if decl.kind() == "function_declaration" || decl.kind() == "local_function_declaration" {
+                            return hover_at_declaration(decl, doc);
+                        }
                     }
                 }
                 n = p;
@@ -82,6 +92,54 @@ pub fn hover(
     }
 
     None
+}
+
+/// Build hover directly from a function/local declaration node at the definition site.
+fn hover_at_declaration(
+    decl_node: tree_sitter::Node,
+    doc: &Document,
+) -> Option<Hover> {
+    let source = doc.text.as_bytes();
+
+    let comment_lines = collect_preceding_comments(decl_node, source);
+    let comment_text = comment_lines.join("\n");
+    let annotations = parse_emmy_comments(&comment_text);
+    let emmy_md = format_annotations_markdown(&annotations);
+
+    let def_line = node_text(decl_node, source)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .to_string();
+
+    let kind_label = match decl_node.kind() {
+        "local_function_declaration" => "local function",
+        _ => "function",
+    };
+
+    let mut parts = Vec::new();
+    parts.push(format!("```lua\n{}\n```", def_line));
+    parts.push(format!("*{}*", kind_label));
+
+    if !emmy_md.is_empty() {
+        parts.push(format!("---\n{}", emmy_md));
+    }
+
+    let doc_text = extract_doc_lines(&comment_lines);
+    if !doc_text.is_empty() {
+        parts.push(doc_text);
+    }
+
+    let name_node = decl_node.child_by_field_name("name");
+    let range = name_node.map(|n| crate::util::ts_node_to_range(n));
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range,
+    })
 }
 
 fn hover_dotted_variable(
@@ -294,21 +352,9 @@ fn build_hover_for_definition(
         parts.push(format!("---\n{}", emmy_md));
     }
 
-    let doc_lines: Vec<&str> = comment_lines
-        .iter()
-        .filter_map(|l| {
-            let stripped = l.strip_prefix("---")?.trim();
-            if stripped.starts_with('@') {
-                None
-            } else if stripped.is_empty() {
-                None
-            } else {
-                Some(stripped)
-            }
-        })
-        .collect();
-    if !doc_lines.is_empty() {
-        parts.push(doc_lines.join("\n"));
+    let doc_text = extract_doc_lines(&comment_lines);
+    if !doc_text.is_empty() {
+        parts.push(doc_text);
     }
 
     Some(Hover {
@@ -318,6 +364,29 @@ fn build_hover_for_definition(
         }),
         range: Some(def.selection_range.clone()),
     })
+}
+
+/// Extract plain documentation text from collected comment lines.
+/// Strips `---` or `--` prefix, excludes `@`-prefixed annotation lines.
+fn extract_doc_lines(comment_lines: &[String]) -> String {
+    let lines: Vec<&str> = comment_lines
+        .iter()
+        .filter_map(|l| {
+            let stripped = if let Some(s) = l.strip_prefix("---") {
+                s.trim()
+            } else if let Some(s) = l.strip_prefix("--") {
+                s.trim()
+            } else {
+                return None;
+            };
+            if stripped.starts_with('@') || stripped.is_empty() {
+                None
+            } else {
+                Some(stripped)
+            }
+        })
+        .collect();
+    lines.join("\n")
 }
 
 fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {

@@ -19,6 +19,9 @@ function T2:get_t1() end
 ---@field t3 string
 T3 = {}
 
+--[[
+UMiscSystemLibrary_ tips
+]]
 ---@class UMiscSystemLibrary_:UMiscSystemLibrary
 UMiscSystemLibrary_ = {}
 
@@ -29,6 +32,7 @@ function UMiscSystemLibrary_.GetAbilitySystemComponentFromActor(Actor) end
 
 UE4 = {}
 
+--- redefine UMiscSystemLibrary
 ---@type UMiscSystemLibrary_
 UE4.UMiscSystemLibrary = nil
 

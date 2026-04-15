@@ -2,6 +2,7 @@
 ---@field a integer
 local ABC = {}
 
+-- a local x
 ---@type ABC123
 local x = 1
 x.a = 1

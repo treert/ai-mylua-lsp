@@ -8,6 +8,10 @@
 #
 set -euo pipefail
 
+# Ensure cargo/rustup and common tools are on PATH when launched outside
+# an interactive shell (e.g. from Cursor agent or a bare login shell).
+[[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
+
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXT_DIR="$REPO_ROOT/vscode-extension"
 LUA_ROOT="$REPO_ROOT/tests/lua-root"

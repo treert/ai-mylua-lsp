@@ -3,6 +3,8 @@ Misc System Library
 ]]
 ---@class UMiscSystemLibrary: UBlueprintFunctionLibrary
 UMiscSystemLibrary = {}
+
+--- first define
 ---@type UMiscSystemLibrary
 UE4.UMiscSystemLibrary = nil
 

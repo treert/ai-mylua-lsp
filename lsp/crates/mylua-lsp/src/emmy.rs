@@ -740,10 +740,31 @@ fn is_type_start_keyword(s: &str) -> bool {
 }
 
 // ===========================================================================
-// Tree-sitter comment collection (unchanged)
+// Tree-sitter comment collection
 // ===========================================================================
 
-/// Collect EmmyLua comment lines immediately before a given node.
+/// Extract text content from a Lua block comment (`--[[ ... ]]` or `--[=[ ... ]=]`).
+fn extract_block_comment_content(text: &str) -> Option<String> {
+    let rest = text.strip_prefix("--[")?;
+    let eq_count = rest.chars().take_while(|c| *c == '=').count();
+    let rest = &rest[eq_count..];
+    let rest = rest.strip_prefix('[')?;
+    let mut closing = String::from("]");
+    for _ in 0..eq_count {
+        closing.push('=');
+    }
+    closing.push(']');
+    let content = rest.strip_suffix(&closing)?;
+    Some(content.to_string())
+}
+
+/// Collect comment lines immediately before a given node.
+///
+/// Collects all consecutive preceding comment siblings:
+/// - `emmy_comment` nodes (`---@xxx` lines)
+/// - `---` line comments (Emmy doc lines)
+/// - `--[[ ... ]]` block comments (content converted to `--- line` format)
+/// - `--` plain line comments (kept as-is for doc display)
 pub fn collect_preceding_comments<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
@@ -769,6 +790,22 @@ pub fn collect_preceding_comments<'a>(
             "comment" => {
                 let text = prev.utf8_text(source).unwrap_or("");
                 if text.starts_with("---") {
+                    comments.push(text.to_string());
+                    sibling = prev.prev_sibling();
+                    continue;
+                }
+                if let Some(content) = extract_block_comment_content(text) {
+                    let block_lines: Vec<String> = content
+                        .lines()
+                        .map(|l| l.trim())
+                        .filter(|l| !l.is_empty())
+                        .map(|l| format!("--- {}", l))
+                        .collect();
+                    comments.extend(block_lines.into_iter().rev());
+                    sibling = prev.prev_sibling();
+                    continue;
+                }
+                if text.starts_with("--") {
                     comments.push(text.to_string());
                     sibling = prev.prev_sibling();
                     continue;
@@ -1512,5 +1549,39 @@ mod tests {
             }
             _ => panic!("expected function type fact"),
         }
+    }
+
+    // -- Block comment content extraction --
+
+    #[test]
+    fn extract_block_comment_simple() {
+        let content = extract_block_comment_content("--[[ hello world ]]");
+        assert_eq!(content, Some(" hello world ".to_string()));
+    }
+
+    #[test]
+    fn extract_block_comment_multiline() {
+        let text = "--[[\nMisc System Library\n]]";
+        let content = extract_block_comment_content(text).unwrap();
+        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines, vec!["Misc System Library"]);
+    }
+
+    #[test]
+    fn extract_block_comment_with_equals() {
+        let content = extract_block_comment_content("--[=[ some text ]=]");
+        assert_eq!(content, Some(" some text ".to_string()));
+    }
+
+    #[test]
+    fn extract_block_comment_double_equals() {
+        let content = extract_block_comment_content("--[==[ text ]==]");
+        assert_eq!(content, Some(" text ".to_string()));
+    }
+
+    #[test]
+    fn extract_block_comment_not_block() {
+        assert_eq!(extract_block_comment_content("-- regular comment"), None);
+        assert_eq!(extract_block_comment_content("--- emmy comment"), None);
     }
 }
