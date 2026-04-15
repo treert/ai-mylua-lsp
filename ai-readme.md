@@ -42,7 +42,7 @@
 
 ### Grammar — Tree-sitter 解析器（阶段 A 核心）
 
-**BNF 规范**：[`grammar/lua-emmy.bnf`](grammar/lua-emmy.bnf) — Lua 5.3+/5.4 EBNF + EmmyLua 子语法。
+**BNF 规范**：[`grammar/lua.bnf`](grammar/lua.bnf)（Lua 5.3+/5.4 EBNF）+ [`grammar/emmy.bnf`](grammar/emmy.bnf)（EmmyLua 注解子语法）。
 
 **解析器实现**（已完成并通过验证）：
 

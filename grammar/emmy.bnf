@@ -1,0 +1,344 @@
+# ============================================================================
+# EmmyLua Annotation — Extended BNF Grammar Specification
+# ============================================================================
+#
+# This file is the **formal grammar reference** for EmmyLua structured-comment
+# annotations.  It defines the syntax inside `---` doc-comment lines.
+#
+# The Lua Tree-sitter parser (see `lua.bnf`) treats each `---` line as an
+# opaque `emmy_line` token.  This grammar specifies how the LSP's annotation
+# layer (Rust recursive-descent parser) interprets the **text content** of
+# those tokens.
+#
+#   Part 1  Shared terminals (imported from lua.bnf)
+#   Part 2  Comment block structure
+#   Part 3  Annotations (@class, @field, @param, …)
+#   Part 4  Type expressions
+#   Part 5  Implementation notes
+#
+# Notation (ISO 14977 EBNF with light extensions):
+#
+#   { A }        zero or more repetitions of A
+#   [ A ]        optional A
+#   A | B        alternative
+#   'x'          terminal string / keyword
+#   ( A )        grouping
+#   (* … *)      inline comment (EBNF standard)
+#   #            line comment (this file only)
+#
+# ============================================================================
+
+
+# ############################################################################
+#  Part 1 — Shared Terminals
+# ############################################################################
+#
+# The following terminals are shared with `lua.bnf`.  Their full lexical
+# definitions live there; here we only list them for reference.
+#
+
+Name               ::= /[a-zA-Z_][a-zA-Z0-9_]*/
+
+LiteralString      ::= <short or long string literal>
+(* Used in literal types: e.g. '"hello"', "'world'" *)
+
+Numeral            ::= <integer or float literal>
+(* Used in literal types: e.g. 42, 3.14 *)
+
+
+# ############################################################################
+#  Part 2 — Comment Block Structure
+# ############################################################################
+#
+# EmmyLua annotations live inside '---' doc-comment lines.  They are NOT Lua
+# keywords — the '@xxx' tags are only meaningful after the '---' prefix.
+#
+# Multiple consecutive '---' lines form a single doc-comment block
+# (emmy_comment node in the Lua CST).  The LSP parses each line's content
+# independently according to this grammar.
+#
+
+emmy_line          ::= '---' ( emmy_annotation | emmy_alias_member | emmy_doc_line )
+
+emmy_doc_line      ::= <any text not starting with '@' or '|'>
+(* Free-form documentation text, preserved for Hover display. *)
+
+
+# ############################################################################
+#  Part 3 — Annotations
+# ############################################################################
+
+emmy_annotation    ::= emmy_class
+                     | emmy_field
+                     | emmy_param
+                     | emmy_return
+                     | emmy_type_annotation
+                     | emmy_alias
+                     | emmy_generic
+                     | emmy_enum
+                     | emmy_overload
+                     | emmy_vararg
+                     | emmy_diagnostic
+                     | emmy_deprecated
+                     | emmy_async
+                     | emmy_version
+                     | emmy_see
+                     | emmy_nodiscard
+                     | emmy_cast
+                     | emmy_source
+                     | emmy_unknown_tag
+
+# ---- @class ----------------------------------------------------------------
+
+emmy_class         ::= '@class' Name [ ':' emmy_parent_list ]
+                        [ emmy_description ]
+
+emmy_parent_list   ::= Name { ',' Name }
+
+# ---- @field ----------------------------------------------------------------
+
+emmy_field         ::= '@field' [ field_visibility ] field_key emmy_type_expr
+                        [ emmy_description ]
+
+field_visibility   ::= 'public' | 'protected' | 'private' | 'package'
+
+field_key          ::= Name
+                     | '[' emmy_type_expr ']'
+
+# ---- @param ----------------------------------------------------------------
+
+emmy_param         ::= '@param' param_name [ '?' ] emmy_type_expr
+                        [ emmy_description ]
+
+param_name         ::= Name | '...'
+
+# ---- @return ---------------------------------------------------------------
+
+emmy_return        ::= '@return' emmy_type_list [ Name ]
+                        [ emmy_description ]
+
+# ---- @type -----------------------------------------------------------------
+
+emmy_type_annotation ::= '@type' emmy_type_expr [ emmy_description ]
+
+(* Named 'emmy_type_annotation' (not 'emmy_type') to avoid collision with
+   the type expression production 'emmy_type_expr'. *)
+
+# ---- @alias ----------------------------------------------------------------
+
+emmy_alias         ::= '@alias' Name emmy_type_expr
+                        [ emmy_description ]
+
+(* Alias enum values appear as continuation lines: *)
+
+emmy_alias_member  ::= '|' emmy_type_expr [ '#' emmy_description ]
+
+# ---- @generic --------------------------------------------------------------
+
+emmy_generic       ::= '@generic' generic_param { ',' generic_param }
+
+generic_param      ::= Name [ ':' emmy_type_expr ]
+
+# ---- @enum -----------------------------------------------------------------
+
+emmy_enum          ::= '@enum' Name
+
+# ---- @overload -------------------------------------------------------------
+
+emmy_overload      ::= '@overload' emmy_fun_type
+
+# ---- @vararg ---------------------------------------------------------------
+
+emmy_vararg        ::= '@vararg' emmy_type_expr
+
+# ---- @diagnostic -----------------------------------------------------------
+
+emmy_diagnostic    ::= '@diagnostic' diagnostic_action
+                        [ ':' diagnostic_name_list ]
+
+diagnostic_action  ::= 'disable' | 'enable' | 'disable-next-line'
+                     | 'disable-line' | 'enable-next-line' | 'enable-line'
+
+diagnostic_name_list ::= Name { ',' Name }
+
+# ---- @deprecated -----------------------------------------------------------
+
+emmy_deprecated    ::= '@deprecated' [ emmy_description ]
+
+# ---- @async ----------------------------------------------------------------
+
+emmy_async         ::= '@async'
+
+# ---- @version --------------------------------------------------------------
+
+emmy_version       ::= '@version' version_constraint { ',' version_constraint }
+
+version_constraint ::= [ '>' | '>=' | '<' | '<=' ] version_id
+
+version_id         ::= Name { '.' Name }
+(* Allows dotted identifiers: lua5.3, lua5.4, 5.3, jit, etc. *)
+
+# ---- @see ------------------------------------------------------------------
+
+emmy_see           ::= '@see' Name { '.' Name } [ '#' Name ]
+
+# ---- @nodiscard ------------------------------------------------------------
+
+emmy_nodiscard     ::= '@nodiscard'
+
+# ---- @cast -----------------------------------------------------------------
+
+emmy_cast          ::= '@cast' Name emmy_type_expr
+
+# ---- @source ---------------------------------------------------------------
+
+emmy_source        ::= '@source' LiteralString
+
+# ---- Unknown tags (forward-compatible) -------------------------------------
+
+emmy_unknown_tag   ::= '@' Name <rest-of-line>
+
+# ---- Description text ------------------------------------------------------
+
+emmy_description   ::= <rest-of-line text, may include inline markdown / links>
+(* Captured as a single text node for Hover display.  Not further parsed. *)
+
+
+# ############################################################################
+#  Part 4 — Type Expressions
+# ############################################################################
+#
+# Type expressions have their own precedence:
+#
+#   Lowest   '|'    union type         left
+#            '?'    optional suffix    postfix
+#            '[]'   array suffix       postfix
+#   Highest  atom / function / table   —
+#
+
+emmy_type_expr     ::= emmy_union_type
+
+emmy_union_type    ::= emmy_optional_type { '|' emmy_optional_type }
+
+emmy_optional_type ::= emmy_array_type [ '?' ]
+
+emmy_array_type    ::= emmy_atom_type { '[]' }
+
+emmy_atom_type     ::= emmy_literal_type
+                     | emmy_name_type
+                     | emmy_fun_type
+                     | emmy_table_type
+                     | emmy_paren_type
+                     | emmy_variadic_type
+
+# Literal types
+emmy_literal_type  ::= LiteralString                (* e.g. '"hello"' *)
+                     | Numeral                       (* e.g. 42 *)
+                     | 'true' | 'false'
+                     | 'nil'
+
+# Named type (possibly generic)
+emmy_name_type     ::= Name [ '<' emmy_type_list '>' ]
+
+# Function type
+emmy_fun_type      ::= 'fun' '(' [ emmy_fun_param_list ] ')'
+                        [ ':' emmy_type_list ]
+
+emmy_fun_param_list ::= emmy_fun_param { ',' emmy_fun_param }
+
+emmy_fun_param     ::= Name ':' emmy_type_expr       (* named parameter *)
+                     | emmy_type_expr                  (* positional / type-only *)
+                     | '...' [ ':' emmy_type_expr ]    (* variadic *)
+(* Disambiguation: if Name is followed by ':', it is the parameter name;
+   otherwise the Name begins a type expression.  Resolved by 1-token
+   lookahead in the recursive-descent parser. *)
+
+# Table literal type
+(* 'table<K,V>' is parsed as emmy_name_type with Name='table' + generic args,
+   since 'table' is a valid Name.  emmy_table_type handles only the '{...}'
+   inline-field syntax, avoiding ambiguity. *)
+emmy_table_type    ::= '{' [ emmy_table_field_list ] '}'
+
+emmy_table_field_list ::= emmy_table_field { ',' emmy_table_field }
+
+emmy_table_field   ::= Name ':' emmy_type_expr
+                     | '[' emmy_type_expr ']' ':' emmy_type_expr
+
+# Parenthesized type (for grouping in unions, etc.)
+emmy_paren_type    ::= '(' emmy_type_expr ')'
+
+# Variadic type in parameter position
+emmy_variadic_type ::= '...' emmy_type_expr
+
+# Type list (for multi-return, generic args, etc.)
+emmy_type_list     ::= emmy_type_expr { ',' emmy_type_expr }
+
+
+# ############################################################################
+#  Part 5 — Implementation Notes
+# ############################################################################
+#
+# 5.1  Parser Strategy
+# --------------------
+# This grammar is implemented as a hand-written recursive-descent parser
+# in Rust (`lsp/crates/mylua-lsp/src/emmy.rs`), NOT via Tree-sitter.
+#
+# Rationale:
+#   - Input is tiny (single lines, typically < 100 chars)
+#   - Error isolation: malformed annotations cannot break Lua parsing
+#   - Fast iteration: changes require only `cargo build`, not
+#     `tree-sitter generate` + C recompilation
+#   - Full control over error recovery and partial-parse results
+#
+# 5.2  Type Expression Precedence
+# --------------------------------
+#
+#   | Layer                   | prec | associativity |
+#   |-------------------------|------|---------------|
+#   | emmy_union_type ('|')   | 1    | left          |
+#   | emmy_optional_type ('?')| 2    | postfix       |
+#   | emmy_array_type ('[]')  | 3    | postfix       |
+#   | emmy_atom_type          | —    | —             |
+#
+# 5.3  Tokenization
+# -----------------
+# The parser operates on individual `---` line content (prefix stripped).
+# A lightweight tokenizer splits the line into:
+#
+#   Name          /[a-zA-Z_][a-zA-Z0-9_]*/
+#   Number        /[0-9][0-9a-fA-FxXpPeE._+-]*/
+#   String        '"...' or "'..."  (simple, no escape parsing needed)
+#   Punctuation   @ | ? : , < > ( ) [ ] { } .
+#   '[]'          array suffix (two-char token)
+#   '...'         vararg (three-char token)
+#   Whitespace    skipped
+#
+# 5.4  Error Recovery
+# -------------------
+# On parse failure, the parser should:
+#   1. Emit what has been successfully parsed so far
+#   2. Capture the remaining text as a raw description / unknown content
+#   3. Never propagate errors to other annotations or Lua code
+#
+# 5.5  AST Node Naming Conventions
+# --------------------------------
+#
+#   | BNF production          | Rust AST enum / struct              |
+#   |-------------------------|-------------------------------------|
+#   | emmy_annotation         | EmmyAnnotation (enum)               |
+#   | emmy_class              | EmmyAnnotation::Class               |
+#   | emmy_field              | EmmyAnnotation::Field               |
+#   | emmy_param              | EmmyAnnotation::Param               |
+#   | emmy_return             | EmmyAnnotation::Return              |
+#   | emmy_type_annotation    | EmmyAnnotation::Type                |
+#   | emmy_alias              | EmmyAnnotation::Alias               |
+#   | emmy_type_expr          | EmmyType (enum)                     |
+#   | emmy_union_type         | EmmyType::Union                     |
+#   | emmy_name_type          | EmmyType::Named                     |
+#   | emmy_fun_type           | EmmyType::Function                  |
+#   | emmy_table_type         | EmmyType::Table                     |
+#   | emmy_literal_type       | EmmyType::Literal                   |
+#   | emmy_array_type         | EmmyType::Array                     |
+#   | emmy_optional_type      | EmmyType::Optional                  |
+#   | emmy_paren_type         | (unwrapped to inner EmmyType)       |
+#   | emmy_variadic_type      | EmmyType::Variadic                  |
