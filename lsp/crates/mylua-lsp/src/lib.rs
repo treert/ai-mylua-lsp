@@ -133,8 +133,12 @@ impl Backend {
 
     fn scan_workspace(&self) {
         let roots = self.workspace_roots.lock().unwrap().clone();
+        let require_config = {
+            let cfg = self.config.lock().unwrap();
+            cfg.require.clone()
+        };
 
-        let require_map = workspace_scanner::scan_workspace_lua_files(&roots);
+        let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config);
         {
             let mut idx = self.index.lock().unwrap();
             for (module, uri) in &require_map {
@@ -296,10 +300,6 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.documents
-            .lock()
-            .unwrap()
-            .remove(&params.text_document.uri);
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
@@ -313,17 +313,16 @@ impl LanguageServer for Backend {
                         if path.extension().map_or(false, |e| e == "lua") {
                             self.index_file_from_disk(&path);
                             let roots = self.workspace_roots.lock().unwrap().clone();
+                            let require_config = self.config.lock().unwrap().require.clone();
                             for root in &roots {
-                                if let Some(module) =
-                                    path.strip_prefix(root).ok().and_then(|rel| {
-                                        let stem = rel.with_extension("");
-                                        Some(stem.to_string_lossy().replace('\\', ".").replace('/', "."))
-                                    })
-                                {
-                                    self.index.lock().unwrap().set_require_mapping(
-                                        module,
-                                        change.uri.clone(),
+                                if path.starts_with(root) {
+                                    let modules = workspace_scanner::file_to_module_paths(
+                                        root, &path, &require_config.paths,
                                     );
+                                    let mut idx = self.index.lock().unwrap();
+                                    for module in modules {
+                                        idx.set_require_mapping(module, change.uri.clone());
+                                    }
                                     break;
                                 }
                             }

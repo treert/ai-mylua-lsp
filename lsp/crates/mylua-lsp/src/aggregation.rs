@@ -223,6 +223,8 @@ impl WorkspaceAggregation {
             !deps.is_empty()
         });
 
+        self.require_map.retain(|_, target_uri| target_uri != uri);
+
         self.remove_legacy_globals(uri);
     }
 
