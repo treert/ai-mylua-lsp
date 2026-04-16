@@ -124,11 +124,19 @@ fn find_global_references(
     let mut locations = Vec::new();
 
     if include_declaration {
-        if let Some(entries) = index.globals.get(name) {
-            for entry in entries {
+        if let Some(candidates) = index.global_shard.get(name) {
+            for candidate in candidates {
                 locations.push(Location {
-                    uri: entry.uri.clone(),
-                    range: entry.selection_range.clone(),
+                    uri: candidate.source_uri.clone(),
+                    range: candidate.selection_range,
+                });
+            }
+        }
+        if let Some(candidates) = index.type_shard.get(name) {
+            for candidate in candidates {
+                locations.push(Location {
+                    uri: candidate.source_uri.clone(),
+                    range: candidate.range,
                 });
             }
         }
@@ -139,6 +147,13 @@ fn find_global_references(
         let mut cursor = doc.tree.root_node().walk();
         collect_global_name_occurrences(&mut cursor, name, source, doc_uri, &mut locations);
     }
+
+    locations.sort_by(|a, b| {
+        a.uri.to_string().cmp(&b.uri.to_string())
+            .then(a.range.start.line.cmp(&b.range.start.line))
+            .then(a.range.start.character.cmp(&b.range.start.character))
+    });
+    locations.dedup_by(|a, b| a.uri == b.uri && a.range == b.range);
 
     locations
 }

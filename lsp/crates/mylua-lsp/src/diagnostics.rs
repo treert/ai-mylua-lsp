@@ -1,6 +1,8 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
+use crate::resolver;
 use crate::scope::ScopeTree;
+use crate::type_system::{TypeFact, KnownType};
 use crate::util::{ts_node_to_range, node_text, truncate};
 use crate::aggregation::WorkspaceAggregation;
 
@@ -23,7 +25,8 @@ pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8]) -> Vec<Diagno
 pub fn collect_semantic_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
-    index: &WorkspaceAggregation,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
     scope_tree: &ScopeTree,
 ) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -31,6 +34,7 @@ pub fn collect_semantic_diagnostics(
 
     let mut cursor = root.walk();
     check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics);
+    check_field_access_diagnostics(root, source, uri, index, &mut diagnostics);
     diagnostics
 }
 
@@ -109,6 +113,95 @@ fn collect_errors_recursive(
     if node.has_error() && cursor.goto_first_child() {
         loop {
             collect_errors_recursive(cursor, source, diagnostics);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+fn check_field_access_diagnostics(
+    root: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let mut cursor = root.walk();
+    collect_field_diagnostics(&mut cursor, source, uri, index, diagnostics);
+}
+
+/// Returns true if `node` is on the left-hand side of an assignment statement.
+fn is_assignment_target(node: tree_sitter::Node) -> bool {
+    if let Some(parent) = node.parent() {
+        if parent.kind() == "variable_list" {
+            if let Some(grandparent) = parent.parent() {
+                if grandparent.kind() == "assignment_statement" {
+                    if let Some(left) = grandparent.child_by_field_name("left") {
+                        return left.id() == parent.id();
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
+fn collect_field_diagnostics(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    diagnostics: &mut Vec<Diagnostic>,
+) {
+    let node = cursor.node();
+
+    // Handle both "field_expression" and "variable" with object.field pattern
+    let is_dotted = matches!(node.kind(), "field_expression" | "variable")
+        && node.child_by_field_name("object").is_some()
+        && node.child_by_field_name("field").is_some();
+
+    if is_dotted {
+        // Skip assignment targets: `obj.field = value` is a definition, not a read
+        if !is_assignment_target(node) {
+            if let (Some(object), Some(field)) = (
+                node.child_by_field_name("object"),
+                node.child_by_field_name("field"),
+            ) {
+                let base_fact = crate::hover::infer_node_type(object, source, uri, index);
+                let field_name = node_text(field, source).to_string();
+
+                let resolved_base = resolver::resolve_type(&base_fact, index);
+                if let TypeFact::Known(KnownType::EmmyType(type_name)) = &resolved_base.type_fact {
+                    let field_resolved = resolver::resolve_field_chain(
+                        &resolved_base.type_fact,
+                        &[field_name.clone()],
+                        index,
+                    );
+                    if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none() {
+                        let qualified = format!("{}.{}", type_name, field_name);
+                        if index.global_shard.get(&qualified).is_none() {
+                            diagnostics.push(Diagnostic {
+                                range: ts_node_to_range(field),
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                source: Some("mylua".to_string()),
+                                message: format!(
+                                    "Unknown field '{}' on type '{}'",
+                                    field_name, type_name
+                                ),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            collect_field_diagnostics(cursor, source, uri, index, diagnostics);
             if !cursor.goto_next_sibling() {
                 break;
             }

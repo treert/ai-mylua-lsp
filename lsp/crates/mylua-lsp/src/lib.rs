@@ -85,11 +85,12 @@ impl Backend {
             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
 
             {
-                let idx = self.index.lock().unwrap();
+                let mut idx = self.index.lock().unwrap();
                 let semantic = diagnostics::collect_semantic_diagnostics(
                     tree.root_node(),
                     text.as_bytes(),
-                    &idx,
+                    &uri,
+                    &mut idx,
                     &scope_tree,
                 );
                 diags.extend(semantic);

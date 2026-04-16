@@ -42,11 +42,12 @@ fn semantic_diagnostics_undefined_global() {
 local a = 1
 print(undefined_var)
 "#;
-    let (doc, _uri, agg) = setup_single_file(src, "test.lua");
+    let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(),
         src.as_bytes(),
-        &agg,
+        &uri,
+        &mut agg,
         &doc.scope_tree,
     );
     // `print` and `undefined_var` are both globals — the exact behavior depends
