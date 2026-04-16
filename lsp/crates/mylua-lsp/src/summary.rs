@@ -82,6 +82,7 @@ pub struct TypeDefinition {
     pub kind: TypeDefinitionKind,
     pub parents: Vec<String>,
     pub fields: Vec<TypeFieldDef>,
+    pub alias_type: Option<TypeFact>,
     pub range: Range,
 }
 

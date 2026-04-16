@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
+use crate::config::DiagnosticsConfig;
 use crate::resolver;
 use crate::scope::ScopeTree;
 use crate::type_system::{TypeFact, KnownType};
@@ -28,13 +29,22 @@ pub fn collect_semantic_diagnostics(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     scope_tree: &ScopeTree,
+    diag_config: &DiagnosticsConfig,
 ) -> Vec<Diagnostic> {
+    if !diag_config.enable {
+        return Vec::new();
+    }
+
     let mut diagnostics = Vec::new();
     let builtins: HashSet<&str> = LUA_BUILTINS.iter().copied().collect();
 
     let mut cursor = root.walk();
-    check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics);
-    check_field_access_diagnostics(root, source, uri, index, &mut diagnostics);
+    if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
+        check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity);
+    }
+    if let Some(severity) = diag_config.emmy_unknown_field.to_lsp_severity() {
+        check_field_access_diagnostics(root, source, uri, index, &mut diagnostics, severity);
+    }
     diagnostics
 }
 
@@ -45,6 +55,7 @@ fn check_undefined_globals(
     index: &WorkspaceAggregation,
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
 ) {
     let node = cursor.node();
 
@@ -65,7 +76,7 @@ fn check_undefined_globals(
                 {
                     diagnostics.push(Diagnostic {
                         range: ts_node_to_range(node),
-                        severity: Some(DiagnosticSeverity::WARNING),
+                        severity: Some(severity),
                         source: Some("mylua".to_string()),
                         message: format!("Undefined global '{}'", name),
                         ..Default::default()
@@ -77,7 +88,7 @@ fn check_undefined_globals(
 
     if cursor.goto_first_child() {
         loop {
-            check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics);
+            check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics, severity);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -127,9 +138,10 @@ fn check_field_access_diagnostics(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
 ) {
     let mut cursor = root.walk();
-    collect_field_diagnostics(&mut cursor, source, uri, index, diagnostics);
+    collect_field_diagnostics(&mut cursor, source, uri, index, diagnostics, severity);
 }
 
 /// Returns true if `node` is on the left-hand side of an assignment statement.
@@ -154,6 +166,7 @@ fn collect_field_diagnostics(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
 ) {
     let node = cursor.node();
 
@@ -184,7 +197,7 @@ fn collect_field_diagnostics(
                         if index.global_shard.get(&qualified).is_none() {
                             diagnostics.push(Diagnostic {
                                 range: ts_node_to_range(field),
-                                severity: Some(DiagnosticSeverity::WARNING),
+                                severity: Some(severity),
                                 source: Some("mylua".to_string()),
                                 message: format!(
                                     "Unknown field '{}' on type '{}'",
@@ -201,7 +214,7 @@ fn collect_field_diagnostics(
 
     if cursor.goto_first_child() {
         loop {
-            collect_field_diagnostics(cursor, source, uri, index, diagnostics);
+            collect_field_diagnostics(cursor, source, uri, index, diagnostics, severity);
             if !cursor.goto_next_sibling() {
                 break;
             }

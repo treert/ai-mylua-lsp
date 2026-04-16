@@ -77,13 +77,31 @@ pub fn hover(
                 for td in &summary.type_definitions {
                     if td.name == ident_text {
                         let mut parts = Vec::new();
-                        let class_header = if td.parents.is_empty() {
-                            format!("---@class {}", td.name)
-                        } else {
-                            format!("---@class {} : {}", td.name, td.parents.join(", "))
+                        let class_header = match td.kind {
+                            crate::summary::TypeDefinitionKind::Alias => {
+                                let alias_display = td.alias_type.as_ref()
+                                    .map(|t| format!("{}", t))
+                                    .unwrap_or_else(|| "unknown".to_string());
+                                format!("---@alias {} {}", td.name, alias_display)
+                            }
+                            crate::summary::TypeDefinitionKind::Enum => {
+                                format!("---@enum {}", td.name)
+                            }
+                            _ => {
+                                if td.parents.is_empty() {
+                                    format!("---@class {}", td.name)
+                                } else {
+                                    format!("---@class {} : {}", td.name, td.parents.join(", "))
+                                }
+                            }
                         };
                         parts.push(format!("```lua\n{}\n```", class_header));
-                        parts.push(format!("*{:?}*", td.kind));
+                        let kind_label = match td.kind {
+                            crate::summary::TypeDefinitionKind::Class => "class",
+                            crate::summary::TypeDefinitionKind::Alias => "alias",
+                            crate::summary::TypeDefinitionKind::Enum => "enum",
+                        };
+                        parts.push(format!("*{}*", kind_label));
                         if !td.fields.is_empty() {
                             let fields_md: Vec<String> = td.fields.iter()
                                 .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))

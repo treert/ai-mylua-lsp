@@ -86,12 +86,14 @@ impl Backend {
 
             {
                 let mut idx = self.index.lock().unwrap();
+                let cfg = self.config.lock().unwrap();
                 let semantic = diagnostics::collect_semantic_diagnostics(
                     tree.root_node(),
                     text.as_bytes(),
                     &uri,
                     &mut idx,
                     &scope_tree,
+                    &cfg.diagnostics,
                 );
                 diags.extend(semantic);
             }

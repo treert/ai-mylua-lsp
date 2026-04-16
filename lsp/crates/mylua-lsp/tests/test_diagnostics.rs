@@ -1,6 +1,7 @@
 mod test_helpers;
 
 use test_helpers::*;
+use mylua_lsp::config::DiagnosticsConfig;
 use mylua_lsp::diagnostics;
 
 #[test]
@@ -43,12 +44,14 @@ local a = 1
 print(undefined_var)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
+    let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(),
         src.as_bytes(),
         &uri,
         &mut agg,
         &doc.scope_tree,
+        &diag_config,
     );
     // `print` and `undefined_var` are both globals — the exact behavior depends
     // on LSP config defaults, but we verify the function doesn't panic.

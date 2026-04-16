@@ -640,6 +640,7 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             kind: TypeDefinitionKind::Class,
             parents,
             fields,
+            alias_type: None,
             range: ts_node_to_range(node),
         });
     }
@@ -666,6 +667,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         kind: TypeDefinitionKind::Class,
                         parents: prev_parents,
                         fields,
+                        alias_type: None,
                         range: ts_node_to_range(node),
                     });
                 }
@@ -692,6 +694,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         kind: TypeDefinitionKind::Class,
                         parents: prev_parents,
                         fields,
+                        alias_type: None,
                         range: ts_node_to_range(node),
                     });
                 }
@@ -700,9 +703,9 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     kind: TypeDefinitionKind::Alias,
                     parents: Vec::new(),
                     fields: Vec::new(),
+                    alias_type: Some(emmy_type_to_fact(type_expr)),
                     range: ts_node_to_range(node),
                 });
-                let _ = type_expr;
             }
             _ => {}
         }
@@ -802,6 +805,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
         let base_stub = if let Some(fact) = ctx.local_type_facts.get(callee_text) {
             match &fact.type_fact {
                 TypeFact::Stub(s) => s.clone(),
+                TypeFact::Known(KnownType::EmmyType(type_name)) => {
+                    SymbolicStub::TypeRef { name: type_name.clone() }
+                }
                 _ => SymbolicStub::GlobalRef { name: callee_text.to_string() },
             }
         } else {
@@ -824,6 +830,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 let base_stub = if let Some(fact) = ctx.local_type_facts.get(base_text) {
                     match &fact.type_fact {
                         TypeFact::Stub(s) => s.clone(),
+                        TypeFact::Known(KnownType::EmmyType(type_name)) => {
+                            SymbolicStub::TypeRef { name: type_name.clone() }
+                        }
                         _ => SymbolicStub::GlobalRef { name: base_text.to_string() },
                     }
                 } else {

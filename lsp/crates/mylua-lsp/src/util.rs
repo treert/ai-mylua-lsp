@@ -50,11 +50,6 @@ pub fn find_node_at_position<'a>(
     root: tree_sitter::Node<'a>,
     byte_offset: usize,
 ) -> Option<tree_sitter::Node<'a>> {
-    let point = tree_sitter::Point {
-        row: 0,
-        column: 0,
-    };
-    let _ = point;
     let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
     while node.kind() != "identifier" {
         node = node.parent()?;
