@@ -123,10 +123,12 @@ pub fn get_fields_for_type(
             if let Some(field_name) = gname.strip_prefix(&prefix) {
                 if !field_name.contains('.') {
                     if let Some(c) = candidates.first() {
+                        let is_func = is_function_type(&c.type_fact)
+                            || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
                         global_prefix_fields.push(FieldCompletion {
                             name: field_name.to_string(),
                             type_display: format!("{}", c.type_fact),
-                            is_function: is_function_type(&c.type_fact),
+                            is_function: is_func,
                             def_uri: Some(c.source_uri.clone()),
                             def_range: Some(c.selection_range),
                         });

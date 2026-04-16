@@ -284,7 +284,7 @@ fn check_type_mismatch_diagnostics(
                 continue;
             }
             let declared = &ltf.type_fact;
-            let actual = find_actual_type_for_local(&ltf.name, root, source, &summary);
+            let actual = find_actual_type_for_local(&ltf.name, &ltf.range, root, source, &summary);
             if actual == TypeFact::Unknown {
                 continue;
             }
@@ -306,17 +306,20 @@ fn check_type_mismatch_diagnostics(
 
 fn find_actual_type_for_local(
     name: &str,
+    decl_range: &Range,
     root: tree_sitter::Node,
     source: &[u8],
     summary: &crate::summary::DocumentSummary,
 ) -> TypeFact {
+    let target_line = decl_range.start.line;
     let mut cursor = root.walk();
-    find_local_rhs_type(&mut cursor, name, summary, source)
+    find_local_rhs_type(&mut cursor, name, target_line, summary, source)
 }
 
 fn find_local_rhs_type(
     cursor: &mut tree_sitter::TreeCursor,
     name: &str,
+    target_line: u32,
     summary: &crate::summary::DocumentSummary,
     source: &[u8],
 ) -> TypeFact {
@@ -326,9 +329,12 @@ fn find_local_rhs_type(
             for i in 0..names.named_child_count() {
                 if let Some(n) = names.named_child(i as u32) {
                     if n.kind() == "identifier" && node_text(n, source) == name {
-                        if let Some(values) = node.child_by_field_name("values") {
-                            if let Some(val) = values.named_child(i as u32) {
-                                return infer_literal_type(val, source, summary);
+                        let node_line = n.start_position().row as u32;
+                        if node_line == target_line {
+                            if let Some(values) = node.child_by_field_name("values") {
+                                if let Some(val) = values.named_child(i as u32) {
+                                    return infer_literal_type(val, source, summary);
+                                }
                             }
                         }
                     }
@@ -338,7 +344,7 @@ fn find_local_rhs_type(
     }
     if cursor.goto_first_child() {
         loop {
-            let result = find_local_rhs_type(cursor, name, summary, source);
+            let result = find_local_rhs_type(cursor, name, target_line, summary, source);
             if result != TypeFact::Unknown {
                 cursor.goto_parent();
                 return result;

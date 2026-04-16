@@ -112,13 +112,19 @@ impl Backend {
                 summary.global_contributions.len(),
             );
 
+            // Snapshot open URIs BEFORE locking index, to avoid lock-order
+            // inversion with schedule_semantic_diagnostics (which locks
+            // documents then index).
+            let open_uris: std::collections::HashSet<Uri> =
+                self.documents.lock().unwrap().keys().cloned().collect();
+
             let dependant_uris = {
                 let mut idx = self.index.lock().unwrap();
                 let old_fp = idx.summaries.get(&uri).map(|s| s.signature_fingerprint);
                 let new_fp = summary.signature_fingerprint;
                 idx.upsert_summary(summary);
                 if old_fp.map_or(false, |old| old != new_fp) {
-                    self.collect_open_dependants(&uri, &idx)
+                    collect_dependant_uris(&uri, &idx, &open_uris)
                 } else {
                     Vec::new()
                 }
@@ -197,28 +203,6 @@ impl Backend {
 
             client.publish_diagnostics(uri, diags, version).await;
         });
-    }
-
-    /// Collect URIs of currently open files that depend on the given URI
-    /// (via require or global/type references).
-    fn collect_open_dependants(
-        &self,
-        uri: &Uri,
-        idx: &aggregation::WorkspaceAggregation,
-    ) -> Vec<Uri> {
-        let open_uris: std::collections::HashSet<Uri> =
-            self.documents.lock().unwrap().keys().cloned().collect();
-        let mut result = Vec::new();
-
-        if let Some(deps) = idx.require_by_return.get(uri) {
-            for dep in deps {
-                if open_uris.contains(&dep.source_uri) {
-                    result.push(dep.source_uri.clone());
-                }
-            }
-        }
-
-        result
     }
 
     fn index_file_from_disk(&self, path: &std::path::Path) {
@@ -437,6 +421,25 @@ impl Backend {
             });
         }
     }
+}
+
+/// Collect URIs of open files that depend on the given URI via require.
+/// Takes a pre-collected set of open URIs to avoid locking documents
+/// while the index lock is held.
+fn collect_dependant_uris(
+    uri: &Uri,
+    idx: &aggregation::WorkspaceAggregation,
+    open_uris: &std::collections::HashSet<Uri>,
+) -> Vec<Uri> {
+    let mut result = Vec::new();
+    if let Some(deps) = idx.require_by_return.get(uri) {
+        for dep in deps {
+            if open_uris.contains(&dep.source_uri) {
+                result.push(dep.source_uri.clone());
+            }
+        }
+    }
+    result
 }
 
 fn content_hash(s: &str) -> u64 {

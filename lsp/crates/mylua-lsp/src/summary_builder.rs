@@ -27,6 +27,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         next_shape_id: 0,
         pending_type_annotation: None,
         pending_class: None,
+        pending_generic_params: Vec::new(),
         module_return_type: None,
     };
 
@@ -66,6 +67,8 @@ struct BuildContext<'a> {
     /// Class being built across consecutive emmy_comment nodes:
     /// (name, parents, fields, generic_params).
     pending_class: Option<(String, Vec<String>, Vec<TypeFieldDef>, Vec<String>)>,
+    /// Buffer for `@generic` params that arrive before `@class`.
+    pending_generic_params: Vec<String>,
     /// Type of the file-level `return` statement (module export).
     module_return_type: Option<TypeFact>,
 }
@@ -694,12 +697,17 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
         match ann {
             EmmyAnnotation::Class { name, parents, .. } => {
                 emit_pending_class_as_typedef(ctx, node);
-                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new(), Vec::new()));
+                let initial_gparams = std::mem::take(&mut ctx.pending_generic_params);
+                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new(), initial_gparams));
             }
             EmmyAnnotation::Generic { params } => {
                 if let Some((_, _, _, ref mut gparams)) = ctx.pending_class {
                     for gp in params {
                         gparams.push(gp.name.clone());
+                    }
+                } else {
+                    for gp in params {
+                        ctx.pending_generic_params.push(gp.name.clone());
                     }
                 }
             }

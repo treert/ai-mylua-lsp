@@ -294,7 +294,7 @@ impl WorkspaceAggregation {
         // Try alias expansion: if module_path starts with an alias prefix,
         // replace it and retry. E.g. aliases={"@": "src/"}, "@utils.foo" → "src/utils.foo"
         for (alias, replacement) in &self.require_aliases {
-            if module_path.starts_with(alias.as_str()) {
+            if !alias.is_empty() && module_path.starts_with(alias.as_str()) {
                 let expanded = format!("{}{}", replacement, &module_path[alias.len()..]);
                 if let Some(uri) = self.require_map.get(&expanded) {
                     return Some(uri.clone());
