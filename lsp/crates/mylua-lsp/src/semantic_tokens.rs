@@ -4,7 +4,8 @@ use crate::scope::ScopeTree;
 use crate::util::node_text;
 
 const TT_VARIABLE: u32 = 0;
-const TM_DEFAULT_LIBRARY: u32 = 1 << 0;
+const TM_DEFAULT_LIBRARY: u32 = 1 << 0; // bit 0
+const TM_GLOBAL: u32 = 1 << 1; // bit 1
 
 const LUA_BUILTINS: &[&str] = &[
     "print", "type", "tostring", "tonumber", "error", "assert", "pcall", "xpcall",
@@ -17,7 +18,10 @@ const LUA_BUILTINS: &[&str] = &[
 pub fn semantic_tokens_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
         token_types: vec![SemanticTokenType::VARIABLE],
-        token_modifiers: vec![SemanticTokenModifier::DEFAULT_LIBRARY],
+        token_modifiers: vec![
+            SemanticTokenModifier::DEFAULT_LIBRARY,       // bit 0
+            SemanticTokenModifier::new("global"),          // bit 1
+        ],
     }
 }
 
@@ -68,9 +72,9 @@ fn collect_variable_tokens(
         let modifiers = if is_local {
             0
         } else if builtins.contains(name) {
-            TM_DEFAULT_LIBRARY
+            TM_DEFAULT_LIBRARY | TM_GLOBAL
         } else {
-            0
+            TM_GLOBAL
         };
         let start = node.start_position();
         let end = node.end_position();

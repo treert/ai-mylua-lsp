@@ -29,14 +29,16 @@
       {
         "language": "lua",
         "scopes": {
-          "variable.defaultLibrary": ["support.variable.lua"]
+          "variable.defaultLibrary": ["support.variable.lua"],
+          "variable.global": ["variable.other.global.lua"]
         }
       }
     ],
     "configurationDefaults": {
       "editor.semanticTokenColorCustomizations": {
         "rules": {
-          "variable.defaultLibrary:lua": "#ee9d28"
+          "variable.defaultLibrary:lua": "#ee9d28",
+          "variable.global:lua": "#d19a66"
         }
       }
     },
