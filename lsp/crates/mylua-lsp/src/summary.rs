@@ -82,6 +82,8 @@ pub struct TypeDefinition {
     pub parents: Vec<String>,
     pub fields: Vec<TypeFieldDef>,
     pub alias_type: Option<TypeFact>,
+    /// Names of generic type parameters (from `---@generic T, K`).
+    pub generic_params: Vec<String>,
     pub range: Range,
 }
 

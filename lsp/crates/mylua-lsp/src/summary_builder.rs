@@ -63,8 +63,9 @@ struct BuildContext<'a> {
     next_shape_id: u32,
     /// `---@type X` annotation pending attachment to the next local declaration.
     pending_type_annotation: Option<EmmyType>,
-    /// Class being built across consecutive emmy_comment nodes.
-    pending_class: Option<(String, Vec<String>, Vec<TypeFieldDef>)>,
+    /// Class being built across consecutive emmy_comment nodes:
+    /// (name, parents, fields, generic_params).
+    pending_class: Option<(String, Vec<String>, Vec<TypeFieldDef>, Vec<String>)>,
     /// Type of the file-level `return` statement (module export).
     module_return_type: Option<TypeFact>,
 }
@@ -646,7 +647,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 /// Flush any pending @class definition into type_definitions.
 /// Called when a non-emmy_comment node is encountered.
 fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    if let Some((cname, parents, fields)) = ctx.pending_class.take() {
+    if let Some((cname, parents, fields, generic_params)) = ctx.pending_class.take() {
         lsp_log!("[flush_class] '{}' with {} fields: {:?}", cname, fields.len(), fields.iter().map(|f| &f.name).collect::<Vec<_>>());
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
@@ -654,6 +655,24 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             parents,
             fields,
             alias_type: None,
+            generic_params,
+            range: ts_node_to_range(node),
+        });
+    }
+}
+
+fn emit_pending_class_as_typedef(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+) {
+    if let Some((cname, prev_parents, fields, gparams)) = ctx.pending_class.take() {
+        ctx.type_definitions.push(TypeDefinition {
+            name: cname,
+            kind: TypeDefinitionKind::Class,
+            parents: prev_parents,
+            fields,
+            alias_type: None,
+            generic_params: gparams,
             range: ts_node_to_range(node),
         });
     }
@@ -674,20 +693,18 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     for ann in &annotations {
         match ann {
             EmmyAnnotation::Class { name, parents, .. } => {
-                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
-                    ctx.type_definitions.push(TypeDefinition {
-                        name: cname,
-                        kind: TypeDefinitionKind::Class,
-                        parents: prev_parents,
-                        fields,
-                        alias_type: None,
-                        range: ts_node_to_range(node),
-                    });
+                emit_pending_class_as_typedef(ctx, node);
+                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new(), Vec::new()));
+            }
+            EmmyAnnotation::Generic { params } => {
+                if let Some((_, _, _, ref mut gparams)) = ctx.pending_class {
+                    for gp in params {
+                        gparams.push(gp.name.clone());
+                    }
                 }
-                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new()));
             }
             EmmyAnnotation::Field { name: fname, type_expr, .. } => {
-                if let Some((_, _, ref mut fields)) = ctx.pending_class {
+                if let Some((_, _, ref mut fields, _)) = ctx.pending_class {
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
                         type_fact: emmy_type_to_fact(type_expr),
@@ -701,42 +718,26 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
             }
             EmmyAnnotation::Alias { name, type_expr } => {
-                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
-                    ctx.type_definitions.push(TypeDefinition {
-                        name: cname,
-                        kind: TypeDefinitionKind::Class,
-                        parents: prev_parents,
-                        fields,
-                        alias_type: None,
-                        range: ts_node_to_range(node),
-                    });
-                }
+                emit_pending_class_as_typedef(ctx, node);
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Alias,
                     parents: Vec::new(),
                     fields: Vec::new(),
                     alias_type: Some(emmy_type_to_fact(type_expr)),
+                    generic_params: Vec::new(),
                     range: ts_node_to_range(node),
                 });
             }
             EmmyAnnotation::Enum { name } => {
-                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
-                    ctx.type_definitions.push(TypeDefinition {
-                        name: cname,
-                        kind: TypeDefinitionKind::Class,
-                        parents: prev_parents,
-                        fields,
-                        alias_type: None,
-                        range: ts_node_to_range(node),
-                    });
-                }
+                emit_pending_class_as_typedef(ctx, node);
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Enum,
                     parents: Vec::new(),
                     fields: Vec::new(),
                     alias_type: None,
+                    generic_params: Vec::new(),
                     range: ts_node_to_range(node),
                 });
             }

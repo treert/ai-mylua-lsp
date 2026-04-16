@@ -429,8 +429,12 @@ fn resolve_field_access(
             resolve_emmy_field(type_name, field, agg)
         }
 
-        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
-            resolve_emmy_field(type_name, field, agg)
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, actual_params)) => {
+            let mut result = resolve_emmy_field(type_name, field, agg);
+            result.type_fact = substitute_generics(
+                &result.type_fact, type_name, actual_params, agg,
+            );
+            result
         }
 
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
@@ -631,8 +635,17 @@ fn collect_fields(
             collect_emmy_fields_recursive(type_name, agg, &mut fields, &mut HashSet::new());
         }
 
-        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, actual_params)) => {
             collect_emmy_fields_recursive(type_name, agg, &mut fields, &mut HashSet::new());
+            let param_names = get_generic_param_names(type_name, agg);
+            for f in &mut fields {
+                for (i, pname) in param_names.iter().enumerate() {
+                    if let Some(actual) = actual_params.get(i) {
+                        let actual_str = format!("{}", actual);
+                        f.type_display = f.type_display.replace(pname.as_str(), &actual_str);
+                    }
+                }
+            }
         }
 
         // GlobalRef stubs are normally resolved before reaching collect_fields.
@@ -737,5 +750,92 @@ fn is_function_type(fact: &TypeFact) -> bool {
         TypeFact::Stub(SymbolicStub::CallReturn { .. }) => true,
         TypeFact::Union(types) => types.iter().any(is_function_type),
         _ => false,
+    }
+}
+
+/// Look up the generic parameter names for a class definition.
+fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<String> {
+    if let Some(candidates) = agg.type_shard.get(type_name) {
+        for candidate in candidates {
+            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+                for td in &summary.type_definitions {
+                    if td.name == type_name && !td.generic_params.is_empty() {
+                        return td.generic_params.clone();
+                    }
+                }
+            }
+        }
+    }
+    Vec::new()
+}
+
+/// Substitute generic type parameters in a TypeFact.
+/// E.g. for `List<string>` where `List` has generic param `T`,
+/// replaces any `EmmyType("T")` or `TypeRef("T")` with `string`.
+fn substitute_generics(
+    fact: &TypeFact,
+    class_name: &str,
+    actual_params: &[TypeFact],
+    agg: &WorkspaceAggregation,
+) -> TypeFact {
+    let param_names = get_generic_param_names(class_name, agg);
+    if param_names.is_empty() {
+        return fact.clone();
+    }
+    substitute_in_fact(fact, &param_names, actual_params)
+}
+
+fn substitute_in_fact(
+    fact: &TypeFact,
+    param_names: &[String],
+    actual_params: &[TypeFact],
+) -> TypeFact {
+    match fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => {
+            if let Some(i) = param_names.iter().position(|p| p == name) {
+                if let Some(actual) = actual_params.get(i) {
+                    return actual.clone();
+                }
+            }
+            fact.clone()
+        }
+        TypeFact::Known(KnownType::EmmyGeneric(name, inner_params)) => {
+            let substituted: Vec<TypeFact> = inner_params
+                .iter()
+                .map(|p| substitute_in_fact(p, param_names, actual_params))
+                .collect();
+            TypeFact::Known(KnownType::EmmyGeneric(name.clone(), substituted))
+        }
+        TypeFact::Stub(SymbolicStub::TypeRef { name }) => {
+            if let Some(i) = param_names.iter().position(|p| p == name) {
+                if let Some(actual) = actual_params.get(i) {
+                    return actual.clone();
+                }
+            }
+            fact.clone()
+        }
+        TypeFact::Union(types) => {
+            let substituted: Vec<TypeFact> = types
+                .iter()
+                .map(|t| substitute_in_fact(t, param_names, actual_params))
+                .collect();
+            TypeFact::Union(substituted)
+        }
+        TypeFact::Known(KnownType::Function(sig)) => {
+            let params: Vec<crate::type_system::ParamInfo> = sig.params.iter().map(|p| {
+                crate::type_system::ParamInfo {
+                    name: p.name.clone(),
+                    type_fact: substitute_in_fact(&p.type_fact, param_names, actual_params),
+                }
+            }).collect();
+            let returns: Vec<TypeFact> = sig.returns.iter()
+                .map(|r| substitute_in_fact(r, param_names, actual_params))
+                .collect();
+            TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
+                params,
+                returns,
+            }))
+        }
+        _ => fact.clone(),
     }
 }
