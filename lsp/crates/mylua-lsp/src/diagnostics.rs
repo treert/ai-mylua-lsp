@@ -225,27 +225,26 @@ fn collect_field_diagnostics(
                     }
                 }
                 TypeFact::Known(KnownType::Table(shape_id)) => {
-                    if let Some(def_uri) = &resolved_base.def_uri {
-                        if let Some(summary) = index.summaries.get(def_uri) {
-                            if let Some(shape) = summary.table_shapes.get(shape_id) {
-                                if !shape.fields.contains_key(&field_name) {
-                                    let severity = if shape.is_closed {
-                                        lua_error_severity
-                                    } else {
-                                        lua_warn_severity
-                                    };
-                                    if let Some(sev) = severity {
-                                        diagnostics.push(Diagnostic {
-                                            range: ts_node_to_range(field),
-                                            severity: Some(sev),
-                                            source: Some("mylua".to_string()),
-                                            message: format!(
-                                                "Unknown field '{}' on table",
-                                                field_name
-                                            ),
-                                            ..Default::default()
-                                        });
-                                    }
+                    let table_uri = resolved_base.def_uri.as_ref().unwrap_or(uri);
+                    if let Some(summary) = index.summaries.get(table_uri) {
+                        if let Some(shape) = summary.table_shapes.get(shape_id) {
+                            if !shape.fields.contains_key(&field_name) {
+                                let severity = if shape.is_closed {
+                                    lua_error_severity
+                                } else {
+                                    lua_warn_severity
+                                };
+                                if let Some(sev) = severity {
+                                    diagnostics.push(Diagnostic {
+                                        range: ts_node_to_range(field),
+                                        severity: Some(sev),
+                                        source: Some("mylua".to_string()),
+                                        message: format!(
+                                            "Unknown field '{}' on table",
+                                            field_name
+                                        ),
+                                        ..Default::default()
+                                    });
                                 }
                             }
                         }
