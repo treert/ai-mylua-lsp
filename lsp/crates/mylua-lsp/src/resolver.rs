@@ -105,12 +105,48 @@ pub fn resolve_local_in_file(
 }
 
 /// Get completable fields for a type (for dot-completion).
+///
+/// `source_uri_hint` provides the file where the base expression lives,
+/// used to disambiguate per-file `TableShapeId` values.
 pub fn get_fields_for_type(
     fact: &TypeFact,
+    source_uri_hint: Option<&Uri>,
     agg: &mut WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
+    // Collect global_shard prefix-based fields BEFORE resolving, so that
+    // table-extension globals (e.g. `UE4.Foo`) are included even though
+    // they live in global_shard rather than in a table shape.
+    let mut global_prefix_fields = Vec::new();
+    if let TypeFact::Stub(SymbolicStub::GlobalRef { name }) = fact {
+        let prefix = format!("{}.", name);
+        for (gname, candidates) in &agg.global_shard {
+            if let Some(field_name) = gname.strip_prefix(&prefix) {
+                if !field_name.contains('.') {
+                    if let Some(c) = candidates.first() {
+                        global_prefix_fields.push(FieldCompletion {
+                            name: field_name.to_string(),
+                            type_display: format!("{}", c.type_fact),
+                            def_uri: Some(c.source_uri.clone()),
+                            def_range: Some(c.selection_range),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     let resolved = resolve_type(fact, agg);
-    collect_fields(&resolved.type_fact, agg)
+    let uri = resolved.def_uri.as_ref().or(source_uri_hint).cloned();
+    let mut fields = collect_fields(&resolved.type_fact, &uri, agg);
+
+    // Merge global prefix fields, deduplicating by name
+    for gf in global_prefix_fields {
+        if !fields.iter().any(|f| f.name == gf.name) {
+            fields.push(gf);
+        }
+    }
+
+    fields
 }
 
 #[derive(Debug, Clone)]
@@ -219,28 +255,25 @@ fn resolve_require(
         None => return ResolvedType::unknown(),
     };
 
-    // Look at the target file's summary for its return type
     let return_fact = {
         let summary = match agg.summaries.get(&target_uri) {
             Some(s) => s,
             None => return ResolvedType::unknown(),
         };
 
-        // Check for a function named at the module level that represents the return
-        // For now, collect all global contributions as a table-like shape
-        if summary.global_contributions.is_empty() && summary.function_summaries.is_empty() {
-            return ResolvedType::unknown();
+        if let Some(ref ret) = summary.module_return_type {
+            ret.clone()
+        } else {
+            TypeFact::Stub(SymbolicStub::GlobalRef {
+                name: module_path.to_string(),
+            })
         }
-
-        // If the module has a single function summary as its main export,
-        // or global contributions, build a type from them
-        TypeFact::Stub(SymbolicStub::GlobalRef {
-            name: module_path.to_string(),
-        })
     };
 
     let mut result = resolve_recursive(&return_fact, agg, depth + 1, visited);
-    result.def_uri = Some(target_uri);
+    if result.def_uri.is_none() {
+        result.def_uri = Some(target_uri);
+    }
     result
 }
 
@@ -344,27 +377,28 @@ fn resolve_call_return(
         }
     }
 
-    // Try looking up `base_name.func_name` as a global
+    // Try looking up `base_name.func_name` as a qualified global name.
+    // Function declarations like `function Foo.bar()` are registered in
+    // global_shard as "Foo.bar" by summary_builder, so O(1) lookup suffices.
     if let SymbolicStub::GlobalRef { name: base_name } | SymbolicStub::RequireRef { module_path: base_name } = base {
         let qualified = format!("{}.{}", base_name, func_name);
-        let candidates = agg.global_shard.get(&qualified).cloned();
-        if let Some(candidates) = candidates {
-            if let Some(c) = candidates.first() {
-                return ResolvedType::with_location(
-                    c.type_fact.clone(),
-                    c.source_uri.clone(),
-                    c.selection_range,
-                );
-            }
-        }
-
-        // Also check function summaries across all files
-        for (_, summary) in &agg.summaries {
-            if let Some(fs) = summary.function_summaries.get(&qualified) {
-                if let Some(ret) = fs.signature.returns.first() {
-                    return ResolvedType::from_fact(ret.clone());
+        if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
+            let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
+            if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
+                if let Some(ret) = sig.returns.first() {
+                    let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
+                    if ret_resolved.def_uri.is_none() {
+                        ret_resolved.def_uri = Some(c.source_uri.clone());
+                        ret_resolved.def_range = Some(c.selection_range);
+                    }
+                    return ret_resolved;
                 }
             }
+            return ResolvedType::with_location(
+                c.type_fact.clone(),
+                c.source_uri.clone(),
+                c.selection_range,
+            );
         }
     }
 
@@ -394,25 +428,17 @@ fn resolve_field_access(
         }
 
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
-            // Try `name.field` as a global
+            // Try `name.field` as a qualified global name (O(1) lookup).
+            // Function declarations like `function Foo.bar()` are registered
+            // in global_shard as "Foo.bar" by summary_builder.
             let qualified = format!("{}.{}", name, field);
-            let candidates = agg.global_shard.get(&qualified).cloned();
-            if let Some(candidates) = candidates {
+            if let Some(candidates) = agg.global_shard.get(&qualified).cloned() {
                 if let Some(c) = candidates.first() {
                     return ResolvedType::with_location(
                         c.type_fact.clone(),
                         c.source_uri.clone(),
                         c.selection_range,
                     );
-                }
-            }
-
-            // Also try looking up function summaries
-            for (_, summary) in &agg.summaries {
-                if let Some(fs) = summary.function_summaries.get(&qualified) {
-                    return ResolvedType::from_fact(TypeFact::Known(KnownType::Function(
-                        fs.signature.clone(),
-                    )));
                 }
             }
 
@@ -440,21 +466,23 @@ fn resolve_table_field(
     source_uri: &Option<Uri>,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    // Search all summaries for the table shape
-    for (uri, summary) in &agg.summaries {
-        if let Some(source) = source_uri {
-            if uri != source {
-                continue;
-            }
-        }
-        if let Some(shape) = summary.table_shapes.get(&shape_id) {
-            if let Some(fi) = shape.fields.get(field) {
-                return ResolvedType {
-                    type_fact: fi.type_fact.clone(),
-                    def_uri: Some(uri.clone()),
-                    def_range: fi.def_range,
-                };
-            }
+    // TableShapeId is a per-file counter, so we MUST know which file it
+    // belongs to.  Without source_uri we could match a wrong file's shape.
+    let uri = match source_uri {
+        Some(u) => u,
+        None => return ResolvedType::unknown(),
+    };
+    let summary = match agg.summaries.get(uri) {
+        Some(s) => s,
+        None => return ResolvedType::unknown(),
+    };
+    if let Some(shape) = summary.table_shapes.get(&shape_id) {
+        if let Some(fi) = shape.fields.get(field) {
+            return ResolvedType {
+                type_fact: fi.type_fact.clone(),
+                def_uri: Some(uri.clone()),
+                def_range: fi.def_range,
+            };
         }
     }
     ResolvedType::unknown()
@@ -465,7 +493,19 @@ fn resolve_emmy_field(
     field: &str,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    // First, try @field annotations in the class definition
+    resolve_emmy_field_with_visited(type_name, field, agg, &mut HashSet::new())
+}
+
+fn resolve_emmy_field_with_visited(
+    type_name: &str,
+    field: &str,
+    agg: &WorkspaceAggregation,
+    visited_types: &mut HashSet<String>,
+) -> ResolvedType {
+    if !visited_types.insert(type_name.to_string()) {
+        return ResolvedType::unknown();
+    }
+
     if let Some(candidates) = agg.type_shard.get(type_name) {
         lsp_log!("[resolve_emmy_field] type '{}' has {} candidates", type_name, candidates.len());
 
@@ -485,6 +525,13 @@ fn resolve_emmy_field(
                                 };
                             }
                         }
+
+                        for parent in &td.parents {
+                            let result = resolve_emmy_field_with_visited(parent, field, agg, visited_types);
+                            if result.type_fact != TypeFact::Unknown || result.def_uri.is_some() {
+                                return result;
+                            }
+                        }
                     }
                 }
             }
@@ -493,10 +540,6 @@ fn resolve_emmy_field(
         lsp_log!("[resolve_emmy_field] type '{}' not found in type_shard", type_name);
     }
 
-    // Fallback: check global_shard for `type_name.field` — handles functions
-    // defined as `function ClassName.MethodName()` without explicit @field.
-    // These are registered in global_shard via visit_function_declaration, so
-    // an O(1) HashMap lookup is sufficient (no summaries scan needed).
     let qualified = format!("{}.{}", type_name, field);
     if let Some(global_candidates) = agg.global_shard.get(&qualified) {
         if let Some(c) = global_candidates.first() {
@@ -514,62 +557,24 @@ fn resolve_emmy_field(
 
 fn collect_fields(
     fact: &TypeFact,
+    source_uri: &Option<Uri>,
     agg: &WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
     let mut fields = Vec::new();
 
     match fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            // Only take fields from the first summary that has this shape ID
-            // to avoid cross-file collisions (shape IDs are per-file counters).
-            for (uri, summary) in &agg.summaries {
-                if let Some(shape) = summary.table_shapes.get(shape_id) {
-                    for (name, fi) in &shape.fields {
-                        fields.push(FieldCompletion {
-                            name: name.clone(),
-                            type_display: format!("{}", fi.type_fact),
-                            def_uri: Some(uri.clone()),
-                            def_range: fi.def_range,
-                        });
-                    }
-                    break;
-                }
-            }
-        }
-
-        TypeFact::Known(KnownType::EmmyType(type_name)) => {
-            if let Some(candidates) = agg.type_shard.get(type_name.as_str()) {
-                for candidate in candidates {
-                    if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
-                        for td in &summary.type_definitions {
-                            if td.name == *type_name {
-                                for tf in &td.fields {
-                                    fields.push(FieldCompletion {
-                                        name: tf.name.clone(),
-                                        type_display: format!("{}", tf.type_fact),
-                                        def_uri: Some(candidate.source_uri.clone()),
-                                        def_range: Some(tf.range),
-                                    });
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
-            // Collect all `name.xxx` globals as fields
-            let prefix = format!("{}.", name);
-            for (gname, candidates) in &agg.global_shard {
-                if let Some(field_name) = gname.strip_prefix(&prefix) {
-                    if !field_name.contains('.') {
-                        if let Some(c) = candidates.first() {
+            // TableShapeId is per-file, so we need source_uri to avoid
+            // cross-file collisions.
+            if let Some(uri) = source_uri {
+                if let Some(summary) = agg.summaries.get(uri) {
+                    if let Some(shape) = summary.table_shapes.get(shape_id) {
+                        for (name, fi) in &shape.fields {
                             fields.push(FieldCompletion {
-                                name: field_name.to_string(),
-                                type_display: format!("{}", c.type_fact),
-                                def_uri: Some(c.source_uri.clone()),
-                                def_range: Some(c.selection_range),
+                                name: name.clone(),
+                                type_display: format!("{}", fi.type_fact),
+                                def_uri: Some(uri.clone()),
+                                def_range: fi.def_range,
                             });
                         }
                     }
@@ -577,9 +582,18 @@ fn collect_fields(
             }
         }
 
+        TypeFact::Known(KnownType::EmmyType(type_name)) => {
+            collect_emmy_fields_recursive(type_name, agg, &mut fields, &mut HashSet::new());
+        }
+
+        // GlobalRef stubs are normally resolved before reaching collect_fields.
+        // Global prefix-based field collection is handled in get_fields_for_type.
+        TypeFact::Stub(SymbolicStub::GlobalRef { .. }) => {}
+
+
         TypeFact::Union(types) => {
             for t in types {
-                fields.extend(collect_fields(t, agg));
+                fields.extend(collect_fields(t, source_uri, agg));
             }
             fields.sort_by(|a, b| a.name.cmp(&b.name));
             fields.dedup_by(|a, b| a.name == b.name);
@@ -589,6 +603,38 @@ fn collect_fields(
     }
 
     fields
+}
+
+fn collect_emmy_fields_recursive(
+    type_name: &str,
+    agg: &WorkspaceAggregation,
+    fields: &mut Vec<FieldCompletion>,
+    visited: &mut HashSet<String>,
+) {
+    if !visited.insert(type_name.to_string()) {
+        return;
+    }
+    if let Some(candidates) = agg.type_shard.get(type_name) {
+        for candidate in candidates {
+            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+                for td in &summary.type_definitions {
+                    if td.name == type_name {
+                        for tf in &td.fields {
+                            fields.push(FieldCompletion {
+                                name: tf.name.clone(),
+                                type_display: format!("{}", tf.type_fact),
+                                def_uri: Some(candidate.source_uri.clone()),
+                                def_range: Some(tf.range),
+                            });
+                        }
+                        for parent in &td.parents {
+                            collect_emmy_fields_recursive(parent, agg, fields, visited);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

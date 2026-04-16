@@ -25,6 +25,9 @@ pub struct DocumentSummary {
     pub local_type_facts: HashMap<String, LocalTypeFact>,
     /// Table shape instances defined in this file.
     pub table_shapes: HashMap<TableShapeId, TableShape>,
+    /// Type of the file-level `return` statement (module export).
+    /// `None` if the file has no top-level return.
+    pub module_return_type: Option<TypeFact>,
     /// Fingerprint of all externally-visible type signatures.
     /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
     pub signature_fingerprint: u64,
@@ -75,6 +78,7 @@ pub struct FunctionSummary {
 pub struct TypeDefinition {
     pub name: String,
     pub kind: TypeDefinitionKind,
+    pub parents: Vec<String>,
     pub fields: Vec<TypeFieldDef>,
     pub range: Range,
 }

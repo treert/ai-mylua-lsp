@@ -107,9 +107,10 @@
 - **作用域树**（`scope.rs`）：arena-based `ScopeTree`，单趟 AST 遍历构建；支持 `function_body` / `do` / `while` / `repeat` / `if` / `for` 等所有块级作用域 + 参数 + for 变量 + 隐式 `self`；正确处理 `local x = x + 1` RHS 引用外层变量的 Lua 语义
 
 **索引架构（步骤 1-6）**：
-- `summary_builder.rs`：单文件 AST → DocumentSummary
-- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）；同名全局候选按 URI 路径深度优先排序（浅路径 > 深路径），确保项目级覆盖优先于自动生成 stub
-- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_field_chain` 对 table-extension 全局变量（如 `UE4.Foo = nil` 与 `UE4 = {}` 分开注册）支持 global_shard 限定名回退
+- `summary_builder.rs`：单文件 AST → DocumentSummary；支持文件级 `return` 语句提取（`module_return_type`）、递归进入 `if`/`do`/`for`/`while` 块收集全局赋值和函数声明、全局函数 `GlobalContribution` 携带真实 `FunctionSignature`
+- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）；同名全局候选按 URI 路径深度优先排序（浅路径 > 深路径）；`resolve_module_to_uri` 优先查 `require_map`
+- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_require` 基于目标文件 `module_return_type` 解析模块返回值类型（支持 `local M = {}; return M` 模式）；`resolve_field_chain` 对 table-extension 全局变量支持 global_shard 限定名回退；Emmy 继承链字段解析（`resolve_emmy_field` 沿 `parents` 递归查找）；`collect_fields` / `resolve_table_field` 强制 `source_uri` 避免跨文件 `TableShapeId` 碰撞
+- `summary.rs`：`DocumentSummary` 含 `module_return_type`；`TypeDefinition` 含 `parents`（继承链）；签名指纹包含全局类型信息和 module return
 - 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
 
 - 构建：`cd lsp && cargo build`

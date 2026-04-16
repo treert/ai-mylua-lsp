@@ -27,6 +27,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         next_shape_id: 0,
         pending_type_annotation: None,
         pending_class: None,
+        module_return_type: None,
     };
 
     let root = tree.root_node();
@@ -44,6 +45,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         type_definitions: ctx.type_definitions,
         local_type_facts: ctx.local_type_facts,
         table_shapes: ctx.table_shapes,
+        module_return_type: ctx.module_return_type,
         signature_fingerprint,
     }
 }
@@ -62,7 +64,9 @@ struct BuildContext<'a> {
     /// `---@type X` annotation pending attachment to the next local declaration.
     pending_type_annotation: Option<EmmyType>,
     /// Class being built across consecutive emmy_comment nodes.
-    pending_class: Option<(String, Vec<TypeFieldDef>)>,
+    pending_class: Option<(String, Vec<String>, Vec<TypeFieldDef>)>,
+    /// Type of the file-level `return` statement (module export).
+    module_return_type: Option<TypeFact>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -107,11 +111,60 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 flush_pending_class(ctx, node);
                 visit_assignment(ctx, node);
             }
+            "return_statement" => {
+                flush_pending_class(ctx, node);
+                ctx.pending_type_annotation = None;
+                visit_module_return(ctx, node);
+            }
             "emmy_comment" => visit_emmy_comment(ctx, node),
+            "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
+            | "for_numeric_statement" | "for_generic_statement" => {
+                flush_pending_class(ctx, node);
+                ctx.pending_type_annotation = None;
+                visit_nested_block(ctx, node);
+            }
             _ => {
                 flush_pending_class(ctx, node);
                 ctx.pending_type_annotation = None;
             }
+        }
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
+}
+
+fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    if let Some(values) = node.child_by_field_name("values") {
+        if let Some(first_expr) = values.named_child(0) {
+            let type_fact = infer_expression_type(ctx, first_expr, 0);
+            ctx.module_return_type = Some(type_fact);
+        }
+    }
+}
+
+fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    let mut cursor = node.walk();
+    if !cursor.goto_first_child() {
+        return;
+    }
+    loop {
+        let child = cursor.node();
+        match child.kind() {
+            "block" | "if_clause" | "elseif_clause" | "else_clause" => {
+                visit_nested_block(ctx, child);
+            }
+            "function_declaration" => {
+                visit_function_declaration(ctx, child);
+            }
+            "assignment_statement" => {
+                visit_assignment(ctx, child);
+            }
+            "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
+            | "for_numeric_statement" | "for_generic_statement" => {
+                visit_nested_block(ctx, child);
+            }
+            _ => {}
         }
         if !cursor.goto_next_sibling() {
             break;
@@ -296,20 +349,16 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let body = node.child_by_field_name("body");
 
     let fs = build_function_summary(ctx, &name, node, body);
-    let fingerprint = fs.signature_fingerprint;
+    let sig_for_global = fs.signature.clone();
     ctx.function_summaries.insert(name.clone(), fs);
 
     ctx.global_contributions.push(GlobalContribution {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
-        type_fact: TypeFact::Known(KnownType::Function(FunctionSignature {
-            params: Vec::new(),
-            returns: Vec::new(),
-        })),
+        type_fact: TypeFact::Known(KnownType::Function(sig_for_global)),
         range: ts_node_to_range(node),
         selection_range: ts_node_to_range(name_node),
     });
-    let _ = fingerprint;
 }
 
 fn build_function_summary(
@@ -571,11 +620,12 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 /// Flush any pending @class definition into type_definitions.
 /// Called when a non-emmy_comment node is encountered.
 fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    if let Some((cname, fields)) = ctx.pending_class.take() {
+    if let Some((cname, parents, fields)) = ctx.pending_class.take() {
         lsp_log!("[flush_class] '{}' with {} fields: {:?}", cname, fields.len(), fields.iter().map(|f| &f.name).collect::<Vec<_>>());
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
             kind: TypeDefinitionKind::Class,
+            parents,
             fields,
             range: ts_node_to_range(node),
         });
@@ -596,20 +646,20 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     for ann in &annotations {
         match ann {
-            EmmyAnnotation::Class { name, .. } => {
-                // Flush any previous pending class before starting a new one
-                if let Some((cname, fields)) = ctx.pending_class.take() {
+            EmmyAnnotation::Class { name, parents, .. } => {
+                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
                         kind: TypeDefinitionKind::Class,
+                        parents: prev_parents,
                         fields,
                         range: ts_node_to_range(node),
                     });
                 }
-                ctx.pending_class = Some((name.clone(), Vec::new()));
+                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new()));
             }
             EmmyAnnotation::Field { name: fname, type_expr, .. } => {
-                if let Some((_, ref mut fields)) = ctx.pending_class {
+                if let Some((_, _, ref mut fields)) = ctx.pending_class {
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
                         type_fact: emmy_type_to_fact(type_expr),
@@ -623,10 +673,11 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
             }
             EmmyAnnotation::Alias { name, type_expr } => {
-                if let Some((cname, fields)) = ctx.pending_class.take() {
+                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
                     ctx.type_definitions.push(TypeDefinition {
                         name: cname,
                         kind: TypeDefinitionKind::Class,
+                        parents: prev_parents,
                         fields,
                         range: ts_node_to_range(node),
                     });
@@ -634,6 +685,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Alias,
+                    parents: Vec::new(),
                     fields: Vec::new(),
                     range: ts_node_to_range(node),
                 });
@@ -945,11 +997,14 @@ fn hash_function_signature(sig: &FunctionSignature) -> u64 {
 fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     let mut hasher = DefaultHasher::new();
 
-    // Hash global contributions
-    let mut globals: Vec<&str> = ctx.global_contributions.iter().map(|g| g.name.as_str()).collect();
+    // Hash global contributions including their type facts
+    let mut globals: Vec<_> = ctx.global_contributions.iter()
+        .map(|g| (g.name.as_str(), format!("{}", g.type_fact)))
+        .collect();
     globals.sort();
-    for name in &globals {
+    for (name, type_str) in &globals {
         name.hash(&mut hasher);
+        type_str.hash(&mut hasher);
     }
 
     // Hash function signatures
@@ -962,11 +1017,26 @@ fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
         }
     }
 
-    // Hash type definitions
-    let mut type_names: Vec<&str> = ctx.type_definitions.iter().map(|t| t.name.as_str()).collect();
-    type_names.sort();
-    for name in &type_names {
+    // Hash type definitions including field info
+    let mut type_defs: Vec<_> = ctx.type_definitions.iter()
+        .map(|t| {
+            let fields_str: String = t.fields.iter()
+                .map(|f| format!("{}:{}", f.name, f.type_fact))
+                .collect::<Vec<_>>()
+                .join(",");
+            (t.name.as_str(), fields_str)
+        })
+        .collect();
+    type_defs.sort();
+    for (name, fields_str) in &type_defs {
         name.hash(&mut hasher);
+        fields_str.hash(&mut hasher);
+    }
+
+    // Hash module return type
+    if let Some(ref ret) = ctx.module_return_type {
+        "module_return".hash(&mut hasher);
+        format!("{}", ret).hash(&mut hasher);
     }
 
     hasher.finish()

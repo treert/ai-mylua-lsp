@@ -81,8 +81,7 @@ fn try_dot_completion(
         TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
     };
 
-    let resolved = resolver::resolve_type(&base_fact, index);
-    let fields = resolver::get_fields_for_type(&resolved.type_fact, index);
+    let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
 
     if fields.is_empty() {
         return None;

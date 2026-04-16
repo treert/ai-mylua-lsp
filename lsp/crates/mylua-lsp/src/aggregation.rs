@@ -288,22 +288,23 @@ impl WorkspaceAggregation {
     /// Mark resolution cache entries as dirty when a file's signature changes.
     ///
     /// Current strategy is conservative: marks all cache entries dirty.
-    /// TODO(step5): refine to only invalidate cache entries reachable from
-    /// dependants listed in `require_by_return[uri]` and global/type references.
+    /// TODO: refine to only invalidate entries reachable from dependants
+    /// listed in `require_by_return[uri]` and global/type references.
     fn invalidate_dependants(&mut self, _uri: &Uri) {
         for entry in self.resolution_cache.values_mut() {
             entry.dirty = true;
         }
     }
 
-    /// Placeholder: resolve a module path string to a target URI.
-    /// Will be backed by require path patterns + aliases from config.
     fn resolve_module_to_uri(&self, module_path: &str) -> Option<Uri> {
-        // For now, look through all summaries to find one whose URI path matches.
-        // This will be replaced with proper require resolution using config paths.
+        if let Some(uri) = self.require_map.get(module_path) {
+            return Some(uri.clone());
+        }
+        // Fallback: check summaries for a URI path match (handles
+        // modules discovered after require_map was built).
+        let module_as_path = module_path.replace('.', "/");
         for (uri, _) in &self.summaries {
             let uri_str = uri.to_string();
-            let module_as_path = module_path.replace('.', "/");
             if uri_str.contains(&module_as_path) {
                 return Some(uri.clone());
             }
