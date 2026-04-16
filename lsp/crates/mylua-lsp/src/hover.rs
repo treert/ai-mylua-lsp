@@ -70,6 +70,57 @@ pub fn hover(
         return build_hover_for_definition(&def, all_docs, type_info.as_deref());
     }
 
+    // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
+    if let Some(candidates) = index.type_shard.get(ident_text) {
+        if let Some(candidate) = candidates.first() {
+            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+                for td in &summary.type_definitions {
+                    if td.name == ident_text {
+                        let mut parts = Vec::new();
+                        let class_header = if td.parents.is_empty() {
+                            format!("---@class {}", td.name)
+                        } else {
+                            format!("---@class {} : {}", td.name, td.parents.join(", "))
+                        };
+                        parts.push(format!("```lua\n{}\n```", class_header));
+                        parts.push(format!("*{:?}*", td.kind));
+                        if !td.fields.is_empty() {
+                            let fields_md: Vec<String> = td.fields.iter()
+                                .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
+                                .collect();
+                            parts.push(fields_md.join("\n"));
+                        }
+                        // Include doc comments from the definition site
+                        if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
+                            let def_byte = crate::util::position_to_byte_offset(
+                                &def_doc.text, td.range.start,
+                            );
+                            if let Some(db) = def_byte {
+                                if let Some(def_node) = def_doc.tree.root_node()
+                                    .descendant_for_byte_range(db, db)
+                                {
+                                    let stmt = find_enclosing_statement(def_node);
+                                    let comment_lines = collect_preceding_comments(stmt, def_doc.text.as_bytes());
+                                    let doc_text = extract_doc_lines(&comment_lines);
+                                    if !doc_text.is_empty() {
+                                        parts.push(doc_text);
+                                    }
+                                }
+                            }
+                        }
+                        return Some(Hover {
+                            contents: HoverContents::Markup(MarkupContent {
+                                kind: MarkupKind::Markdown,
+                                value: parts.join("\n\n"),
+                            }),
+                            range: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
     if let Some(entries) = index.globals.get(ident_text) {
         if let Some(entry) = entries.first() {
             let fake_def = crate::types::Definition {
@@ -269,24 +320,40 @@ fn hover_field_expression(
     })
 }
 
-fn infer_node_type(
+/// Recursively infer the type of an AST expression node.
+/// For `field_expression` nodes (like `t.x`), decomposes into base + field
+/// and uses the resolver chain rather than treating the whole text as one name.
+pub fn infer_node_type(
     node: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> TypeFact {
-    let text = node_text(node, source);
-
-    // Check if it's a known local in the summary
-    if let Some(summary) = index.summaries.get(uri) {
-        if let Some(ltf) = summary.local_type_facts.get(text) {
-            return ltf.type_fact.clone();
+    match node.kind() {
+        "field_expression" => {
+            if let (Some(object), Some(field)) = (
+                node.child_by_field_name("object"),
+                node.child_by_field_name("field"),
+            ) {
+                let base_fact = infer_node_type(object, source, uri, index);
+                let field_name = node_text(field, source).to_string();
+                let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
+                return resolved.type_fact;
+            }
+            TypeFact::Unknown
+        }
+        _ => {
+            let text = node_text(node, source);
+            if let Some(summary) = index.summaries.get(uri) {
+                if let Some(ltf) = summary.local_type_facts.get(text) {
+                    return ltf.type_fact.clone();
+                }
+            }
+            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
+                name: text.to_string(),
+            })
         }
     }
-
-    TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-        name: text.to_string(),
-    })
 }
 
 fn resolve_local_type_info(

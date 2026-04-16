@@ -381,8 +381,8 @@ fn build_function_summary(
     let mut params = Vec::new();
     let mut returns = Vec::new();
     let mut emmy_annotated = false;
+    let mut overloads = Vec::new();
 
-    // Extract params from Emmy annotations
     for ann in &annotations {
         match ann {
             EmmyAnnotation::Param { name: pname, type_expr, .. } => {
@@ -396,6 +396,11 @@ fn build_function_summary(
                 emmy_annotated = true;
                 for rt in return_types {
                     returns.push(emmy_type_to_fact(rt));
+                }
+            }
+            EmmyAnnotation::Overload { fun_type } => {
+                if let TypeFact::Known(KnownType::Function(sig)) = emmy_type_to_fact(fun_type) {
+                    overloads.push(sig);
                 }
             }
             _ => {}
@@ -431,6 +436,7 @@ fn build_function_summary(
         signature_fingerprint: fingerprint,
         returned_shapes: Vec::new(),
         emmy_annotated,
+        overloads,
     }
 }
 

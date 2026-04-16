@@ -903,20 +903,32 @@ use crate::type_system::{FunctionSignature, KnownType, ParamInfo, TypeFact};
 /// Convert a parsed `EmmyType` AST into a `TypeFact`.
 pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
     match ty {
-        EmmyType::Named { name, generics: _ } => match name.as_str() {
-            "nil" => TypeFact::Known(KnownType::Nil),
-            "boolean" => TypeFact::Known(KnownType::Boolean),
-            "number" => TypeFact::Known(KnownType::Number),
-            "integer" => TypeFact::Known(KnownType::Integer),
-            "string" => TypeFact::Known(KnownType::String),
-            "table" => TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX))),
-            "function" => TypeFact::Known(KnownType::Function(FunctionSignature {
-                params: Vec::new(),
-                returns: Vec::new(),
-            })),
-            "any" => TypeFact::Unknown,
-            _ => TypeFact::Known(KnownType::EmmyType(name.clone())),
-        },
+        EmmyType::Named { name, generics } => {
+            let base = match name.as_str() {
+                "nil" => return TypeFact::Known(KnownType::Nil),
+                "boolean" => return TypeFact::Known(KnownType::Boolean),
+                "number" => return TypeFact::Known(KnownType::Number),
+                "integer" => return TypeFact::Known(KnownType::Integer),
+                "string" => return TypeFact::Known(KnownType::String),
+                "any" => return TypeFact::Unknown,
+                _ => name.clone(),
+            };
+            if generics.is_empty() {
+                if base == "table" {
+                    TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX)))
+                } else if base == "function" {
+                    TypeFact::Known(KnownType::Function(FunctionSignature {
+                        params: Vec::new(),
+                        returns: Vec::new(),
+                    }))
+                } else {
+                    TypeFact::Known(KnownType::EmmyType(base))
+                }
+            } else {
+                let generic_facts: Vec<TypeFact> = generics.iter().map(emmy_type_to_fact).collect();
+                TypeFact::Known(KnownType::EmmyGeneric(base, generic_facts))
+            }
+        }
         EmmyType::Union(types) => {
             let parts: Vec<TypeFact> = types.iter().map(emmy_type_to_fact).collect();
             if parts.len() == 1 {

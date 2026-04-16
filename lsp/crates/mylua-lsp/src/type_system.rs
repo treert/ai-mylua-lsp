@@ -24,6 +24,7 @@ pub enum KnownType {
     Table(TableShapeId),
     Function(FunctionSignature),
     EmmyType(String),
+    EmmyGeneric(String, Vec<TypeFact>),
 }
 
 /// Placeholder that defers resolution to cross-file analysis.
@@ -93,6 +94,9 @@ impl fmt::Display for KnownType {
             Self::Table(id) => write!(f, "table<{}>", id.0),
             Self::Function(_) => write!(f, "function"),
             Self::EmmyType(name) => write!(f, "{}", name),
+            Self::EmmyGeneric(name, params) => {
+                write!(f, "{}<{}>", name, params.iter().map(|p| format!("{}", p)).collect::<Vec<_>>().join(", "))
+            }
         }
     }
 }

@@ -71,6 +71,8 @@ pub struct FunctionSummary {
     pub returned_shapes: Vec<TableShapeId>,
     /// Whether Emmy annotations are the authority for this function's signature.
     pub emmy_annotated: bool,
+    /// Alternative signatures from `---@overload` annotations.
+    pub overloads: Vec<FunctionSignature>,
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).

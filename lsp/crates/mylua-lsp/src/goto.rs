@@ -40,6 +40,16 @@ pub fn goto_definition(
         }
     }
 
+    // Check if ident is a type name → jump to its definition
+    if let Some(candidates) = index.type_shard.get(name) {
+        if let Some(candidate) = candidates.first() {
+            return Some(GotoDefinitionResponse::Scalar(Location {
+                uri: candidate.source_uri.clone(),
+                range: candidate.range,
+            }));
+        }
+    }
+
     if let Some(target) = try_require_goto(doc, ident_node, index) {
         return Some(target);
     }
@@ -111,16 +121,7 @@ fn goto_field_expression(
     let field = field_expr.child_by_field_name("field")?;
     let field_name = node_text(field, source).to_string();
 
-    let base_text = node_text(object, source);
-    let base_fact = if let Some(summary) = index.summaries.get(uri) {
-        if let Some(ltf) = summary.local_type_facts.get(base_text) {
-            ltf.type_fact.clone()
-        } else {
-            TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
-        }
-    } else {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
-    };
+    let base_fact = crate::hover::infer_node_type(object, source, uri, index);
 
     let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
 

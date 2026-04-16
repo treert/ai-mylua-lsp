@@ -56,7 +56,6 @@ fn try_dot_completion(
         return None;
     }
     let is_method = bytes[dot_pos - 1] == b':';
-    let _ = is_method;
 
     // Find the base expression before the dot
     let base_end = dot_pos - 1;
@@ -71,14 +70,33 @@ fn try_dot_completion(
     let base_text = std::str::from_utf8(&bytes[base_start..base_end]).ok()?;
     let prefix = std::str::from_utf8(&bytes[dot_pos..offset]).ok()?.to_string();
 
-    let base_fact = if let Some(summary) = index.summaries.get(uri) {
-        if let Some(ltf) = summary.local_type_facts.get(base_text) {
-            ltf.type_fact.clone()
+    let base_fact = {
+        let parts: Vec<&str> = base_text.split('.').collect();
+        if parts.len() == 1 {
+            if let Some(summary) = index.summaries.get(uri) {
+                if let Some(ltf) = summary.local_type_facts.get(base_text) {
+                    ltf.type_fact.clone()
+                } else {
+                    TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
+                }
+            } else {
+                TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
+            }
         } else {
-            TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
+            let root = parts[0];
+            let root_fact = if let Some(summary) = index.summaries.get(uri) {
+                if let Some(ltf) = summary.local_type_facts.get(root) {
+                    ltf.type_fact.clone()
+                } else {
+                    TypeFact::Stub(SymbolicStub::GlobalRef { name: root.to_string() })
+                }
+            } else {
+                TypeFact::Stub(SymbolicStub::GlobalRef { name: root.to_string() })
+            };
+            let field_chain: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
+            let resolved = resolver::resolve_field_chain(&root_fact, &field_chain, index);
+            resolved.type_fact
         }
-    } else {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
     };
 
     let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
@@ -90,15 +108,30 @@ fn try_dot_completion(
     let items: Vec<CompletionItem> = fields
         .into_iter()
         .filter(|f| prefix.is_empty() || f.name.starts_with(&prefix))
-        .map(|f| CompletionItem {
-            label: f.name.clone(),
-            kind: Some(CompletionItemKind::FIELD),
-            detail: if f.type_display != "unknown" {
-                Some(f.type_display)
+        .filter(|f| {
+            if is_method {
+                f.type_display.starts_with("fun(") || f.type_display.contains("function")
+                    || f.type_display == "unknown"
             } else {
-                None
-            },
-            ..Default::default()
+                true
+            }
+        })
+        .map(|f| {
+            let kind = if is_method || f.type_display.starts_with("fun(") || f.type_display.contains("function") {
+                CompletionItemKind::METHOD
+            } else {
+                CompletionItemKind::FIELD
+            };
+            CompletionItem {
+                label: f.name.clone(),
+                kind: Some(kind),
+                detail: if f.type_display != "unknown" {
+                    Some(f.type_display)
+                } else {
+                    None
+                },
+                ..Default::default()
+            }
         })
         .collect();
 

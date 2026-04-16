@@ -427,6 +427,10 @@ fn resolve_field_access(
             resolve_emmy_field(type_name, field, agg)
         }
 
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
+            resolve_emmy_field(type_name, field, agg)
+        }
+
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
             // Try `name.field` as a qualified global name (O(1) lookup).
             // Function declarations like `function Foo.bar()` are registered
@@ -583,6 +587,10 @@ fn collect_fields(
         }
 
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
+            collect_emmy_fields_recursive(type_name, agg, &mut fields, &mut HashSet::new());
+        }
+
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
             collect_emmy_fields_recursive(type_name, agg, &mut fields, &mut HashSet::new());
         }
 
