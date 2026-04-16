@@ -95,22 +95,22 @@
 - **配置体系**：15 个扩展配置项，通过 `initializationOptions` + `didChangeConfiguration` 下发
 - **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
 - **documentSymbol**：顶层 function / local / assignment 提取为大纲
-- **goto definition**：local 作用域 + 全局符号表 + `require` 跳转 + **字段表达式跨文件跳转**
-- **hover**：定义源码 + EmmyLua 注解 + 文档注释（`---`/`--`/`--[[ ]]` 三种注释形式）+ **推断类型展示**（链式字段解析）
-- **references**：单文件 local scope + 全工作区全局符号引用
-- **workspace/symbol**：全局函数/变量模糊搜索
-- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；54 个单元测试
-- **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全**
+- **goto definition**：local 作用域 + 全局符号表 + `require` 跳转（到首个全局贡献位置）+ **字段表达式跨文件跳转** + **Emmy 类型名跳转**（`type_shard`）+ **链式 field_expression 递归解析**（`a.b.c`）
+- **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **推断类型展示**（链式字段解析）+ **Emmy 类型 hover**（class/alias/enum 区分展示、字段列表）+ **全局多候选提示**
+- **references**：单文件 local scope + 全工作区全局符号引用（`global_shard` + `type_shard` 声明 + 去重）
+- **workspace/symbol**：全局函数/变量 + **Emmy class/alias/enum**（`type_shard`）模糊搜索
+- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；**泛型参数保留**（`EmmyGeneric` 变体）；**`@overload` 参与 FunctionSummary**；**`@alias` 右侧类型保存和展开**
+- **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全** + **冒号补全过滤方法** + **链式 dotted base 解析**
 - **rename**：单文件 local + 全工作区全局（含 prepareRename）
 - **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记（作用域感知）
-- **语义诊断**：未定义全局变量 warning（作用域感知）
+- **语义诊断**：未定义全局变量 + **Emmy 类型未知字段访问** warning（severity 可配置）；**诊断 enable/severity 受配置控制**
 - **作用域树**（`scope.rs`）：arena-based `ScopeTree`，单趟 AST 遍历构建；支持 `function_body` / `do` / `while` / `repeat` / `if` / `for` 等所有块级作用域 + 参数 + for 变量 + 隐式 `self`；正确处理 `local x = x + 1` RHS 引用外层变量的 Lua 语义
 
 **索引架构（步骤 1-6）**：
-- `summary_builder.rs`：单文件 AST → DocumentSummary；支持文件级 `return` 语句提取（`module_return_type`）、递归进入 `if`/`do`/`for`/`while` 块收集全局赋值和函数声明、全局函数 `GlobalContribution` 携带真实 `FunctionSignature`
+- `summary_builder.rs`：单文件 AST → DocumentSummary；支持文件级 `return` 语句提取（`module_return_type`）、递归进入 `if`/`do`/`for`/`while` 块（含 local/emmy_comment）收集全局赋值和函数声明、全局函数 `GlobalContribution` 携带真实 `FunctionSignature`、**冒号方法调用生成 CallReturn stub**、**Known(EmmyType) base 生成 TypeRef**
 - `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn）；同名全局候选按 URI 路径深度优先排序（浅路径 > 深路径）；`resolve_module_to_uri` 优先查 `require_map`
-- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_require` 基于目标文件 `module_return_type` 解析模块返回值类型（支持 `local M = {}; return M` 模式）；`resolve_field_chain` 对 table-extension 全局变量支持 global_shard 限定名回退；Emmy 继承链字段解析（`resolve_emmy_field` 沿 `parents` 递归查找）；`collect_fields` / `resolve_table_field` 强制 `source_uri` 避免跨文件 `TableShapeId` 碰撞
-- `summary.rs`：`DocumentSummary` 含 `module_return_type`；`TypeDefinition` 含 `parents`（继承链）；签名指纹包含全局类型信息和 module return
+- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_require` 基于目标文件 `module_return_type` 解析模块返回值类型；`resolve_field_chain` 对 table-extension 全局变量支持 global_shard 限定名回退；Emmy 继承链字段解析（沿 `parents` 递归）+ **alias 类型展开**（`resolve_emmy_field` 自动跟踪 alias 目标）；`collect_fields` / `resolve_table_field` 强制 `source_uri`；**EmmyGeneric 类型的字段/补全支持**
+- `summary.rs`：`DocumentSummary` 含 `module_return_type`；`TypeDefinition` 含 `parents`（继承链）、`alias_type`（别名目标）；`FunctionSummary` 含 `overloads`；签名指纹包含全局类型信息和 module return
 - 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
 
 - 构建：`cd lsp && cargo build`
