@@ -434,7 +434,6 @@ fn build_function_summary(
         signature: sig,
         range: ts_node_to_range(decl_node),
         signature_fingerprint: fingerprint,
-        returned_shapes: Vec::new(),
         emmy_annotated,
         overloads,
     }
@@ -1037,6 +1036,16 @@ fn hash_function_signature(sig: &FunctionSignature) -> u64 {
 fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     let mut hasher = DefaultHasher::new();
 
+    // Hash require bindings (affect cross-file resolution)
+    let mut requires: Vec<_> = ctx.require_bindings.iter()
+        .map(|r| (&r.local_name, &r.module_path))
+        .collect();
+    requires.sort();
+    for (name, path) in &requires {
+        name.hash(&mut hasher);
+        path.hash(&mut hasher);
+    }
+
     // Hash global contributions including their type facts
     let mut globals: Vec<_> = ctx.global_contributions.iter()
         .map(|g| (g.name.as_str(), format!("{}", g.type_fact)))
@@ -1057,20 +1066,28 @@ fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
         }
     }
 
-    // Hash type definitions including field info
+    // Hash type definitions: kind, parents, alias, fields
     let mut type_defs: Vec<_> = ctx.type_definitions.iter()
         .map(|t| {
             let fields_str: String = t.fields.iter()
                 .map(|f| format!("{}:{}", f.name, f.type_fact))
                 .collect::<Vec<_>>()
                 .join(",");
-            (t.name.as_str(), fields_str)
+            let alias_str = t.alias_type.as_ref()
+                .map(|a| format!("{}", a))
+                .unwrap_or_default();
+            let parents_str = t.parents.join(",");
+            let kind_str = format!("{:?}", t.kind);
+            (t.name.as_str(), kind_str, parents_str, alias_str, fields_str)
         })
         .collect();
     type_defs.sort();
-    for (name, fields_str) in &type_defs {
+    for (name, kind, parents, alias, fields) in &type_defs {
         name.hash(&mut hasher);
-        fields_str.hash(&mut hasher);
+        kind.hash(&mut hasher);
+        parents.hash(&mut hasher);
+        alias.hash(&mut hasher);
+        fields.hash(&mut hasher);
     }
 
     // Hash module return type

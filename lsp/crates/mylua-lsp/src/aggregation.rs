@@ -217,7 +217,8 @@ impl WorkspaceAggregation {
             !candidates.is_empty()
         });
 
-        self.require_by_return.remove(uri);
+        // Only remove entries where THIS file is the *source* (requirer),
+        // not where it is the *target* (required module).
         self.require_by_return.retain(|_, deps| {
             deps.retain(|d| &d.source_uri != uri);
             !deps.is_empty()
@@ -298,7 +299,7 @@ impl WorkspaceAggregation {
         }
     }
 
-    fn resolve_module_to_uri(&self, module_path: &str) -> Option<Uri> {
+    pub fn resolve_module_to_uri(&self, module_path: &str) -> Option<Uri> {
         if let Some(uri) = self.require_map.get(module_path) {
             return Some(uri.clone());
         }

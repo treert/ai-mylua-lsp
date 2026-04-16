@@ -68,8 +68,6 @@ pub struct FunctionSummary {
     pub range: Range,
     /// Stable hash of `(params_types, return_types)` for cascade invalidation.
     pub signature_fingerprint: u64,
-    /// Table shapes constructed and returned by this function.
-    pub returned_shapes: Vec<TableShapeId>,
     /// Whether Emmy annotations are the authority for this function's signature.
     pub emmy_annotated: bool,
     /// Alternative signatures from `---@overload` annotations.

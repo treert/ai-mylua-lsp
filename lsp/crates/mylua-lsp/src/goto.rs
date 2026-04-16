@@ -163,16 +163,16 @@ fn try_require_goto(
 
     let module_path = extract_string_content(arg, doc.text.as_bytes())?;
 
-    let target_uri = index.require_map.get(&module_path)?;
+    let target_uri = index.resolve_module_to_uri(&module_path)?;
 
-    let target_range = index.summaries.get(target_uri)
+    let target_range = index.summaries.get(&target_uri)
         .and_then(|s| {
             s.global_contributions.first().map(|gc| gc.selection_range)
         })
         .unwrap_or_default();
 
     Some(GotoDefinitionResponse::Scalar(Location {
-        uri: target_uri.clone(),
+        uri: target_uri,
         range: target_range,
     }))
 }

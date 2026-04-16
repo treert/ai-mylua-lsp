@@ -135,20 +135,6 @@ impl SummaryCache {
         }
     }
 
-    pub fn get_if_fresh(&self, uri_str: &str, content_hash: u64) -> Option<DocumentSummary> {
-        let filename = uri_to_cache_filename(uri_str);
-        let path = self
-            .cache_dir
-            .join("entries")
-            .join(format!("{}.json", filename));
-        let data = std::fs::read(&path).ok()?;
-        let entry: CacheEntry = serde_json::from_slice(&data).ok()?;
-        if entry.content_hash == content_hash {
-            Some(entry.summary)
-        } else {
-            None
-        }
-    }
 }
 
 fn resolve_cache_dir(workspace_root: &Path) -> Option<PathBuf> {

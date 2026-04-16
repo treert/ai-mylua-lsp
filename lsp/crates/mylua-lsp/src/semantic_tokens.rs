@@ -1,10 +1,18 @@
+use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::scope::ScopeTree;
 use crate::util::node_text;
 
-
 const TT_VARIABLE: u32 = 0;
 const TM_DEFAULT_LIBRARY: u32 = 1 << 0;
+
+const LUA_BUILTINS: &[&str] = &[
+    "print", "type", "tostring", "tonumber", "error", "assert", "pcall", "xpcall",
+    "pairs", "ipairs", "next", "select", "require", "dofile", "loadfile", "load",
+    "rawget", "rawset", "rawequal", "rawlen", "setmetatable", "getmetatable",
+    "collectgarbage", "unpack", "table", "string", "math", "io", "os", "debug",
+    "coroutine", "package", "utf8", "arg", "_G", "_ENV", "_VERSION",
+];
 
 pub fn semantic_tokens_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
@@ -18,9 +26,10 @@ pub fn collect_semantic_tokens(
     source: &[u8],
     scope_tree: &ScopeTree,
 ) -> Vec<SemanticToken> {
+    let builtins: HashSet<&str> = LUA_BUILTINS.iter().copied().collect();
     let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
-    collect_variable_tokens(&mut cursor, source, scope_tree, &mut raw);
+    collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw);
 
     raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 
@@ -47,6 +56,7 @@ fn collect_variable_tokens(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     scope_tree: &ScopeTree,
+    builtins: &HashSet<&str>,
     tokens: &mut Vec<(u32, u32, u32, u32)>,
 ) {
     let node = cursor.node();
@@ -57,8 +67,10 @@ fn collect_variable_tokens(
         let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
         let modifiers = if is_local {
             0
-        } else {
+        } else if builtins.contains(name) {
             TM_DEFAULT_LIBRARY
+        } else {
+            0
         };
         let start = node.start_position();
         let end = node.end_position();
@@ -72,7 +84,7 @@ fn collect_variable_tokens(
 
     if cursor.goto_first_child() {
         loop {
-            collect_variable_tokens(cursor, source, scope_tree, tokens);
+            collect_variable_tokens(cursor, source, scope_tree, builtins, tokens);
             if !cursor.goto_next_sibling() {
                 break;
             }

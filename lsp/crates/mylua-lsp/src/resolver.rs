@@ -250,8 +250,8 @@ fn resolve_require(
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
-    let target_uri = match agg.require_map.get(module_path) {
-        Some(u) => u.clone(),
+    let target_uri = match agg.resolve_module_to_uri(module_path) {
+        Some(u) => u,
         None => return ResolvedType::unknown(),
     };
 
@@ -450,14 +450,40 @@ fn resolve_field_access(
         }
 
         TypeFact::Union(types) => {
-            // Try each union member; return first successful resolution
+            let mut resolved_types = Vec::new();
+            let mut best_location: Option<(Uri, Range)> = None;
             for t in types {
                 let result = resolve_field_access(t, field, agg, depth + 1, visited);
                 if result.type_fact != TypeFact::Unknown {
-                    return result;
+                    if best_location.is_none() {
+                        if let (Some(u), Some(r)) = (&result.def_uri, &result.def_range) {
+                            best_location = Some((u.clone(), *r));
+                        }
+                    }
+                    if !resolved_types.contains(&result.type_fact) {
+                        resolved_types.push(result.type_fact);
+                    }
                 }
             }
-            ResolvedType::unknown()
+            match resolved_types.len() {
+                0 => ResolvedType::unknown(),
+                1 => {
+                    let fact = resolved_types.into_iter().next().unwrap();
+                    if let Some((uri, range)) = best_location {
+                        ResolvedType::with_location(fact, uri, range)
+                    } else {
+                        ResolvedType::from_fact(fact)
+                    }
+                }
+                _ => {
+                    let fact = TypeFact::Union(resolved_types);
+                    if let Some((uri, range)) = best_location {
+                        ResolvedType::with_location(fact, uri, range)
+                    } else {
+                        ResolvedType::from_fact(fact)
+                    }
+                }
+            }
         }
 
         _ => ResolvedType::unknown(),
