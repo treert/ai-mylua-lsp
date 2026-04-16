@@ -1,4 +1,12 @@
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use tower_lsp_server::ls_types::*;
+
+pub fn hash_bytes(data: &[u8]) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    data.hash(&mut hasher);
+    hasher.finish()
+}
 
 pub fn ts_point_to_position(point: tree_sitter::Point) -> Position {
     Position {

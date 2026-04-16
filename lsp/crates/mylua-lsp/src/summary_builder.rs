@@ -1019,9 +1019,7 @@ fn merge_types(a: TypeFact, b: TypeFact) -> TypeFact {
 // ---------------------------------------------------------------------------
 
 fn hash_bytes(data: &[u8]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    data.hash(&mut hasher);
-    hasher.finish()
+    crate::util::hash_bytes(data)
 }
 
 fn hash_function_signature(sig: &FunctionSignature) -> u64 {

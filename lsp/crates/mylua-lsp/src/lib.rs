@@ -20,12 +20,14 @@ pub mod table_shape;
 pub mod type_system;
 pub mod types;
 pub mod util;
+pub mod summary_cache;
 pub mod workspace_scanner;
 pub mod workspace_symbol;
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use tower_lsp_server::jsonrpc::Result;
 use tower_lsp_server::ls_types::*;
@@ -35,32 +37,56 @@ use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
 
+const DIAGNOSTIC_DEBOUNCE_MS: u64 = 300;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexState {
+    Initializing,
+    Ready,
+}
+
 pub struct Backend {
     client: Client,
     parser: Mutex<tree_sitter::Parser>,
-    documents: Mutex<HashMap<Uri, Document>>,
-    index: Mutex<WorkspaceAggregation>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    index: Arc<Mutex<WorkspaceAggregation>>,
     workspace_roots: Mutex<Vec<PathBuf>>,
-    config: Mutex<LspConfig>,
+    config: Arc<Mutex<LspConfig>>,
+    index_state: Arc<Mutex<IndexState>>,
+    diag_gen: Arc<Mutex<HashMap<Uri, u64>>>,
+}
+
+struct ParsedFile {
+    uri: Uri,
+    text: String,
+    tree: tree_sitter::Tree,
+    summary: summary::DocumentSummary,
+    scope_tree: scope::ScopeTree,
 }
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
     semantic_tokens::semantic_tokens_legend()
 }
 
+fn new_parser() -> tree_sitter::Parser {
+    let mut parser = tree_sitter::Parser::new();
+    parser
+        .set_language(&tree_sitter_mylua::LANGUAGE.into())
+        .expect("failed to load mylua grammar");
+    parser
+}
+
 impl Backend {
     pub fn new(client: Client) -> Self {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_mylua::LANGUAGE.into())
-            .expect("failed to load mylua grammar");
         Backend {
             client,
-            parser: Mutex::new(parser),
-            documents: Mutex::new(HashMap::new()),
-            index: Mutex::new(WorkspaceAggregation::new()),
+            parser: Mutex::new(new_parser()),
+            documents: Arc::new(Mutex::new(HashMap::new())),
+            index: Arc::new(Mutex::new(WorkspaceAggregation::new())),
             workspace_roots: Mutex::new(Vec::new()),
-            config: Mutex::new(LspConfig::default()),
+            config: Arc::new(Mutex::new(LspConfig::default())),
+            index_state: Arc::new(Mutex::new(IndexState::Initializing)),
+            diag_gen: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -71,32 +97,23 @@ impl Backend {
         };
 
         if let Some(tree) = tree {
-            let mut diags = diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
+            let syntax_diags =
+                diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
 
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
-            lsp_log!("[index] summary for {:?}: locals={:?} types={:?} globals={}",
+            lsp_log!(
+                "[index] summary for {:?}: locals={:?} types={:?} globals={}",
                 uri,
                 summary.local_type_facts.keys().collect::<Vec<_>>(),
-                summary.type_definitions.iter().map(|t| &t.name).collect::<Vec<_>>(),
+                summary.type_definitions
+                    .iter()
+                    .map(|t| &t.name)
+                    .collect::<Vec<_>>(),
                 summary.global_contributions.len(),
             );
             self.index.lock().unwrap().upsert_summary(summary);
 
             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-
-            {
-                let mut idx = self.index.lock().unwrap();
-                let cfg = self.config.lock().unwrap();
-                let semantic = diagnostics::collect_semantic_diagnostics(
-                    tree.root_node(),
-                    text.as_bytes(),
-                    &uri,
-                    &mut idx,
-                    &scope_tree,
-                    &cfg.diagnostics,
-                );
-                diags.extend(semantic);
-            }
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
@@ -104,10 +121,67 @@ impl Backend {
             );
 
             let client = self.client.clone();
+            let uri_for_syntax = uri.clone();
             tokio::spawn(async move {
-                client.publish_diagnostics(uri, diags, version).await;
+                client
+                    .publish_diagnostics(uri_for_syntax, syntax_diags, version)
+                    .await;
             });
+
+            self.schedule_semantic_diagnostics(uri, version);
         }
+    }
+
+    fn schedule_semantic_diagnostics(&self, uri: Uri, version: Option<i32>) {
+        let gen = {
+            let mut gens = self.diag_gen.lock().unwrap();
+            let entry = gens.entry(uri.clone()).or_insert(0);
+            *entry += 1;
+            *entry
+        };
+
+        let diag_gen = self.diag_gen.clone();
+        let documents = self.documents.clone();
+        let index = self.index.clone();
+        let config = self.config.clone();
+        let index_state = self.index_state.clone();
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS)).await;
+
+            let current_gen = diag_gen.lock().unwrap().get(&uri).copied().unwrap_or(0);
+            if current_gen != gen {
+                return;
+            }
+
+            if *index_state.lock().unwrap() != IndexState::Ready {
+                return;
+            }
+
+            let diags = {
+                let docs = documents.lock().unwrap();
+                let Some(doc) = docs.get(&uri) else {
+                    return;
+                };
+                let mut syntax =
+                    diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
+                let mut idx = index.lock().unwrap();
+                let cfg = config.lock().unwrap();
+                let semantic = diagnostics::collect_semantic_diagnostics(
+                    doc.tree.root_node(),
+                    doc.text.as_bytes(),
+                    &uri,
+                    &mut idx,
+                    &doc.scope_tree,
+                    &cfg.diagnostics,
+                );
+                syntax.extend(semantic);
+                syntax
+            };
+
+            client.publish_diagnostics(uri, diags, version).await;
+        });
     }
 
     fn index_file_from_disk(&self, path: &std::path::Path) {
@@ -127,16 +201,35 @@ impl Backend {
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
             self.index.lock().unwrap().upsert_summary(summary);
             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-            self.documents.lock().unwrap().insert(uri, Document { text, tree, scope_tree });
+            self.documents
+                .lock()
+                .unwrap()
+                .insert(uri, Document { text, tree, scope_tree });
         }
     }
 
-    fn scan_workspace(&self) {
+    async fn scan_workspace_parallel(&self) {
         let roots = self.workspace_roots.lock().unwrap().clone();
-        let require_config = {
+        let (require_config, cache_mode, config_fingerprint) = {
             let cfg = self.config.lock().unwrap();
-            cfg.require.clone()
+            (
+                cfg.require.clone(),
+                cfg.index.cache_mode.clone(),
+                summary_cache::compute_config_fingerprint(&cfg),
+            )
         };
+
+        let use_disk_cache = cache_mode == config::CacheMode::Summary;
+        let cache = if use_disk_cache {
+            roots
+                .first()
+                .and_then(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
+        } else {
+            None
+        };
+
+        let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
+        let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
         let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config);
         {
@@ -148,17 +241,158 @@ impl Backend {
 
         let files = workspace_scanner::collect_lua_files(&roots);
         let total = files.len();
-        eprintln!("[mylua-lsp] indexing {} .lua files...", total);
+        eprintln!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
 
-        for (i, file) in files.iter().enumerate() {
-            self.index_file_from_disk(file);
-            if (i + 1) % 500 == 0 || i + 1 == total {
-                eprintln!("[mylua-lsp] indexed {}/{}", i + 1, total);
+        let token = NumberOrString::String("mylua-indexing".to_string());
+        let progress = self
+            .client
+            .progress(token, "Indexing Lua workspace")
+            .with_percentage(0)
+            .with_message(format!("0/{} files", total))
+            .begin()
+            .await;
+
+        let batch_size = 200;
+        let mut indexed = 0usize;
+
+        for chunk in files.chunks(batch_size) {
+            let chunk_len = chunk.len();
+            let chunk = chunk.to_vec();
+            let cached_clone = cached_summaries.clone();
+            let hits_clone = cache_hits.clone();
+
+            let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
+                use rayon::prelude::*;
+                chunk
+                    .par_iter()
+                    .filter_map(|path| {
+                        let text = std::fs::read_to_string(path).ok()?;
+                        let uri = workspace_scanner::path_to_uri(path)?;
+                        let content_hash = content_hash(&text);
+
+                        if let Some(cached) = cached_clone.get(&uri.to_string()) {
+                            if cached.content_hash == content_hash {
+                                hits_clone
+                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                let mut parser = new_parser();
+                                let tree = parser.parse(text.as_bytes(), None)?;
+                                let scope_tree =
+                                    scope::build_scope_tree(&tree, text.as_bytes());
+                                return Some(ParsedFile {
+                                    uri,
+                                    text,
+                                    tree,
+                                    summary: cached.clone(),
+                                    scope_tree,
+                                });
+                            }
+                        }
+
+                        let mut parser = new_parser();
+                        let tree = parser.parse(text.as_bytes(), None)?;
+                        let summary =
+                            summary_builder::build_summary(&uri, &tree, text.as_bytes());
+                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                        Some(ParsedFile {
+                            uri,
+                            text,
+                            tree,
+                            summary,
+                            scope_tree,
+                        })
+                    })
+                    .collect()
+            })
+            .await
+            .unwrap_or_else(|e| {
+                eprintln!("[mylua-lsp] indexing batch failed: {}", e);
+                vec![]
+            });
+
+            {
+                let mut docs = self.documents.lock().unwrap();
+                let mut idx = self.index.lock().unwrap();
+                for pf in parsed {
+                    idx.upsert_summary(pf.summary);
+                    docs.insert(
+                        pf.uri,
+                        Document {
+                            text: pf.text,
+                            tree: pf.tree,
+                            scope_tree: pf.scope_tree,
+                        },
+                    );
+                }
             }
+
+            indexed += chunk_len;
+            let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
+            progress.report(pct).await;
+            eprintln!("[mylua-lsp] indexed {}/{}", indexed, total);
         }
 
-        eprintln!("[mylua-lsp] workspace indexing complete: {} files", total);
+        let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+        if hits > 0 {
+            eprintln!("[mylua-lsp] cache hits: {}/{}", hits, total);
+        }
+
+        *self.index_state.lock().unwrap() = IndexState::Ready;
+        progress.finish().await;
+        eprintln!(
+            "[mylua-lsp] workspace indexing complete: {} files (Ready)",
+            total
+        );
+
+        if let Some(cache) = &cache {
+            let summaries = self.index.lock().unwrap().summaries.clone();
+            tokio::task::spawn_blocking({
+                let cache_dir = cache.cache_dir().to_path_buf();
+                let config_fp = config_fingerprint;
+                move || {
+                    let c = summary_cache::SummaryCache::new_from_dir(cache_dir, config_fp);
+                    c.save_all(&summaries);
+                    eprintln!("[mylua-lsp] saved {} summaries to cache", summaries.len());
+                }
+            });
+        }
     }
+
+    fn publish_diagnostics_for_open_files(&self) {
+        let uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
+        let cfg = self.config.lock().unwrap().diagnostics.clone();
+
+        for uri in uris {
+            let diags = {
+                let docs = self.documents.lock().unwrap();
+                let Some(doc) = docs.get(&uri) else {
+                    continue;
+                };
+                let mut diags =
+                    diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
+                let mut idx = self.index.lock().unwrap();
+                let semantic = diagnostics::collect_semantic_diagnostics(
+                    doc.tree.root_node(),
+                    doc.text.as_bytes(),
+                    &uri,
+                    &mut idx,
+                    &doc.scope_tree,
+                    &cfg,
+                );
+                diags.extend(semantic);
+                diags
+            };
+
+            let client = self.client.clone();
+            let uri_clone = uri.clone();
+            tokio::spawn(async move {
+                client.publish_diagnostics(uri_clone, diags, None).await;
+            });
+        }
+    }
+}
+
+fn content_hash(s: &str) -> u64 {
+    util::hash_bytes(s.as_bytes())
 }
 
 fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
@@ -215,6 +449,7 @@ impl LanguageServer for Backend {
             }
         }
         if roots.is_empty() {
+            #[allow(deprecated)]
             if let Some(uri) = &params.root_uri {
                 if let Some(path) = uri_to_path(uri) {
                     roots.push(path);
@@ -235,7 +470,9 @@ impl LanguageServer for Backend {
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
-                    work_done_progress_options: WorkDoneProgressOptions { work_done_progress: None },
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
                 })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
                 semantic_tokens_provider: Some(
@@ -269,9 +506,13 @@ impl LanguageServer for Backend {
             }
         }
         self.client
-            .log_message(MessageType::INFO, "mylua-lsp initialized, scanning workspace...")
+            .log_message(
+                MessageType::INFO,
+                "mylua-lsp initialized, scanning workspace...",
+            )
             .await;
-        self.scan_workspace();
+        self.scan_workspace_parallel().await;
+        self.publish_diagnostics_for_open_files();
         self.client
             .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
             .await;
@@ -300,6 +541,10 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        self.diag_gen
+            .lock()
+            .unwrap()
+            .remove(&params.text_document.uri);
         self.client
             .publish_diagnostics(params.text_document.uri, vec![], None)
             .await;
@@ -313,15 +558,21 @@ impl LanguageServer for Backend {
                         if path.extension().map_or(false, |e| e == "lua") {
                             self.index_file_from_disk(&path);
                             let roots = self.workspace_roots.lock().unwrap().clone();
-                            let require_config = self.config.lock().unwrap().require.clone();
+                            let require_config =
+                                self.config.lock().unwrap().require.clone();
                             for root in &roots {
                                 if path.starts_with(root) {
                                     let modules = workspace_scanner::file_to_module_paths(
-                                        root, &path, &require_config.paths,
+                                        root,
+                                        &path,
+                                        &require_config.paths,
                                     );
                                     let mut idx = self.index.lock().unwrap();
                                     for module in modules {
-                                        idx.set_require_mapping(module, change.uri.clone());
+                                        idx.set_require_mapping(
+                                            module,
+                                            change.uri.clone(),
+                                        );
                                     }
                                     break;
                                 }
@@ -332,6 +583,7 @@ impl LanguageServer for Backend {
                 FileChangeType::DELETED => {
                     self.index.lock().unwrap().remove_file(&change.uri);
                     self.documents.lock().unwrap().remove(&change.uri);
+                    self.diag_gen.lock().unwrap().remove(&change.uri);
                 }
                 _ => {}
             }
@@ -431,7 +683,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(rename::rename(doc, uri, position, &params.new_name, &idx, &docs))
+        Ok(rename::rename(
+            doc,
+            uri,
+            position,
+            &params.new_name,
+            &idx,
+            &docs,
+        ))
     }
 
     async fn symbol(

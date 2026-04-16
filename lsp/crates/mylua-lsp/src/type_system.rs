@@ -1,12 +1,14 @@
 use std::fmt;
 
+use serde::{Deserialize, Serialize};
+
 use crate::table_shape::TableShapeId;
 
 /// A type fact produced by single-file inference.
 ///
 /// `Known` variants are fully resolved within the file.
 /// `Stub` variants require cross-file resolution via the aggregation layer.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum TypeFact {
     Known(KnownType),
     Stub(SymbolicStub),
@@ -14,7 +16,7 @@ pub enum TypeFact {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum KnownType {
     Nil,
     Boolean,
@@ -23,44 +25,44 @@ pub enum KnownType {
     String,
     Table(TableShapeId),
     Function(FunctionSignature),
-    EmmyType(String),
-    EmmyGeneric(String, Vec<TypeFact>),
+    EmmyType(std::string::String),
+    EmmyGeneric(std::string::String, Vec<TypeFact>),
 }
 
 /// Placeholder that defers resolution to cross-file analysis.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum SymbolicStub {
     /// `local x = require("mod")` — resolve to target file's return type.
-    RequireRef { module_path: String },
+    RequireRef { module_path: std::string::String },
 
     /// `local x = base.func_name()` — resolve to function return type.
     CallReturn {
         base: Box<SymbolicStub>,
-        func_name: String,
+        func_name: std::string::String,
     },
 
     /// Reference to a global name, resolved via GlobalShard.
-    GlobalRef { name: String },
+    GlobalRef { name: std::string::String },
 
     /// Reference to an Emmy type name, resolved via TypeShard.
-    TypeRef { name: String },
+    TypeRef { name: std::string::String },
 
     /// `base.field` — resolve base, then look up field.
     FieldOf {
         base: Box<TypeFact>,
-        field: String,
+        field: std::string::String,
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FunctionSignature {
     pub params: Vec<ParamInfo>,
     pub returns: Vec<TypeFact>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ParamInfo {
-    pub name: String,
+    pub name: std::string::String,
     pub type_fact: TypeFact,
 }
 

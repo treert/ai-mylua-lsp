@@ -1,13 +1,14 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use tower_lsp_server::ls_types::Range;
 
 /// Stable identity for a table literal or constructed table within a file.
 /// The inner `u32` is a per-file unique id assigned during summary generation.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct TableShapeId(pub u32);
 
 /// Describes the statically known shape of a Lua table value.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TableShape {
     pub id: TableShapeId,
     pub fields: HashMap<String, FieldInfo>,
@@ -19,7 +20,7 @@ pub struct TableShape {
     pub truncated: bool,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FieldInfo {
     pub name: String,
     pub type_fact: crate::type_system::TypeFact,

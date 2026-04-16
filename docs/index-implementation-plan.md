@@ -1,6 +1,6 @@
 # 索引架构落地实施计划
 
-**状态**：草案
+**状态**：步骤 1–7 全部完成
 **前置文档**：[`index-architecture.md`](index-architecture.md)、[`lsp-semantic-spec.md`](lsp-semantic-spec.md)、[`requirements.md`](requirements.md)
 
 ---

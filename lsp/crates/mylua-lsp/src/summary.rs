@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
 use tower_lsp_server::ls_types::{Range, Uri};
 
 use crate::table_shape::{TableShape, TableShapeId};
@@ -8,7 +9,7 @@ use crate::type_system::{FunctionSignature, TypeFact};
 ///
 /// Contains everything needed to participate in the workspace aggregation layer
 /// without re-parsing the AST. See `index-architecture.md` §2.1.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentSummary {
     pub uri: Uri,
     /// Hash of source text; used for cache invalidation.
@@ -34,7 +35,7 @@ pub struct DocumentSummary {
 }
 
 /// `local <name> = require("<module_path>")`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RequireBinding {
     pub local_name: String,
     pub module_path: String,
@@ -42,7 +43,7 @@ pub struct RequireBinding {
 }
 
 /// A global name contributed by this file (assignment, function declaration, table extension).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GlobalContribution {
     pub name: String,
     pub kind: GlobalContributionKind,
@@ -51,7 +52,7 @@ pub struct GlobalContribution {
     pub selection_range: Range,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum GlobalContributionKind {
     Variable,
     Function,
@@ -59,7 +60,7 @@ pub enum GlobalContributionKind {
 }
 
 /// Summary of a function's type-level contract.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FunctionSummary {
     pub name: String,
     pub signature: FunctionSignature,
@@ -76,7 +77,7 @@ pub struct FunctionSummary {
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeDefinition {
     pub name: String,
     pub kind: TypeDefinitionKind,
@@ -86,7 +87,7 @@ pub struct TypeDefinition {
     pub range: Range,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeDefinitionKind {
     Class,
     Alias,
@@ -94,7 +95,7 @@ pub enum TypeDefinitionKind {
 }
 
 /// A field declared within `---@class` or `---@field`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TypeFieldDef {
     pub name: String,
     pub type_fact: TypeFact,
@@ -102,7 +103,7 @@ pub struct TypeFieldDef {
 }
 
 /// Inferred type fact for a key local variable, with provenance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LocalTypeFact {
     pub name: String,
     pub type_fact: TypeFact,
@@ -111,7 +112,7 @@ pub struct LocalTypeFact {
 }
 
 /// Where a local's type information came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TypeFactSource {
     Assignment,
     CallReturn,

@@ -37,11 +37,12 @@
 - **摘要驱动的渐进索引**：`DocumentSummary`、`require` 绑定、工作区聚合层；为 workspace-wide 打基础。
 - **诊断分层 MVP**：先落地 Emmy 路径严格、Lua 路径保守的默认策略。
 
-### 阶段 C — Workspace-wide 完整能力 + 5 万文件硬化
+### 阶段 C — Workspace-wide 完整能力 + 5 万文件硬化 ✅
 
 - **`textDocument/references`**、**`workspace/symbol`** 达到需求文档硬性标准；增量索引与 **内存/延迟** 调优；压测 5 万文件。
 - **缓存与工作区边界**：固化 `DocumentSummary` 缓存、失效规则、多根工作区与 `exclude` 的默认行为。
 - **语义诊断** 分级与后台调度固化。
+- **索引生命周期**：`Initializing`/`Ready` 状态机 + `window/workDoneProgress` 进度通知 + `rayon` 并行冷启动 + 300ms 去抖诊断调度 + FNV 磁盘缓存（`DocumentSummary` 序列化）。
 
 ### 阶段 D — 体验与扩展
 
