@@ -160,6 +160,13 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "assignment_statement" => {
                 visit_assignment(ctx, child);
             }
+            "local_declaration" => {
+                visit_local_declaration(ctx, child);
+            }
+            "local_function_declaration" => {
+                visit_local_function(ctx, child);
+            }
+            "emmy_comment" => visit_emmy_comment(ctx, child),
             "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
             | "for_numeric_statement" | "for_generic_statement" => {
                 visit_nested_block(ctx, child);
@@ -779,6 +786,26 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
             }
         }
         return TypeFact::Unknown;
+    }
+
+    // `obj:method()` → CallReturn(base_stub, method_name)
+    if let Some(method_node) = node.child_by_field_name("method") {
+        let method_name = node_text(method_node, ctx.source).to_string();
+        let callee_text = node_text(callee, ctx.source);
+
+        let base_stub = if let Some(fact) = ctx.local_type_facts.get(callee_text) {
+            match &fact.type_fact {
+                TypeFact::Stub(s) => s.clone(),
+                _ => SymbolicStub::GlobalRef { name: callee_text.to_string() },
+            }
+        } else {
+            SymbolicStub::GlobalRef { name: callee_text.to_string() }
+        };
+
+        return TypeFact::Stub(SymbolicStub::CallReturn {
+            base: Box::new(base_stub),
+            func_name: method_name,
+        });
     }
 
     // `mod.func()` → CallReturn(RequireRef/GlobalRef, func_name)

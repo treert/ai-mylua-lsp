@@ -164,9 +164,15 @@ fn try_require_goto(
 
     let target_uri = index.require_map.get(&module_path)?;
 
+    let target_range = index.summaries.get(target_uri)
+        .and_then(|s| {
+            s.global_contributions.first().map(|gc| gc.selection_range)
+        })
+        .unwrap_or_default();
+
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: target_uri.clone(),
-        range: Range::default(),
+        range: target_range,
     }))
 }
 

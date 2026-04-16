@@ -33,6 +33,31 @@ pub fn search_workspace_symbols(
         }
     }
 
+    for (name, candidates) in &index.type_shard {
+        if query.is_empty() || name.to_lowercase().contains(&query_lower) {
+            for candidate in candidates {
+                let kind = match candidate.kind {
+                    crate::summary::TypeDefinitionKind::Class => SymbolKind::CLASS,
+                    crate::summary::TypeDefinitionKind::Alias => SymbolKind::TYPE_PARAMETER,
+                    crate::summary::TypeDefinitionKind::Enum => SymbolKind::ENUM,
+                };
+
+                #[allow(deprecated)]
+                results.push(SymbolInformation {
+                    name: name.clone(),
+                    kind,
+                    tags: None,
+                    deprecated: None,
+                    location: Location {
+                        uri: candidate.source_uri.clone(),
+                        range: candidate.range,
+                    },
+                    container_name: None,
+                });
+            }
+        }
+    }
+
     results.sort_by(|a, b| {
         let a_exact = a.name.to_lowercase() == query_lower;
         let b_exact = b.name.to_lowercase() == query_lower;

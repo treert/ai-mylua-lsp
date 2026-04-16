@@ -79,13 +79,17 @@ pub fn hover(
                 selection_range: entry.selection_range.clone(),
                 uri: entry.uri.clone(),
             };
+            let entry_count = entries.len();
             let resolved = resolver::resolve_type(
                 &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                     name: ident_text.to_string(),
                 }),
                 index,
             );
-            let type_info = format_resolved_type(&resolved.type_fact);
+            let mut type_info = format_resolved_type(&resolved.type_fact);
+            if entry_count > 1 {
+                type_info.push_str(&format!(" ({} definitions)", entry_count));
+            }
             return build_hover_for_definition(&fake_def, all_docs, Some(&type_info));
         }
     }
