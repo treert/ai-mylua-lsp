@@ -25,6 +25,8 @@ pub struct WorkspaceAggregation {
 
     /// Module path → target URI, used by `resolve_module_to_uri`.
     pub require_map: HashMap<String, Uri>,
+    /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
+    pub require_aliases: HashMap<String, String>,
 }
 
 /// A single candidate definition for a global name.
@@ -123,6 +125,7 @@ impl WorkspaceAggregation {
             require_by_return: HashMap::new(),
             resolution_cache: HashMap::new(),
             require_map: HashMap::new(),
+            require_aliases: HashMap::new(),
         }
     }
 
@@ -287,6 +290,25 @@ impl WorkspaceAggregation {
         if let Some(uri) = self.require_map.get(module_path) {
             return Some(uri.clone());
         }
+
+        // Try alias expansion: if module_path starts with an alias prefix,
+        // replace it and retry. E.g. aliases={"@": "src/"}, "@utils.foo" → "src/utils.foo"
+        for (alias, replacement) in &self.require_aliases {
+            if module_path.starts_with(alias.as_str()) {
+                let expanded = format!("{}{}", replacement, &module_path[alias.len()..]);
+                if let Some(uri) = self.require_map.get(&expanded) {
+                    return Some(uri.clone());
+                }
+                let alias_as_path = expanded.replace('.', "/");
+                for (uri, _) in &self.summaries {
+                    let uri_str = uri.to_string();
+                    if uri_str.contains(&alias_as_path) {
+                        return Some(uri.clone());
+                    }
+                }
+            }
+        }
+
         // Fallback: check summaries for a URI path match (handles
         // modules discovered after require_map was built).
         let module_as_path = module_path.replace('.', "/");

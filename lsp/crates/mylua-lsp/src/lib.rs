@@ -281,6 +281,7 @@ impl Backend {
         let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config, &workspace_config);
         {
             let mut idx = self.index.lock().unwrap();
+            idx.require_aliases = require_config.aliases.clone();
             for (module, uri) in &require_map {
                 idx.set_require_mapping(module.clone(), uri.clone());
             }

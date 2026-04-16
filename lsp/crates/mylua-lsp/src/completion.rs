@@ -110,14 +110,13 @@ fn try_dot_completion(
         .filter(|f| prefix.is_empty() || f.name.starts_with(&prefix))
         .filter(|f| {
             if is_method {
-                f.type_display.starts_with("fun(") || f.type_display.contains("function")
-                    || f.type_display == "unknown"
+                f.is_function || f.type_display == "unknown"
             } else {
                 true
             }
         })
         .map(|f| {
-            let kind = if is_method || f.type_display.starts_with("fun(") || f.type_display.contains("function") {
+            let kind = if is_method || f.is_function {
                 CompletionItemKind::METHOD
             } else {
                 CompletionItemKind::FIELD

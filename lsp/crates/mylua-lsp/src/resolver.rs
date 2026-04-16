@@ -126,6 +126,7 @@ pub fn get_fields_for_type(
                         global_prefix_fields.push(FieldCompletion {
                             name: field_name.to_string(),
                             type_display: format!("{}", c.type_fact),
+                            is_function: is_function_type(&c.type_fact),
                             def_uri: Some(c.source_uri.clone()),
                             def_range: Some(c.selection_range),
                         });
@@ -153,6 +154,7 @@ pub fn get_fields_for_type(
 pub struct FieldCompletion {
     pub name: String,
     pub type_display: String,
+    pub is_function: bool,
     pub def_uri: Option<Uri>,
     pub def_range: Option<Range>,
 }
@@ -615,6 +617,7 @@ fn collect_fields(
                             fields.push(FieldCompletion {
                                 name: name.clone(),
                                 type_display: format!("{}", fi.type_fact),
+                                is_function: is_function_type(&fi.type_fact),
                                 def_uri: Some(uri.clone()),
                                 def_range: fi.def_range,
                             });
@@ -677,6 +680,7 @@ fn collect_emmy_fields_recursive(
                             fields.push(FieldCompletion {
                                 name: tf.name.clone(),
                                 type_display: format!("{}", tf.type_fact),
+                                is_function: is_function_type(&tf.type_fact),
                                 def_uri: Some(candidate.source_uri.clone()),
                                 def_range: Some(tf.range),
                             });
@@ -724,5 +728,14 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
         SymbolicStub::TypeRef { name } => {
             Some(CacheKey::Type { name: name.clone() })
         }
+    }
+}
+
+fn is_function_type(fact: &TypeFact) -> bool {
+    match fact {
+        TypeFact::Known(KnownType::Function(_)) => true,
+        TypeFact::Stub(SymbolicStub::CallReturn { .. }) => true,
+        TypeFact::Union(types) => types.iter().any(is_function_type),
+        _ => false,
     }
 }

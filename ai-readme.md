@@ -92,18 +92,18 @@
 
 **已实现 LSP 能力**：
 - `initialize` / `shutdown` / 文档同步（Full sync）
-- **配置体系**：15 个扩展配置项，通过 `initializationOptions` + `didChangeConfiguration` 下发
+- **配置体系**：15 个扩展配置项，通过 `initializationOptions` + `didChangeConfiguration` 下发；`require.aliases` 参与模块解析
 - **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
 - **documentSymbol**：顶层 function / local / assignment 提取为大纲
 - **goto definition**：local 作用域 + 全局符号表 + `require` 跳转（到首个全局贡献位置）+ **字段表达式跨文件跳转** + **Emmy 类型名跳转**（`type_shard`）+ **链式 field_expression 递归解析**（`a.b.c`）；**多候选策略可配置**（`gotoDefinition.strategy`: Auto/Single/List）
-- **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **推断类型展示**（链式字段解析）+ **Emmy 类型 hover**（class/alias/enum 区分展示、字段列表）+ **全局多候选提示**
+- **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **推断类型展示**（链式字段解析）+ **Emmy 类型 hover**（class/alias/enum 区分展示、字段列表）+ **全局多候选提示** + **`@overload` 签名展示**
 - **references**：单文件 local scope + 全工作区全局符号引用（`global_shard` + `type_shard` 声明 + 去重）；**声明包含策略可配置**（`references.strategy`: Best/Merge/Select）
 - **workspace/symbol**：全局函数/变量 + **Emmy class/alias/enum**（`type_shard`）模糊搜索
-- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；**泛型参数保留**（`EmmyGeneric` 变体）；**`@overload` 参与 FunctionSummary**；**`@alias` 右侧类型保存和展开**
-- **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全** + **冒号补全过滤方法** + **链式 dotted base 解析**
+- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@enum`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；**泛型参数保留**（`EmmyGeneric` 变体，但泛型实参在字段解析中**尚未替换**）；**`@overload` 参与 FunctionSummary + hover 展示**；**`@alias` 右侧类型保存和展开**；**`@enum` 写入 TypeShard**
+- **completion**：局部变量 + 全局名 + 关键字 + **点号字段补全** + **冒号补全过滤方法**（结构化 `is_function` 判定）+ **链式 dotted base 解析**
 - **rename**：单文件 local + 全工作区全局（含 prepareRename）
 - **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记（作用域感知）
-- **语义诊断**：未定义全局变量 + **Emmy 类型未知字段访问** warning（severity 可配置）；**诊断 enable/severity 受配置控制**
+- **语义诊断**：未定义全局变量 + **Emmy 类型未知字段访问** warning（severity 可配置）；**诊断 enable/severity 受配置控制**；`emmyTypeMismatch` 和 `luaFieldError`/`luaFieldWarning` 配置项已定义但**诊断逻辑待实现**
 - **作用域树**（`scope.rs`）：arena-based `ScopeTree`，单趟 AST 遍历构建；支持 `function_body` / `do` / `while` / `repeat` / `if` / `for` 等所有块级作用域 + 参数 + for 变量 + 隐式 `self`；正确处理 `local x = x + 1` RHS 引用外层变量的 Lua 语义
 
 **索引架构（步骤 1-7）**：

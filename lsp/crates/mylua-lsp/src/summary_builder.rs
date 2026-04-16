@@ -720,6 +720,26 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     range: ts_node_to_range(node),
                 });
             }
+            EmmyAnnotation::Enum { name } => {
+                if let Some((cname, prev_parents, fields)) = ctx.pending_class.take() {
+                    ctx.type_definitions.push(TypeDefinition {
+                        name: cname,
+                        kind: TypeDefinitionKind::Class,
+                        parents: prev_parents,
+                        fields,
+                        alias_type: None,
+                        range: ts_node_to_range(node),
+                    });
+                }
+                ctx.type_definitions.push(TypeDefinition {
+                    name: name.clone(),
+                    kind: TypeDefinitionKind::Enum,
+                    parents: Vec::new(),
+                    fields: Vec::new(),
+                    alias_type: None,
+                    range: ts_node_to_range(node),
+                });
+            }
             _ => {}
         }
     }

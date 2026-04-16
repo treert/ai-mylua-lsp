@@ -139,32 +139,42 @@ pub fn hover(
         }
     }
 
-    if let Some(candidates) = index.global_shard.get(ident_text) {
-        if let Some(candidate) = candidates.first() {
-            let def_kind = match candidate.kind {
-                crate::summary::GlobalContributionKind::Function => crate::types::DefKind::GlobalFunction,
-                _ => crate::types::DefKind::GlobalVariable,
-            };
-            let fake_def = crate::types::Definition {
-                name: candidate.name.clone(),
-                kind: def_kind,
-                range: candidate.range,
-                selection_range: candidate.selection_range,
-                uri: candidate.source_uri.clone(),
-            };
-            let entry_count = candidates.len();
-            let resolved = resolver::resolve_type(
-                &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                    name: ident_text.to_string(),
-                }),
-                index,
-            );
-            let mut type_info = format_resolved_type(&resolved.type_fact);
-            if entry_count > 1 {
-                type_info.push_str(&format!(" ({} definitions)", entry_count));
-            }
-            return build_hover_for_definition(&fake_def, all_docs, Some(&type_info));
+    let global_info = index.global_shard.get(ident_text).and_then(|candidates| {
+        let candidate = candidates.first()?;
+        let def_kind = match candidate.kind {
+            crate::summary::GlobalContributionKind::Function => crate::types::DefKind::GlobalFunction,
+            _ => crate::types::DefKind::GlobalVariable,
+        };
+        Some((crate::types::Definition {
+            name: candidate.name.clone(),
+            kind: def_kind,
+            range: candidate.range,
+            selection_range: candidate.selection_range,
+            uri: candidate.source_uri.clone(),
+        }, candidates.len(), candidate.source_uri.clone()))
+    });
+    if let Some((fake_def, entry_count, source_uri)) = global_info {
+        let resolved = resolver::resolve_type(
+            &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
+                name: ident_text.to_string(),
+            }),
+            index,
+        );
+        let mut type_info = format_resolved_type(&resolved.type_fact);
+        if entry_count > 1 {
+            type_info.push_str(&format!(" ({} definitions)", entry_count));
         }
+        if let Some(summary) = index.summaries.get(&source_uri) {
+            if let Some(fs) = summary.function_summaries.get(ident_text) {
+                if !fs.overloads.is_empty() {
+                    type_info.push_str("\n\nOverloads:");
+                    for overload in &fs.overloads {
+                        type_info.push_str(&format!("\n- `{}`", format_signature(overload)));
+                    }
+                }
+            }
+        }
+        return build_hover_for_definition(&fake_def, all_docs, Some(&type_info));
     }
 
     None
@@ -394,6 +404,22 @@ fn resolve_local_type_info(
 
 fn format_resolved_type(fact: &TypeFact) -> String {
     format!("{}", fact)
+}
+
+fn format_signature(sig: &crate::type_system::FunctionSignature) -> String {
+    let params: Vec<String> = sig.params.iter().map(|p| {
+        if p.type_fact == TypeFact::Unknown {
+            p.name.clone()
+        } else {
+            format!("{}: {}", p.name, p.type_fact)
+        }
+    }).collect();
+    let returns: Vec<String> = sig.returns.iter().map(|r| format!("{}", r)).collect();
+    if returns.is_empty() {
+        format!("fun({})", params.join(", "))
+    } else {
+        format!("fun({}): {}", params.join(", "), returns.join(", "))
+    }
 }
 
 fn build_hover_for_definition(
