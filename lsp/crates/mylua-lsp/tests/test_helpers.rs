@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 use mylua_lsp::aggregation::WorkspaceAggregation;
-use mylua_lsp::config::RequireConfig;
+use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
@@ -118,12 +118,12 @@ pub fn setup_workspace_from_dir(
     let mut agg = WorkspaceAggregation::new();
 
     let roots = vec![dir.clone()];
-    let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &RequireConfig::default());
+    let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &RequireConfig::default(), &WorkspaceConfig::default());
     for (module, uri) in &require_map {
         agg.set_require_mapping(module.clone(), uri.clone());
     }
 
-    let files = workspace_scanner::collect_lua_files(&roots);
+    let files = workspace_scanner::collect_lua_files(&roots, &WorkspaceConfig::default());
     for file in &files {
         let text = match std::fs::read_to_string(file) {
             Ok(t) => t,

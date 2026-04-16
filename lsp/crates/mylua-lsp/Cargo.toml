@@ -21,3 +21,4 @@ tree-sitter-mylua = { path = "../tree-sitter-mylua" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rayon = "1"
+globset = "0.4.18"

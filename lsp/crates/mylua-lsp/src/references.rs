@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
+use crate::config::ReferencesStrategy;
 use crate::document::Document;
 use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position};
 use crate::aggregation::WorkspaceAggregation;
@@ -11,6 +12,7 @@ pub fn find_references(
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
+    strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
@@ -31,6 +33,7 @@ pub fn find_references(
         include_declaration,
         index,
         all_docs,
+        strategy,
     ))
 }
 
@@ -120,24 +123,47 @@ fn find_global_references(
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
+    strategy: &ReferencesStrategy,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
 
     if include_declaration {
-        if let Some(candidates) = index.global_shard.get(name) {
-            for candidate in candidates {
-                locations.push(Location {
-                    uri: candidate.source_uri.clone(),
-                    range: candidate.selection_range,
-                });
+        match strategy {
+            ReferencesStrategy::Best => {
+                if let Some(candidates) = index.global_shard.get(name) {
+                    if let Some(best) = candidates.first() {
+                        locations.push(Location {
+                            uri: best.source_uri.clone(),
+                            range: best.selection_range,
+                        });
+                    }
+                }
+                if let Some(candidates) = index.type_shard.get(name) {
+                    if let Some(best) = candidates.first() {
+                        locations.push(Location {
+                            uri: best.source_uri.clone(),
+                            range: best.range,
+                        });
+                    }
+                }
             }
-        }
-        if let Some(candidates) = index.type_shard.get(name) {
-            for candidate in candidates {
-                locations.push(Location {
-                    uri: candidate.source_uri.clone(),
-                    range: candidate.range,
-                });
+            ReferencesStrategy::Merge | ReferencesStrategy::Select => {
+                if let Some(candidates) = index.global_shard.get(name) {
+                    for candidate in candidates {
+                        locations.push(Location {
+                            uri: candidate.source_uri.clone(),
+                            range: candidate.selection_range,
+                        });
+                    }
+                }
+                if let Some(candidates) = index.type_shard.get(name) {
+                    for candidate in candidates {
+                        locations.push(Location {
+                            uri: candidate.source_uri.clone(),
+                            range: candidate.range,
+                        });
+                    }
+                }
             }
         }
     }

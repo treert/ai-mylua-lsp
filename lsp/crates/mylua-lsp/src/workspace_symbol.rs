@@ -1,5 +1,5 @@
 use tower_lsp_server::ls_types::*;
-use crate::types::DefKind;
+use crate::summary::GlobalContributionKind;
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn search_workspace_symbols(
@@ -9,11 +9,11 @@ pub fn search_workspace_symbols(
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();
 
-    for (name, entries) in &index.globals {
+    for (name, candidates) in &index.global_shard {
         if query.is_empty() || name.to_lowercase().contains(&query_lower) {
-            for entry in entries {
-                let kind = match entry.kind {
-                    DefKind::GlobalFunction | DefKind::LocalFunction => SymbolKind::FUNCTION,
+            for candidate in candidates {
+                let kind = match candidate.kind {
+                    GlobalContributionKind::Function => SymbolKind::FUNCTION,
                     _ => SymbolKind::VARIABLE,
                 };
 
@@ -24,8 +24,8 @@ pub fn search_workspace_symbols(
                     tags: None,
                     deprecated: None,
                     location: Location {
-                        uri: entry.uri.clone(),
-                        range: entry.selection_range.clone(),
+                        uri: candidate.source_uri.clone(),
+                        range: candidate.selection_range,
                     },
                     container_name: None,
                 });

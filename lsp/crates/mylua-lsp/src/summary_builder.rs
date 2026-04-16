@@ -620,6 +620,20 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     });
                 }
             }
+            // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
+            "subscript_expression" => {
+                if let Some(base) = var_node.child_by_field_name("object") {
+                    let base_text = node_text(base, ctx.source);
+                    if let Some(ltf) = ctx.local_type_facts.get(base_text) {
+                        if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
+                            let sid = *shape_id;
+                            if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
+                                shape.mark_open();
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -968,6 +982,32 @@ fn extract_table_shape(
                             def_range: Some(ts_node_to_range(child)),
                             assignment_count: 1,
                         });
+                    }
+                } else if let Some(key_node) = child.child_by_field_name("key") {
+                    // Bracket key: `[expr] = value`
+                    let key_text = node_text(key_node, ctx.source);
+                    let is_static = matches!(key_node.kind(), "string" | "number");
+                    if is_static {
+                        if let Some(val_node) = child.child_by_field_name("value") {
+                            let type_fact = infer_expression_type(ctx, val_node, depth);
+                            shape.set_field(key_text.to_string(), FieldInfo {
+                                name: key_text.to_string(),
+                                type_fact,
+                                def_range: Some(ts_node_to_range(child)),
+                                assignment_count: 1,
+                            });
+                        }
+                    } else {
+                        shape.mark_open();
+                        if let Some(val_node) = child.child_by_field_name("value") {
+                            let type_fact = infer_expression_type(ctx, val_node, depth);
+                            shape.array_element_type = Some(
+                                match shape.array_element_type.take() {
+                                    Some(existing) => merge_types(existing, type_fact),
+                                    None => type_fact,
+                                }
+                            );
+                        }
                     }
                 } else if let Some(val_node) = child.child_by_field_name("value") {
                     let type_fact = infer_expression_type(ctx, val_node, depth);

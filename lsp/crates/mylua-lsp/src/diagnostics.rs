@@ -72,7 +72,7 @@ fn check_undefined_globals(
                 let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
                 if !is_local
                     && !builtins.contains(name)
-                    && !index.globals.contains_key(name)
+                    && !index.global_shard.contains_key(name)
                 {
                     diagnostics.push(Diagnostic {
                         range: ts_node_to_range(node),

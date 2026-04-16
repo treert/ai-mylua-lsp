@@ -188,10 +188,12 @@ fn collect_global_completions(
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    for (name, entries) in &index.globals {
+    for (name, candidates) in &index.global_shard {
         if name.starts_with(prefix) && !seen.contains(name) {
             seen.insert(name.clone());
-            let kind = if entries.iter().any(|e| matches!(e.kind, crate::types::DefKind::GlobalFunction)) {
+            let kind = if candidates.iter().any(|c| {
+                matches!(c.kind, crate::summary::GlobalContributionKind::Function)
+            }) {
                 CompletionItemKind::FUNCTION
             } else {
                 CompletionItemKind::VARIABLE

@@ -111,7 +111,18 @@ impl Backend {
                     .collect::<Vec<_>>(),
                 summary.global_contributions.len(),
             );
-            self.index.lock().unwrap().upsert_summary(summary);
+
+            let dependant_uris = {
+                let mut idx = self.index.lock().unwrap();
+                let old_fp = idx.summaries.get(&uri).map(|s| s.signature_fingerprint);
+                let new_fp = summary.signature_fingerprint;
+                idx.upsert_summary(summary);
+                if old_fp.map_or(false, |old| old != new_fp) {
+                    self.collect_open_dependants(&uri, &idx)
+                } else {
+                    Vec::new()
+                }
+            };
 
             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
 
@@ -129,6 +140,10 @@ impl Backend {
             });
 
             self.schedule_semantic_diagnostics(uri, version);
+
+            for dep_uri in dependant_uris {
+                self.schedule_semantic_diagnostics(dep_uri, None);
+            }
         }
     }
 
@@ -184,6 +199,28 @@ impl Backend {
         });
     }
 
+    /// Collect URIs of currently open files that depend on the given URI
+    /// (via require or global/type references).
+    fn collect_open_dependants(
+        &self,
+        uri: &Uri,
+        idx: &aggregation::WorkspaceAggregation,
+    ) -> Vec<Uri> {
+        let open_uris: std::collections::HashSet<Uri> =
+            self.documents.lock().unwrap().keys().cloned().collect();
+        let mut result = Vec::new();
+
+        if let Some(deps) = idx.require_by_return.get(uri) {
+            for dep in deps {
+                if open_uris.contains(&dep.source_uri) {
+                    result.push(dep.source_uri.clone());
+                }
+            }
+        }
+
+        result
+    }
+
     fn index_file_from_disk(&self, path: &std::path::Path) {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
@@ -210,14 +247,24 @@ impl Backend {
 
     async fn scan_workspace_parallel(&self) {
         let roots = self.workspace_roots.lock().unwrap().clone();
-        let (require_config, cache_mode, config_fingerprint) = {
+        let (require_config, workspace_config, cache_mode, config_fingerprint, index_mode) = {
             let cfg = self.config.lock().unwrap();
             (
                 cfg.require.clone(),
+                cfg.workspace.clone(),
                 cfg.index.cache_mode.clone(),
                 summary_cache::compute_config_fingerprint(&cfg),
+                cfg.workspace.index_mode.clone(),
             )
         };
+
+        if index_mode == config::IndexMode::Isolated && roots.len() > 1 {
+            eprintln!(
+                "[mylua-lsp] WARNING: indexMode 'isolated' is not yet implemented; \
+                 falling back to 'merged' for {} workspace roots",
+                roots.len()
+            );
+        }
 
         let use_disk_cache = cache_mode == config::CacheMode::Summary;
         let cache = if use_disk_cache {
@@ -231,7 +278,7 @@ impl Backend {
         let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
         let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
-        let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config);
+        let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config, &workspace_config);
         {
             let mut idx = self.index.lock().unwrap();
             for (module, uri) in &require_map {
@@ -239,7 +286,7 @@ impl Backend {
             }
         }
 
-        let files = workspace_scanner::collect_lua_files(&roots);
+        let files = workspace_scanner::collect_lua_files(&roots, &workspace_config);
         let total = files.len();
         eprintln!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
 
@@ -551,15 +598,22 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+        let roots = self.workspace_roots.lock().unwrap().clone();
+        let (require_config, workspace_config) = {
+            let cfg = self.config.lock().unwrap();
+            (cfg.require.clone(), cfg.workspace.clone())
+        };
+        let filter = workspace_scanner::FileFilter::from_config(&workspace_config);
+
         for change in params.changes {
             match change.typ {
                 FileChangeType::CREATED | FileChangeType::CHANGED => {
                     if let Some(path) = uri_to_path(&change.uri) {
                         if path.extension().map_or(false, |e| e == "lua") {
+                            if !workspace_scanner::should_index_path(&path, &roots, &filter) {
+                                continue;
+                            }
                             self.index_file_from_disk(&path);
-                            let roots = self.workspace_roots.lock().unwrap().clone();
-                            let require_config =
-                                self.config.lock().unwrap().require.clone();
                             for root in &roots {
                                 if path.starts_with(root) {
                                     let modules = workspace_scanner::file_to_module_paths(
@@ -619,7 +673,8 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let mut idx = self.index.lock().unwrap();
-        Ok(goto::goto_definition(doc, uri, position, &mut idx))
+        let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
+        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -654,6 +709,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
+        let ref_strategy = self.config.lock().unwrap().references.strategy.clone();
         Ok(references::find_references(
             doc,
             uri,
@@ -661,6 +717,7 @@ impl LanguageServer for Backend {
             include_declaration,
             &idx,
             &docs,
+            &ref_strategy,
         ))
     }
 

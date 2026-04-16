@@ -1,19 +1,14 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use tower_lsp_server::ls_types::{Range, Uri};
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
-use crate::types::{DefKind, GlobalEntry};
 use crate::type_system::TypeFact;
-use crate::util::ts_node_to_range;
 
 /// Workspace-level aggregation of all per-file summaries.
 ///
 /// This is the "bridge" between single-file `DocumentSummary` instances
 /// and cross-file queries (goto/hover/references/diagnostics).
 /// See `index-architecture.md` §2.2.
-///
-/// Also maintains legacy `globals` and `require_map` fields for backward
-/// compatibility with existing LSP handlers during the transition period.
 #[derive(Debug)]
 pub struct WorkspaceAggregation {
     /// All file summaries, keyed by URI.
@@ -28,10 +23,7 @@ pub struct WorkspaceAggregation {
     /// marked dirty on upstream signature changes.
     pub resolution_cache: HashMap<CacheKey, CachedResolution>,
 
-    // -- Legacy compatibility fields (same shape as old WorkspaceIndex) --
-    /// Global name → entries, consumed by goto/hover/references/completion/diagnostics.
-    pub globals: HashMap<String, Vec<GlobalEntry>>,
-    /// Module path → target URI, consumed by goto for require resolution.
+    /// Module path → target URI, used by `resolve_module_to_uri`.
     pub require_map: HashMap<String, Uri>,
 }
 
@@ -66,9 +58,16 @@ pub struct RequireDependant {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CacheKey {
     RequireReturn { module_path: String },
+    /// Resolve a global name itself (not a field on it).
+    Global { name: String },
+    /// Resolve a field on a global: `name.field`.
     GlobalField { global_name: String, field: String },
+    /// Resolve an Emmy type name itself (not a field on it).
+    Type { name: String },
+    /// Resolve a field on an Emmy type: `type.field`.
     TypeField { type_name: String, field: String },
     CallReturn { base_key: Box<CacheKey>, func_name: String },
+    FieldAccess { base_key: Box<CacheKey>, field: String },
 }
 
 /// Cached result of cross-file type resolution.
@@ -76,6 +75,31 @@ pub enum CacheKey {
 pub struct CachedResolution {
     pub resolved_type: TypeFact,
     pub dirty: bool,
+}
+
+/// Names affected by a file update, used for targeted cache invalidation.
+struct AffectedNames {
+    module_paths: HashSet<String>,
+    global_names: HashSet<String>,
+    type_names: HashSet<String>,
+}
+
+/// Check whether a cache key transitively depends on any of the affected names.
+fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
+    match key {
+        CacheKey::RequireReturn { module_path } => {
+            affected.module_paths.contains(module_path)
+        }
+        CacheKey::Global { name } | CacheKey::GlobalField { global_name: name, .. } => {
+            affected.global_names.contains(name)
+        }
+        CacheKey::Type { name } | CacheKey::TypeField { type_name: name, .. } => {
+            affected.type_names.contains(name)
+        }
+        CacheKey::CallReturn { base_key, .. } | CacheKey::FieldAccess { base_key, .. } => {
+            cache_key_affected(base_key, affected)
+        }
+    }
 }
 
 /// Priority key for sorting candidates (smaller = higher priority):
@@ -98,7 +122,6 @@ impl WorkspaceAggregation {
             type_shard: HashMap::new(),
             require_by_return: HashMap::new(),
             resolution_cache: HashMap::new(),
-            globals: HashMap::new(),
             require_map: HashMap::new(),
         }
     }
@@ -116,6 +139,10 @@ impl WorkspaceAggregation {
             .get(&uri)
             .map(|s| s.signature_fingerprint);
 
+        // Collect affected names from BOTH old and new summaries before removal,
+        // so invalidation can target the right cache entries.
+        let affected = self.collect_affected_names(&uri, &summary);
+
         self.remove_contributions(&uri);
 
         for gc in &summary.global_contributions {
@@ -131,22 +158,6 @@ impl WorkspaceAggregation {
                 source_uri: uri.clone(),
             });
             candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
-
-            let def_kind = match gc.kind {
-                GlobalContributionKind::Function => DefKind::GlobalFunction,
-                _ => DefKind::GlobalVariable,
-            };
-            let entries = self.globals
-                .entry(gc.name.clone())
-                .or_default();
-            entries.push(GlobalEntry {
-                name: gc.name.clone(),
-                kind: def_kind,
-                range: gc.range,
-                selection_range: gc.selection_range,
-                uri: uri.clone(),
-            });
-            entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
         }
 
         for td in &summary.type_definitions {
@@ -177,7 +188,7 @@ impl WorkspaceAggregation {
         let fingerprint_changed = old_fingerprint
             .map_or(true, |old| old != summary.signature_fingerprint);
         if fingerprint_changed {
-            self.invalidate_dependants(&uri);
+            self.invalidate_dependants_targeted(&affected);
         }
 
         self.summaries.insert(uri, summary);
@@ -189,19 +200,7 @@ impl WorkspaceAggregation {
         self.summaries.remove(uri);
     }
 
-    /// Legacy compatibility: update index from raw AST (used during workspace scan
-    /// for files that haven't gone through summary_builder yet).
-    pub fn update_document_legacy(
-        &mut self,
-        uri: &Uri,
-        tree: &tree_sitter::Tree,
-        source: &[u8],
-    ) {
-        self.remove_legacy_globals(uri);
-        self.scan_globals_legacy(uri, tree.root_node(), source);
-    }
-
-    /// Legacy compatibility: set require mapping directly.
+    /// Set require mapping directly (module path → target URI).
     pub fn set_require_mapping(&mut self, module_path: String, uri: Uri) {
         self.require_map.insert(module_path, uri);
     }
@@ -225,77 +224,62 @@ impl WorkspaceAggregation {
         });
 
         self.require_map.retain(|_, target_uri| target_uri != uri);
-
-        self.remove_legacy_globals(uri);
     }
 
-    fn remove_legacy_globals(&mut self, uri: &Uri) {
-        self.globals.retain(|_, entries| {
-            entries.retain(|e| &e.uri != uri);
-            !entries.is_empty()
-        });
-    }
-
-    fn scan_globals_legacy(
-        &mut self,
+    /// Collect the set of module paths, global names, and type names affected
+    /// by updating a file. Merges contributions from the old summary (if any)
+    /// and the new summary so that both added and removed names are covered.
+    fn collect_affected_names(
+        &self,
         uri: &Uri,
-        root: tree_sitter::Node,
-        source: &[u8],
-    ) {
-        use crate::util::node_text;
-        let mut cursor = root.walk();
-        if !cursor.goto_first_child() {
+        new_summary: &DocumentSummary,
+    ) -> AffectedNames {
+        let mut module_paths: HashSet<String> = HashSet::new();
+        let mut global_names: HashSet<String> = HashSet::new();
+        let mut type_names: HashSet<String> = HashSet::new();
+
+        // Names from the old summary (about to be removed)
+        if let Some(old) = self.summaries.get(uri) {
+            for gc in &old.global_contributions {
+                global_names.insert(gc.name.clone());
+            }
+            for td in &old.type_definitions {
+                type_names.insert(td.name.clone());
+            }
+        }
+
+        // Names from the new summary (about to be inserted)
+        for gc in &new_summary.global_contributions {
+            global_names.insert(gc.name.clone());
+        }
+        for td in &new_summary.type_definitions {
+            type_names.insert(td.name.clone());
+        }
+
+        // Module paths that resolve to this URI
+        for (mod_path, target_uri) in &self.require_map {
+            if target_uri == uri {
+                module_paths.insert(mod_path.clone());
+            }
+        }
+
+        AffectedNames { module_paths, global_names, type_names }
+    }
+
+    /// Mark only the resolution cache entries that transitively depend on the
+    /// affected names (global contributions, type definitions, or require
+    /// targets from the changed file).
+    fn invalidate_dependants_targeted(&mut self, affected: &AffectedNames) {
+        if affected.module_paths.is_empty()
+            && affected.global_names.is_empty()
+            && affected.type_names.is_empty()
+        {
             return;
         }
-        loop {
-            let node = cursor.node();
-            match node.kind() {
-                "function_declaration" => {
-                    if let Some(name_node) = node.child_by_field_name("name") {
-                        let name = node_text(name_node, source).to_string();
-                        let entries = self.globals.entry(name.clone()).or_default();
-                        entries.push(GlobalEntry {
-                            name,
-                            kind: DefKind::GlobalFunction,
-                            range: ts_node_to_range(node),
-                            selection_range: ts_node_to_range(name_node),
-                            uri: uri.clone(),
-                        });
-                        entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
-                    }
-                }
-                "assignment_statement" => {
-                    if let Some(left_node) = node.child_by_field_name("left") {
-                        if let Some(first_var) = left_node.named_child(0) {
-                            let name = node_text(first_var, source).to_string();
-                            let entries = self.globals.entry(name.clone()).or_default();
-                            entries.push(GlobalEntry {
-                                name,
-                                kind: DefKind::GlobalVariable,
-                                range: ts_node_to_range(node),
-                                selection_range: ts_node_to_range(first_var),
-                                uri: uri.clone(),
-                            });
-                            entries.sort_by_cached_key(|e| uri_priority_key(&e.uri));
-                        }
-                    }
-                }
-                _ => {}
+        for (key, entry) in self.resolution_cache.iter_mut() {
+            if !entry.dirty && cache_key_affected(key, affected) {
+                entry.dirty = true;
             }
-            if !cursor.goto_next_sibling() {
-                break;
-            }
-        }
-    }
-
-    /// Mark resolution cache entries as dirty when a file's signature changes.
-    ///
-    /// Current strategy is conservative: marks all cache entries dirty.
-    /// TODO: refine to only invalidate entries reachable from dependants
-    /// listed in `require_by_return[uri]` and global/type references.
-    fn invalidate_dependants(&mut self, _uri: &Uri) {
-        for entry in self.resolution_cache.values_mut() {
-            entry.dirty = true;
         }
     }
 

@@ -701,14 +701,14 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
             Some(CacheKey::RequireReturn { module_path: module_path.clone() })
         }
         SymbolicStub::GlobalRef { name } => {
-            Some(CacheKey::GlobalField { global_name: name.clone(), field: String::new() })
+            Some(CacheKey::Global { name: name.clone() })
         }
         SymbolicStub::FieldOf { base, field } => {
             if let TypeFact::Stub(base_stub) = base.as_ref() {
                 let base_key = stub_to_cache_key(base_stub)?;
-                Some(CacheKey::CallReturn {
+                Some(CacheKey::FieldAccess {
                     base_key: Box::new(base_key),
-                    func_name: field.clone(),
+                    field: field.clone(),
                 })
             } else {
                 None
@@ -722,7 +722,7 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
             })
         }
         SymbolicStub::TypeRef { name } => {
-            Some(CacheKey::TypeField { type_name: name.clone(), field: String::new() })
+            Some(CacheKey::Type { name: name.clone() })
         }
     }
 }

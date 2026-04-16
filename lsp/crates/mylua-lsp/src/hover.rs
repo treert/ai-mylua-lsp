@@ -139,16 +139,20 @@ pub fn hover(
         }
     }
 
-    if let Some(entries) = index.globals.get(ident_text) {
-        if let Some(entry) = entries.first() {
-            let fake_def = crate::types::Definition {
-                name: entry.name.clone(),
-                kind: entry.kind.clone(),
-                range: entry.range.clone(),
-                selection_range: entry.selection_range.clone(),
-                uri: entry.uri.clone(),
+    if let Some(candidates) = index.global_shard.get(ident_text) {
+        if let Some(candidate) = candidates.first() {
+            let def_kind = match candidate.kind {
+                crate::summary::GlobalContributionKind::Function => crate::types::DefKind::GlobalFunction,
+                _ => crate::types::DefKind::GlobalVariable,
             };
-            let entry_count = entries.len();
+            let fake_def = crate::types::Definition {
+                name: candidate.name.clone(),
+                kind: def_kind,
+                range: candidate.range,
+                selection_range: candidate.selection_range,
+                uri: candidate.source_uri.clone(),
+            };
+            let entry_count = candidates.len();
             let resolved = resolver::resolve_type(
                 &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                     name: ident_text.to_string(),

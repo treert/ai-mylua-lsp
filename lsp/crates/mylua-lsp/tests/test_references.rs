@@ -2,6 +2,7 @@ mod test_helpers;
 
 use std::collections::HashMap;
 use test_helpers::*;
+use mylua_lsp::config::ReferencesStrategy;
 use mylua_lsp::references;
 
 #[test]
@@ -14,7 +15,7 @@ local x = abc + 1"#;
     let doc = docs.get(&uri).unwrap();
 
     // Find references to `abc` (defined line 0, col 6)
-    let result = references::find_references(doc, &uri, pos(0, 6), true, &agg, &docs);
+    let result = references::find_references(doc, &uri, pos(0, 6), true, &agg, &docs, &ReferencesStrategy::Best);
     assert!(result.is_some(), "should find references for `abc`");
     let locs = result.unwrap();
     assert!(
@@ -35,7 +36,7 @@ end"#;
     let doc = docs.get(&uri).unwrap();
 
     // Find references to `param` at line 1, col 10
-    let result = references::find_references(doc, &uri, pos(1, 10), true, &agg, &docs);
+    let result = references::find_references(doc, &uri, pos(1, 10), true, &agg, &docs, &ReferencesStrategy::Best);
     assert!(result.is_some(), "should find references for `param`");
     let locs = result.unwrap();
     assert!(
@@ -53,7 +54,7 @@ fn references_no_result_for_keyword() {
     let doc = docs.get(&uri).unwrap();
 
     // `local` keyword at line 0, col 0
-    let result = references::find_references(doc, &uri, pos(0, 0), true, &agg, &docs);
+    let result = references::find_references(doc, &uri, pos(0, 0), true, &agg, &docs, &ReferencesStrategy::Best);
     // Should not panic; result may be None
     let _ = result;
 }
@@ -67,8 +68,8 @@ print(myvar)"#;
     let docs = HashMap::from([(uri.clone(), doc)]);
     let doc = docs.get(&uri).unwrap();
 
-    let with_decl = references::find_references(doc, &uri, pos(1, 6), true, &agg, &docs);
-    let without_decl = references::find_references(doc, &uri, pos(1, 6), false, &agg, &docs);
+    let with_decl = references::find_references(doc, &uri, pos(1, 6), true, &agg, &docs, &ReferencesStrategy::Best);
+    let without_decl = references::find_references(doc, &uri, pos(1, 6), false, &agg, &docs, &ReferencesStrategy::Best);
 
     if let (Some(with), Some(without)) = (with_decl, without_decl) {
         assert!(

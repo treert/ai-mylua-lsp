@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
+use crate::config::ReferencesStrategy;
 use crate::document::Document;
 use crate::references;
 use crate::aggregation::WorkspaceAggregation;
@@ -47,6 +48,7 @@ pub fn rename(
         true,
         index,
         all_docs,
+        &ReferencesStrategy::Merge,
     )?;
 
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();

@@ -1,20 +1,62 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tower_lsp_server::ls_types::Uri;
+use globset::{Glob, GlobSet, GlobSetBuilder};
 
-use crate::config::RequireConfig;
+use crate::config::{RequireConfig, WorkspaceConfig};
+
+/// Compiled include/exclude glob filters for workspace scanning.
+pub struct FileFilter {
+    include: GlobSet,
+    exclude: GlobSet,
+}
+
+impl FileFilter {
+    pub fn from_config(config: &WorkspaceConfig) -> Self {
+        Self {
+            include: build_globset(&config.include),
+            exclude: build_globset(&config.exclude),
+        }
+    }
+
+    /// Returns `true` if the file should be included in the workspace index.
+    fn accepts(&self, relative_path: &str) -> bool {
+        if !self.include.is_empty() && !self.include.is_match(relative_path) {
+            return false;
+        }
+        !self.exclude.is_match(relative_path)
+    }
+
+    /// Returns `true` if a directory should be recursed into.
+    /// Skips directories that are themselves matched by an exclude pattern.
+    fn should_enter_dir(&self, relative_dir: &str) -> bool {
+        !self.exclude.is_match(relative_dir)
+    }
+}
+
+fn build_globset(patterns: &[String]) -> GlobSet {
+    let mut builder = GlobSetBuilder::new();
+    for pat in patterns {
+        if let Ok(g) = Glob::new(pat) {
+            builder.add(g);
+        }
+    }
+    builder.build().unwrap_or_else(|_| GlobSet::empty())
+}
 
 /// Scan a directory recursively for .lua files.
 /// Returns a map of module_path -> file URI.
 pub fn scan_workspace_lua_files(
     roots: &[PathBuf],
     require_config: &RequireConfig,
+    workspace_config: &WorkspaceConfig,
 ) -> HashMap<String, Uri> {
     let mut require_map = HashMap::new();
+    let filter = FileFilter::from_config(workspace_config);
 
     for root in roots {
         if root.is_dir() {
-            scan_dir_recursive(root, root, &mut require_map, &require_config.paths);
+            scan_dir_recursive(root, root, &mut require_map, &require_config.paths, &filter);
         }
     }
 
@@ -26,6 +68,7 @@ fn scan_dir_recursive(
     dir: &Path,
     map: &mut HashMap<String, Uri>,
     path_patterns: &[String],
+    filter: &FileFilter,
 ) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
@@ -34,13 +77,20 @@ fn scan_dir_recursive(
 
     for entry in entries.flatten() {
         let path = entry.path();
+        let relative = path.strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
         if path.is_dir() {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if name.starts_with('.') || name == "node_modules" {
+            if !filter.should_enter_dir(&relative) {
                 continue;
             }
-            scan_dir_recursive(base, &path, map, path_patterns);
+            scan_dir_recursive(base, &path, map, path_patterns, filter);
         } else if path.extension().map_or(false, |ext| ext == "lua") {
+            if !filter.accepts(&relative) {
+                continue;
+            }
             if let Some(uri) = path_to_uri(&path) {
                 for module_path in file_to_module_paths(base, &path, path_patterns) {
                     map.entry(module_path).or_insert_with(|| uri.clone());
@@ -95,17 +145,18 @@ pub fn file_to_module_paths(base: &Path, file: &Path, patterns: &[String]) -> Ve
 }
 
 /// Collect all .lua file paths in the workspace (for batch indexing).
-pub fn collect_lua_files(roots: &[PathBuf]) -> Vec<PathBuf> {
+pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
+    let filter = FileFilter::from_config(workspace_config);
     for root in roots {
         if root.is_dir() {
-            collect_files_recursive(root, &mut files);
+            collect_files_recursive(root, root, &mut files, &filter);
         }
     }
     files
 }
 
-fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
+fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>, filter: &FileFilter) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -113,16 +164,34 @@ fn collect_files_recursive(dir: &Path, files: &mut Vec<PathBuf>) {
 
     for entry in entries.flatten() {
         let path = entry.path();
+        let relative = path.strip_prefix(base)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+
         if path.is_dir() {
-            let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if name.starts_with('.') || name == "node_modules" {
+            if !filter.should_enter_dir(&relative) {
                 continue;
             }
-            collect_files_recursive(&path, files);
+            collect_files_recursive(base, &path, files, filter);
         } else if path.extension().map_or(false, |ext| ext == "lua") {
+            if !filter.accepts(&relative) {
+                continue;
+            }
             files.push(path);
         }
     }
+}
+
+/// Check whether a file path should be included in the workspace index.
+pub fn should_index_path(path: &Path, roots: &[PathBuf], filter: &FileFilter) -> bool {
+    for root in roots {
+        if let Ok(relative) = path.strip_prefix(root) {
+            let relative_str = relative.to_string_lossy().replace('\\', "/");
+            return filter.accepts(&relative_str);
+        }
+    }
+    true
 }
 
 /// Convert a file path to a `file://` URI.

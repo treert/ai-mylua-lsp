@@ -1,6 +1,7 @@
 mod test_helpers;
 
 use test_helpers::*;
+use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::{hover, completion, goto};
 
 /// Tests using the real `tests/hover/` directory as a workspace.
@@ -53,7 +54,7 @@ fn workspace_goto_define_dir() {
 
     let (uri, doc) = test3_entry.unwrap();
     // Attempt goto on `ppp` (line 0, col 6) or on "be_define" string
-    let result = goto::goto_definition(doc, uri, pos(0, 6), &mut agg);
+    let result = goto::goto_definition(doc, uri, pos(0, 6), &mut agg, &GotoStrategy::Auto);
     // Cross-file goto may or may not resolve depending on require mapping,
     // but should not panic
     let _ = result;

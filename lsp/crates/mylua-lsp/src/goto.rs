@@ -1,4 +1,5 @@
 use tower_lsp_server::ls_types::*;
+use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{TypeFact, SymbolicStub};
@@ -10,6 +11,7 @@ pub fn goto_definition(
     uri: &Uri,
     position: Position,
     index: &mut WorkspaceAggregation,
+    strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
@@ -54,19 +56,17 @@ pub fn goto_definition(
         return Some(target);
     }
 
-    if let Some(entries) = index.globals.get(name) {
-        let locations: Vec<Location> = entries
+    if let Some(candidates) = index.global_shard.get(name) {
+        let locations: Vec<Location> = candidates
             .iter()
-            .map(|e| Location {
-                uri: e.uri.clone(),
-                range: e.selection_range.clone(),
+            .map(|c| Location {
+                uri: c.source_uri.clone(),
+                range: c.selection_range,
             })
             .collect();
 
-        if locations.len() == 1 {
-            return Some(GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap()));
-        } else if !locations.is_empty() {
-            return Some(GotoDefinitionResponse::Array(locations));
+        if !locations.is_empty() {
+            return Some(apply_goto_strategy(locations, strategy));
         }
     }
 
@@ -198,4 +198,25 @@ fn extract_string_content(node: tree_sitter::Node, source: &[u8]) -> Option<Stri
         }
     }
     find_string_content(node, source)
+}
+
+fn apply_goto_strategy(
+    locations: Vec<Location>,
+    strategy: &GotoStrategy,
+) -> GotoDefinitionResponse {
+    match strategy {
+        GotoStrategy::Single => {
+            GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
+        }
+        GotoStrategy::List => {
+            GotoDefinitionResponse::Array(locations)
+        }
+        GotoStrategy::Auto => {
+            if locations.len() == 1 {
+                GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
+            } else {
+                GotoDefinitionResponse::Array(locations)
+            }
+        }
+    }
 }
