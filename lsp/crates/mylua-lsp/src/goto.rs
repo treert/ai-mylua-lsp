@@ -1,7 +1,6 @@
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::resolver;
-use crate::scope;
 use crate::type_system::{TypeFact, SymbolicStub};
 use crate::aggregation::WorkspaceAggregation;
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
@@ -12,16 +11,16 @@ pub fn goto_definition(
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
-    if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
+    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
+    let name = node_text(ident_node, doc.text.as_bytes());
+
+    if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def.uri,
             range: def.selection_range,
         }));
     }
-
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
-    let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
-    let name = node_text(ident_node, doc.text.as_bytes());
 
     // Field expression goto: `obj.field` → resolve and jump to field definition
     // Handles both `field_expression` (RHS) and `variable` (LHS assignment) nodes.

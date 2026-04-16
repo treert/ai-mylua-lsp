@@ -9,7 +9,7 @@
 
 ### 已实现（阶段 C 壳）
 
-- Tree-sitter 解析 + 词法作用域（`scope.rs`）
+- Tree-sitter 解析 + 词法作用域（`scope.rs`：arena-based `ScopeTree`，支持所有块级作用域嵌套）
 - 简化 `WorkspaceIndex`：`HashMap<String, Vec<GlobalEntry>>` + `HashMap<String, Uri>` require 映射
 - 基础 LSP 能力表面：definition/hover/references/completion/rename/semantic tokens/diagnostics
 - 工作区扫描：`initialized` 时全量递归，`didChangeWatchedFiles` 增量

@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use mylua_lsp::aggregation::WorkspaceAggregation;
 use mylua_lsp::document::Document;
+use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
@@ -50,9 +51,11 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
     let tree = parser
         .parse(text.as_bytes(), None)
         .expect("parse returned None");
+    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
     Document {
         text: text.to_string(),
         tree,
+        scope_tree,
     }
 }
 
@@ -133,7 +136,8 @@ pub fn setup_workspace_from_dir(
         if let Some(tree) = tree {
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
             agg.upsert_summary(summary);
-            docs.insert(uri, Document { text, tree });
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+            docs.insert(uri, Document { text, tree, scope_tree });
         }
     }
 

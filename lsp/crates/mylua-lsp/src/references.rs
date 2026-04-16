@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
-use crate::scope;
-use crate::types::DefKind;
 use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position};
 use crate::aggregation::WorkspaceAggregation;
 
@@ -18,7 +16,7 @@ pub fn find_references(
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let name = node_text(ident_node, doc.text.as_bytes());
 
-    if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
+    if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
         return Some(find_local_references(
             doc,
             uri,
@@ -46,8 +44,6 @@ fn find_local_references(
     let mut locations = Vec::new();
     let source = doc.text.as_bytes();
 
-    let scope_node = find_scope_for_definition(&doc.tree, def);
-
     if include_declaration {
         locations.push(Location {
             uri: uri.clone(),
@@ -55,64 +51,20 @@ fn find_local_references(
         });
     }
 
+    let def_byte = position_to_byte_offset(&doc.text, def.selection_range.start)
+        .unwrap_or(0);
+    let scope_range = doc.scope_tree.scope_byte_range_for_def(def_byte, name);
+    let scope_node = if let Some((start, end)) = scope_range {
+        doc.tree.root_node().descendant_for_byte_range(start, end.saturating_sub(1))
+    } else {
+        Some(doc.tree.root_node())
+    };
+
     if let Some(scope) = scope_node {
         collect_identifier_occurrences(scope, name, source, uri, &mut locations, def);
     }
 
     locations
-}
-
-fn find_scope_for_definition<'a>(
-    tree: &'a tree_sitter::Tree,
-    def: &crate::types::Definition,
-) -> Option<tree_sitter::Node<'a>> {
-    let start_byte = def.range.start.line as usize * 1000 + def.range.start.character as usize;
-    let _ = start_byte;
-
-    match def.kind {
-        DefKind::Parameter | DefKind::ForVariable => {
-            let def_pos = tree_sitter::Point {
-                row: def.range.start.line as usize,
-                column: def.range.start.character as usize,
-            };
-            let node = tree.root_node().descendant_for_point_range(def_pos, def_pos)?;
-            let mut current = node;
-            loop {
-                match current.kind() {
-                    "function_body" | "for_numeric_statement" | "for_generic_statement" => {
-                        return Some(current);
-                    }
-                    _ => {
-                        current = current.parent()?;
-                    }
-                }
-            }
-        }
-        DefKind::LocalVariable | DefKind::LocalFunction => {
-            let def_pos = tree_sitter::Point {
-                row: def.range.start.line as usize,
-                column: def.range.start.character as usize,
-            };
-            let node = tree.root_node().descendant_for_point_range(def_pos, def_pos)?;
-            let mut current = node;
-            loop {
-                match current.kind() {
-                    "source_file" | "function_body" | "do_statement" | "while_statement"
-                    | "repeat_statement" | "if_statement" | "elseif_clause" | "else_clause" => {
-                        return Some(current);
-                    }
-                    _ => {
-                        if let Some(parent) = current.parent() {
-                            current = parent;
-                        } else {
-                            return Some(tree.root_node());
-                        }
-                    }
-                }
-            }
-        }
-        _ => Some(tree.root_node()),
-    }
 }
 
 fn collect_identifier_occurrences(

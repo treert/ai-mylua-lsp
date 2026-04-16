@@ -47,6 +47,7 @@ print(undefined_var)
         doc.tree.root_node(),
         src.as_bytes(),
         &agg,
+        &doc.scope_tree,
     );
     // `print` and `undefined_var` are both globals — the exact behavior depends
     // on LSP config defaults, but we verify the function doesn't panic.

@@ -2,7 +2,6 @@ use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::emmy::{collect_preceding_comments, parse_emmy_comments, format_annotations_markdown};
 use crate::resolver;
-use crate::scope;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
@@ -65,7 +64,7 @@ pub fn hover(
         }
     }
 
-    if let Some(def) = scope::resolve_at_position(&doc.tree, &doc.text, position, uri) {
+    if let Some(def) = doc.scope_tree.resolve(byte_offset, ident_text, uri) {
         let type_info = resolve_local_type_info(uri, ident_text, index);
         lsp_log!("[hover] scope resolved '{}', type_info={:?}", ident_text, type_info);
         return build_hover_for_definition(&def, all_docs, type_info.as_deref());

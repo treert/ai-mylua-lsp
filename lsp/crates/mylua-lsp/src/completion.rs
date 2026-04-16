@@ -3,7 +3,7 @@ use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{TypeFact, SymbolicStub};
-use crate::util::{node_text, position_to_byte_offset};
+use crate::util::position_to_byte_offset;
 use crate::aggregation::WorkspaceAggregation;
 
 const LUA_KEYWORDS: &[&str] = &[
@@ -134,126 +134,19 @@ fn collect_scope_completions(
     let Some(offset) = position_to_byte_offset(&doc.text, position) else {
         return;
     };
-    let source = doc.text.as_bytes();
-    let root = doc.tree.root_node();
-
-    let Some(node_at) = root.descendant_for_byte_range(offset, offset) else {
-        return;
-    };
-
-    let mut current = node_at;
-    loop {
-        scan_block_locals(current, offset, prefix, source, items, seen);
-        if let Some(parent) = current.parent() {
-            if parent.kind() == "function_body" {
-                scan_params(parent, prefix, source, items, seen);
-            }
-            current = parent;
-        } else {
-            break;
+    for decl in doc.scope_tree.visible_locals(offset) {
+        if decl.name.starts_with(prefix) && !seen.contains(&decl.name) {
+            seen.insert(decl.name.clone());
+            let kind = match decl.kind {
+                crate::types::DefKind::LocalFunction => CompletionItemKind::FUNCTION,
+                _ => CompletionItemKind::VARIABLE,
+            };
+            items.push(CompletionItem {
+                label: decl.name.clone(),
+                kind: Some(kind),
+                ..Default::default()
+            });
         }
-    }
-}
-
-fn scan_block_locals(
-    block: tree_sitter::Node,
-    before_offset: usize,
-    prefix: &str,
-    source: &[u8],
-    items: &mut Vec<CompletionItem>,
-    seen: &mut HashSet<String>,
-) {
-    let mut cursor = block.walk();
-    if !cursor.goto_first_child() {
-        return;
-    }
-    loop {
-        let child = cursor.node();
-        if child.start_byte() >= before_offset {
-            break;
-        }
-        match child.kind() {
-            "local_declaration" => {
-                if let Some(names) = child.child_by_field_name("names") {
-                    add_identifiers_from(names, prefix, source, items, seen, CompletionItemKind::VARIABLE);
-                }
-            }
-            "local_function_declaration" => {
-                if let Some(name) = child.child_by_field_name("name") {
-                    add_if_match(name, prefix, source, items, seen, CompletionItemKind::FUNCTION);
-                }
-            }
-            "for_numeric_statement" => {
-                if let Some(name) = child.child_by_field_name("name") {
-                    add_if_match(name, prefix, source, items, seen, CompletionItemKind::VARIABLE);
-                }
-            }
-            "for_generic_statement" => {
-                if let Some(names) = child.child_by_field_name("names") {
-                    add_identifiers_from(names, prefix, source, items, seen, CompletionItemKind::VARIABLE);
-                }
-            }
-            _ => {}
-        }
-        if !cursor.goto_next_sibling() {
-            break;
-        }
-    }
-}
-
-fn scan_params(
-    func_body: tree_sitter::Node,
-    prefix: &str,
-    source: &[u8],
-    items: &mut Vec<CompletionItem>,
-    seen: &mut HashSet<String>,
-) {
-    if let Some(params) = func_body.child_by_field_name("parameters") {
-        for i in 0..params.named_child_count() {
-            if let Some(child) = params.named_child(i as u32) {
-                if child.kind() == "identifier" {
-                    add_if_match(child, prefix, source, items, seen, CompletionItemKind::VARIABLE);
-                } else if child.kind() == "name_list" {
-                    add_identifiers_from(child, prefix, source, items, seen, CompletionItemKind::VARIABLE);
-                }
-            }
-        }
-    }
-}
-
-fn add_identifiers_from(
-    node: tree_sitter::Node,
-    prefix: &str,
-    source: &[u8],
-    items: &mut Vec<CompletionItem>,
-    seen: &mut HashSet<String>,
-    kind: CompletionItemKind,
-) {
-    for i in 0..node.named_child_count() {
-        if let Some(child) = node.named_child(i as u32) {
-            if child.kind() == "identifier" {
-                add_if_match(child, prefix, source, items, seen, kind);
-            }
-        }
-    }
-}
-
-fn add_if_match(
-    node: tree_sitter::Node,
-    prefix: &str,
-    source: &[u8],
-    items: &mut Vec<CompletionItem>,
-    seen: &mut HashSet<String>,
-    kind: CompletionItemKind,
-) {
-    let name = node_text(node, source);
-    if name.starts_with(prefix) && !seen.contains(name) {
-        seen.insert(name.to_string());
-        items.push(CompletionItem {
-            label: name.to_string(),
-            kind: Some(kind),
-            ..Default::default()
-        });
     }
 }
 

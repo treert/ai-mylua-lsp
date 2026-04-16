@@ -82,19 +82,22 @@ impl Backend {
             );
             self.index.lock().unwrap().upsert_summary(summary);
 
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+
             {
                 let idx = self.index.lock().unwrap();
                 let semantic = diagnostics::collect_semantic_diagnostics(
                     tree.root_node(),
                     text.as_bytes(),
                     &idx,
+                    &scope_tree,
                 );
                 diags.extend(semantic);
             }
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
-                Document { text, tree },
+                Document { text, tree, scope_tree },
             );
 
             let client = self.client.clone();
@@ -120,7 +123,8 @@ impl Backend {
         if let Some(tree) = tree {
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
             self.index.lock().unwrap().upsert_summary(summary);
-            self.documents.lock().unwrap().insert(uri, Document { text, tree });
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+            self.documents.lock().unwrap().insert(uri, Document { text, tree, scope_tree });
         }
     }
 
@@ -448,6 +452,7 @@ impl LanguageServer for Backend {
         let data = semantic_tokens::collect_semantic_tokens(
             doc.tree.root_node(),
             doc.text.as_bytes(),
+            &doc.scope_tree,
         );
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
