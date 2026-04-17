@@ -40,28 +40,36 @@
 | [`tests/parse/`](tests/parse/) | 解析测试 Lua fixture（2 个文件）：语法错误恢复、各种语句类型 |
 | [`tests/project/`](tests/project/) | 多文件工程级测试 Lua fixture（5 个文件）：全局变量跨文件、枚举段 |
 
-#### `tests/lua-root/` — 手工端到端测试目录
+#### `tests/lua-root/` + `tests/lua-root2/` — 手工端到端测试目录
 
-此目录用作 **Extension Development Host 的工作区**，开发者在其中打开 `.lua` 文件来实际体验 LSP 效果（高亮、hover、补全、跳转、诊断等）。与 `tests/` 下其他目录的区别：其他目录是 Rust 集成测试读取的 fixture，而 `lua-root` 是人手动操作的端到端体验环境。
+这两个目录一起被 [`tests/mylua-tests.code-workspace`](tests/mylua-tests.code-workspace) 作为**两个 workspace folder** 挂载，用于在 Extension Development Host 中人工验证 LSP 行为（含跨 workspace 场景）。与 `tests/` 下其他目录的区别：其他目录是 Rust 集成测试读取的 fixture，而这两个目录是人手动操作的端到端体验环境。
 
-**启动方式**：运行 `.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows），脚本会自动构建 LSP + 扩展并打开此目录。参见 Skill `.cursor/skills/test-extension/`。
+**启动方式**：运行 `.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows），脚本会自动构建 LSP + 扩展并打开这两个 workspace。参见 Skill `.cursor/skills/test-extension/` 和 [`tests/lua-root/README.md`](tests/lua-root/README.md)、[`tests/lua-root2/README.md`](tests/lua-root2/README.md)。
 
-**目录结构与测试重点**：
+**`tests/lua-root/` 文件清单**：
 
 | 文件 | 覆盖场景 |
 |------|----------|
-| `test.lua` | `require` 跳转（json4lua）、`---@class` 声明 + 成员方法 |
-| `json.lua` | 真实第三方库（json4lua），验证无语法错误解析 |
-| `test_lua_helper.lua` | `---@class` + `---@field`、`---@type` 类型断言、`self` 字段推断、跨文件 `UE4.UMiscSystemLibrary` 链式调用、未定义字段诊断 |
-| `test_lua_2.lua` | 跨文件 `ABC` class 成员方法 + 字段赋值、全局 dotted 表达式 |
-| `UEAnnotation/test_utils.lua` | 多 class 继承（`T3: T1,T2`）、`---@return` 链式调用、UE 风格 stub 重写（`UMiscSystemLibrary_` 继承 `UMiscSystemLibrary`）|
-| `UEAnnotation/ue-comment/ue-comment-xxxxx.lua` | UE4 自动导出注释风格（`--[[ ]]` + `---@class` 继承链）、子目录 require 解析 |
+| `main.lua` | 入口；require 跳转、module return 类型、跨 workspace require、跨文件全局调用、completion 测试点 |
+| `math_utils.lua` | `return M` 模块风格；`@overload` / `@vararg` / `@deprecated` / `@async` / `@nodiscard`；复杂类型（union / optional / array / fun() / table shape / 泛型）|
+| `emmy_basics.lua` | `@class` / `@field` / `@alias`（字面量 + union 字符串）/ `@enum` / `@type` |
+| `emmy_types.lua` | EmmyLua 类型表达式全覆盖：union、optional、array、`T<U>`、`fun()`、`{k:v}`、括号分组 |
+| `player.lua` | OOP：`@class A: B,C` 多继承、self 方法、字段；全局 `Player` 跨文件使用 |
+| `scopes.lua` | 作用域树全部 block 类型、参数、vararg、隐式 self、`local x = x + 1` 语义、closure |
+| `generics.lua` | `@generic T`（函数级）+ `@class C<T>`（容器）+ 泛型参数替换 |
+| `diagnostics.lua` | 预期诊断清单（每行 `-- !diag:` 标注）：undefinedGlobal / emmyTypeMismatch / emmyUnknownField / luaFieldError / luaFieldWarning / syntax error |
+| `refs_rename.lua` | references / rename / semantic tokens（defaultLibrary）|
+| `json.lua` | 真实第三方库（json4lua）解析健壮性 |
+| `UEAnnotation/test_utils.lua` | UE4 场景：多继承 `T3: T1,T2`、`---@return` 链式调用、UE 风格 stub 重写 |
+| `UEAnnotation/ue-comment/ue-comment-xxxxx.lua` | UE4 自动导出风格：`--[[ ]]` + `---@class` 继承链、子目录 require |
 
-**特殊模式**：
-- **UE4 全局表** — `UE4.UMiscSystemLibrary` 模拟 Unreal Engine Lua 绑定的多层 dotted 全局访问，测试跨文件字段解析和类型推断
-- **Class 继承链** — `UMiscSystemLibrary_ : UMiscSystemLibrary`、`T3 : T1, T2`，测试多继承和方法/字段解析
-- **未定义字段** — `x.no_exist`、`ttt1:f333()` 等，测试语义诊断是否正确报 warning/error
-- **跨文件 self 推断** — `ABC` class 在 `test_lua_helper.lua` 定义，在 `test_lua_2.lua` 扩展方法和字段
+**`tests/lua-root2/` 文件清单**（跨 workspace 场景）：
+
+| 文件 | 覆盖场景 |
+|------|----------|
+| `shared/config.lua` | 跨 workspace require：`lua-root/main.lua` 通过 `require("shared.config")` 引用 |
+| `shared/logger.lua` | 跨 workspace require + `@overload` 示例 |
+| `cross_globals.lua` | 跨 workspace 全局贡献（`AppName` / `Audit` 等），测试 workspace/symbol + 跨 root goto |
 
 ### Grammar — Tree-sitter 解析器（阶段 A 核心）
 

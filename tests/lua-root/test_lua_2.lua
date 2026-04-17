@@ -17,3 +17,5 @@ print("hello world")
 
 -- local xxx = ABC.g1
 -- xxx.g1 = 7
+
+utils2.hello()
