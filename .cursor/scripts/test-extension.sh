@@ -4,7 +4,7 @@
 # opening tests/lua-root as the workspace.
 #
 # Usage:
-#   .cursor/scripts/test-extension.sh [--skip-build] [--skip-lsp] [--skip-ext]
+#   .cursor/scripts/test-extension.sh [--skip-build] [--skip-lsp] [--skip-ext] [-w] [-w 0] [-w 1]
 #
 set -euo pipefail
 
@@ -15,27 +15,56 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 EXT_DIR="$REPO_ROOT/vscode-extension"
 LUA_ROOT="$REPO_ROOT/tests/lua-root"
+WORKSPACE_FILE="$REPO_ROOT/tests/mylua-tests.code-workspace"
 EDH_MARKER="extensionDevelopmentPath=$EXT_DIR"
 
 SKIP_BUILD=false
 SKIP_LSP=false
 SKIP_EXT=false
+OPEN_WORKSPACE=false
 
-for arg in "$@"; do
-  case "$arg" in
-    --skip-build) SKIP_BUILD=true ;;
-    --skip-lsp)   SKIP_LSP=true ;;
-    --skip-ext)   SKIP_EXT=true ;;
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --skip-build) SKIP_BUILD=true; shift ;;
+    --skip-lsp)   SKIP_LSP=true; shift ;;
+    --skip-ext)   SKIP_EXT=true; shift ;;
+    -w)
+      OPEN_WORKSPACE=true
+      if [[ $# -gt 1 && "$2" =~ ^[01]$ ]]; then
+        if [[ "$2" == "0" ]]; then
+          OPEN_WORKSPACE=false
+        fi
+        shift 2
+      else
+        shift
+      fi
+      ;;
     -h|--help)
-      echo "Usage: $0 [--skip-build] [--skip-lsp] [--skip-ext]"
+      echo "Usage: $0 [--skip-build] [--skip-lsp] [--skip-ext] [-w] [-w 0] [-w 1]"
       echo "  --skip-build  Skip both LSP and extension build"
       echo "  --skip-lsp    Skip LSP cargo build only"
       echo "  --skip-ext    Skip extension npm compile only"
+      echo "  -w            Open tests/mylua-tests.code-workspace"
+      echo "  -w 0          Open tests/lua-root"
+      echo "  -w 1          Open tests/mylua-tests.code-workspace"
       exit 0
       ;;
-    *) echo "Unknown option: $arg"; exit 1 ;;
+    *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
+
+if [[ "$OPEN_WORKSPACE" == true ]]; then
+  LAUNCH_TARGET="$WORKSPACE_FILE"
+  LAUNCH_TARGET_LABEL="workspace"
+else
+  LAUNCH_TARGET="$LUA_ROOT"
+  LAUNCH_TARGET_LABEL="lua-root"
+fi
+
+if [[ ! -e "$LAUNCH_TARGET" ]]; then
+  echo "ERROR: Launch target not found: $LAUNCH_TARGET"
+  exit 1
+fi
 
 # Auto-detect editor CLI: prefer code, fall back to cursor
 if command -v code &>/dev/null; then
@@ -85,9 +114,9 @@ fi
 # ── Step 4: Launch Extension Development Host ─────────────────────────
 echo "==> [4/4] Launching Extension Development Host ($EDITOR_CLI)..."
 echo "    Extension: $EXT_DIR"
-echo "    Workspace: $LUA_ROOT"
-"$EDITOR_CLI" --extensionDevelopmentPath="$EXT_DIR" "$LUA_ROOT" &
+echo "    Target ($LAUNCH_TARGET_LABEL): $LAUNCH_TARGET"
+"$EDITOR_CLI" --extensionDevelopmentPath="$EXT_DIR" "$LAUNCH_TARGET" &
 
 echo ""
-echo "==> Done! Extension Development Host launched with lua-root."
+echo "==> Done! Extension Development Host launched with $LAUNCH_TARGET_LABEL."
 echo "    Run again to restart."

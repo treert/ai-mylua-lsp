@@ -3,12 +3,14 @@
 # opening tests/lua-root as the workspace.
 #
 # Usage:
-#   .cursor/scripts/test-extension.ps1 [-SkipBuild] [-SkipLsp] [-SkipExt]
+#   .cursor/scripts/test-extension.ps1 [-SkipBuild] [-SkipLsp] [-SkipExt] [-w] [-w 0] [-w 1]
 #
 param(
     [switch]$SkipBuild,
     [switch]$SkipLsp,
-    [switch]$SkipExt
+    [switch]$SkipExt,
+    [Alias("w")]
+    [switch]$UseWorkspace
 )
 
 $ErrorActionPreference = "Stop"
@@ -16,7 +18,30 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "../..")
 $ExtDir   = Join-Path $RepoRoot "vscode-extension"
 $LuaRoot  = Join-Path $RepoRoot "tests/lua-root"
+$WorkspaceFile = Join-Path $RepoRoot "tests/mylua-tests.code-workspace"
 $EdhMarker = "extensionDevelopmentPath=$ExtDir"
+
+$OpenWorkspace = $UseWorkspace.IsPresent
+if ($UseWorkspace.IsPresent) {
+    if ($args.Count -gt 0) {
+        if ($args.Count -gt 1 -or $args[0] -notin @("0", "1")) {
+            Write-Error "Invalid -w value. Use -w, -w 0, or -w 1."
+            exit 1
+        }
+        $OpenWorkspace = [int]$args[0] -eq 1
+    }
+} elseif ($args.Count -gt 0) {
+    Write-Error "Unknown argument: $($args[0]). Use -w, -w 0, or -w 1."
+    exit 1
+}
+
+$LaunchTarget = if ($OpenWorkspace) { $WorkspaceFile } else { $LuaRoot }
+$LaunchTargetLabel = if ($OpenWorkspace) { "workspace" } else { "lua-root" }
+
+if (-not (Test-Path $LaunchTarget)) {
+    Write-Error "Launch target not found: $LaunchTarget"
+    exit 1
+}
 
 # Auto-detect editor CLI: prefer code, fall back to cursor
 $EditorCli = $null
@@ -71,9 +96,9 @@ if ($edhProcesses) {
 # ── Step 4: Launch Extension Development Host ─────────────────────────
 Write-Host "==> [4/4] Launching Extension Development Host ($EditorCli)..."
 Write-Host "    Extension: $ExtDir"
-Write-Host "    Workspace: $LuaRoot"
-Start-Process $EditorCli -ArgumentList "--extensionDevelopmentPath=`"$ExtDir`"", "`"$LuaRoot`""
+Write-Host "    Target ($LaunchTargetLabel): $LaunchTarget"
+Start-Process $EditorCli -ArgumentList "--extensionDevelopmentPath=`"$ExtDir`"", "`"$LaunchTarget`""
 
 Write-Host ""
-Write-Host "==> Done! Extension Development Host launched with lua-root."
+Write-Host "==> Done! Extension Development Host launched with $LaunchTargetLabel."
 Write-Host "    Run again to restart."
