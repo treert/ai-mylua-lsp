@@ -448,6 +448,34 @@ fn build_function_summary(
     }
 }
 
+/// Return the enclosing `local_declaration` / `assignment_statement`
+/// iff the `function_definition` at `node` is a **direct** RHS value
+/// (i.e. the function expression is the sole content of a
+/// value-list slot on an `expression_list` directly under such a
+/// statement). Returns `None` for every nested / indirect case — table
+/// entries (`{ m = function() end }`), function arguments
+/// (`foo(function() end)`), IIFE wrappers
+/// (`(function() end)()` — the RHS is the call, not the function
+/// expression itself), arithmetic (`x = 1 + function() end()`),
+/// nested function bodies, etc. — so we never pick up unrelated
+/// outer Emmy annotations.
+fn enclosing_statement_for_function_expr(
+    node: tree_sitter::Node,
+) -> Option<tree_sitter::Node> {
+    // The parent of a direct-bound RHS function is always
+    // `expression_list`; any other immediate parent means we're
+    // inside a call / wrapper / table / nested context.
+    let parent = node.parent()?;
+    if parent.kind() != "expression_list" {
+        return None;
+    }
+    let grandparent = parent.parent()?;
+    match grandparent.kind() {
+        "local_declaration" | "assignment_statement" => Some(grandparent),
+        _ => None,
+    }
+}
+
 fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_sitter::Node, source: &[u8]) {
     for i in 0..param_list.named_child_count() {
         if let Some(child) = param_list.named_child(i as u32) {
@@ -782,10 +810,61 @@ fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth:
         }
 
         "function_definition" => {
-            TypeFact::Known(KnownType::Function(FunctionSignature {
-                params: Vec::new(),
-                returns: Vec::new(),
-            }))
+            // Extract params from the `parameters` list on the
+            // function_body child; fall through to Emmy-annotation
+            // enrichment on the enclosing `local f = function(...)`
+            // or `f = function(...)` statement so hover/signatureHelp
+            // show a meaningful signature (rather than empty `fun()`).
+            let mut params = Vec::new();
+            let mut returns = Vec::new();
+            let mut emmy_annotated = false;
+
+            if let Some(body) = node.child_by_field_name("body") {
+                if let Some(param_list) = body.child_by_field_name("parameters") {
+                    extract_ast_params(&mut params, param_list, ctx.source);
+                }
+            }
+
+            if let Some(stmt) = enclosing_statement_for_function_expr(node) {
+                let emmy_comments = collect_preceding_comments(stmt, ctx.source);
+                let emmy_text = emmy_comments.join("\n");
+                for ann in parse_emmy_comments(&emmy_text) {
+                    match ann {
+                        EmmyAnnotation::Param { name: pname, type_expr, .. } => {
+                            emmy_annotated = true;
+                            let fact = emmy_type_to_fact(&type_expr);
+                            // Only overwrite an AST-declared param of the
+                            // same name. A typo'd `@param xyz` for a
+                            // function declaring `a` must NOT append a
+                            // phantom `xyz` parameter (keeps behavior in
+                            // line with `build_function_summary`).
+                            if let Some(p) = params.iter_mut().find(|p| p.name == pname) {
+                                p.type_fact = fact;
+                            }
+                        }
+                        EmmyAnnotation::Return { return_types, .. } => {
+                            emmy_annotated = true;
+                            for rt in return_types {
+                                returns.push(emmy_type_to_fact(&rt));
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+
+            // Any Emmy annotation (even a lone `@param`, no `@return`)
+            // disables AST-derived return inference — matching
+            // `build_function_summary` so users can explicitly opt into
+            // "no return value" by writing e.g. `---@param x number`
+            // without a `---@return`.
+            if returns.is_empty() && !emmy_annotated {
+                if let Some(body) = node.child_by_field_name("body") {
+                    collect_return_types(ctx, body, &mut returns, 0);
+                }
+            }
+
+            TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
         }
 
         "function_call" => {

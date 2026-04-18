@@ -298,6 +298,94 @@ handler:shout("hi")"#;
 }
 
 #[test]
+fn signature_help_local_anonymous_function_shows_ast_params() {
+    // P1-8: `local f = function(a, b) ... end` previously inferred as
+    // empty `fun()`; now signatureHelp should surface `a, b` from the
+    // AST even without Emmy annotations.
+    let src = "local f = function(a, b) return a + b end\nf(1, 2)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "anon.lua");
+
+    // Cursor inside `f(1,|2)` on line 1, col 2
+    let h = signature_help::signature_help(&doc, &uri, pos(1, 2), &mut agg)
+        .expect("signatureHelp should resolve for f()");
+    assert_eq!(h.signatures.len(), 1);
+    let label = &h.signatures[0].label;
+    assert!(
+        label.contains("a") && label.contains("b"),
+        "should include AST-derived params `a, b`, got: {}",
+        label,
+    );
+    assert_eq!(h.active_parameter, Some(0));
+}
+
+#[test]
+fn signature_help_local_anonymous_function_merges_emmy_types() {
+    // P1-8: Emmy annotations on the enclosing `local f = ...`
+    // statement enrich the param/return types on the inferred
+    // anonymous-function signature.
+    let src = r#"---@param a number
+---@param b string
+---@return boolean
+local f = function(a, b) return true end
+f(1, "x")"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "anon_emmy.lua");
+
+    // Cursor on the second arg: line 4, col 6
+    let h = signature_help::signature_help(&doc, &uri, pos(4, 6), &mut agg)
+        .expect("signatureHelp should resolve");
+    assert_eq!(h.signatures.len(), 1);
+    let label = &h.signatures[0].label;
+    assert!(
+        label.contains("a: number") && label.contains("b: string") && label.contains(": boolean"),
+        "Emmy-merged signature should display typed params and return, got: {}",
+        label,
+    );
+    assert_eq!(h.active_parameter, Some(1));
+}
+
+#[test]
+fn signature_help_iife_does_not_inherit_outer_emmy_annotations() {
+    // P1-8 guard: the inner anonymous function in an IIFE pattern
+    // `local x = (function(inner) return inner end)()` must NOT
+    // inherit the outer local's `---@param x number` — the function
+    // expression is wrapped in `parenthesized_expression` + a call
+    // before reaching `local_declaration`, so the enclosing-statement
+    // helper must return None there.
+    let src = r#"---@param x number
+local x = (function(inner) return inner end)(1)
+local f = function(inner) return inner end
+f(1)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "iife.lua");
+
+    // Click inside `f(|1)` on line 3 col 2 — the real binding. This
+    // one SHOULD resolve to the untyped `inner` param (no outer
+    // Emmy annotations on `local f = ...`).
+    let h = signature_help::signature_help(&doc, &uri, pos(3, 2), &mut agg)
+        .expect("signatureHelp resolves for direct binding");
+    assert_eq!(h.signatures.len(), 1);
+    assert!(
+        h.signatures[0].label.contains("inner") && !h.signatures[0].label.contains("x: number"),
+        "direct-bound anon should not pick up unrelated outer `---@param x`, got: {}",
+        h.signatures[0].label,
+    );
+}
+
+#[test]
+fn signature_help_global_anonymous_assignment() {
+    // `f = function(x, y) end` — global assignment with anon func RHS.
+    let src = "f = function(x, y) end\nf(1, 2)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "global_anon.lua");
+
+    let h = signature_help::signature_help(&doc, &uri, pos(1, 2), &mut agg)
+        .expect("signatureHelp should resolve for global f()");
+    let label = &h.signatures[0].label;
+    assert!(
+        label.contains("x") && label.contains("y"),
+        "global anon assignment should surface params, got: {}", label,
+    );
+}
+
+#[test]
 fn signature_help_method_call_hides_self() {
     let src = r#"---@class Obj
 ---@field x integer

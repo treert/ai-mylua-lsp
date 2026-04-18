@@ -185,7 +185,7 @@ f:init()
 
 ---
 
-### [ ] P1-8 — 匿名 / local function 签名推断
+### [x] P1-8 — 匿名 / local function 签名推断
 
 **目标**：`local f = function(a, b) return a + b end` 之后 `f(|)` 的 signatureHelp 应显示参数 `a, b`；hover 显示完整签名。
 

@@ -378,6 +378,13 @@ fn resolve_local_type_info(
 }
 
 fn format_resolved_type(fact: &TypeFact) -> String {
+    // Specialize `Known(Function(sig))` to a fully formatted
+    // `fun(a: T, b: U): R` signature — the default `Display` for
+    // `KnownType::Function` renders just `"function"` which is
+    // info-less on the hover "Type:" line.
+    if let TypeFact::Known(crate::type_system::KnownType::Function(sig)) = fact {
+        return format_signature(sig);
+    }
     format!("{}", fact)
 }
 

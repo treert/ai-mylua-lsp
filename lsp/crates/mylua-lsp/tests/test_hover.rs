@@ -347,3 +347,53 @@ fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
         HoverContents::Markup(m) => m.value.clone(),
     }
 }
+
+#[test]
+fn hover_local_anonymous_function_shows_params() {
+    // P1-8: `local f = function(a, b) end` — hover on `f` should show
+    // the full `fun(a, b)` signature (previously was empty `fun()`).
+    let src = "local f = function(a, b) return a + b end\nprint(f)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_anon.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Hover on `f` in `print(f)` — line 1, col 6
+    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+        .expect("hover should return something for local f");
+    let text = hover_content_string(&result);
+    // Lock on the formatted signature `fun(a, b)` rather than loose
+    // `a` / `b` substrings — those also appear in the decl-line code
+    // block regardless of whether the anon-function sig was derived.
+    assert!(
+        text.contains("fun(a, b)"),
+        "hover should display formatted signature `fun(a, b)`, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_local_anonymous_function_with_emmy_types() {
+    // P1-8: Emmy annotations on the enclosing `local` statement should
+    // enrich hover output for the anonymous function binding.
+    let src = r#"---@param a number
+---@param b string
+---@return boolean
+local f = function(a, b) return true end
+print(f)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_anon_emmy.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs)
+        .expect("hover on Emmy-annotated anon function should resolve");
+    let text = hover_content_string(&result);
+    // The full Emmy-merged signature should appear in the "Type:"
+    // line — locking on `fun(a: number, b: string): boolean` ensures
+    // the new `format_resolved_type` specialization is actually being
+    // used (the substrings `number`, `string`, `boolean` would also
+    // come through the Emmy-comment markdown block regardless).
+    assert!(
+        text.contains("fun(a: number, b: string): boolean"),
+        "hover Type should be fully formatted signature, got:\n{}", text,
+    );
+}

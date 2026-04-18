@@ -100,12 +100,22 @@ fn resolve_call_signatures(
 
     // Simple identifier / variable callee: `foo(...)`
     let name = node_text(callee, source).to_string();
-    // Local function
+    // Local function declaration (`local function f() end`) — rich
+    // FunctionSummary with overloads registered in `function_summaries`.
     if let Some(summary) = index.summaries.get(uri) {
         if let Some(fs) = summary.function_summaries.get(&name) {
             let sigs = primary_plus_overloads(fs);
             return Some((sigs, false, name));
         }
+    }
+    // Local variable bound to a function expression (`local f =
+    // function(a, b) ... end` or cross-file `require` returning a
+    // callable). Resolve via the type system so inferred / Emmy-
+    // enriched signatures from `infer_expression_type` are picked up.
+    let base_fact = hover::infer_node_type(callee, source, uri, index);
+    let resolved = resolver::resolve_type(&base_fact, index);
+    if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
+        return Some((vec![sig.clone()], false, name));
     }
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
