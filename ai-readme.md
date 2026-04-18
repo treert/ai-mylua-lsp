@@ -112,7 +112,7 @@
 - **completion**：局部变量 + 全局名 + 关键字 + **AST 驱动的点号字段补全**（通过 `hover::infer_node_type` 递归 `variable` 节点的 `object`/`field`，不再用字符串 splitn）+ **冒号补全过滤方法**（结构化 `is_function` 判定）+ **`---@` EmmyLua tag 补全**（class/field/param/return/type/alias/enum/generic/overload/vararg/deprecated/async/nodiscard/see/meta/diagnostic/cast/operator/private/protected/package/public/readonly/version）+ **`require("…")` 模块路径补全**（来自 `require_map`）；**声明 `trigger_characters = ['.', ':', '@', '"', "'"]`** 让客户端自动触发
 - **signatureHelp**：基于 `FunctionSummary` 的参数签名浮窗；支持 `foo(a, b)` / `obj.m(...)` / `obj:m(...)` / 跨文件 require 返回的 callable；`---@overload` 生成多个 SignatureInformation；`active_parameter` 由 `(` 到光标间顶层 `,` 的计数得到（感知嵌套 `()` / `{}` / `[]` 与字符串、行注释）；方法调用时 `self` 不出现在显示参数列表
 - **rename**：单文件 local + 全工作区全局（含 prepareRename）；**新名字校验为合法 Lua 标识符**（非法返回 `InvalidParams` JSON-RPC 错误，关键字拒绝）
-- **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记（作用域感知）；**发出的列号为 UTF-16 code unit**
+- **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记（作用域感知）；**发出的列号为 UTF-16 code unit**。**设计取舍：刻意最小化，只补 TextMate 无法静态判定的语义区分**（全局 `defaultLibrary`、全局/局部、Emmy 类型名等）；`keyword` / `number` / `string` / 注释等基色交由 TextMate，**不做** token type 细分（详见 [`docs/requirements.md`](docs/requirements.md) §3.1）
 - **语义诊断**：未定义全局变量 + **Emmy 类型未知字段访问** warning + **Lua table shape 未知字段**（closed→error / open→warning，`luaFieldError`/`luaFieldWarning` 可配置）+ **Emmy 类型不匹配**（`---@type` 声明与赋值字面量类型冲突时报告，`emmyTypeMismatch` 可配置）；**诊断 enable/severity 受配置控制**
 - **作用域树**（`scope.rs`）：arena-based `ScopeTree`，单趟 AST 遍历构建；支持 `function_body` / `do` / `while` / `repeat` / `if` / `for` 等所有块级作用域 + 参数 + for 变量 + 隐式 `self`；正确处理 `local x = x + 1` RHS 引用外层变量的 Lua 语义
 

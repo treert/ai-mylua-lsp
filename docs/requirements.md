@@ -31,8 +31,11 @@
 
 - **基础语法高亮**：以 **TextMate**（VS Code `contributes.grammars`）**为主**。使用 **自研** TextMate grammar，覆盖 Lua 5.3+ 与 EmmyLua 注释区块的常见结构，便于与产品迭代同步。
 - **语法树与解析**：以 **自研 Tree-sitter 文法** 生成 parser，部署在 **LSP Server** 内；依赖增量解析、紧凑树表示，支撑大文件与高频编辑下的解析与查询（与编辑器是否内置 Tree-sitter 高亮 **无必然关系**）。
-- **语义高亮增强**：LSP 实现 **`textDocument/semanticTokens/*`**，在 TextMate 基色之上提供 **token type / modifier**（例如区分**全局变量与局部**、模块字段、`upvalue` 意图、可由产品定义的「强调」类等）。颜色由 **编辑器主题**将 semantic token 映射到具体配色；扩展可提供 **semanticTokenScopes** 等默认映射，便于用户与主题定制。
-- **关系小结**：TextMate ↔ Tree-sitter **不负责互相证明**同一套着色规则；**对外一致**靠：自研 TextMate 与自研 Tree-sitter **共用同一语言边界与版本策略**（同一文档约定的 Lua 5.3+ / 注释语法），避免「肉眼看是关键字、树里是标识符」的长期漂移。
+- **语义高亮增强（刻意最小化）**：LSP 的 **`textDocument/semanticTokens/*`** 在本项目中**仅作为 TextMate 基色的补充**，**只发那些 TextMate 静态无法判断的少量区分**（典型场景：**全局变量 `defaultLibrary` 标记**、**全局 vs 局部**、**方法 vs 函数**、**Emmy 类型名**）。**刻意不追求** token type 的细粒度拆分（`FUNCTION` / `METHOD` / `PARAMETER` / `PROPERTY` / `NUMBER` / `STRING` / `KEYWORD` 等）—— `keyword` / `number` / `string` / 注释等基色**一律由 TextMate 负责**，LSP **不重复**发这些 token 类型。
+  - **理由**：（1）TextMate 已能在无语义信息下给出稳定的基色，semantic tokens 再细分收益边际、维护成本高；（2）细分 token 会放大 TextMate 与 LSP **作用域命名不一致**导致的"跳色"问题；（3）在 5 万文件级工作区下，semantic tokens 的计算和传输成本应保持在最低水平；（4）`keyword` / `number` / `string` 等在 LSP ready 之前就已由 TextMate 着色，细分反而会在打开瞬间出现"闪烁"。
+  - **不做清单（设计决定，非待办）**：token type 细分（见上）、为注释/字符串/数字单独发 semantic token、把 TextMate 能表达的所有 scope 镜像成 semantic modifier。
+  - **颜色来源**：由 **编辑器主题**把 semantic token 映射到具体配色；扩展可提供 **semanticTokenScopes** 等默认映射，便于用户与主题定制。
+- **关系小结**：TextMate ↔ Tree-sitter **不负责互相证明**同一套着色规则；**对外一致**靠：自研 TextMate 与自研 Tree-sitter **共用同一语言边界与版本策略**（同一文档约定的 Lua 5.3+ / 注释语法），避免「肉眼看是关键字、树里是标识符」的长期漂移。**semantic tokens 的定位不是"另一套高亮"，而是"TextMate 基色的一层薄补丁"**。
 
 ### 3.2 语义跳转与工作区范围（硬性）
 

@@ -75,7 +75,7 @@ flowchart TB
 
 - **Tree-sitter 文法**：在己方仓库中维护；升级 Lua 子集或定制语法时 **先改 Tree-sitter 文法、再生 parser、再调语义与 token 规则**。
 - **TextMate**：单独维护，与 **同一套语言边界说明**（Lua 5.3+、注释/Emmy 展示）对齐；**不负责**替代语法树。
-- **一致性**：诊断/跳转以 **Tree-sitter AST** 为准；屏幕上「第一眼颜色」以 **TextMate + semantic tokens** 为准；产品侧用测试与文档避免二者**长期**割裂。
+- **一致性**：诊断/跳转以 **Tree-sitter AST** 为准；屏幕上「第一眼颜色」以 **TextMate** 为准，**semantic tokens** 只在其上叠加少量语义区分（全局 `defaultLibrary`、全局/局部、Emmy 类型名），**不作**另一套独立高亮系统；产品侧用测试与文档避免二者**长期**割裂。
 - **查询层**：大纲、索引、rename 等可基于 `tree-sitter query` 或等价遍历；**EmmyLua** 在 Tree-sitter 中 **显式节点化**；TextMate 可对注释块做 **粗粒度** 着色配合。
 
 ### 3.2 工作区级索引（workspace-wide 必备）
@@ -120,13 +120,13 @@ flowchart TB
 | `textDocument/hover` | 注解 + 推断 |
 | `textDocument/documentSymbol` | 单文件大纲 |
 | `textDocument/publishDiagnostics` | 可配置深度 |
-| `textDocument/semanticTokens/*` | **在 TextMate 基色之上**叠加；例如全局 vs 局部、可定制 modifier；由主题映射颜色 |
+| `textDocument/semanticTokens/*` | **TextMate 基色的最小补充**（仅发语义才能判断的类别，如全局 `defaultLibrary`、全局 vs 局部、Emmy 类型名）；**刻意不做** token type 细分，详见 [`requirements.md`](requirements.md) §3.1 |
 
 ## 5. 扩展侧职责（VS Code）约束
 
 - **不做**语言理解；**不做** Tree-sitter 解析（解析在 LSP）。
-- **TextMate**：自研 grammar，承担 **基础语法高亮**。
-- **Semantic tokens**：扩展侧配置 **默认 token 作用域/主题适配**；具体 range 与类型由 **LSP** 计算。
+- **TextMate**：自研 grammar，承担 **基础语法高亮**（关键字、注释、字符串、数字、运算符、EmmyLua 注解块等**静态可判定**的全部着色）。
+- **Semantic tokens**：**刻意最小化**，仅补充 TextMate 无法静态判定的语义类别（全局 `defaultLibrary`、全局/局部区分、Emmy 类型名等）。**不做** token type 细分；`keyword` / `number` / `string` 等一律让 TextMate 着色。扩展侧只配置 **默认 token 作用域/主题适配**；具体 range 与类型由 **LSP** 计算。详见 [`requirements.md`](requirements.md) §3.1。
 
 ## 6. 实现选型方向（与路线图一致）
 
