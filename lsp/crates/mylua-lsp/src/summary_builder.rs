@@ -207,6 +207,20 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let values_node = node.child_by_field_name("values");
 
     let name_count = names_node.named_child_count();
+
+    // Multi-return distribution: `local a, b, c = f()` where the RHS
+    // has exactly one value expression that is a `function_call`.
+    // When we can statically infer the callee's return signature, map
+    // `returns[i]` to `names[i]`; for every name beyond the signature's
+    // return count we leave `Unknown`.
+    let multi_return_types: Option<Vec<TypeFact>> = if name_count > 1 {
+        values_node
+            .and_then(single_function_call_rhs)
+            .and_then(|call| extract_call_return_types(ctx, call))
+    } else {
+        None
+    };
+
     for i in 0..name_count {
         let name_node = match names_node.named_child(i as u32) {
             Some(n) if n.kind() == "identifier" => n,
@@ -227,6 +241,20 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 });
                 continue;
             }
+        }
+
+        // Multi-return path takes priority when in effect: distribute
+        // the i-th return type from the single RHS call. Names beyond
+        // the signature's return arity stay Unknown.
+        if let Some(ref returns) = multi_return_types {
+            let type_fact = returns.get(i).cloned().unwrap_or(TypeFact::Unknown);
+            ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
+                name: name.clone(),
+                type_fact,
+                source: TypeFactSource::Assignment,
+                range,
+            });
+            continue;
         }
 
         let value_node = values_node
@@ -255,6 +283,63 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             });
         }
     }
+}
+
+/// True iff `values_node` (the `expression_list` on the RHS of a
+/// `local_declaration` / `assignment_statement`) holds exactly one
+/// expression and that expression is a `function_call`. Returns the
+/// call node when it qualifies.
+fn single_function_call_rhs(values: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    if values.named_child_count() != 1 {
+        return None;
+    }
+    let only = values.named_child(0)?;
+    if only.kind() == "function_call" {
+        Some(only)
+    } else {
+        None
+    }
+}
+
+/// Try to statically extract the full list of return types for a
+/// `function_call` node. Returns `None` when the callee's signature
+/// isn't reachable at summary-build time (e.g. cross-file require,
+/// method calls, field expressions) — callers should fall back to
+/// leaving each name `Unknown` in that case rather than guessing.
+///
+/// Only the cheap, deterministic paths are handled here; more
+/// elaborate multi-return analysis (e.g. following require to another
+/// file's `module_return_type` → resolving multiple returns) is
+/// intentionally deferred to avoid ballooning the summary pass.
+fn extract_call_return_types(
+    ctx: &BuildContext,
+    call_node: tree_sitter::Node,
+) -> Option<Vec<TypeFact>> {
+    // Grammar: `function_call` with a `method` field is `obj:m(...)`.
+    // The `callee` child is just `obj` in that shape, so relying on
+    // the callee kind alone would wrongly treat `obj:m()` like `obj()`
+    // when `obj` is also a top-level function registered in
+    // `function_summaries`. Mirror `infer_call_return_type`'s method
+    // branch and bail out unambiguously.
+    if call_node.child_by_field_name("method").is_some() {
+        return None;
+    }
+    let callee = call_node.child_by_field_name("callee")?;
+    // Only bare identifier callees are statically resolvable here;
+    // dotted calls (`mod.f()`) and subscript calls fall through the
+    // resolver as CallReturn stubs without direct access to the full
+    // returns list.
+    if !matches!(callee.kind(), "variable" | "identifier") {
+        return None;
+    }
+    let callee_text = node_text(callee, ctx.source);
+
+    // Same-file function summary (covers `local function`, `function`,
+    // `function Class:m`, etc.).
+    if let Some(fs) = ctx.function_summaries.get(callee_text) {
+        return Some(fs.signature.returns.clone());
+    }
+    None
 }
 
 /// Extract `---@type X` from a comment node immediately preceding the given node.

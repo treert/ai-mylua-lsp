@@ -371,6 +371,138 @@ fn hover_local_anonymous_function_shows_params() {
 }
 
 #[test]
+fn hover_multi_return_distributes_types_across_names() {
+    // P1-9: `local a, b = f()` should bind `a` ↦ returns[0],
+    // `b` ↦ returns[1]. Previously both fell back to the first
+    // return type via `infer_expression_type` on the full call.
+    let src = r#"---@return number, string
+function split() return 1, "x" end
+
+local a, b = split()
+print(a)
+print(b)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "multi_ret.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `a` (first name → first return = number)
+    let h_a = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs)
+        .expect("hover on a");
+    let text_a = hover_content_string(&h_a);
+    assert!(
+        text_a.contains("number") && !text_a.contains("string"),
+        "a should be number (first return), got:\n{}", text_a,
+    );
+
+    // hover on `b` (second name → second return = string)
+    let h_b = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs)
+        .expect("hover on b");
+    let text_b = hover_content_string(&h_b);
+    assert!(
+        text_b.contains("string"),
+        "b should be string (second return), got:\n{}", text_b,
+    );
+}
+
+#[test]
+fn hover_multi_return_extra_names_fall_back_to_unknown() {
+    // When there are more names than return types, extras stay Unknown
+    // instead of being wrongly duplicated. Lock on the positive: `a`
+    // picks up the one typed return, `b` has no known type.
+    let src = r#"---@return number
+function only() return 1 end
+
+local a, b = only()
+print(a)
+print(b)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "multi_ret_short.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `a` gets the sole return type.
+    let h_a = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs).expect("hover on a");
+    let text_a = hover_content_string(&h_a);
+    assert!(text_a.contains("number"), "a should be number, got:\n{}", text_a);
+
+    // `b` must not falsely claim `number`.
+    if let Some(h) = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs) {
+        let text_b = hover_content_string(&h);
+        assert!(
+            !text_b.contains("`number`"),
+            "extra name beyond returns should NOT be typed `number`, got:\n{}", text_b,
+        );
+    }
+}
+
+#[test]
+fn hover_multi_return_method_call_falls_back_to_unknown() {
+    // P1-9 guard: `obj:m()` where the base `obj` happens to ALSO be
+    // a top-level function (registered under the bare key `"obj"` in
+    // `function_summaries`) must NOT distribute that function's
+    // returns to `a, b`. The grammar's `function_call` splits the
+    // `:m` form into `callee = obj` + `method = m`, so if
+    // `extract_call_return_types` checks only `callee` kind it will
+    // wrongly find `obj()` and leak its return types. The correct
+    // behavior is to bail out because we lack a summary-level method-
+    // resolution path.
+    let src = r#"---@return number, string
+function obj() return 1, "decoy" end
+
+local a, b = obj:m()
+print(a)
+print(b)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "method_call.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    if let Some(h) = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs) {
+        let text = hover_content_string(&h);
+        assert!(
+            !text.contains("`number`") && !text.contains("Type: number"),
+            "method call `obj:m()` must not inherit top-level `obj()`'s number return, got:\n{}", text,
+        );
+    }
+    if let Some(h) = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs) {
+        let text = hover_content_string(&h);
+        assert!(
+            !text.contains("`string`") && !text.contains("Type: string"),
+            "method call `obj:m()` must not inherit top-level `obj()`'s string return, got:\n{}", text,
+        );
+    }
+}
+
+#[test]
+fn hover_multi_return_dotted_call_falls_back_to_unknown() {
+    // Dotted call `mod.f()` also produces a CallReturn stub and must
+    // fall through to Unknown rather than picking any same-named
+    // top-level function's returns.
+    let src = r#"---@return number, string
+function f() return 1, "decoy" end
+
+local mod = {}
+---@return boolean, integer
+function mod.f() return true, 2 end
+
+local a, b = mod.f()
+print(a)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dotted_call.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    if let Some(h) = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs) {
+        let text = hover_content_string(&h);
+        assert!(
+            !text.contains("`number`") && !text.contains("Type: number"),
+            "dotted call `mod.f()` must not pick up top-level `f()`'s number return, got:\n{}", text,
+        );
+    }
+}
+
+#[test]
 fn hover_local_anonymous_function_with_emmy_types() {
     // P1-8: Emmy annotations on the enclosing `local` statement should
     // enrich hover output for the anonymous function binding.
