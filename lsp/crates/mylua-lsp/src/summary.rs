@@ -90,7 +90,19 @@ pub struct TypeDefinition {
     /// Names of generic type parameters (from `---@generic T, K`).
     #[serde(default)]
     pub generic_params: Vec<String>,
+    /// Full range of the declaration anchor — for a class this is the
+    /// following statement that anchors the class value (`Foo = {}`);
+    /// for alias/enum it is the range of the emmy_comment node itself.
+    /// Used by clients that want to highlight the whole construct.
     pub range: Range,
+    /// Range of just the `Foo` identifier within `---@class Foo`,
+    /// `---@alias Foo ...`, or `---@enum Foo`. Used as the
+    /// `selection_range` in `documentSymbol` and as the highlight
+    /// target in `workspace/symbol` so that clicking the outline entry
+    /// jumps precisely to the type name rather than the whole line.
+    /// Falls back to `range` for legacy summaries (`#[serde(default)]`).
+    #[serde(default)]
+    pub name_range: Option<Range>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,7 +117,14 @@ pub enum TypeDefinitionKind {
 pub struct TypeFieldDef {
     pub name: String,
     pub type_fact: TypeFact,
+    /// Full `---@field ...` line range.
     pub range: Range,
+    /// Range of just the field name token (`bar` within
+    /// `---@field bar integer`). When `None`, clients should fall
+    /// back to `range`. `#[serde(default)]` keeps cached summaries
+    /// produced by older builds readable.
+    #[serde(default)]
+    pub name_range: Option<Range>,
 }
 
 /// Inferred type fact for a key local variable, with provenance.

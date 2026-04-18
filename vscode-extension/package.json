@@ -132,6 +132,36 @@
           "default": "warning",
           "description": "Severity for conservative Lua field warnings (e.g. unknown field on open table)."
         },
+        "mylua.diagnostics.duplicateTableKey": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "warning",
+          "description": "Severity for duplicate keys inside a single table constructor (`{ a = 1, a = 2 }`)."
+        },
+        "mylua.diagnostics.unusedLocal": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "off",
+          "description": "Severity for local variables declared but never read. `_`/`_prefix` names are always skipped."
+        },
+        "mylua.diagnostics.argumentCountMismatch": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "off",
+          "description": "Severity when a call passes a different number of arguments than the resolved signature expects. Vararg (`...`) absorbs extras; any `---@overload` matching the count suppresses the diagnostic."
+        },
+        "mylua.diagnostics.argumentTypeMismatch": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "off",
+          "description": "Severity when an argument literal type doesn't match the resolved parameter's declared `---@param` type. Unknown-typed arguments are skipped silently."
+        },
+        "mylua.diagnostics.returnMismatch": {
+          "type": "string",
+          "enum": ["error", "warning", "hint", "off"],
+          "default": "off",
+          "description": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries."
+        },
         "mylua.gotoDefinition.strategy": {
           "type": "string",
           "enum": ["auto", "single", "list"],

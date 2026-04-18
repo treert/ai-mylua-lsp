@@ -28,7 +28,8 @@ pub fn signature_help(
 
     // Find the enclosing function call whose argument list contains the cursor.
     let call = find_enclosing_call(doc.tree.root_node(), offset)?;
-    let (signatures, is_method, primary_name) = resolve_call_signatures(call, doc, uri, index)?;
+    let (signatures, is_method, primary_name) =
+        resolve_call_signatures(call, source, uri, index)?;
     if signatures.is_empty() {
         return None;
     }
@@ -65,13 +66,18 @@ fn find_enclosing_call(root: tree_sitter::Node, byte_offset: usize) -> Option<tr
 }
 
 /// Produces (signatures, is_method_call, callee_display_name).
-fn resolve_call_signatures(
+///
+/// Exposed at `pub(crate)` so diagnostics (argument-count / -type
+/// mismatch checks) can reuse the exact same resolution rules used
+/// to populate `signatureHelp`, keeping the two features from
+/// drifting on edge cases like cross-file `@field`+impl merging or
+/// `@overload` handling.
+pub(crate) fn resolve_call_signatures(
     call: tree_sitter::Node,
-    doc: &Document,
+    source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
-    let source = doc.text.as_bytes();
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
 

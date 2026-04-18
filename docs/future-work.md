@@ -8,50 +8,25 @@
 
 ## 1. 诊断扩展（P2-3 剩余子项）
 
-P2-3 中 `duplicateTableKey` + `unusedLocal` 两项已完成；以下诊断尚未实现，每类都应有独立的 `DiagnosticsConfig` 开关（参考 `emmy_type_mismatch` 的模式）。
+**全部完成。** `duplicateTableKey` / `unusedLocal` / `argumentCountMismatch` / `argumentTypeMismatch` / `returnMismatch` 以及 `emmyTypeMismatch` 的 reassignment 扩展均已实现，每个都有独立的 `DiagnosticsConfig` 开关。
 
-### [ ] 函数调用参数个数不匹配
+后三项默认 Off —— 第一次开启会在老代码上产生大量告警，按需 opt-in。启用路径：
 
-**锚点**：`lsp/crates/mylua-lsp/src/diagnostics.rs`、`src/config.rs::DiagnosticsConfig`
+```json
+{
+  "mylua.diagnostics.argumentCountMismatch": "warning",
+  "mylua.diagnostics.argumentTypeMismatch": "warning",
+  "mylua.diagnostics.returnMismatch": "warning"
+}
+```
 
-**目标**：对 `foo(a, b)` 调用，若静态解析得到 `FunctionSummary.signature.params.len()` 确定（非 `vararg`），且实参数量 `!=` 形参数量 → 报告。`---@overload` 存在时允许多个重载之一匹配。
-
-**陷阱**：
-- `foo(t, ...)` 里 vararg 形参吸收任意多实参
-- `foo()` 调用 `function foo(a, b) end` 时，`nil` 默认值在 Lua 里合法，行为是 warning 而非 error
-- method call `obj:m(x)` 时 `self` 已被隐式传递，不应计入实参数
-
-### [ ] 函数调用参数类型不匹配
-
-**锚点**：同上
-
-**目标**：emmy `@param x number` 声明下，实参静态类型可推断时（来自 `local_type_facts` / literal）若不兼容则报告。复用 `check_type_mismatch_diagnostics` 里的 `is_type_compatible`。
-
-### [ ] `@return` 与实际 `return` 语句不匹配
-
-**目标**：`---@return number` 声明下，函数体内 `return "x"` 报告类型不匹配；`---@return number, string` 声明下 `return 1` 报告数量不匹配。
-
-**陷阱**：`return` 可以出现在嵌套 `if/do/while` 里，需要遍历整个 function_body 而非只看末尾。
-
-### [ ] `---@type` 声明与后续赋值类型不匹配
-
-**目标**：当前只 check `local` 首次字面量赋值（见 `diagnostics::find_local_rhs_type`）；`x = "new value"` 后续赋值若类型冲突也应报告。
-
-**陷阱**：需要扩展 `diagnostics.rs` 遍历 `assignment_statement` 的 LHS 是否指向有 emmy 类型声明的 local。
+实现要点见 `ai-readme.md` 的「语义诊断」条目和 `tests/test_diagnostics.rs`（32 条集成测试）。
 
 ---
 
 ## 2. selection_range / symbols 精细化
 
-### [ ] `TypeDefinition` 增加 `name_range` 字段
-
-**背景**：当前 `TypeDefinition.range` 指向 `@class Foo` 下一条 statement（`Foo = {}` 整行）；documentSymbol 的 CLASS 节点 `selection_range` 跟着粗粒度化，客户端点击 outline 会高亮整条语句而非 `Foo` 本身。
-
-**实现提示**：`summary_builder.rs::visit_emmy_comment` 里解析 `@class <name>` 时记录 name token 的 range 到 `TypeDefinition.name_range`，`symbols.rs` 与 `workspace_symbol.rs` 的 Class 节点用 `name_range` 作 `selection_range`。
-
-### [ ] `TypeFieldDef` 同名 range 精细化
-
-与上一项同构：`@field x integer` 里 `x` 的 range，当前复用整条 emmy_line 的 range，可拆出精准列范围。
+**全部完成。** `TypeDefinition.name_range` / `TypeFieldDef.name_range` 已加入 summary，并在 `symbols.rs` / `workspace_symbol.rs` 中替换 `selection_range` / `location.range`。`@field private name T` 里跳过 visibility 关键字后定位 name token。
 
 ---
 

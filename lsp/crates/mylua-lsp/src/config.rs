@@ -131,6 +131,21 @@ pub struct DiagnosticsConfig {
     /// placeholders; opt-in via config.
     #[serde(rename = "unusedLocal")]
     pub unused_local: DiagnosticSeverityOption,
+    /// P2-3 continued: call-site arg count vs FunctionSummary params
+    /// mismatch. Respects vararg (`...` absorbs extras) and overloads
+    /// (any overload matching clears the diagnostic).
+    #[serde(rename = "argumentCountMismatch")]
+    pub argument_count_mismatch: DiagnosticSeverityOption,
+    /// P2-3 continued: call-site arg type vs `@param` declared type
+    /// mismatch. Only fires when both sides have a known Known
+    /// KnownType (literals, resolved locals); `Unknown` is skipped.
+    #[serde(rename = "argumentTypeMismatch")]
+    pub argument_type_mismatch: DiagnosticSeverityOption,
+    /// P2-3 continued: `---@return` count/type mismatch vs actual
+    /// `return` statements in the function body. Walks all nested
+    /// `return` statements (including inside `if`/`do`/`while`).
+    #[serde(rename = "returnMismatch")]
+    pub return_mismatch: DiagnosticSeverityOption,
 }
 
 impl Default for DiagnosticsConfig {
@@ -146,6 +161,12 @@ impl Default for DiagnosticsConfig {
             // Unused-local is noisy (every `for _, v in pairs(t)` uses
             // `_` which is legitimate). Default off.
             unused_local: DiagnosticSeverityOption::Off,
+            // Arg/return checks are OFF by default to avoid flooding
+            // first-run users with warnings on code that predates the
+            // feature; opt in via config.
+            argument_count_mismatch: DiagnosticSeverityOption::Off,
+            argument_type_mismatch: DiagnosticSeverityOption::Off,
+            return_mismatch: DiagnosticSeverityOption::Off,
         }
     }
 }

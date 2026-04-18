@@ -327,3 +327,410 @@ fn unused_local_counts_reference_in_expression() {
         "x is used in return expression, got: {:?}", diags,
     );
 }
+
+// ---------------------------------------------------------------------------
+// P2-3 — @type follow-up assignment mismatch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn emmy_type_mismatch_on_reassignment() {
+    // `x` is declared `---@type number`; a later `x = "str"` must
+    // report mismatch in addition to the initial declaration being OK.
+    let src = r#"
+---@type number
+local x = 0
+x = "not a number"
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "reassign.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Type mismatch on assignment"))
+        .collect();
+    assert_eq!(
+        mismatches.len(), 1,
+        "exactly one follow-up assignment mismatch, got: {:?}", diags,
+    );
+    assert!(
+        mismatches[0].message.contains("'x'"),
+        "message names the variable, got: {}", mismatches[0].message,
+    );
+}
+
+#[test]
+fn emmy_type_mismatch_reassignment_respects_shadowing() {
+    // Inner `local x = "str"` shadows the outer typed declaration —
+    // the inner assignment must NOT be reported against the outer
+    // `---@type number`.
+    let src = r#"
+---@type number
+local x = 0
+do
+    local x = "inner"
+    x = "still string"
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "reassign_shadow.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Type mismatch on assignment")),
+        "shadowed inner `x` reassignments must not flag outer number type, got: {:?}", diags,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — argument count / type mismatch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn argument_count_mismatch_too_many() {
+    let src = r#"
+local function f(a, b) return a + b end
+f(1, 2, 3)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_too_many.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(mismatches.len(), 1, "should flag over-arity, got: {:?}", diags);
+    assert!(mismatches[0].message.contains("expected 2"), "expected 2 params: {}", mismatches[0].message);
+}
+
+#[test]
+fn argument_count_mismatch_too_few() {
+    let src = r#"
+local function f(a, b) return a + b end
+f(1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_too_few.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(mismatches.len(), 1, "should flag under-arity, got: {:?}", diags);
+}
+
+#[test]
+fn argument_count_vararg_absorbs_extras() {
+    let src = r#"
+local function f(a, ...) return a end
+f(1, 2, 3, 4, 5)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_vararg.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "vararg must absorb extras, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn argument_count_method_call_hides_self() {
+    // `:` call passes `self` implicitly; the user-visible arg list
+    // should match the `@field`-declared params after hiding `self`.
+    let src = r#"
+---@class Greeter
+---@field hello fun(self: Greeter, name: string)
+local g = nil
+
+---@type Greeter
+g = g
+
+g:hello("world")
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_method.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    // The call passes 1 visible arg ("world"); the signature has
+    // 2 params (self, name); after hiding `self` it's 1 — match.
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "method call with matching visible arg count should not flag, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn argument_count_overload_accepting_clears_diagnostic() {
+    // One overload takes 1 arg, another takes 2 — calling with 1 arg
+    // matches an overload, so nothing should be reported.
+    let src = r#"
+---@overload fun(a: number)
+---@overload fun(a: number, b: number)
+local function f(a, b) return a end
+f(1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_overload.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "any overload match clears the count diagnostic, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn argument_count_off_by_default() {
+    let src = r#"
+local function f(a) return a end
+f(1, 2, 3)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_default.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "argument count check is off by default, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn argument_type_mismatch_basic() {
+    let src = r#"
+---@param a number
+---@param b string
+local function f(a, b) return a end
+f("str", 42)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let type_mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.starts_with("Argument "))
+        .collect();
+    assert_eq!(
+        type_mismatches.len(), 2,
+        "both args flagged: str->number, 42->string, got: {:?}", diags,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — @return mismatch
+// ---------------------------------------------------------------------------
+
+#[test]
+fn return_count_mismatch_reports() {
+    let src = r#"
+---@return number, string
+local function f()
+    return 42
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_count.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let return_mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Return statement yields"))
+        .collect();
+    assert_eq!(return_mismatches.len(), 1, "got: {:?}", diags);
+    assert!(return_mismatches[0].message.contains("expected 2"));
+}
+
+#[test]
+fn return_type_mismatch_reports() {
+    let src = r#"
+---@return number
+local function f()
+    return "str"
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_type.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let return_mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Return value"))
+        .collect();
+    assert_eq!(return_mismatches.len(), 1, "got: {:?}", diags);
+}
+
+#[test]
+fn return_mismatch_nested_return_inside_if() {
+    let src = r#"
+---@return number
+local function f(x)
+    if x > 0 then
+        return "bad"
+    end
+    return 0
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_nested.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    // The string return inside `if` should be flagged as type mismatch,
+    // the outer `return 0` is correct.
+    let return_mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Return value"))
+        .collect();
+    assert_eq!(return_mismatches.len(), 1, "nested return must be walked, got: {:?}", diags);
+}
+
+#[test]
+fn return_mismatch_nested_function_scope_isolation() {
+    // `return "str"` inside an inner function must NOT count against
+    // the outer `---@return number` declaration.
+    let src = r#"
+---@return number
+local function outer()
+    local inner = function() return "str" end
+    return 0
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_nested_fn.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return")),
+        "nested function's returns must not count against outer, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn return_mismatch_off_by_default() {
+    let src = r#"
+---@return number
+local function f() return "str" end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_off.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return")),
+        "return mismatch default off, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn return_mismatch_skips_tail_call_expansion() {
+    // Lua semantics: `return foo()` expands to whatever values foo()
+    // returns. Static count comparison can't know the expansion size,
+    // so we skip such returns to avoid false positives.
+    let src = r#"
+local function two() return 1, "s" end
+
+---@return number, string
+local function wrap()
+    return two()
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_tailcall.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return")),
+        "tail call return should not be flagged, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn return_mismatch_skips_vararg_expansion() {
+    // `return ...` similarly expands to any number of values.
+    let src = r#"
+---@return number, string
+local function pass(...)
+    return ...
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_vararg.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return")),
+        "vararg return should not be flagged, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn argument_type_mismatch_reads_emmy_annotated_local() {
+    // Regression: previously `infer_literal_type` refused to return
+    // an EmmyAnnotation-sourced type, so passing a `---@type string`
+    // local into a `@param n number` slot slipped through silently.
+    let src = r#"
+---@param n number
+local function takes_number(n) return n end
+
+---@type string
+local s = "hi"
+takes_number(s)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype_emmy.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.starts_with("Argument "))
+        .collect();
+    assert_eq!(
+        mismatches.len(), 1,
+        "passing @type string to @param number must be flagged, got: {:?}", diags,
+    );
+}

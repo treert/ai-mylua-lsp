@@ -64,8 +64,15 @@ struct BuildContext<'a> {
     /// `---@type X` annotation pending attachment to the next local declaration.
     pending_type_annotation: Option<EmmyType>,
     /// Class being built across consecutive emmy_comment nodes:
-    /// (name, parents, fields, generic_params).
-    pending_class: Option<(String, Vec<String>, Vec<TypeFieldDef>, Vec<String>)>,
+    /// (name, parents, fields, generic_params, name_range of the
+    /// `---@class <Name>` identifier token).
+    pending_class: Option<(
+        String,
+        Vec<String>,
+        Vec<TypeFieldDef>,
+        Vec<String>,
+        tower_lsp_server::ls_types::Range,
+    )>,
     /// Buffer for `@generic` params that arrive before `@class`.
     pending_generic_params: Vec<String>,
     /// Type of the file-level `return` statement (module export).
@@ -541,7 +548,7 @@ fn build_function_summary(
 /// expression itself), arithmetic (`x = 1 + function() end()`),
 /// nested function bodies, etc. — so we never pick up unrelated
 /// outer Emmy annotations.
-fn enclosing_statement_for_function_expr(
+pub(crate) fn enclosing_statement_for_function_expr(
     node: tree_sitter::Node,
 ) -> Option<tree_sitter::Node> {
     // The parent of a direct-bound RHS function is always
@@ -559,34 +566,50 @@ fn enclosing_statement_for_function_expr(
 }
 
 fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_sitter::Node, source: &[u8]) {
-    for i in 0..param_list.named_child_count() {
-        if let Some(child) = param_list.named_child(i as u32) {
-            match child.kind() {
-                "identifier" => {
-                    params.push(ParamInfo {
-                        name: node_text(child, source).to_string(),
-                        type_fact: TypeFact::Unknown,
-                    });
-                }
-                "name_list" => {
-                    for j in 0..child.named_child_count() {
-                        if let Some(id) = child.named_child(j as u32) {
-                            if id.kind() == "identifier" {
-                                params.push(ParamInfo {
-                                    name: node_text(id, source).to_string(),
-                                    type_fact: TypeFact::Unknown,
-                                });
-                            }
+    // Walk ALL children (named + unnamed) so we can pick up the
+    // anonymous `...` token too: the grammar's `_parameter_list_content`
+    // is inlined (leading `_`) and does NOT give the ellipsis its own
+    // node kind, so `named_child_count` alone would silently drop
+    // vararg params. Signal it by pushing a `ParamInfo { name: "...", .. }`.
+    for i in 0..param_list.child_count() {
+        let Some(child) = param_list.child(i as u32) else { continue };
+        match child.kind() {
+            "identifier" => {
+                params.push(ParamInfo {
+                    name: node_text(child, source).to_string(),
+                    type_fact: TypeFact::Unknown,
+                });
+            }
+            "name_list" => {
+                for j in 0..child.named_child_count() {
+                    if let Some(id) = child.named_child(j as u32) {
+                        if id.kind() == "identifier" {
+                            params.push(ParamInfo {
+                                name: node_text(id, source).to_string(),
+                                type_fact: TypeFact::Unknown,
+                            });
                         }
                     }
                 }
-                "varargs" => {
+            }
+            // Legacy explicit node name (if the grammar ever exposes
+            // vararg as a named node again) or anonymous `...` token.
+            "varargs" => {
+                params.push(ParamInfo {
+                    name: "...".to_string(),
+                    type_fact: TypeFact::Unknown,
+                });
+            }
+            _ => {
+                // Anonymous `...` token in `function f(a, ...)`:
+                // tree-sitter exposes it as an unnamed child whose
+                // literal text is `...`.
+                if !child.is_named() && node_text(child, source) == "..." {
                     params.push(ParamInfo {
                         name: "...".to_string(),
                         type_fact: TypeFact::Unknown,
                     });
                 }
-                _ => {}
             }
         }
     }
@@ -936,7 +959,7 @@ fn register_nested_field_write(
 /// Flush any pending @class definition into type_definitions.
 /// Called when a non-emmy_comment node is encountered.
 fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    if let Some((cname, parents, fields, generic_params)) = ctx.pending_class.take() {
+    if let Some((cname, parents, fields, generic_params, name_range)) = ctx.pending_class.take() {
         lsp_log!("[flush_class] '{}' with {} fields: {:?}", cname, fields.len(), fields.iter().map(|f| &f.name).collect::<Vec<_>>());
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
@@ -946,6 +969,7 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             alias_type: None,
             generic_params,
             range: ts_node_to_range(node, ctx.source),
+            name_range: Some(name_range),
         });
     }
 }
@@ -954,7 +978,7 @@ fn emit_pending_class_as_typedef(
     ctx: &mut BuildContext,
     node: tree_sitter::Node,
 ) {
-    if let Some((cname, prev_parents, fields, gparams)) = ctx.pending_class.take() {
+    if let Some((cname, prev_parents, fields, gparams, name_range)) = ctx.pending_class.take() {
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
             kind: TypeDefinitionKind::Class,
@@ -963,31 +987,52 @@ fn emit_pending_class_as_typedef(
             alias_type: None,
             generic_params: gparams,
             range: ts_node_to_range(node, ctx.source),
+            name_range: Some(name_range),
         });
     }
 }
 
 fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    let mut lines = Vec::new();
+    // Walk emmy_line children individually so each annotation can be
+    // paired with its originating source range. `parse_emmy_comments`
+    // returns at most one annotation per line (it tokenizes after the
+    // leading `---`/`--` prefix), so `Vec::first()` suffices per line.
+    // A name_range is computed per line by locating the identifier
+    // token within the raw line text.
     for i in 0..node.named_child_count() {
-        if let Some(line_node) = node.named_child(i as u32) {
-            if line_node.kind() == "emmy_line" {
-                lines.push(node_text(line_node, ctx.source).to_string());
-            }
+        let Some(line_node) = node.named_child(i as u32) else { continue };
+        if line_node.kind() != "emmy_line" {
+            continue;
         }
-    }
-    let text = lines.join("\n");
-    let annotations = parse_emmy_comments(&text);
+        let line_text = node_text(line_node, ctx.source).to_string();
+        let anns = parse_emmy_comments(&line_text);
+        let Some(ann) = anns.first() else { continue };
 
-    for ann in &annotations {
+        let line_start_byte = line_node.start_byte();
+        let line_end_byte = line_node.end_byte();
+
         match ann {
             EmmyAnnotation::Class { name, parents, .. } => {
                 emit_pending_class_as_typedef(ctx, node);
                 let initial_gparams = std::mem::take(&mut ctx.pending_generic_params);
-                ctx.pending_class = Some((name.clone(), parents.clone(), Vec::new(), initial_gparams));
+                let name_range = find_name_range_in_line(
+                    ctx.source,
+                    line_start_byte,
+                    line_end_byte,
+                    &line_text,
+                    name,
+                    "class",
+                );
+                ctx.pending_class = Some((
+                    name.clone(),
+                    parents.clone(),
+                    Vec::new(),
+                    initial_gparams,
+                    name_range,
+                ));
             }
             EmmyAnnotation::Generic { params } => {
-                if let Some((_, _, _, ref mut gparams)) = ctx.pending_class {
+                if let Some((_, _, _, ref mut gparams, _)) = ctx.pending_class {
                     for gp in params {
                         gparams.push(gp.name.clone());
                     }
@@ -998,11 +1043,21 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
             }
             EmmyAnnotation::Field { name: fname, type_expr, .. } => {
-                if let Some((_, _, ref mut fields, _)) = ctx.pending_class {
+                if let Some((_, _, ref mut fields, _, _)) = ctx.pending_class {
+                    let full_range = ts_node_to_range(line_node, ctx.source);
+                    let name_range = find_name_range_in_line(
+                        ctx.source,
+                        line_start_byte,
+                        line_end_byte,
+                        &line_text,
+                        fname,
+                        "field",
+                    );
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
                         type_fact: emmy_type_to_fact(type_expr),
-                        range: ts_node_to_range(node, ctx.source),
+                        range: full_range,
+                        name_range: Some(name_range),
                     });
                 }
             }
@@ -1013,6 +1068,14 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             EmmyAnnotation::Alias { name, type_expr } => {
                 emit_pending_class_as_typedef(ctx, node);
+                let name_range = find_name_range_in_line(
+                    ctx.source,
+                    line_start_byte,
+                    line_end_byte,
+                    &line_text,
+                    name,
+                    "alias",
+                );
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Alias,
@@ -1021,10 +1084,19 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     alias_type: Some(emmy_type_to_fact(type_expr)),
                     generic_params: Vec::new(),
                     range: ts_node_to_range(node, ctx.source),
+                    name_range: Some(name_range),
                 });
             }
             EmmyAnnotation::Enum { name } => {
                 emit_pending_class_as_typedef(ctx, node);
+                let name_range = find_name_range_in_line(
+                    ctx.source,
+                    line_start_byte,
+                    line_end_byte,
+                    &line_text,
+                    name,
+                    "enum",
+                );
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Enum,
@@ -1033,11 +1105,130 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     alias_type: None,
                     generic_params: Vec::new(),
                     range: ts_node_to_range(node, ctx.source),
+                    name_range: Some(name_range),
                 });
             }
             _ => {}
         }
     }
+}
+
+/// Locate the byte range of the `<name>` token following a specific
+/// annotation tag (`class`/`alias`/`enum`/`field`) inside an
+/// `emmy_line`'s source text. Returns a `Range` anchored at the
+/// original source file via `line_start_byte`.
+///
+/// Falls back to the full emmy_line range when the name cannot be
+/// located (defensive; parser already validated the name exists).
+///
+/// For `@field`, the optional visibility keyword (`public` /
+/// `private` / `protected` / `package`) is skipped before locating
+/// the field name token so `---@field private name integer` resolves
+/// to `name`, not `private`.
+fn find_name_range_in_line(
+    source: &[u8],
+    line_start_byte: usize,
+    line_end_byte: usize,
+    line_text: &str,
+    name: &str,
+    tag: &str,
+) -> tower_lsp_server::ls_types::Range {
+    // Find the `@<tag>` occurrence; scan forward to the name token.
+    let tag_marker = format!("@{}", tag);
+    let Some(tag_pos) = line_text.find(&tag_marker) else {
+        return byte_range_to_range(source, line_start_byte, line_end_byte);
+    };
+    // Byte cursor past the tag keyword.
+    let mut cursor = tag_pos + tag_marker.len();
+    let bytes = line_text.as_bytes();
+
+    // Skip whitespace.
+    while cursor < bytes.len() && (bytes[cursor] == b' ' || bytes[cursor] == b'\t') {
+        cursor += 1;
+    }
+
+    // For @field: optionally skip a visibility keyword if what follows
+    // is not the target `name`. We probe one identifier ahead.
+    if tag == "field" {
+        if let Some((word, next_cursor)) = read_identifier(bytes, cursor) {
+            if word != name
+                && matches!(word.as_str(), "public" | "private" | "protected" | "package")
+            {
+                cursor = next_cursor;
+                while cursor < bytes.len() && (bytes[cursor] == b' ' || bytes[cursor] == b'\t') {
+                    cursor += 1;
+                }
+            }
+        }
+    }
+
+    // Now expect the `name` identifier at `cursor`.
+    if cursor + name.len() <= bytes.len()
+        && &bytes[cursor..cursor + name.len()] == name.as_bytes()
+    {
+        // Confirm word boundary on both sides to avoid partial matches.
+        let before_ok = cursor == 0
+            || !bytes[cursor - 1].is_ascii_alphanumeric() && bytes[cursor - 1] != b'_';
+        let after_idx = cursor + name.len();
+        let after_ok = after_idx >= bytes.len()
+            || !(bytes[after_idx].is_ascii_alphanumeric() || bytes[after_idx] == b'_');
+        if before_ok && after_ok {
+            let start = line_start_byte + cursor;
+            let end = start + name.len();
+            return byte_range_to_range(source, start, end);
+        }
+    }
+    byte_range_to_range(source, line_start_byte, line_end_byte)
+}
+
+/// Read an ASCII identifier starting at `start` within `bytes`.
+/// Returns `(word, next_cursor)` past the identifier, or `None` when
+/// no identifier is present at the cursor.
+fn read_identifier(bytes: &[u8], start: usize) -> Option<(String, usize)> {
+    let mut end = start;
+    if end >= bytes.len() {
+        return None;
+    }
+    if !(bytes[end].is_ascii_alphabetic() || bytes[end] == b'_') {
+        return None;
+    }
+    while end < bytes.len() && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'_') {
+        end += 1;
+    }
+    let word = std::str::from_utf8(&bytes[start..end]).ok()?.to_string();
+    Some((word, end))
+}
+
+/// Build an LSP `Range` from an absolute byte span, reusing the
+/// file-level line/column computation via a tree-sitter Point-like
+/// walk. Keeps UTF-16 column encoding consistent with the rest of
+/// the crate.
+fn byte_range_to_range(
+    source: &[u8],
+    start_byte: usize,
+    end_byte: usize,
+) -> tower_lsp_server::ls_types::Range {
+    tower_lsp_server::ls_types::Range {
+        start: byte_to_position(source, start_byte),
+        end: byte_to_position(source, end_byte),
+    }
+}
+
+fn byte_to_position(source: &[u8], target: usize) -> tower_lsp_server::ls_types::Position {
+    let mut line: u32 = 0;
+    let mut line_start: usize = 0;
+    let mut i: usize = 0;
+    while i < target && i < source.len() {
+        if source[i] == b'\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+        i += 1;
+    }
+    let col_bytes = target.min(source.len()) - line_start;
+    let line_slice = &source[line_start..line_start + col_bytes];
+    let character = crate::util::byte_col_to_utf16_col(line_slice, col_bytes);
+    tower_lsp_server::ls_types::Position { line, character }
 }
 
 // ---------------------------------------------------------------------------

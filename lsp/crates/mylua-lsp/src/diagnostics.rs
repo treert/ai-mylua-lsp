@@ -67,13 +67,25 @@ pub fn collect_semantic_diagnostics_with_version(
         );
     }
     if let Some(severity) = diag_config.emmy_type_mismatch.to_lsp_severity() {
-        check_type_mismatch_diagnostics(root, source, uri, index, &mut diagnostics, severity);
+        check_type_mismatch_diagnostics(
+            root, source, uri, index, scope_tree, &mut diagnostics, severity,
+        );
     }
     if let Some(severity) = diag_config.duplicate_table_key.to_lsp_severity() {
         check_duplicate_table_keys(root, source, &mut diagnostics, severity);
     }
     if let Some(severity) = diag_config.unused_local.to_lsp_severity() {
         check_unused_locals(root, source, scope_tree, &mut diagnostics, severity);
+    }
+    let count_sev = diag_config.argument_count_mismatch.to_lsp_severity();
+    let type_sev = diag_config.argument_type_mismatch.to_lsp_severity();
+    if count_sev.is_some() || type_sev.is_some() {
+        check_call_argument_diagnostics(
+            root, source, uri, index, &mut diagnostics, count_sev, type_sev,
+        );
+    }
+    if let Some(severity) = diag_config.return_mismatch.to_lsp_severity() {
+        check_return_mismatch_diagnostics(root, source, &mut diagnostics, severity);
     }
     diagnostics
 }
@@ -315,33 +327,184 @@ fn check_type_mismatch_diagnostics(
     source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
 ) {
-    if let Some(summary) = index.summaries.get(uri).cloned() {
-        for ltf in summary.local_type_facts.values() {
-            if ltf.source != crate::summary::TypeFactSource::EmmyAnnotation {
-                continue;
-            }
-            let declared = &ltf.type_fact;
-            let actual = find_actual_type_for_local(&ltf.name, &ltf.range, root, source, &summary);
-            if actual == TypeFact::Unknown {
-                continue;
-            }
-            if !is_type_compatible(declared, &actual) {
-                diagnostics.push(Diagnostic {
-                    range: ltf.range,
-                    severity: Some(severity),
-                    source: Some("mylua".to_string()),
-                    message: format!(
-                        "Type mismatch: declared '{}', got '{}'",
-                        declared, actual
-                    ),
-                    ..Default::default()
-                });
-            }
+    let Some(summary) = index.summaries.get(uri).cloned() else { return };
+
+    // Pass 1 — original behaviour: check the initial `local x = <rhs>`
+    // assignment against `---@type` declared on the same line.
+    for ltf in summary.local_type_facts.values() {
+        if ltf.source != crate::summary::TypeFactSource::EmmyAnnotation {
+            continue;
+        }
+        let declared = &ltf.type_fact;
+        let actual = find_actual_type_for_local(&ltf.name, &ltf.range, root, source, &summary);
+        if actual == TypeFact::Unknown {
+            continue;
+        }
+        if !is_type_compatible(declared, &actual) {
+            diagnostics.push(Diagnostic {
+                range: ltf.range,
+                severity: Some(severity),
+                source: Some("mylua".to_string()),
+                message: format!(
+                    "Type mismatch: declared '{}', got '{}'",
+                    declared, actual
+                ),
+                ..Default::default()
+            });
         }
     }
+
+    // Pass 2 — follow-up `x = <rhs>` assignments to locals previously
+    // declared with `---@type T`. Walks every `assignment_statement`,
+    // resolves the LHS identifier via `scope_tree` back to its
+    // declaration site, and (if the decl site carries an Emmy type
+    // fact) compares RHS literal type against the declared type.
+    // Shadowing is handled correctly by `resolve_decl` — a new `local
+    // x` inside an inner scope produces a different `decl_byte`, so
+    // assignments inside that scope won't be checked against the
+    // outer declaration's type.
+    check_assignment_type_mismatches(
+        root, source, &summary, scope_tree, diagnostics, severity,
+    );
+}
+
+/// Walk every `assignment_statement` and, for each simple LHS
+/// identifier that resolves to a local whose declaration carries an
+/// Emmy type annotation, report mismatches between the declared type
+/// and the RHS literal type.
+fn check_assignment_type_mismatches(
+    root: tree_sitter::Node,
+    source: &[u8],
+    summary: &crate::summary::DocumentSummary,
+    scope_tree: &ScopeTree,
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let mut cursor = root.walk();
+    walk_assignment_nodes(&mut cursor, source, summary, scope_tree, diagnostics, severity);
+}
+
+fn walk_assignment_nodes(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    summary: &crate::summary::DocumentSummary,
+    scope_tree: &ScopeTree,
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let node = cursor.node();
+    if node.kind() == "assignment_statement" {
+        inspect_assignment_for_mismatch(node, source, summary, scope_tree, diagnostics, severity);
+    }
+    if cursor.goto_first_child() {
+        loop {
+            walk_assignment_nodes(cursor, source, summary, scope_tree, diagnostics, severity);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+fn inspect_assignment_for_mismatch(
+    node: tree_sitter::Node,
+    source: &[u8],
+    summary: &crate::summary::DocumentSummary,
+    scope_tree: &ScopeTree,
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let Some(left) = node.child_by_field_name("left") else { return };
+    let Some(right) = node.child_by_field_name("right") else { return };
+
+    // Iterate LHS/RHS pairs. Only single-variable, bare-identifier
+    // LHS entries are checked — dotted / subscripted LHS like
+    // `t.x = "str"` is a field write, not an assignment to a local
+    // with an `@type` annotation, and belongs to field-access
+    // diagnostics instead.
+    for i in 0..left.named_child_count() {
+        let Some(lhs) = left.named_child(i as u32) else { continue };
+        // Single-identifier LHS: either a bare `identifier` or a
+        // `variable` wrapping exactly one identifier. Skip dotted /
+        // subscripted forms (they have an `object` or `index` field).
+        let ident_node = if lhs.kind() == "identifier" {
+            Some(lhs)
+        } else if lhs.kind() == "variable"
+            && lhs.child_by_field_name("object").is_none()
+            && lhs.child_by_field_name("index").is_none()
+        {
+            // `variable` with a single identifier child.
+            lhs.named_child(0).filter(|c| c.kind() == "identifier")
+        } else {
+            None
+        };
+        let Some(ident) = ident_node else { continue };
+
+        let name = node_text(ident, source);
+        // Resolve to the declaration site; skip names that don't
+        // resolve (globals without an @type fact reach this path).
+        let Some(decl) = scope_tree.resolve_decl(ident.start_byte(), name) else {
+            continue;
+        };
+
+        // The local's declaration site must carry an EmmyAnnotation-
+        // sourced type fact — otherwise there's no declared type to
+        // compare against. `local_type_facts` is keyed by name; guard
+        // against shadowing by matching the decl_byte against the
+        // ltf's range start.
+        let Some(ltf) = summary.local_type_facts.get(name) else { continue };
+        if ltf.source != crate::summary::TypeFactSource::EmmyAnnotation {
+            continue;
+        }
+        // Confirm the ltf corresponds to the resolved declaration: the
+        // ltf's range line should match the decl line. tree-sitter
+        // byte -> line lookup isn't free; fall back to line comparison
+        // via the AST node at decl_byte.
+        if !ltf_matches_decl(decl.decl_byte, ltf, source) {
+            continue;
+        }
+
+        let Some(value_expr) = right.named_child(i as u32) else { continue };
+        let actual = infer_literal_type(value_expr, source, summary);
+        if actual == TypeFact::Unknown {
+            continue;
+        }
+        if !is_type_compatible(&ltf.type_fact, &actual) {
+            diagnostics.push(Diagnostic {
+                range: ts_node_to_range(ident, source),
+                severity: Some(severity),
+                source: Some("mylua".to_string()),
+                message: format!(
+                    "Type mismatch on assignment to '{}': declared '{}', got '{}'",
+                    name, ltf.type_fact, actual
+                ),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+/// True if the local-type-fact range starts on the same line as
+/// `decl_byte`. Used to guard against a same-named later declaration
+/// leaking its ltf onto an outer-scope assignment.
+fn ltf_matches_decl(
+    decl_byte: usize,
+    ltf: &crate::summary::LocalTypeFact,
+    source: &[u8],
+) -> bool {
+    // Count line breaks up to decl_byte.
+    let mut line: u32 = 0;
+    for &b in source.iter().take(decl_byte.min(source.len())) {
+        if b == b'\n' {
+            line += 1;
+        }
+    }
+    ltf.range.start.line == line
 }
 
 fn find_actual_type_for_local(
@@ -635,5 +798,505 @@ fn count_identifier_references(
             }
         }
         cursor.goto_parent();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — function-call argument count/type mismatch
+// ---------------------------------------------------------------------------
+
+/// Walk every `function_call` in the tree and compare actual argument
+/// count (and, when types are knowable, types) against the resolved
+/// callee's `FunctionSignature`s. `@overload` annotations produce
+/// alternative signatures; if any one matches the call, no diagnostic
+/// is emitted.
+///
+/// - `self` is implicit for `obj:method(...)` calls and is therefore
+///   filtered out of the parameter list before counting.
+/// - A vararg trailing param (`...`) absorbs any number of extra
+///   arguments; only the required-arg minimum is enforced.
+/// - Unknown-typed args (literal expression whose `infer_literal_type`
+///   returns `Unknown`) suppress the type mismatch but do not suppress
+///   the count check.
+fn check_call_argument_diagnostics(
+    root: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    diagnostics: &mut Vec<Diagnostic>,
+    count_severity: Option<DiagnosticSeverity>,
+    type_severity: Option<DiagnosticSeverity>,
+) {
+    // Depth-first collection of call nodes; we have to collect up front
+    // because `resolve_call_signatures` borrows `index` mutably and we
+    // can't nest that inside a tree-sitter cursor walk that also owns
+    // `root`.
+    let mut calls: Vec<tree_sitter::Node> = Vec::new();
+    collect_function_calls(root, &mut calls);
+
+    for call in calls {
+        let Some((sigs, is_method, display)) =
+            crate::signature_help::resolve_call_signatures(call, source, uri, index)
+        else {
+            continue;
+        };
+        // After `resolve_call_signatures` returns, the `&mut index`
+        // borrow ends (the returned values are owned). We can now
+        // take an immutable reference to `index.summaries[uri]` for
+        // the type-check path without cloning a full DocumentSummary
+        // on every call.
+        if sigs.is_empty() {
+            continue;
+        }
+        let Some(args_node) = call.child_by_field_name("arguments") else { continue };
+        let (actual_count, arg_exprs) = collect_call_arguments(args_node, source);
+
+        // Count match: any overload compatible with the actual count
+        // clears the diagnostic.
+        if let Some(severity) = count_severity {
+            let any_count_ok = sigs.iter().any(|sig| signature_accepts_count(sig, actual_count, is_method));
+            if !any_count_ok {
+                // Use the smallest/largest expected count range across
+                // overloads for the human-readable message.
+                let (min_expected, max_expected) = expected_count_range(&sigs, is_method);
+                let range = ts_node_to_range(args_node, source);
+                let expected_desc = if min_expected == max_expected {
+                    format!("{}", min_expected)
+                } else if max_expected == u32::MAX {
+                    format!("at least {}", min_expected)
+                } else {
+                    format!("{} to {}", min_expected, max_expected)
+                };
+                diagnostics.push(Diagnostic {
+                    range,
+                    severity: Some(severity),
+                    source: Some("mylua".to_string()),
+                    message: format!(
+                        "Call to '{}' passes {} argument(s), expected {}",
+                        display, actual_count, expected_desc,
+                    ),
+                    ..Default::default()
+                });
+                // Skip per-arg type checks when count is already wrong —
+                // the positional pairing is ambiguous.
+                continue;
+            }
+        }
+
+        // Type match: only when a suitable summary is available (local
+        // file) to evaluate argument literal types. For each positional
+        // arg i, check against the best matching overload's param i.
+        // A single "any overload matches" check keeps behavior
+        // consistent with the count pass.
+        if let Some(severity) = type_severity {
+            let Some(summary) = index.summaries.get(uri) else { continue };
+            // Find the first overload whose count is compatible; use
+            // its param slots for typing. If multiple overloads match,
+            // prefer the one whose param types align most with the
+            // provided literal types (best-effort, non-critical).
+            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, summary) else { continue };
+            let visible_params = visible_params_for(&best_sig, is_method);
+            for (i, arg_expr) in arg_exprs.iter().enumerate() {
+                // Vararg param absorbs everything past its position.
+                let param_idx = i;
+                let param = match visible_params.get(param_idx) {
+                    Some(p) => p,
+                    None => break,
+                };
+                if param.name == "..." {
+                    break;
+                }
+                let actual = infer_argument_type(*arg_expr, source, summary);
+                if actual == TypeFact::Unknown {
+                    continue;
+                }
+                if !is_type_compatible(&param.type_fact, &actual) {
+                    diagnostics.push(Diagnostic {
+                        range: ts_node_to_range(*arg_expr, source),
+                        severity: Some(severity),
+                        source: Some("mylua".to_string()),
+                        message: format!(
+                            "Argument {} of '{}': declared '{}', got '{}'",
+                            i + 1, display, param.type_fact, actual,
+                        ),
+                        ..Default::default()
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Extended version of `infer_literal_type` that also allows
+/// `EmmyAnnotation`-sourced locals to contribute their declared
+/// type. This is what call-site argument checking wants — if
+/// `local s ---@type string = f()` appears, then passing `s` to a
+/// `@param n number` slot should be diagnosable. The original
+/// `infer_literal_type` deliberately refuses Emmy-sourced locals
+/// because the initial `local` declaration's mismatch check would
+/// otherwise be circular.
+fn infer_argument_type(
+    node: tree_sitter::Node,
+    source: &[u8],
+    summary: &crate::summary::DocumentSummary,
+) -> TypeFact {
+    if matches!(node.kind(), "variable" | "identifier") {
+        let text = node_text(node, source);
+        if let Some(ltf) = summary.local_type_facts.get(text) {
+            return ltf.type_fact.clone();
+        }
+    }
+    infer_literal_type(node, source, summary)
+}
+
+fn collect_function_calls<'tree>(
+    node: tree_sitter::Node<'tree>,
+    out: &mut Vec<tree_sitter::Node<'tree>>,
+) {
+    if node.kind() == "function_call" {
+        out.push(node);
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            collect_function_calls(child, out);
+        }
+    }
+}
+
+/// Count actual arguments at a `function_call`'s `arguments` node and
+/// return the individual argument-expression nodes.
+///
+/// Three grammar forms:
+/// - `( expression_list )` — multi-arg; count the expression_list's
+///   named children.
+/// - `table_constructor` (`foo{...}`) — 1 arg, the table itself.
+/// - `string` (`foo "x"`) — 1 arg, the string literal.
+fn collect_call_arguments<'tree>(
+    args: tree_sitter::Node<'tree>,
+    source: &[u8],
+) -> (u32, Vec<tree_sitter::Node<'tree>>) {
+    // Paren form only starts with '('; otherwise it's a single-arg
+    // form (table / string).
+    if source.get(args.start_byte()).copied() != Some(b'(') {
+        return (1, vec![args]);
+    }
+    // Find the `expression_list` named child (optional); if absent the
+    // call has zero args.
+    let mut exprs = Vec::new();
+    for i in 0..args.named_child_count() {
+        if let Some(child) = args.named_child(i as u32) {
+            if child.kind() == "expression_list" {
+                for j in 0..child.named_child_count() {
+                    if let Some(e) = child.named_child(j as u32) {
+                        exprs.push(e);
+                    }
+                }
+            } else {
+                // Some grammars expose args directly without an
+                // `expression_list` wrapper; still count each named
+                // child as an arg.
+                exprs.push(child);
+            }
+        }
+    }
+    (exprs.len() as u32, exprs)
+}
+
+fn visible_params_for(sig: &crate::type_system::FunctionSignature, is_method: bool) -> Vec<crate::type_system::ParamInfo> {
+    sig.params
+        .iter()
+        .filter(|p| !(is_method && p.name == "self"))
+        .cloned()
+        .collect()
+}
+
+fn signature_accepts_count(sig: &crate::type_system::FunctionSignature, actual: u32, is_method: bool) -> bool {
+    let visible = visible_params_for(sig, is_method);
+    let has_vararg = visible.last().map_or(false, |p| p.name == "...");
+    let declared = visible.len() as u32;
+    if has_vararg {
+        // `declared - 1` is the count of non-vararg params; vararg
+        // absorbs zero or more extras.
+        actual >= declared.saturating_sub(1)
+    } else {
+        actual == declared
+    }
+}
+
+/// Return the `(min, max)` acceptable argument counts across all
+/// overloads, where `max == u32::MAX` indicates at least one overload
+/// has a vararg trailing parameter.
+fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_method: bool) -> (u32, u32) {
+    let mut min_acc = u32::MAX;
+    let mut max_acc = 0u32;
+    let mut any_vararg = false;
+    for sig in sigs {
+        let visible = visible_params_for(sig, is_method);
+        let has_vararg = visible.last().map_or(false, |p| p.name == "...");
+        let declared = visible.len() as u32;
+        let (lo, hi) = if has_vararg {
+            any_vararg = true;
+            (declared.saturating_sub(1), u32::MAX)
+        } else {
+            (declared, declared)
+        };
+        if lo < min_acc { min_acc = lo; }
+        if hi > max_acc { max_acc = hi; }
+    }
+    if any_vararg {
+        (min_acc, u32::MAX)
+    } else {
+        (min_acc, max_acc)
+    }
+}
+
+/// Heuristic: among overloads that accept the actual count, pick the
+/// one whose first N param types are compatible with the supplied
+/// argument literal types. Returns `None` when no overload is a count
+/// match — the caller already diagnosed that case.
+fn pick_best_typing_overload(
+    sigs: &[crate::type_system::FunctionSignature],
+    arg_exprs: &[tree_sitter::Node],
+    is_method: bool,
+    source: &[u8],
+    summary: &crate::summary::DocumentSummary,
+) -> Option<crate::type_system::FunctionSignature> {
+    let actual_count = arg_exprs.len() as u32;
+    let candidates: Vec<&crate::type_system::FunctionSignature> = sigs
+        .iter()
+        .filter(|s| signature_accepts_count(s, actual_count, is_method))
+        .collect();
+    if candidates.is_empty() {
+        return None;
+    }
+    let mut best: Option<(&crate::type_system::FunctionSignature, usize)> = None;
+    for sig in candidates {
+        let visible = visible_params_for(sig, is_method);
+        let mut score = 0usize;
+        for (i, arg) in arg_exprs.iter().enumerate() {
+            let Some(param) = visible.get(i) else { break };
+            if param.name == "..." {
+                break;
+            }
+            let actual = infer_argument_type(*arg, source, summary);
+            if actual == TypeFact::Unknown {
+                continue;
+            }
+            if is_type_compatible(&param.type_fact, &actual) {
+                score += 1;
+            }
+        }
+        if best.map_or(true, |(_, s)| score > s) {
+            best = Some((sig, score));
+        }
+    }
+    best.map(|(s, _)| s.clone())
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — @return vs actual return statement mismatch
+// ---------------------------------------------------------------------------
+
+/// Walk every function declaration / definition; when preceded by
+/// `---@return` annotations, compare against every `return_statement`
+/// reachable from the body (including nested `if`/`do`/`while`/`for`
+/// / `repeat` blocks). Both count and literal types are checked when
+/// statically resolvable.
+fn check_return_mismatch_diagnostics(
+    root: tree_sitter::Node,
+    source: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let mut functions: Vec<tree_sitter::Node> = Vec::new();
+    collect_function_like_nodes(root, &mut functions);
+    for fun in functions {
+        inspect_function_returns(fun, source, diagnostics, severity);
+    }
+}
+
+fn collect_function_like_nodes<'tree>(
+    node: tree_sitter::Node<'tree>,
+    out: &mut Vec<tree_sitter::Node<'tree>>,
+) {
+    if matches!(
+        node.kind(),
+        "function_declaration" | "local_function_declaration" | "function_definition"
+    ) {
+        out.push(node);
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            collect_function_like_nodes(child, out);
+        }
+    }
+}
+
+fn inspect_function_returns(
+    fun: tree_sitter::Node,
+    source: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    // For `function_definition` (anonymous `local f = function() end`
+    // or `Class.m = function() end`), the anchor statement (used to
+    // locate preceding `---@return` comments) is the enclosing
+    // `local_declaration` / `assignment_statement`. For the named
+    // forms, the declaration node itself carries the comments.
+    let anchor = match fun.kind() {
+        "function_definition" => crate::summary_builder::enclosing_statement_for_function_expr(fun)
+            .unwrap_or(fun),
+        _ => fun,
+    };
+
+    let emmy_text = crate::emmy::collect_preceding_comments(anchor, source).join("\n");
+    let anns = crate::emmy::parse_emmy_comments(&emmy_text);
+    let mut declared_types: Vec<TypeFact> = Vec::new();
+    for ann in &anns {
+        if let crate::emmy::EmmyAnnotation::Return { return_types, .. } = ann {
+            for rt in return_types {
+                declared_types.push(crate::emmy::emmy_type_to_fact(rt));
+            }
+            // All `@return` lines accumulate; each contributes one or
+            // more declared types (per EmmyLua convention). A function
+            // with `---@return number, string` followed by
+            // `---@return Err` declares 3 total return positions.
+        }
+    }
+    if declared_types.is_empty() {
+        return;
+    }
+
+    let body = match fun.kind() {
+        "function_definition" => fun.child_by_field_name("body"),
+        _ => fun.child_by_field_name("body"),
+    };
+    let Some(body) = body else { return };
+
+    let mut returns: Vec<tree_sitter::Node> = Vec::new();
+    collect_return_statements(body, &mut returns);
+
+    // A function with `@return` but no `return` anywhere in its body is
+    // suspicious but often intentional (stub). Skip unless at least
+    // one return is present — better to report concrete mismatches
+    // than nag about stubs.
+    if returns.is_empty() {
+        return;
+    }
+
+    for ret in returns {
+        inspect_single_return(ret, &declared_types, source, diagnostics, severity);
+    }
+}
+
+fn collect_return_statements<'tree>(
+    node: tree_sitter::Node<'tree>,
+    out: &mut Vec<tree_sitter::Node<'tree>>,
+) {
+    if node.kind() == "return_statement" {
+        out.push(node);
+        return;
+    }
+    // Do NOT descend into nested functions — their own `return`
+    // statements belong to them, not the outer function.
+    if matches!(
+        node.kind(),
+        "function_declaration" | "local_function_declaration" | "function_definition"
+    ) {
+        return;
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            collect_return_statements(child, out);
+        }
+    }
+}
+
+fn inspect_single_return(
+    ret: tree_sitter::Node,
+    declared_types: &[TypeFact],
+    source: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    // `return_statement` in our grammar is `'return' optional(expression_list)
+    // optional(';')` — no `values` field. Find the `expression_list`
+    // child directly; absence means a bare `return` (0 values).
+    let values = (0..ret.named_child_count())
+        .filter_map(|i| ret.named_child(i as u32))
+        .find(|c| c.kind() == "expression_list");
+    let actual_count = values.map(|v| v.named_child_count() as u32).unwrap_or(0);
+    let declared_count = declared_types.len() as u32;
+
+    // Lua multi-value expansion: a trailing `function_call` or
+    // `vararg_expression` at the last return-value position expands
+    // into N values at call time. Static count comparison isn't
+    // meaningful then — skip count *and* type checks for those
+    // returns to avoid flooding opt-in users with false positives
+    // from idiomatic `return foo()` / `return ...`.
+    if let Some(values) = values {
+        if let Some(last) = values
+            .named_child(values.named_child_count().saturating_sub(1) as u32)
+        {
+            if matches!(last.kind(), "function_call" | "vararg_expression") {
+                return;
+            }
+        }
+    }
+
+    if actual_count != declared_count {
+        diagnostics.push(Diagnostic {
+            range: ts_node_to_range(ret, source),
+            severity: Some(severity),
+            source: Some("mylua".to_string()),
+            message: format!(
+                "Return statement yields {} value(s), expected {}",
+                actual_count, declared_count,
+            ),
+            ..Default::default()
+        });
+        return;
+    }
+    // Count matches — check literal types when resolvable.
+    if let Some(values) = values {
+        // Use a lightweight inference that mirrors
+        // `infer_literal_type` but without summary access; we don't
+        // have the per-file summary plumbed here and the walk is
+        // already heuristic. Literal nodes cover the common cases.
+        for (i, declared) in declared_types.iter().enumerate() {
+            let Some(val) = values.named_child(i as u32) else { break };
+            let actual = infer_return_literal_type(val);
+            if actual == TypeFact::Unknown {
+                continue;
+            }
+            if !is_type_compatible(declared, &actual) {
+                diagnostics.push(Diagnostic {
+                    range: ts_node_to_range(val, source),
+                    severity: Some(severity),
+                    source: Some("mylua".to_string()),
+                    message: format!(
+                        "Return value {}: declared '{}', got '{}'",
+                        i + 1, declared, actual,
+                    ),
+                    ..Default::default()
+                });
+            }
+        }
+    }
+}
+
+/// Literal-only type inference for return values. Avoids the summary
+/// dependency of `infer_literal_type` so this walk can run without a
+/// summary in scope (keeps the diagnostic self-contained).
+fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
+    match node.kind() {
+        "number" => TypeFact::Known(KnownType::Number),
+        "string" => TypeFact::Known(KnownType::String),
+        "true" | "false" => TypeFact::Known(KnownType::Boolean),
+        "nil" => TypeFact::Known(KnownType::Nil),
+        "table_constructor" => {
+            TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
+        }
+        _ => TypeFact::Unknown,
     }
 }

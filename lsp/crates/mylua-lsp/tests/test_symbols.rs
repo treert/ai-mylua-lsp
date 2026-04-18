@@ -167,3 +167,108 @@ fn symbols_fixture_hover1() {
         );
     }
 }
+
+/// `selection_range` for `---@class Foo` must point to just the `Foo`
+/// identifier — not the whole line or the anchor statement. This is
+/// the outline's click target; pointing at a wider range makes the
+/// client highlight unhelpful context.
+#[test]
+fn symbols_class_name_range_is_precise() {
+    let src = r#"---@class Foo
+Foo = {}
+"#;
+    let syms = collect(src);
+    let class = syms.iter().find(|s| s.name == "Foo").expect("Foo class present");
+    let sel = class.selection_range;
+    let range = class.range;
+    // The selection_range should be narrower than the full anchor
+    // range, pointing just at the identifier.
+    assert!(
+        sel.start.line == 0 && sel.end.line == 0,
+        "Foo name_range should sit on line 0 (the ---@class line), got: {:?}",
+        sel,
+    );
+    // And it should end at the end of `Foo` — 3 UTF-16 units past its start.
+    assert_eq!(
+        sel.end.character - sel.start.character,
+        3,
+        "selection_range should span exactly `Foo`, got {:?}", sel,
+    );
+    // Meanwhile, `range` covers the anchor statement on line 1.
+    assert!(
+        range.end.line >= 1,
+        "full range spans anchor statement, got: {:?}", range,
+    );
+}
+
+#[test]
+fn symbols_field_name_range_is_precise() {
+    // `---@field bar integer` — the FIELD child's selection_range
+    // should point at just `bar`, not the whole `---@field` line.
+    let src = r#"---@class Foo
+---@field bar integer
+Foo = {}
+"#;
+    let syms = collect(src);
+    let class = syms.iter().find(|s| s.name == "Foo").expect("Foo class present");
+    let children = class.children.as_ref().expect("has children");
+    let bar = children.iter().find(|c| c.name == "bar").expect("bar field present");
+    let sel = bar.selection_range;
+    // `bar` is 3 UTF-16 units wide.
+    assert_eq!(
+        sel.end.character - sel.start.character,
+        3,
+        "field selection_range spans just `bar`, got: {:?}", sel,
+    );
+    // And its start line is the `---@field bar integer` line (line 1).
+    assert_eq!(sel.start.line, 1, "field on line 1, got: {:?}", sel);
+}
+
+#[test]
+fn symbols_alias_name_range_is_precise() {
+    let src = r#"---@alias MyString string
+"#;
+    let syms = collect(src);
+    let alias = syms.iter().find(|s| s.name == "MyString").expect("alias present");
+    let sel = alias.selection_range;
+    assert_eq!(
+        sel.end.character - sel.start.character,
+        8, // "MyString" is 8 chars
+        "alias selection_range spans just `MyString`, got: {:?}", sel,
+    );
+}
+
+#[test]
+fn symbols_enum_name_range_is_precise() {
+    let src = r#"---@enum Color
+local Color = { R = 1, G = 2 }
+"#;
+    let syms = collect(src);
+    let enum_sym = syms.iter().find(|s| s.name == "Color").expect("enum present");
+    let sel = enum_sym.selection_range;
+    assert_eq!(
+        sel.end.character - sel.start.character,
+        5, // "Color" is 5 chars
+        "enum selection_range spans just `Color`, got: {:?}", sel,
+    );
+}
+
+#[test]
+fn symbols_field_name_range_skips_visibility() {
+    // `---@field private bar integer` — the selection_range must point
+    // at `bar`, not `private`.
+    let src = r#"---@class Foo
+---@field private bar integer
+Foo = {}
+"#;
+    let syms = collect(src);
+    let class = syms.iter().find(|s| s.name == "Foo").expect("Foo present");
+    let children = class.children.as_ref().expect("has children");
+    let bar = children.iter().find(|c| c.name == "bar").expect("bar field");
+    let sel = bar.selection_range;
+    assert_eq!(
+        sel.end.character - sel.start.character,
+        3, // "bar"
+        "visibility skipped; selection spans just `bar`, got: {:?}", sel,
+    );
+}

@@ -73,6 +73,13 @@ impl OutlineBuilder {
                     if !seen_keys.insert(key) {
                         continue;
                     }
+                    // Prefer the precise `name_range` (byte range of the
+                    // field name token) for `selection_range` so the
+                    // client highlights just the field identifier when
+                    // the user clicks this outline entry. Fall back to
+                    // the full `---@field` line range if the summary
+                    // was produced before the precise range was tracked.
+                    let selection_range = fd.name_range.unwrap_or(fd.range);
                     #[allow(deprecated)]
                     children.push(DocumentSymbol {
                         name: fd.name.clone(),
@@ -81,10 +88,13 @@ impl OutlineBuilder {
                         tags: None,
                         deprecated: None,
                         range: fd.range,
-                        selection_range: fd.range,
+                        selection_range,
                         children: None,
                     });
                 }
+                // Same rationale as fields: use the `---@class <Name>`
+                // identifier token for the outline's selection target.
+                let selection_range = td.name_range.unwrap_or(td.range);
                 #[allow(deprecated)]
                 class_nodes.push(DocumentSymbol {
                     name: td.name.clone(),
@@ -93,7 +103,7 @@ impl OutlineBuilder {
                     tags: None,
                     deprecated: None,
                     range: td.range,
-                    selection_range: td.range,
+                    selection_range,
                     children: Some(children),
                 });
                 class_index.insert(td.name.clone(), class_nodes.len() - 1);

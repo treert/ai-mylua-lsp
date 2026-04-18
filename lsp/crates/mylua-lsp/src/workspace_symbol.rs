@@ -100,6 +100,21 @@ pub fn search_workspace_symbols(
                 TypeDefinitionKind::Alias => SymbolKind::INTERFACE,
                 TypeDefinitionKind::Enum => SymbolKind::ENUM,
             };
+            // Prefer `name_range` (byte range of the `Foo` identifier
+            // inside `---@class Foo`) over the broader anchor range so
+            // VS Code highlights just the type name after navigation.
+            // Look up via the owning summary because `TypeShardEntry`
+            // only carries the coarse anchor range.
+            let location_range = index
+                .summaries
+                .get(&candidate.source_uri)
+                .and_then(|s| {
+                    s.type_definitions
+                        .iter()
+                        .find(|td| td.name == *name)
+                        .and_then(|td| td.name_range)
+                })
+                .unwrap_or(candidate.range);
             #[allow(deprecated)]
             results.push(SymbolInformation {
                 name: name.clone(),
@@ -108,7 +123,7 @@ pub fn search_workspace_symbols(
                 deprecated: None,
                 location: Location {
                     uri: candidate.source_uri.clone(),
-                    range: candidate.range,
+                    range: location_range,
                 },
                 container_name: None,
             });
@@ -130,6 +145,7 @@ pub fn search_workspace_symbols(
                 if !member_keys.insert(key) {
                     continue;
                 }
+                let location_range = fd.name_range.unwrap_or(fd.range);
                 #[allow(deprecated)]
                 results.push(SymbolInformation {
                     name: fd.name.clone(),
@@ -138,7 +154,7 @@ pub fn search_workspace_symbols(
                     deprecated: None,
                     location: Location {
                         uri: uri.clone(),
-                        range: fd.range,
+                        range: location_range,
                     },
                     container_name: Some(td.name.clone()),
                 });
