@@ -69,6 +69,13 @@ pub struct Backend {
     /// The outer `std::sync::Mutex` only guards the HashMap itself; the
     /// inner `tokio::sync::Mutex` is awaited while parsing/applying edits.
     edit_locks: Arc<Mutex<HashMap<Uri, Arc<tokio::sync::Mutex<()>>>>>,
+    /// Per-URI semantic-tokens delta cache: stores the token data
+    /// last returned for each URI so `semanticTokens/full/delta` can
+    /// compute a compact edit set. `u64` counter is appended to the
+    /// URI to form `result_id`.
+    semantic_tokens_cache: Arc<Mutex<HashMap<Uri, semantic_tokens::TokenCacheEntry>>>,
+    /// Monotonic counter used to mint unique `result_id`s.
+    semantic_tokens_counter: Arc<Mutex<u64>>,
 }
 
 struct ParsedFile {
@@ -103,7 +110,18 @@ impl Backend {
             index_state: Arc::new(Mutex::new(IndexState::Initializing)),
             diag_gen: Arc::new(Mutex::new(HashMap::new())),
             edit_locks: Arc::new(Mutex::new(HashMap::new())),
+            semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
+            semantic_tokens_counter: Arc::new(Mutex::new(0)),
         }
+    }
+
+    /// Mint a new semantic-tokens `result_id` string. Monotonic u64
+    /// counter suffixed to `mylua-stk-` keeps IDs unique across the
+    /// whole session (client-facing).
+    fn mint_semantic_token_result_id(&self) -> String {
+        let mut c = self.semantic_tokens_counter.lock().unwrap();
+        *c += 1;
+        format!("mylua-stk-{}", *c)
     }
 
     /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
@@ -751,7 +769,12 @@ impl LanguageServer for Backend {
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
                             legend: semantic_tokens_legend(),
-                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            // `delta: true` opts into
+                            // `textDocument/semanticTokens/full/delta` so
+                            // clients can pull only the changed portions
+                            // of the token stream after the initial full
+                            // response.
+                            full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
                             range: Some(true),
                             work_done_progress_options: WorkDoneProgressOptions {
                                 work_done_progress: None,
@@ -860,6 +883,9 @@ impl LanguageServer for Backend {
         // Any in-flight did_change holding an `Arc` clone still sees a
         // valid mutex; we only remove the HashMap entry.
         self.edit_locks.lock().unwrap().remove(&uri);
+        // The client won't retry a stale `previous_result_id` after
+        // closing the file, so drop the cache entry to free memory.
+        self.semantic_tokens_cache.lock().unwrap().remove(&uri);
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
@@ -1190,8 +1216,9 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
+        let uri = params.text_document.uri;
         let docs = self.documents.lock().unwrap();
-        let Some(doc) = docs.get(&params.text_document.uri) else {
+        let Some(doc) = docs.get(&uri) else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
@@ -1201,10 +1228,81 @@ impl LanguageServer for Backend {
             &doc.scope_tree,
             &runtime_version,
         );
+        let result_id = self.mint_semantic_token_result_id();
+        // Cache the full response so a subsequent `delta` request
+        // with `previous_result_id == result_id` can diff against it.
+        self.semantic_tokens_cache.lock().unwrap().insert(
+            uri.clone(),
+            semantic_tokens::TokenCacheEntry {
+                result_id: result_id.clone(),
+                data: data.clone(),
+            },
+        );
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
-            result_id: None,
+            result_id: Some(result_id),
             data,
         })))
+    }
+
+    async fn semantic_tokens_full_delta(
+        &self,
+        params: SemanticTokensDeltaParams,
+    ) -> Result<Option<SemanticTokensFullDeltaResult>> {
+        let uri = params.text_document.uri;
+        let previous_result_id = params.previous_result_id;
+
+        // Load the current tokens regardless of cache state.
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let new_tokens = semantic_tokens::collect_semantic_tokens_with_version(
+            doc.tree.root_node(),
+            doc.text.as_bytes(),
+            &doc.scope_tree,
+            &runtime_version,
+        );
+        drop(docs);
+
+        // If the cache matches the client's previous_result_id, emit
+        // a delta (edits). Otherwise fall back to a full response so
+        // the client can re-sync.
+        let mut cache = self.semantic_tokens_cache.lock().unwrap();
+        let new_result_id = self.mint_semantic_token_result_id();
+        let cached_matches = cache
+            .get(&uri)
+            .map(|c| c.result_id == previous_result_id)
+            .unwrap_or(false);
+        if cached_matches {
+            let old = cache.get(&uri).expect("cached_matches guarded above").data.clone();
+            let edits = semantic_tokens::compute_semantic_token_delta(&old, &new_tokens);
+            cache.insert(
+                uri.clone(),
+                semantic_tokens::TokenCacheEntry {
+                    result_id: new_result_id.clone(),
+                    data: new_tokens,
+                },
+            );
+            Ok(Some(SemanticTokensFullDeltaResult::TokensDelta(
+                SemanticTokensDelta {
+                    result_id: Some(new_result_id),
+                    edits,
+                },
+            )))
+        } else {
+            cache.insert(
+                uri.clone(),
+                semantic_tokens::TokenCacheEntry {
+                    result_id: new_result_id.clone(),
+                    data: new_tokens.clone(),
+                },
+            );
+            Ok(Some(SemanticTokensFullDeltaResult::Tokens(SemanticTokens {
+                result_id: Some(new_result_id),
+                data: new_tokens,
+            })))
+        }
     }
 
     async fn semantic_tokens_range(
