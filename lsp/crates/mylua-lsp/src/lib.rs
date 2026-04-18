@@ -1,6 +1,7 @@
 #[macro_use]
 pub mod logger;
 pub mod aggregation;
+pub mod call_hierarchy;
 pub mod completion;
 pub mod config;
 pub mod diagnostics;
@@ -736,6 +737,7 @@ impl LanguageServer for Backend {
                     },
                 })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                call_hierarchy_provider: Some(CallHierarchyServerCapability::Simple(true)),
                 document_link_provider: Some(DocumentLinkOptions {
                     // We resolve the target URI at link-emit time
                     // (require_map already knows it), so no lazy
@@ -957,6 +959,43 @@ impl LanguageServer for Backend {
             doc.text.as_bytes(),
             &idx,
         )))
+    }
+
+    async fn prepare_call_hierarchy(
+        &self,
+        params: CallHierarchyPrepareParams,
+    ) -> Result<Option<Vec<CallHierarchyItem>>> {
+        let uri = params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, position, &idx);
+        if items.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(items))
+        }
+    }
+
+    async fn incoming_calls(
+        &self,
+        params: CallHierarchyIncomingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
+        let idx = self.index.lock().unwrap();
+        let calls = call_hierarchy::incoming_calls(&params.item, &idx);
+        Ok(Some(calls))
+    }
+
+    async fn outgoing_calls(
+        &self,
+        params: CallHierarchyOutgoingCallsParams,
+    ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
+        let idx = self.index.lock().unwrap();
+        let calls = call_hierarchy::outgoing_calls(&params.item, &idx);
+        Ok(Some(calls))
     }
 
     async fn inlay_hint(

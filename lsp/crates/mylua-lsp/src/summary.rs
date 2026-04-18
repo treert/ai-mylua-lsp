@@ -37,6 +37,30 @@ pub struct DocumentSummary {
     /// Fingerprint of all externally-visible type signatures.
     /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
     pub signature_fingerprint: u64,
+    /// Call sites captured from this file's function bodies (and
+    /// top-level code). Feeds `call_hierarchy` incoming/outgoing
+    /// queries without requiring the tree to be re-parsed at query
+    /// time. `#[serde(default)]` keeps cached summaries produced by
+    /// older builds readable.
+    #[serde(default)]
+    pub call_sites: Vec<CallSite>,
+}
+
+/// One `function_call` occurrence recorded during summary build.
+/// `callee_name` preserves the full dotted / colon-qualified form
+/// (`m.sub.foo`, `obj:bar`) so consumers can do exact or
+/// last-segment matching.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CallSite {
+    /// Full callee text (e.g. `foo`, `m.sub.foo`, `obj:bar`).
+    pub callee_name: String,
+    /// Enclosing function's (possibly qualified) name. Empty string
+    /// when the call is at file top level.
+    pub caller_name: String,
+    /// Range of the callee identifier / final segment — not the
+    /// whole `function_call` node. Preferred by clients as the
+    /// highlight target.
+    pub range: Range,
 }
 
 /// `local <name> = require("<module_path>")`.
