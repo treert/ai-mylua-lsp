@@ -242,6 +242,62 @@ f:init()
 }
 
 #[test]
+fn signature_help_emmy_field_method_does_not_pick_unrelated_global() {
+    // P0-R3 regression: in `lookup_function_signatures_by_field` the
+    // Function branch used to fall through to a bare
+    // `summary.function_summaries.get(field_name)` lookup whenever the
+    // class-qualified key `{class}:{field}` / `{class}.{field}` missed.
+    // Since `function_summaries` is keyed by the fully-qualified
+    // declaration name (`Foo:m`, not `m`), a `get("m")` hit could only
+    // come from a TOP-LEVEL `function m() end` declared in the same
+    // file — semantically unrelated to the method call. For a class
+    // with a `@field m fun(...)` but no `function Class:m() end` body
+    // in the same file, that wrong global `m` would shadow the
+    // correctly-resolved `@field` signature. Fix: the bare fallback is
+    // removed; the resolver's `sig` (from `@field`) is authoritative
+    // when no exact class-qualified or global-shard impl is found.
+    let src = r#"---@class Handler
+---@field shout fun(self, msg: string)
+Handler = {}
+
+---@param n number
+function shout(n) end
+
+---@type Handler
+local handler = nil
+
+handler:shout("hi")"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "handler.lua");
+
+    // Cursor inside `handler:shout(|"hi")` — line 10, column 14
+    let h = mylua_lsp::signature_help::signature_help(&doc, &uri, pos(10, 14), &mut agg)
+        .expect("signatureHelp should resolve for handler:shout()");
+    let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
+
+    // Exactly one signature: the `@field`-declared `(msg: string)`.
+    // A regression that re-introduces the bare fallback would add a
+    // second entry derived from the top-level `function shout(n)` —
+    // lock that out explicitly.
+    assert_eq!(
+        h.signatures.len(),
+        1,
+        "only the @field signature should be surfaced, got: {:?}",
+        labels,
+    );
+    assert_eq!(h.active_signature, Some(0));
+    assert!(
+        labels[0].contains("msg: string"),
+        "should pick up @field-declared `msg: string` param, got: {}",
+        labels[0],
+    );
+    assert!(
+        !labels[0].contains("n: number"),
+        "must NOT pick up the unrelated top-level `function shout(n)`, got: {}",
+        labels[0],
+    );
+}
+
+#[test]
 fn signature_help_method_call_hides_self() {
     let src = r#"---@class Obj
 ---@field x integer

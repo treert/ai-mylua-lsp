@@ -61,7 +61,7 @@ f:init()
 
 ---
 
-### [ ] P0-R3 — `lookup_function_signatures_by_field` shape table 同名方法歧义
+### [x] P0-R3 — `lookup_function_signatures_by_field` 移除不安全的 bare `function_summaries.get(field_name)` 兜底
 
 **背景**：第二轮 reviewer 的 n3。base 是 shape table（没有 emmy class），owner_class = None，只能走 bare `summary.function_summaries.get(field_name)`，同文件中两个 shape 都有同名方法会产生歧义。
 

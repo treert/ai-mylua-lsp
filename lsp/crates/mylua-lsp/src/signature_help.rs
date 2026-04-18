@@ -169,9 +169,19 @@ fn lookup_function_signatures_by_field(
                         }
                     }
                 }
-                if let Some(fs) = summary.function_summaries.get(field_name) {
-                    return primary_plus_overloads(fs);
-                }
+                // Intentionally no bare `function_summaries.get(field_name)`
+                // fallback here: `function_summaries` is keyed by the
+                // fully-qualified declaration name, so a bare-name key
+                // only exists for top-level `function field_name() end`
+                // or `local function field_name() end` — neither of which
+                // has any semantic relationship to the `obj.field()` /
+                // `obj:field()` call we're resolving. For an Emmy class
+                // with an `@field m fun(...)` but no `function Class:m()`
+                // body in the same file (P0-R3), pulling that unrelated
+                // top-level FunctionSummary would shadow the correctly-
+                // resolved `@field` signature. Instead we fall through to
+                // the resolver's `sig` below (or to the cross-file impl
+                // merge via `lookup_overloads_via_global_shard`).
             }
         }
         // The @field-declared signature lives in `def_uri`, but the actual
