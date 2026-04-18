@@ -21,7 +21,7 @@
 
 ## P0 残余 — 两轮 review 后的非 BLOCKING SUGGESTION
 
-### [ ] P0-R1 — `lookup_function_signatures_by_field` 跨文件 class 声明/实现分离时兜底漏 overload
+### [x] P0-R1 — `lookup_function_signatures_by_field` 跨文件 class 声明/实现分离时兜底漏 overload
 
 **背景**：第二轮 reviewer 的 n1。当 `@class Foo` + `@field init fun(...)` 在 `a.lua`，而 `function Foo:init() end ---@overload ...` 实际在 `b.lua`，正常路径的 `resolved.def_uri = a.lua`，读 `summaries[a.lua].function_summaries["Foo:init"]` 会命中失败 → 只返回 `vec![sig]`，丢 `b.lua` 的 overloads。
 

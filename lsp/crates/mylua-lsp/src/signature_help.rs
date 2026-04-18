@@ -133,6 +133,16 @@ fn resolve_call_signatures(
 /// walked `function_summaries.keys()` with `ends_with` which picked a
 /// non-deterministic match in files where two classes shared a common
 /// method name (e.g. both `Foo.init` and `Bar.init`).
+///
+/// When the `@class` / `@field` declaration and the actual
+/// `function Class:method() end` implementation live in different files
+/// (a common pattern when type stubs and runtime code are separated),
+/// we additionally look the qualified name up in `global_shard` and
+/// merge the implementation file's overloads with the `@field`-declared
+/// signature. This ensures `---@overload` annotations sitting above the
+/// implementation are not lost. Equal / visually-empty (self-only) impl
+/// primaries are filtered to avoid duplicate or blank entries in the
+/// client's signature popup.
 fn lookup_function_signatures_by_field(
     base_fact: &TypeFact,
     field_name: &str,
@@ -164,6 +174,35 @@ fn lookup_function_signatures_by_field(
                 }
             }
         }
+        // The @field-declared signature lives in `def_uri`, but the actual
+        // Lua body + extra `@overload` annotations may live in a different
+        // file. Look up `{class}:{field}` / `{class}.{field}` in
+        // `global_shard` and merge any overloads we find there.
+        if let Some(cls) = owner_class.as_ref() {
+            if let Some((impl_uri, impl_sigs)) =
+                lookup_overloads_via_global_shard(cls, field_name, index)
+            {
+                if Some(&impl_uri) != resolved.def_uri.as_ref() {
+                    let mut merged = vec![sig.clone()];
+                    for s in impl_sigs {
+                        // Skip entries that would render as duplicates of
+                        // the `@field` primary (same params & returns) or
+                        // as a visually-empty method stub (self-only, no
+                        // returns) once the client hides `self` for `:`
+                        // calls.
+                        if s == *sig || is_self_only_method_stub(&s) {
+                            continue;
+                        }
+                        merged.push(s);
+                    }
+                    return merged;
+                }
+            }
+        }
+        // Either `def_uri` was missing, or the impl file was the same as
+        // `def_uri` (already exhausted by the block above) and its summary
+        // carried no `function_summaries` entry for this name. Fall back
+        // to the single signature we already have from `@field`.
         return vec![sig.clone()];
     }
     // The resolver couldn't match the field through the class's declared
@@ -173,25 +212,49 @@ fn lookup_function_signatures_by_field(
     // in `global_shard` — `visit_function_declaration` registers those
     // qualified names there with a real `FunctionSignature`.
     if let Some(cls) = owner_class.as_ref() {
-        for sep in [":", "."] {
-            let qualified = format!("{}{}{}", cls, sep, field_name);
-            if let Some(candidate) = index
-                .global_shard
-                .get(&qualified)
-                .and_then(|v| v.first().cloned())
-            {
-                if let Some(summary) = index.summaries.get(&candidate.source_uri) {
-                    if let Some(fs) = summary.function_summaries.get(&qualified) {
-                        return primary_plus_overloads(fs);
-                    }
-                }
-                if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
-                    return vec![sig];
-                }
-            }
+        if let Some((_uri, sigs)) = lookup_overloads_via_global_shard(cls, field_name, index) {
+            return sigs;
         }
     }
     Vec::new()
+}
+
+/// Resolve `{class}:{field}` / `{class}.{field}` against `global_shard` and
+/// return the implementation file's `primary+overloads` when available.
+/// Used to enrich or rescue overload lookups when the class declaration
+/// (`@class` + `@field`) and its implementation (`function Class:method()`)
+/// live in different files.
+fn lookup_overloads_via_global_shard(
+    cls: &str,
+    field_name: &str,
+    index: &WorkspaceAggregation,
+) -> Option<(Uri, Vec<FunctionSignature>)> {
+    for sep in [":", "."] {
+        let qualified = format!("{}{}{}", cls, sep, field_name);
+        if let Some(candidate) = index
+            .global_shard
+            .get(&qualified)
+            .and_then(|v| v.first().cloned())
+        {
+            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+                if let Some(fs) = summary.function_summaries.get(&qualified) {
+                    return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
+                }
+            }
+            if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
+                return Some((candidate.source_uri.clone(), vec![sig]));
+            }
+        }
+    }
+    None
+}
+
+/// True for a primary signature like `function Foo:init() end` that only
+/// carries the implicit `self` parameter and no return types: when
+/// rendered for a `:` method call we'd hide `self`, leaving the user with
+/// a blank `obj:init()` entry that duplicates the real `@field` sig.
+fn is_self_only_method_stub(sig: &FunctionSignature) -> bool {
+    sig.returns.is_empty() && sig.params.len() == 1 && sig.params[0].name == "self"
 }
 
 fn primary_plus_overloads(fs: &FunctionSummary) -> Vec<FunctionSignature> {

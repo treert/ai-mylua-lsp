@@ -172,6 +172,76 @@ fn signature_help_returns_none_outside_call() {
 }
 
 #[test]
+fn signature_help_merges_overloads_from_impl_file_when_class_declared_elsewhere() {
+    // P0-R1 regression: `@class Foo` + `@field init fun(...)` lives in one
+    // file while `function Foo:init() end` + `---@overload` lives in
+    // another. The declaration file's resolver gives us a single
+    // `FunctionSignature` (from `@field`), but the implementation file is
+    // where the extra overloads are declared — we must merge both.
+    let decl = (
+        "a.lua",
+        r#"---@class Foo
+---@field init fun(name: string): Foo
+Foo = {}
+"#,
+    );
+    let impl_file = (
+        "b.lua",
+        r#"---@overload fun(n: number): Foo
+---@param self Foo
+function Foo:init() end
+"#,
+    );
+    let caller = (
+        "caller.lua",
+        r#"---@type Foo
+local f = nil
+f:init()
+"#,
+    );
+    let (docs, mut agg, _parser) = setup_workspace(&[decl, impl_file, caller]);
+    let caller_uri = make_uri("caller.lua");
+    let doc = docs.get(&caller_uri).expect("caller doc present");
+
+    // Cursor inside `f:init(|)` on line 2, col 7.
+    let h = mylua_lsp::signature_help::signature_help(doc, &caller_uri, pos(2, 7), &mut agg)
+        .expect("signatureHelp should resolve for f:init()");
+    let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
+
+    // Exactly 2 signatures: `@field` primary + impl `@overload`. The impl
+    // file's own primary (`function Foo:init() end` with only `self`) is
+    // a visually-empty stub once `self` is hidden for `:` calls — it must
+    // be filtered to avoid a blank `f:init()` entry duplicating the
+    // `@field` sig.
+    assert_eq!(
+        h.signatures.len(),
+        2,
+        "expected exactly 2 merged signatures, got: {:?}",
+        labels,
+    );
+    assert_eq!(
+        h.active_signature,
+        Some(0),
+        "active_signature should point at the primary (`@field`-declared) sig",
+    );
+    assert!(
+        h.signatures[0].label.contains("name: string") && h.signatures[0].label.contains(": Foo"),
+        "signatures[0] should be `@field`-declared `(name: string): Foo`, got: {}",
+        h.signatures[0].label,
+    );
+    assert!(
+        h.signatures[1].label.contains("n: number") && h.signatures[1].label.contains(": Foo"),
+        "signatures[1] should be impl-file `@overload fun(n: number): Foo`, got: {}",
+        h.signatures[1].label,
+    );
+    assert!(
+        !labels.iter().any(|l| l == "f:init()"),
+        "impl file's self-only primary must not appear as blank `f:init()` entry, got: {:?}",
+        labels,
+    );
+}
+
+#[test]
 fn signature_help_method_call_hides_self() {
     let src = r#"---@class Obj
 ---@field x integer
