@@ -43,7 +43,7 @@
 ## 4. 其他低优先项
 
 - `textDocument/prepareCallHierarchy` / `callHierarchy/incomingCalls` / `outgoingCalls`：从 `FunctionSummary` + `global_shard` 构造函数调用图
-- `textDocument/documentLink`：识别 `require("mod")` 里的 module path 作为可跳转链接
+- ~~`textDocument/documentLink`：识别 `require("mod")` 里的 module path 作为可跳转链接~~ ✅ 已完成（paren + short-call 两种形态，别名调用 `m = require; m("x")` 不跟随）
 - `textDocument/foldingRange` 的 `elseif` / `else` 分支独立折叠
 - 语义 tokens delta provider（当前只支持 full + range，delta 可进一步减小流量）
 - `---@meta` 元文件支持（Lua-LS 习惯的 stub 文件约定）

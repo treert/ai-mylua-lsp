@@ -6,6 +6,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod document;
 pub mod document_highlight;
+pub mod document_link;
 pub mod emmy;
 pub mod folding_range;
 pub mod inlay_hint;
@@ -724,6 +725,15 @@ impl LanguageServer for Backend {
                     },
                 })),
                 workspace_symbol_provider: Some(OneOf::Left(true)),
+                document_link_provider: Some(DocumentLinkOptions {
+                    // We resolve the target URI at link-emit time
+                    // (require_map already knows it), so no lazy
+                    // `documentLink/resolve` is needed.
+                    resolve_provider: Some(false),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                }),
                 semantic_tokens_provider: Some(
                     SemanticTokensServerCapabilities::SemanticTokensOptions(
                         SemanticTokensOptions {
@@ -920,6 +930,22 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         Ok(Some(folding_range::folding_range(doc)))
+    }
+
+    async fn document_link(
+        &self,
+        params: DocumentLinkParams,
+    ) -> Result<Option<Vec<DocumentLink>>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        Ok(Some(document_link::document_links(
+            doc.tree.root_node(),
+            doc.text.as_bytes(),
+            &idx,
+        )))
     }
 
     async fn inlay_hint(
