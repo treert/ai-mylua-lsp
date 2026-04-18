@@ -66,6 +66,17 @@ fn walk_for_blocks<'t>(
     if let Some(fold) = fold_for_block_node(node, source) {
         out.push(fold);
     }
+    // Per-branch folds for `if ... elseif ... else ... end`. The
+    // outer `if_statement` fold (emitted above) covers the whole
+    // construct; this pass adds a dedicated fold for the leading
+    // `if` branch so each branch has its own collapse affordance
+    // alongside `elseif_clause` / `else_clause` folds which match
+    // below as their own kinds.
+    if node.kind() == "if_statement" {
+        if let Some(fold) = fold_for_if_branch(node) {
+            out.push(fold);
+        }
+    }
     if cursor.goto_first_child() {
         loop {
             walk_for_blocks(cursor.node(), source, cursor, out);
@@ -75,6 +86,37 @@ fn walk_for_blocks<'t>(
         }
         cursor.goto_parent();
     }
+}
+
+/// Emit a fold covering just the `if cond then ... body` portion
+/// of an `if_statement` — i.e. from the `if` line up to the row
+/// before the first `elseif`/`else` clause. Returns `None` when the
+/// `if_statement` has no clauses (no branching to fold independently
+/// from the outer block) or when the if-branch body is a single line.
+fn fold_for_if_branch(if_stmt: tree_sitter::Node) -> Option<FoldingRange> {
+    let start_row = if_stmt.start_position().row as u32;
+    // First elseif/else clause (in source order). They live directly
+    // on the `if_statement` node.
+    let mut first_clause_row: Option<u32> = None;
+    for i in 0..if_stmt.named_child_count() {
+        let Some(child) = if_stmt.named_child(i as u32) else { continue };
+        if matches!(child.kind(), "elseif_clause" | "else_clause") {
+            first_clause_row = Some(child.start_position().row as u32);
+            break;
+        }
+    }
+    let end_row = first_clause_row?;
+    if end_row <= start_row + 1 {
+        return None; // single-line if-branch
+    }
+    Some(FoldingRange {
+        start_line: start_row,
+        end_line: end_row - 1,
+        start_character: None,
+        end_character: None,
+        kind: Some(FoldingRangeKind::Region),
+        collapsed_text: None,
+    })
 }
 
 fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<FoldingRange> {
@@ -96,6 +138,33 @@ fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<Folding
                 Some(FoldingRange {
                     start_line: start_row,
                     end_line: end_row - 1,
+                    start_character: None,
+                    end_character: None,
+                    kind: Some(FoldingRangeKind::Region),
+                    collapsed_text: None,
+                })
+            } else {
+                None
+            }
+        }
+
+        // Per-branch folds for `elseif` / `else`. Tree-sitter ends
+        // the clause node at its last statement, **not** at the
+        // next sibling / `end` keyword. A naive `end_row - 1` would
+        // leave the last body row visible when folded. Extend the
+        // fold to the row **before** the next sibling (either
+        // another clause or the `end` keyword) so every body line
+        // of this branch collapses and only the clause opener stays
+        // visible.
+        "elseif_clause" | "else_clause" => {
+            let next_row = node
+                .next_sibling()
+                .map(|n| n.start_position().row as u32)
+                .unwrap_or(end_row + 1);
+            if next_row > start_row + 1 {
+                Some(FoldingRange {
+                    start_line: start_row,
+                    end_line: next_row - 1,
                     start_character: None,
                     end_character: None,
                     kind: Some(FoldingRangeKind::Region),

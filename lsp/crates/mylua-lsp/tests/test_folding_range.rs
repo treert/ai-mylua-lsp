@@ -183,3 +183,105 @@ fn folding_range_leveled_block_comment() {
     );
     assert_eq!(comment_folds[0].end_line, 3);
 }
+
+#[test]
+fn folding_range_if_branch_independent_folds() {
+    // `if` + `elseif` + `else`, each branch has a multi-line body.
+    // Expect:
+    // - one wide fold for the whole if_statement (existing behavior)
+    // - one fold per branch (if-branch, elseif-branch, else-branch)
+    let src = r#"if a then
+    x = 1
+    y = 2
+elseif b then
+    x = 3
+    y = 4
+else
+    x = 5
+    y = 6
+end
+"#;
+    let (doc, _uri, _agg) = setup_single_file(src, "ifelse.lua");
+    let folds = folding_range(&doc);
+    let regions: Vec<_> = folds
+        .iter()
+        .filter(|f| f.kind == Some(FoldingRangeKind::Region))
+        .collect();
+    // 1 outer + 1 if-branch + 1 elseif-branch + 1 else-branch = 4 region folds.
+    assert_eq!(
+        regions.len(), 4,
+        "expect 4 region folds (whole + 3 branches), got: {:?}", regions,
+    );
+
+    // Whole if_statement: start=0; tree-sitter stops the node at the
+    // `end` keyword row (9), so end_line = end_row-1 = 8.
+    let outer = regions.iter().find(|f| f.start_line == 0 && f.end_line == 8);
+    assert!(outer.is_some(), "outer if_statement fold missing: {:?}", regions);
+
+    // if-branch: start=0, end=2 (row before `elseif`).
+    assert!(
+        regions.iter().any(|f| f.start_line == 0 && f.end_line == 2),
+        "if-branch fold missing: {:?}", regions,
+    );
+
+    // elseif-branch: start=3, end=5 (row before `else`).
+    assert!(
+        regions.iter().any(|f| f.start_line == 3 && f.end_line == 5),
+        "elseif-branch fold missing: {:?}", regions,
+    );
+
+    // else-branch: start=6, end=8 (row before `end`).
+    assert!(
+        regions.iter().any(|f| f.start_line == 6 && f.end_line == 8),
+        "else-branch fold missing: {:?}", regions,
+    );
+}
+
+#[test]
+fn folding_range_if_without_branches_has_no_branch_fold() {
+    // Plain `if ... end` — only the outer fold, no extra branch fold
+    // (single branch, no elseif/else to split against).
+    let src = r#"if a then
+    x = 1
+    y = 2
+end
+"#;
+    let (doc, _uri, _agg) = setup_single_file(src, "if_simple.lua");
+    let folds = folding_range(&doc);
+    let regions: Vec<_> = folds
+        .iter()
+        .filter(|f| f.kind == Some(FoldingRangeKind::Region))
+        .collect();
+    assert_eq!(
+        regions.len(), 1,
+        "simple `if ... end` should yield only the outer fold, got: {:?}", regions,
+    );
+}
+
+#[test]
+fn folding_range_single_line_branch_skipped() {
+    // `elseif` body on the same line as the `elseif` keyword — no
+    // foldable range.
+    let src = r#"if a then
+    x = 1
+elseif b then x = 2
+else
+    x = 3
+end
+"#;
+    let (doc, _uri, _agg) = setup_single_file(src, "if_singleline.lua");
+    let folds = folding_range(&doc);
+    let regions: Vec<_> = folds
+        .iter()
+        .filter(|f| f.kind == Some(FoldingRangeKind::Region))
+        .collect();
+    // Expected:
+    //  - outer if_statement (0..5)
+    //  - if-branch (0..1)
+    //  - else-branch (3..4)
+    // The elseif-branch is single-line → skipped.
+    assert!(
+        !regions.iter().any(|f| f.start_line == 2),
+        "single-line elseif body must not produce a fold, got: {:?}", regions,
+    );
+}
