@@ -253,6 +253,73 @@ local Color = { R = 1, G = 2 }
     );
 }
 
+/// Regression: VS Code rejected the whole outline with
+/// `"selectionRange must be contained in fullRange"` when the
+/// `---@class` annotation sits *above* the anchor statement
+/// (`Foo = { ... }`), because `range` used to be the anchor-only
+/// range while `selection_range` lived on the comment line above.
+/// Assert the LSP invariant holds across common declaration shapes.
+#[test]
+fn symbols_selection_range_contained_in_range_across_shapes() {
+    // Covers:
+    //  - `@class` + `@field` + plain-global anchor (the original bug)
+    //  - `@class` + `local` anchor
+    //  - method/function children on a class
+    //  - top-level function / local function / local var / global var
+    //  - `@alias` and `@enum` (no anchor)
+    let src = r#"---@class Audit
+---@field enabled boolean
+Audit = { enabled = true }
+
+---@class Widget
+---@field name string
+local Widget = {}
+
+function Widget:setName(n) self.name = n end
+function Widget.static() end
+
+---@alias MyId integer
+---@enum Kind
+
+function top_fn(a, b) return a + b end
+local function helper() end
+local x = 1
+Global = 2
+"#;
+    let syms = collect(src);
+
+    fn check(syms: &[tower_lsp_server::ls_types::DocumentSymbol], path: &str) {
+        for s in syms {
+            let r = s.range;
+            let sel = s.selection_range;
+            let start_ok = (r.start.line, r.start.character)
+                <= (sel.start.line, sel.start.character);
+            let end_ok = (r.end.line, r.end.character)
+                >= (sel.end.line, sel.end.character);
+            assert!(
+                start_ok && end_ok,
+                "`{}{}` violates LSP invariant: range={:?} selection_range={:?}",
+                path, s.name, r, sel,
+            );
+            if let Some(children) = s.children.as_ref() {
+                let child_path = format!("{}{}.", path, s.name);
+                check(children, &child_path);
+            }
+        }
+    }
+    check(&syms, "");
+
+    // Also sanity-check the original broken case specifically: the
+    // Audit class must exist and its `range` starts on or before the
+    // `---@class` annotation line.
+    let audit = syms.iter().find(|s| s.name == "Audit").expect("Audit class present");
+    assert_eq!(
+        audit.range.start.line, 0,
+        "Audit.range should start at `---@class Audit` (line 0), got: {:?}",
+        audit.range,
+    );
+}
+
 #[test]
 fn symbols_field_name_range_skips_visibility() {
     // `---@field private bar integer` — the selection_range must point

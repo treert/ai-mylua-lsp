@@ -34,7 +34,58 @@ pub fn collect_document_symbols(
 ) -> Vec<DocumentSymbol> {
     let mut builder = OutlineBuilder::new(summary);
     builder.visit_top_level(root, source);
-    builder.finalize()
+    let mut symbols = builder.finalize();
+    normalize_ranges(&mut symbols);
+    symbols
+}
+
+/// LSP requires `selection_range ⊆ range` for every `DocumentSymbol`.
+/// This invariant is violated when a `TypeDefinition.name_range`
+/// lives on a `---@class <Name>` / `---@alias <Name>` / `---@enum
+/// <Name>` comment line while `TypeDefinition.range` points at a
+/// *subsequent* anchor statement (e.g. `Foo = { ... }` on the next
+/// line). The outline's `selection_range` is populated from
+/// `name_range` (a per-identifier precision gain) and its `range`
+/// from `td.range`, so the two can sit on disjoint lines.
+///
+/// VS Code's client throws `"selectionRange must be contained in
+/// fullRange"` and drops the *entire* outline payload when that
+/// happens. Walk the tree once and expand `range` to cover
+/// `selection_range` whenever it would otherwise escape. Keeping
+/// this at the outline boundary (rather than in `summary_builder`)
+/// preserves `TypeDefinition.range`'s "anchor statement" semantics
+/// for `goto_type_definition` and `workspace/symbol` consumers.
+fn normalize_ranges(symbols: &mut [DocumentSymbol]) {
+    for sym in symbols.iter_mut() {
+        if !range_contains(&sym.range, &sym.selection_range) {
+            sym.range = union_range(sym.range, sym.selection_range);
+        }
+        if let Some(children) = sym.children.as_mut() {
+            normalize_ranges(children);
+        }
+    }
+}
+
+fn range_contains(outer: &Range, inner: &Range) -> bool {
+    let start_ok = (outer.start.line, outer.start.character)
+        <= (inner.start.line, inner.start.character);
+    let end_ok = (outer.end.line, outer.end.character)
+        >= (inner.end.line, inner.end.character);
+    start_ok && end_ok
+}
+
+fn union_range(a: Range, b: Range) -> Range {
+    let start = if (a.start.line, a.start.character) <= (b.start.line, b.start.character) {
+        a.start
+    } else {
+        b.start
+    };
+    let end = if (a.end.line, a.end.character) >= (b.end.line, b.end.character) {
+        a.end
+    } else {
+        b.end
+    };
+    Range { start, end }
 }
 
 struct OutlineBuilder {
