@@ -7,14 +7,9 @@ use crate::type_system::{TypeFact, KnownType, SymbolicStub};
 use crate::util::{ts_node_to_range, node_text, truncate};
 use crate::aggregation::WorkspaceAggregation;
 
-const LUA_BUILTINS: &[&str] = &[
-    "print", "type", "tostring", "tonumber", "error", "assert", "pcall", "xpcall",
-    "pairs", "ipairs", "next", "select", "require", "dofile", "loadfile", "load",
-    "rawget", "rawset", "rawequal", "rawlen", "setmetatable", "getmetatable",
-    "collectgarbage", "unpack", "table", "string", "math", "io", "os", "debug",
-    "coroutine", "package", "utf8", "arg", "_G", "_ENV", "_VERSION",
-    "self", "true", "false", "nil",
-];
+// Built-in identifier set is now version-dependent and lives in
+// `lua_builtins::builtins_for(version)`. Diagnostic paths pull the
+// set through `collect_semantic_diagnostics`'s config parameter.
 
 pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8]) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
@@ -31,12 +26,32 @@ pub fn collect_semantic_diagnostics(
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
 ) -> Vec<Diagnostic> {
+    collect_semantic_diagnostics_with_version(
+        root, source, uri, index, scope_tree, diag_config, "5.3",
+    )
+}
+
+/// Version-aware variant — `runtime_version` (e.g. `"5.3"` / `"5.4"`
+/// / `"luajit"`) selects which built-in identifiers are considered
+/// defined so that `undefinedGlobal` and related checks stay
+/// accurate per runtime.
+pub fn collect_semantic_diagnostics_with_version(
+    root: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    scope_tree: &ScopeTree,
+    diag_config: &DiagnosticsConfig,
+    runtime_version: &str,
+) -> Vec<Diagnostic> {
     if !diag_config.enable {
         return Vec::new();
     }
 
     let mut diagnostics = Vec::new();
-    let builtins: HashSet<&str> = LUA_BUILTINS.iter().copied().collect();
+    let builtins: HashSet<&str> = crate::lua_builtins::builtins_for(runtime_version)
+        .into_iter()
+        .collect();
 
     let mut cursor = root.walk();
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {

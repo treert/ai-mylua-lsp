@@ -8,6 +8,7 @@ pub mod document;
 pub mod document_highlight;
 pub mod emmy;
 pub mod folding_range;
+pub mod lua_builtins;
 pub mod goto;
 pub mod hover;
 pub mod references;
@@ -280,13 +281,14 @@ impl Backend {
                     diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
                 let mut idx = index.lock().unwrap();
                 let cfg = config.lock().unwrap();
-                let semantic = diagnostics::collect_semantic_diagnostics(
+                let semantic = diagnostics::collect_semantic_diagnostics_with_version(
                     doc.tree.root_node(),
                     doc.text.as_bytes(),
                     &uri,
                     &mut idx,
                     &doc.scope_tree,
                     &cfg.diagnostics,
+                    &cfg.runtime.version,
                 );
                 syntax.extend(semantic);
                 syntax
@@ -482,7 +484,10 @@ impl Backend {
 
     fn publish_diagnostics_for_open_files(&self) {
         let uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
-        let cfg = self.config.lock().unwrap().diagnostics.clone();
+        let (cfg, runtime_version) = {
+            let c = self.config.lock().unwrap();
+            (c.diagnostics.clone(), c.runtime.version.clone())
+        };
 
         for uri in uris {
             let diags = {
@@ -493,13 +498,14 @@ impl Backend {
                 let mut diags =
                     diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
                 let mut idx = self.index.lock().unwrap();
-                let semantic = diagnostics::collect_semantic_diagnostics(
+                let semantic = diagnostics::collect_semantic_diagnostics_with_version(
                     doc.tree.root_node(),
                     doc.text.as_bytes(),
                     &uri,
                     &mut idx,
                     &doc.scope_tree,
                     &cfg,
+                    &runtime_version,
                 );
                 diags.extend(semantic);
                 diags
@@ -1088,10 +1094,12 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&params.text_document.uri) else {
             return Ok(None);
         };
-        let data = semantic_tokens::collect_semantic_tokens(
+        let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let data = semantic_tokens::collect_semantic_tokens_with_version(
             doc.tree.root_node(),
             doc.text.as_bytes(),
             &doc.scope_tree,
+            &runtime_version,
         );
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
             result_id: None,
@@ -1107,11 +1115,13 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&params.text_document.uri) else {
             return Ok(None);
         };
-        let data = semantic_tokens::collect_semantic_tokens_range(
+        let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let data = semantic_tokens::collect_semantic_tokens_range_with_version(
             doc.tree.root_node(),
             doc.text.as_bytes(),
             &doc.scope_tree,
             params.range,
+            &runtime_version,
         );
         Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,

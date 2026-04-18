@@ -268,7 +268,7 @@ f:init()
 
 ---
 
-### [ ] P2-5 — `runtime.version` 真正生效
+### [x] P2-5 — `runtime.version` 真正生效
 
 **目标**：`config.rs::RuntimeConfig.version` 现在是死字段。应根据 `"5.3"` / `"5.4"` / `"5.1"` / `"luajit"` 切换内置 builtin 列表（bit32 / goto label 语义 / etc）、影响 `diagnostics::LUA_BUILTINS`。
 

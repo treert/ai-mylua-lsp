@@ -7,13 +7,10 @@ const TT_VARIABLE: u32 = 0;
 const TM_DEFAULT_LIBRARY: u32 = 1 << 0; // bit 0
 const TM_GLOBAL: u32 = 1 << 1; // bit 1
 
-const LUA_BUILTINS: &[&str] = &[
-    "print", "type", "tostring", "tonumber", "error", "assert", "pcall", "xpcall",
-    "pairs", "ipairs", "next", "select", "require", "dofile", "loadfile", "load",
-    "rawget", "rawset", "rawequal", "rawlen", "setmetatable", "getmetatable",
-    "collectgarbage", "unpack", "table", "string", "math", "io", "os", "debug",
-    "coroutine", "package", "utf8", "arg", "_G", "_ENV", "_VERSION",
-];
+// Built-in identifiers now come from `lua_builtins::builtins_for(version)`.
+// `collect_semantic_tokens` and friends default to Lua 5.3 for backward
+// compatibility; the `_with_version` variants let callers thread the
+// configured runtime through.
 
 pub fn semantic_tokens_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
@@ -30,7 +27,16 @@ pub fn collect_semantic_tokens(
     source: &[u8],
     scope_tree: &ScopeTree,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, None)
+    collect_semantic_tokens_with_version(root, source, scope_tree, "5.3")
+}
+
+pub fn collect_semantic_tokens_with_version(
+    root: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    runtime_version: &str,
+) -> Vec<SemanticToken> {
+    collect_tokens_filtered(root, source, scope_tree, None, runtime_version)
 }
 
 /// `textDocument/semanticTokens/range` — return tokens that overlap
@@ -43,7 +49,17 @@ pub fn collect_semantic_tokens_range(
     scope_tree: &ScopeTree,
     range: Range,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, Some(range))
+    collect_semantic_tokens_range_with_version(root, source, scope_tree, range, "5.3")
+}
+
+pub fn collect_semantic_tokens_range_with_version(
+    root: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    range: Range,
+    runtime_version: &str,
+) -> Vec<SemanticToken> {
+    collect_tokens_filtered(root, source, scope_tree, Some(range), runtime_version)
 }
 
 fn collect_tokens_filtered(
@@ -51,8 +67,11 @@ fn collect_tokens_filtered(
     source: &[u8],
     scope_tree: &ScopeTree,
     range: Option<Range>,
+    runtime_version: &str,
 ) -> Vec<SemanticToken> {
-    let builtins: HashSet<&str> = LUA_BUILTINS.iter().copied().collect();
+    let builtins: HashSet<&str> = crate::lua_builtins::builtins_for(runtime_version)
+        .into_iter()
+        .collect();
     let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
     collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw);
