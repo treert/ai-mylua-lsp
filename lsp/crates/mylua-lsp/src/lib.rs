@@ -293,7 +293,14 @@ impl Backend {
                     &cfg.runtime.version,
                 );
                 syntax.extend(semantic);
-                syntax
+                // `---@diagnostic disable-*` post-processing: filter
+                // out suppressed entries and stamp the surviving ones
+                // with a stable `code` slug for client display.
+                diagnostics::apply_diagnostic_suppressions(
+                    doc.tree.root_node(),
+                    doc.text.as_bytes(),
+                    syntax,
+                )
             };
 
             client.publish_diagnostics(uri, diags, version).await;
@@ -510,7 +517,11 @@ impl Backend {
                     &runtime_version,
                 );
                 diags.extend(semantic);
-                diags
+                diagnostics::apply_diagnostic_suppressions(
+                    doc.tree.root_node(),
+                    doc.text.as_bytes(),
+                    diags,
+                )
             };
 
             let client = self.client.clone();

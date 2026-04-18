@@ -47,7 +47,7 @@
 - `textDocument/foldingRange` 的 `elseif` / `else` 分支独立折叠
 - 语义 tokens delta provider（当前只支持 full + range，delta 可进一步减小流量）
 - `---@meta` 元文件支持（Lua-LS 习惯的 stub 文件约定）
-- EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定、`---@diagnostic disable-next-line` 等
+- EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定（`---@diagnostic disable-next-line` 等已完成 ✅）
 
 ---
 
