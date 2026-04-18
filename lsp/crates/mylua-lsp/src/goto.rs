@@ -1,8 +1,9 @@
 use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
-use crate::aggregation::WorkspaceAggregation;
+use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
 
 pub fn goto_definition(
@@ -82,6 +83,129 @@ pub fn goto_definition(
     }
 
     None
+}
+
+/// `textDocument/typeDefinition` — jump to the *type* of the symbol
+/// at the cursor, rather than to its declaration.
+///
+/// For `---@type Foo local x = nil`, `goto_definition(x)` jumps to
+/// `local x`; `goto_type_definition(x)` jumps to `@class Foo`.
+///
+/// Resolution order:
+///
+/// 1. Identifier at the cursor → scope-resolve to a local declaration
+///    and read `DocumentSummary.local_type_facts[name].type_fact`.
+/// 2. If the resolved `TypeFact` names an Emmy type (directly via
+///    `Known(EmmyType(n))` / `Known(EmmyGeneric(n, _))` / `Stub(TypeRef{n})`,
+///    or indirectly — a `Stub(GlobalRef)` that `resolve_type` chains
+///    to an Emmy-named type), locate `type_shard[n]` and return its
+///    candidate range.
+/// 3. If no Emmy type name can be produced (type is `Number`, `String`,
+///    a plain `Table`, etc.) fall back to plain `goto_definition`.
+///
+/// The fallback means typeDefinition behaves as a strict superset of
+/// definition — VS Code's "Go to Type Definition" never lands on
+/// nothing when Go-to-Definition would have worked.
+pub fn goto_type_definition(
+    doc: &Document,
+    uri: &Uri,
+    position: Position,
+    index: &mut WorkspaceAggregation,
+    strategy: &GotoStrategy,
+) -> Option<GotoDefinitionResponse> {
+    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+
+    // Identifier AST path — click on a Lua identifier. Resolve to a
+    // local declaration, then walk its stored `TypeFact` to an Emmy
+    // type name via the resolver. If no Emmy type can be produced
+    // (primitive, bare shape table, function, etc.), fall back to
+    // `goto_definition` so the feature never goes silent.
+    if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
+        let name = node_text(ident_node, doc.text.as_bytes());
+        if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
+            if let Some(target) = type_definition_for_local(&def.uri, &def.name, index, strategy) {
+                return Some(target);
+            }
+        }
+        // Intentionally do NOT also query `type_shard[name]` here —
+        // `name` is a variable name, not a type name; a coincidental
+        // collision (`local Foo` in a workspace that also declares
+        // `@class Foo`) must not jump us to the class. Fall back to
+        // plain `goto_definition` instead.
+        return goto_definition(doc, uri, position, index, strategy);
+    }
+
+    // Word-extraction fallback — cursor is inside an `emmy_line` text
+    // blob (e.g. on `Foo` in `---@type Foo` / `---@class Bar : Foo`).
+    // Here the word IS a type name by context; query `type_shard`
+    // directly. If not found, returning None is correct (there's no
+    // Lua-side definition to fall back to).
+    let word = crate::references::extract_word_at(&doc.text, byte_offset)?;
+    type_definition_for_name(&word, index, strategy)
+}
+
+/// Given a local variable's declaration URI + name, look up its
+/// stored `TypeFact` and map it to a `type_shard` candidate range
+/// when the fact identifies an Emmy type.
+fn type_definition_for_local(
+    def_uri: &Uri,
+    local_name: &str,
+    index: &mut WorkspaceAggregation,
+    strategy: &GotoStrategy,
+) -> Option<GotoDefinitionResponse> {
+    let fact = index
+        .summaries
+        .get(def_uri)
+        .and_then(|s| s.local_type_facts.get(local_name))
+        .map(|l| l.type_fact.clone())?;
+
+    // Direct name: `---@type Foo local x = ...` stores Foo directly.
+    // For `Known(_)` facts the resolver would just return the same
+    // fact, so skip the redundant pass.
+    if let Some(type_name) = type_name_of(&fact) {
+        return type_definition_for_name(&type_name, index, strategy);
+    }
+    // Indirect: `local x = someGlobalReturningFoo()` / `require("mod")`
+    // with Emmy module return type — let the resolver chase stubs
+    // (GlobalRef / RequireRef / CallReturn) and try again on the
+    // resolved fact.
+    let resolved_fact = resolver::resolve_type(&fact, index).type_fact;
+    if let Some(type_name) = type_name_of(&resolved_fact) {
+        return type_definition_for_name(&type_name, index, strategy);
+    }
+    None
+}
+
+/// Pull an Emmy type name out of a `TypeFact` when the fact carries
+/// one directly. Returns `None` for primitives / shape tables /
+/// functions, and for stubs other than `TypeRef` (those need an
+/// extra resolution step through the resolver).
+fn type_name_of(fact: &TypeFact) -> Option<String> {
+    match fact {
+        TypeFact::Known(KnownType::EmmyType(n)) => Some(n.clone()),
+        TypeFact::Known(KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
+        TypeFact::Stub(SymbolicStub::TypeRef { name }) => Some(name.clone()),
+        _ => None,
+    }
+}
+
+fn type_definition_for_name(
+    name: &str,
+    index: &WorkspaceAggregation,
+    strategy: &GotoStrategy,
+) -> Option<GotoDefinitionResponse> {
+    let candidates = index.type_shard.get(name)?;
+    if candidates.is_empty() {
+        return None;
+    }
+    let locations: Vec<Location> = candidates
+        .iter()
+        .map(|c| Location {
+            uri: c.source_uri.clone(),
+            range: c.range,
+        })
+        .collect();
+    Some(apply_goto_strategy(locations, strategy))
 }
 
 /// AST-driven goto for a dotted access: the clicked identifier is the

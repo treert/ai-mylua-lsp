@@ -350,7 +350,7 @@ fn is_ident_byte(b: u8) -> bool {
 /// Extract the ASCII identifier-like word ([A-Za-z_][A-Za-z0-9_]*) that
 /// spans the given byte offset. Returns `None` if the offset does not sit
 /// on a word character.
-fn extract_word_at(text: &str, byte_offset: usize) -> Option<String> {
+pub fn extract_word_at(text: &str, byte_offset: usize) -> Option<String> {
     let bytes = text.as_bytes();
     if byte_offset > bytes.len() {
         return None;

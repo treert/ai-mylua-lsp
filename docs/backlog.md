@@ -108,7 +108,7 @@ f:init()
 
 ---
 
-### [ ] P1-3 — `textDocument/typeDefinition`
+### [x] P1-3 — `textDocument/typeDefinition`
 
 **目标**：LSP 里有 `definition`（跳到声明）和 `typeDefinition`（跳到其**类型**的声明）两个独立请求。对 `---@type Foo local x = ...` 里的 `x`，goto-definition 跳到 `local x`，但 goto-type-definition 应跳到 `---@class Foo` 处。
 
