@@ -32,11 +32,7 @@
 
 ## 3. signature_help 继续打磨
 
-### [ ] `lookup_function_signatures_by_field` shape table 同名方法消歧
-
-**背景**：P0-R3 已经通过移除 bare fallback 消除了"误拿同名 top-level 函数"的风险，但对于一个文件里两个 shape table 都有同名方法的场景（`{ m = function() end }` + `{ m = function() end }`），没有 owner_class 上下文时我们只能依赖 resolver 的 def_uri 区分。长期解决方案：`TableShape` 挂 owner 绑定名，从 `base_fact` 的 `LocalTypeFact.source` 反查。
-
-**锚点**：`summary.rs::TableShape` / `summary_builder.rs::visit_assignment` / `visit_local_declaration`。
+**已完成。** `TableShape.owner_name: Option<String>` 在 `visit_local_declaration` / `visit_assignment` 里由 `set_owner(binding_name)` 填充，shape 与其绑定名建立关联。实际的 field 解析已通过 `resolve_field_chain_in_file` 的 per-file `TableShapeId` 唯一性达成消歧；`owner_name` 为未来 hover / signature_help 的展示层增强（如 "method of `t`"）保留钩子。
 
 ---
 

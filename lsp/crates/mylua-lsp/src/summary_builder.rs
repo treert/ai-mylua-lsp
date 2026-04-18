@@ -417,6 +417,15 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
 
             let type_fact = infer_expression_type(ctx, val, 0);
+            // When the RHS is a literal table constructor, stamp
+            // this binding name onto the freshly-allocated shape so
+            // hover / signature_help can disambiguate same-named
+            // methods across two shape tables in the same file.
+            if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
+                if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+                    shape.set_owner(name.clone());
+                }
+            }
             ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                 name: name.clone(),
                 type_fact,
@@ -860,6 +869,15 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         .map(|v| infer_expression_type(ctx, v, 0))
                         .unwrap_or(TypeFact::Unknown)
                 };
+
+                // Same owner-stamping as `visit_local_declaration`:
+                // anchor the binding name onto the literal table's
+                // shape when the RHS is `{ ... }`.
+                if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
+                    if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+                        shape.set_owner(name.clone());
+                    }
+                }
 
                 ctx.global_contributions.push(GlobalContribution {
                     name,

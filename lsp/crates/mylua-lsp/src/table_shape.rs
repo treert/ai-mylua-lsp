@@ -18,6 +18,17 @@ pub struct TableShape {
     pub is_closed: bool,
     /// `true` if recursive nesting hit the depth limit during extraction.
     pub truncated: bool,
+    /// Binding name that anchored this shape, if any. Filled in by
+    /// `summary_builder` when the shape is allocated for a
+    /// `local <name> = { ... }` / `<name> = { ... }` RHS — this
+    /// gives hover / signature_help a human-readable owner so
+    /// popups can say `(method of t)` when two shape tables in the
+    /// same file share a field name. Dotted / subscripted LHS
+    /// (`M.field = { ... }`) preserves the full text form.
+    /// `#[serde(default)]` keeps caches written by earlier builds
+    /// loadable.
+    #[serde(default)]
+    pub owner_name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -41,6 +52,17 @@ impl TableShape {
             array_element_type: None,
             is_closed: true,
             truncated: false,
+            owner_name: None,
+        }
+    }
+
+    /// Attach the binding name that anchors this shape. Idempotent:
+    /// the first non-empty name wins, later writes are ignored so a
+    /// subsequent field-level extraction can't overwrite the
+    /// original binding with a nested-scope alias.
+    pub fn set_owner(&mut self, name: String) {
+        if self.owner_name.is_none() && !name.is_empty() {
+            self.owner_name = Some(name);
         }
     }
 
