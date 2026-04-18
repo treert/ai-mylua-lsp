@@ -30,10 +30,42 @@ pub fn collect_semantic_tokens(
     source: &[u8],
     scope_tree: &ScopeTree,
 ) -> Vec<SemanticToken> {
+    collect_tokens_filtered(root, source, scope_tree, None)
+}
+
+/// `textDocument/semanticTokens/range` — return tokens that overlap
+/// `range` only. The delta encoding is recomputed from (0, 0)
+/// against the filtered set (LSP spec requires that), so clients
+/// can apply the result independent of any earlier `full` result.
+pub fn collect_semantic_tokens_range(
+    root: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    range: Range,
+) -> Vec<SemanticToken> {
+    collect_tokens_filtered(root, source, scope_tree, Some(range))
+}
+
+fn collect_tokens_filtered(
+    root: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    range: Option<Range>,
+) -> Vec<SemanticToken> {
     let builtins: HashSet<&str> = LUA_BUILTINS.iter().copied().collect();
     let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
     collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw);
+
+    // Line-based range filtering: keep tokens whose start line is
+    // inside `range.start.line..=range.end.line` inclusive. Column
+    // precision isn't necessary for semantic tokens — clients always
+    // request full-line viewports in practice.
+    if let Some(r) = range {
+        raw.retain(|&(line, _col, _len, _mod)| {
+            line >= r.start.line && line <= r.end.line
+        });
+    }
 
     raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
 

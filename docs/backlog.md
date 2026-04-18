@@ -233,7 +233,7 @@ f:init()
 
 ---
 
-### [ ] P2-2 — Semantic tokens range provider
+### [x] P2-2 — Semantic tokens range provider
 
 **目标**：大文件打开时客户端只要视口里的部分。
 

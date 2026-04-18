@@ -721,7 +721,7 @@ impl LanguageServer for Backend {
                         SemanticTokensOptions {
                             legend: semantic_tokens_legend(),
                             full: Some(SemanticTokensFullOptions::Bool(true)),
-                            range: None,
+                            range: Some(true),
                             work_done_progress_options: WorkDoneProgressOptions {
                                 work_done_progress: None,
                             },
@@ -1094,6 +1094,26 @@ impl LanguageServer for Backend {
             &doc.scope_tree,
         );
         Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data,
+        })))
+    }
+
+    async fn semantic_tokens_range(
+        &self,
+        params: SemanticTokensRangeParams,
+    ) -> Result<Option<SemanticTokensRangeResult>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        let data = semantic_tokens::collect_semantic_tokens_range(
+            doc.tree.root_node(),
+            doc.text.as_bytes(),
+            &doc.scope_tree,
+            params.range,
+        );
+        Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
             data,
         })))
