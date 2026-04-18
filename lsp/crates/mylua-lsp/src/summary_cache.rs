@@ -27,6 +27,7 @@ pub struct SummaryCache {
 impl SummaryCache {
     pub fn new(workspace_root: &Path, config_fingerprint: u64) -> Option<Self> {
         let cache_dir = resolve_cache_dir(workspace_root)?;
+        eprintln!("[mylua-lsp] summary cache dir: {}", cache_dir.display());
         Some(Self {
             cache_dir,
             config_fingerprint,
@@ -34,6 +35,7 @@ impl SummaryCache {
     }
 
     pub fn new_from_dir(cache_dir: PathBuf, config_fingerprint: u64) -> Self {
+        eprintln!("[mylua-lsp] summary cache dir: {}", cache_dir.display());
         Self {
             cache_dir,
             config_fingerprint,
