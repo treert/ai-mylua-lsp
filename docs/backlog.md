@@ -94,7 +94,7 @@ f:init()
 
 ---
 
-### [ ] P1-2 — `textDocument/documentHighlight`
+### [x] P1-2 — `textDocument/documentHighlight`
 
 **目标**：光标悬停/放在某 identifier 时高亮当前文件里所有同义使用（read/write 区分可选）。
 

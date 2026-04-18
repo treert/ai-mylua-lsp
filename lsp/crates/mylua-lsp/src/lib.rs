@@ -5,6 +5,7 @@ pub mod completion;
 pub mod config;
 pub mod diagnostics;
 pub mod document;
+pub mod document_highlight;
 pub mod emmy;
 pub mod folding_range;
 pub mod goto;
@@ -621,6 +622,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                document_highlight_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
@@ -844,6 +846,19 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         Ok(Some(folding_range::folding_range(doc)))
+    }
+
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> Result<Option<Vec<DocumentHighlight>>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        Ok(document_highlight::document_highlight(doc, uri, position))
     }
 
     async fn goto_definition(
