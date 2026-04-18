@@ -85,6 +85,10 @@ pub struct Backend {
     ///   - Cold-start seed routing (`initialized` splits documents into
     ///     Hot/Cold based on this set)
     open_uris: Arc<Mutex<HashSet<Uri>>>,
+    /// Unified semantic diagnostics scheduler (priority queue + single
+    /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
+    /// spawns and the cold-start `publish_diagnostics_for_open_files`.
+    scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
 }
 
 struct ParsedFile {
@@ -122,6 +126,7 @@ impl Backend {
             semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_counter: Arc::new(Mutex::new(0)),
             open_uris: Arc::new(Mutex::new(HashSet::new())),
+            scheduler: diagnostic_scheduler::DiagnosticScheduler::new(),
         }
     }
 
@@ -566,6 +571,133 @@ impl Backend {
     }
 }
 
+/// Supervisor for the diagnostic consumer task. Spawns `consumer_loop`
+/// and auto-restarts it on panic (logs + 100ms backoff). The internal
+/// scheduler state lives behind `Arc`, so a restarted consumer picks up
+/// the existing queue without loss.
+fn start_diagnostic_consumer(
+    scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    index: Arc<Mutex<WorkspaceAggregation>>,
+    config: Arc<Mutex<LspConfig>>,
+    index_state: Arc<Mutex<IndexState>>,
+    client: Client,
+) {
+    tokio::spawn(async move {
+        loop {
+            let s = scheduler.clone();
+            let d = documents.clone();
+            let i = index.clone();
+            let c = config.clone();
+            let st = index_state.clone();
+            let cl = client.clone();
+
+            let handle = tokio::spawn(async move {
+                consumer_loop(s, d, i, c, st, cl).await;
+            });
+
+            match handle.await {
+                Ok(()) => break,
+                Err(e) if e.is_panic() => {
+                    lsp_log!(
+                        "[sched] consumer panicked: {:?}, restarting in 100ms...",
+                        e
+                    );
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    continue;
+                }
+                Err(e) => {
+                    lsp_log!("[sched] consumer task cancelled: {:?}", e);
+                    break;
+                }
+            }
+        }
+    });
+}
+
+/// Single-consumer loop draining `DiagnosticScheduler.pop()`. Waits
+/// for the workspace index to reach `Ready` before doing any work
+/// (gated before pop — otherwise popping a Hot URI while Not Ready
+/// would require re-enqueuing it which would silently downgrade to
+/// Cold on the next loop iteration).
+///
+/// Mirrors the body of the legacy `schedule_semantic_diagnostics`
+/// closure: snapshot text → compute (syntax + semantic) → text
+/// consistency check → publish. Locks are held for the minimum
+/// duration and never across `.await`.
+async fn consumer_loop(
+    scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    index: Arc<Mutex<WorkspaceAggregation>>,
+    config: Arc<Mutex<LspConfig>>,
+    index_state: Arc<Mutex<IndexState>>,
+    client: Client,
+) {
+    loop {
+        if *index_state.lock().unwrap() != IndexState::Ready {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+
+        let uri = loop {
+            if let Some(u) = scheduler.pop() {
+                break u;
+            }
+            scheduler.notified().await;
+        };
+
+        let snapshot = {
+            let docs = documents.lock().unwrap();
+            let Some(doc) = docs.get(&uri) else {
+                continue;
+            };
+            doc.text.clone()
+        };
+
+        let diags = {
+            let docs = documents.lock().unwrap();
+            let Some(doc) = docs.get(&uri) else {
+                continue;
+            };
+            let mut syntax =
+                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
+            let mut idx = index.lock().unwrap();
+            let cfg = config.lock().unwrap();
+            let semantic = diagnostics::collect_semantic_diagnostics_with_version(
+                doc.tree.root_node(),
+                doc.text.as_bytes(),
+                &uri,
+                &mut idx,
+                &doc.scope_tree,
+                &cfg.diagnostics,
+                &cfg.runtime.version,
+            );
+            syntax.extend(semantic);
+            diagnostics::apply_diagnostic_suppressions(
+                doc.tree.root_node(),
+                doc.text.as_bytes(),
+                syntax,
+            )
+        };
+
+        // Consistency check: if the document's text changed while we
+        // were computing (another did_change in flight), skip publish.
+        // The newer edit already re-scheduled its own compute.
+        let stale = {
+            let docs = documents.lock().unwrap();
+            match docs.get(&uri) {
+                Some(doc) => doc.text != snapshot,
+                None => true,
+            }
+        };
+        if stale {
+            continue;
+        }
+
+        client.publish_diagnostics(uri, diags, None).await;
+    }
+}
+
 /// Collect URIs of dependent files (from the given candidate set) that
 /// depend on `uri` either via `require()` (require_by_return) or via
 /// Emmy type references (type_dependants — P1-7). `candidate_uris` is
@@ -740,6 +872,18 @@ impl LanguageServer for Backend {
         }
 
         *self.workspace_roots.lock().unwrap() = roots;
+
+        // Boot the diagnostic scheduler consumer. It waits on an
+        // `index_state == Ready` gate internally, so it's safe to
+        // start before `initialized` fires / workspace scan completes.
+        start_diagnostic_consumer(
+            self.scheduler.clone(),
+            self.documents.clone(),
+            self.index.clone(),
+            self.config.clone(),
+            self.index_state.clone(),
+            self.client.clone(),
+        );
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
