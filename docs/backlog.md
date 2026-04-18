@@ -165,7 +165,7 @@ f:init()
 
 ---
 
-### [ ] P1-7 — 反向类型依赖图 + 级联诊断重算
+### [x] P1-7 — 反向类型依赖图 + 级联诊断重算
 
 **目标**：修改 `a.lua` 里 `@class Foo` 的字段后，所有在注解里引用 `Foo`（即便不 require a.lua）的 `b.lua` 的语义诊断能自动重算。当前 `require_by_return` 只覆盖 require 依赖。
 

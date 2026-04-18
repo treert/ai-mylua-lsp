@@ -19,6 +19,13 @@ pub struct WorkspaceAggregation {
     pub type_shard: HashMap<String, Vec<TypeCandidate>>,
     /// Target URI → files that `require` it (reverse dependency index).
     pub require_by_return: HashMap<Uri, Vec<RequireDependant>>,
+    /// Emmy type name → URIs whose summaries reference that type
+    /// (P1-7 reverse type-dependency graph). Enables cascade
+    /// invalidation when a class definition changes — any file that
+    /// `@type`s / `@param`s / inherits from / has fields typed as
+    /// the changed class needs its semantic diagnostics recomputed,
+    /// even if it doesn't `require()` the defining file.
+    pub type_dependants: HashMap<String, Vec<Uri>>,
     /// Resolved cross-file type cache; entries are lazily populated and
     /// marked dirty on upstream signature changes.
     pub resolution_cache: HashMap<CacheKey, CachedResolution>,
@@ -119,6 +126,7 @@ impl WorkspaceAggregation {
             global_shard: HashMap::new(),
             type_shard: HashMap::new(),
             require_by_return: HashMap::new(),
+            type_dependants: HashMap::new(),
             resolution_cache: HashMap::new(),
             require_map: HashMap::new(),
             require_aliases: HashMap::new(),
@@ -184,6 +192,17 @@ impl WorkspaceAggregation {
             }
         }
 
+        // Collect every Emmy type name this file references — in its
+        // local type facts, class parents/fields, function sigs, etc.
+        // — and register `this_file` as a dependant of each.
+        let referenced_types = collect_referenced_type_names(&summary);
+        for type_name in referenced_types {
+            let uris = self.type_dependants.entry(type_name).or_default();
+            if !uris.iter().any(|u| u == &uri) {
+                uris.push(uri.clone());
+            }
+        }
+
         let fingerprint_changed = old_fingerprint
             .map_or(true, |old| old != summary.signature_fingerprint);
         if fingerprint_changed {
@@ -225,6 +244,13 @@ impl WorkspaceAggregation {
         self.require_by_return.retain(|_, deps| {
             deps.retain(|d| &d.source_uri != uri);
             !deps.is_empty()
+        });
+
+        // Prune this URI from every type_dependants bucket (file may
+        // be re-indexed with a different set of referenced types).
+        self.type_dependants.retain(|_, uris| {
+            uris.retain(|u| u != uri);
+            !uris.is_empty()
         });
     }
 
@@ -319,4 +345,121 @@ impl WorkspaceAggregation {
         }
         None
     }
+}
+
+/// Walk `summary` for every Emmy type name it references (a shape
+/// table / primitive / function type without an Emmy name is
+/// ignored). Returns a sorted + deduped `Vec<String>` — used by
+/// `upsert_summary` to populate `type_dependants`.
+fn collect_referenced_type_names(summary: &DocumentSummary) -> Vec<String> {
+    use crate::type_system::{KnownType, SymbolicStub, TypeFact};
+    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    fn walk(fact: &TypeFact, out: &mut std::collections::BTreeSet<String>) {
+        match fact {
+            TypeFact::Known(KnownType::EmmyType(n)) => {
+                out.insert(n.clone());
+            }
+            TypeFact::Known(KnownType::EmmyGeneric(n, params)) => {
+                out.insert(n.clone());
+                for p in params {
+                    walk(p, out);
+                }
+            }
+            TypeFact::Known(KnownType::Function(sig)) => {
+                for p in &sig.params {
+                    walk(&p.type_fact, out);
+                }
+                for r in &sig.returns {
+                    walk(r, out);
+                }
+            }
+            TypeFact::Stub(SymbolicStub::TypeRef { name }) => {
+                out.insert(name.clone());
+            }
+            TypeFact::Stub(SymbolicStub::FieldOf { base, .. }) => {
+                walk(base, out);
+            }
+            TypeFact::Union(parts) => {
+                for p in parts {
+                    walk(p, out);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // 1. All `---@type X local y` annotations.
+    for ltf in summary.local_type_facts.values() {
+        walk(&ltf.type_fact, &mut names);
+    }
+
+    // 2. `@class Foo : Parent1, Parent2` — each parent.
+    for td in &summary.type_definitions {
+        for parent in &td.parents {
+            names.insert(parent.clone());
+        }
+        // 3. Every `@field` type.
+        for f in &td.fields {
+            walk(&f.type_fact, &mut names);
+        }
+        // 4. `@alias Foo = Bar | Baz` target type.
+        if let Some(alias_fact) = &td.alias_type {
+            walk(alias_fact, &mut names);
+        }
+    }
+
+    // 5. Function param & return types.
+    for fs in summary.function_summaries.values() {
+        for p in &fs.signature.params {
+            walk(&p.type_fact, &mut names);
+        }
+        for r in &fs.signature.returns {
+            walk(r, &mut names);
+        }
+        for overload in &fs.overloads {
+            for p in &overload.params {
+                walk(&p.type_fact, &mut names);
+            }
+            for r in &overload.returns {
+                walk(r, &mut names);
+            }
+        }
+    }
+
+    // 6. Module return type (for files that `return X` at top level).
+    if let Some(mrt) = &summary.module_return_type {
+        walk(mrt, &mut names);
+    }
+
+    // 7. Global contributions — `---@type Foo G = ...` stores the
+    //    typed annotation on a `GlobalContribution` rather than in
+    //    `local_type_facts`, so we need an explicit pass here to
+    //    not miss it.
+    for gc in &summary.global_contributions {
+        walk(&gc.type_fact, &mut names);
+    }
+
+    // Drop self-references and generic parameter names:
+    // - Self-references: a file shouldn't list itself as a dependant
+    //   of its own class.
+    // - Generic params: `---@class Foo<T>` + `---@field x T` treats
+    //   `T` as an EmmyType during walk; `T` is NOT a real type in
+    //   the workspace (unless the user happened to name a class `T`,
+    //   which we then falsely cross-wire). Filter them out.
+    let self_defined: std::collections::HashSet<&str> = summary
+        .type_definitions
+        .iter()
+        .map(|td| td.name.as_str())
+        .collect();
+    let generic_params: std::collections::HashSet<&str> = summary
+        .type_definitions
+        .iter()
+        .flat_map(|td| td.generic_params.iter().map(|s| s.as_str()))
+        .collect();
+    names
+        .into_iter()
+        .filter(|n| !self_defined.contains(n.as_str()))
+        .filter(|n| !generic_params.contains(n.as_str()))
+        .collect()
 }

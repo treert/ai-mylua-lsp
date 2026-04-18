@@ -185,9 +185,36 @@ impl Backend {
                 let mut idx = self.index.lock().unwrap();
                 let old_fp = idx.summaries.get(&uri).map(|s| s.signature_fingerprint);
                 let new_fp = summary.signature_fingerprint;
+
+                // Snapshot the OLD summary's type names before the
+                // upsert swaps the summary away. Together with the
+                // new summary's names below, this covers:
+                //   - rename (`@class Foo` → `@class Bar` — old `Foo`
+                //     is in old set, lets us invalidate its dependants)
+                //   - delete (`@class` annotation removed entirely —
+                //     only old set contains the name)
+                //   - add / edit (new set contains the name)
+                let old_type_names: Vec<String> = idx
+                    .summaries
+                    .get(&uri)
+                    .map(|s| s.type_definitions.iter().map(|t| t.name.clone()).collect())
+                    .unwrap_or_default();
+                let new_type_names: Vec<String> = summary
+                    .type_definitions
+                    .iter()
+                    .map(|t| t.name.clone())
+                    .collect();
+
                 idx.upsert_summary(summary);
+
                 if old_fp.map_or(false, |old| old != new_fp) {
-                    collect_dependant_uris(&uri, &idx, &open_uris)
+                    let mut affected = old_type_names;
+                    for n in new_type_names {
+                        if !affected.contains(&n) {
+                            affected.push(n);
+                        }
+                    }
+                    collect_dependant_uris(&uri, &idx, &open_uris, &affected)
                 } else {
                     Vec::new()
                 }
@@ -486,22 +513,51 @@ impl Backend {
     }
 }
 
-/// Collect URIs of open files that depend on the given URI via require.
-/// Takes a pre-collected set of open URIs to avoid locking documents
-/// while the index lock is held.
+/// Collect URIs of open files that depend on `uri` either via
+/// `require()` (require_by_return) or via Emmy type references
+/// (type_dependants — P1-7). Takes a pre-collected set of open
+/// URIs and the set of type names this edit may have touched
+/// (union of old-summary and new-summary type definitions — the
+/// old names cover rename/delete, the new names cover add/edit).
+///
+/// De-duplicates across both sources so a file that both requires
+/// `uri` AND references one of its classes only appears once.
 fn collect_dependant_uris(
     uri: &Uri,
     idx: &aggregation::WorkspaceAggregation,
     open_uris: &std::collections::HashSet<Uri>,
+    affected_type_names: &[String],
 ) -> Vec<Uri> {
+    let mut seen: std::collections::HashSet<Uri> = std::collections::HashSet::new();
     let mut result = Vec::new();
+
     if let Some(deps) = idx.require_by_return.get(uri) {
         for dep in deps {
-            if open_uris.contains(&dep.source_uri) {
+            if open_uris.contains(&dep.source_uri) && seen.insert(dep.source_uri.clone()) {
                 result.push(dep.source_uri.clone());
             }
         }
     }
+
+    // Cascade via the reverse type-dependency graph. `affected_type_names`
+    // includes BOTH the old summary's type names (so
+    // rename/delete still invalidates the abandoned name's
+    // dependants) and the new summary's type names (covers
+    // add/edit). The lib.rs call site is responsible for snapshotting
+    // the old set before `upsert_summary` swaps the summary.
+    for type_name in affected_type_names {
+        if let Some(uris) = idx.type_dependants.get(type_name) {
+            for dep_uri in uris {
+                if dep_uri == uri {
+                    continue;
+                }
+                if open_uris.contains(dep_uri) && seen.insert(dep_uri.clone()) {
+                    result.push(dep_uri.clone());
+                }
+            }
+        }
+    }
+
     result
 }
 
