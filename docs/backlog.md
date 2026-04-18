@@ -258,7 +258,7 @@ f:init()
 
 ---
 
-### [ ] P2-4 — `textDocument/inlayHint`
+### [x] P2-4 — `textDocument/inlayHint`
 
 **目标**：调用参数内联显示形参名（`foo(▸x= 1, ▸y= 2)`），局部变量类型内联显示（`local x: number = 1`）。
 

@@ -12,6 +12,8 @@ pub struct LspConfig {
     #[serde(rename = "gotoDefinition")]
     pub goto_definition: GotoDefinitionConfig,
     pub references: ReferencesConfig,
+    #[serde(rename = "inlayHint")]
+    pub inlay_hint: InlayHintConfig,
     pub debug: DebugConfig,
 }
 
@@ -152,6 +154,37 @@ impl DiagnosticSeverityOption {
             Self::Warning => Some(DiagnosticSeverity::WARNING),
             Self::Hint => Some(DiagnosticSeverity::HINT),
             Self::Off => None,
+        }
+    }
+}
+
+/// Inlay hint options.
+///
+/// - `enable` master switch
+/// - `parameter_names`: show `name:` before each non-variadic argument
+///    at function call sites where we have a FunctionSummary
+/// - `variable_types`: show `: Type` after `local x = ...` names when
+///    a useful inferred type is available
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct InlayHintConfig {
+    pub enable: bool,
+    #[serde(rename = "parameterNames")]
+    pub parameter_names: bool,
+    #[serde(rename = "variableTypes")]
+    pub variable_types: bool,
+}
+
+impl Default for InlayHintConfig {
+    fn default() -> Self {
+        Self {
+            // All three default off — inlay hints can feel cluttered
+            // for users who don't expect them. Clients that want
+            // them send `initializationOptions.inlayHint.enable =
+            // true` to opt in.
+            enable: false,
+            parameter_names: true,
+            variable_types: true,
         }
     }
 }

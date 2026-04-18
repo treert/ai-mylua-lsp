@@ -8,6 +8,7 @@ pub mod document;
 pub mod document_highlight;
 pub mod emmy;
 pub mod folding_range;
+pub mod inlay_hint;
 pub mod lua_builtins;
 pub mod goto;
 pub mod hover;
@@ -690,6 +691,7 @@ impl LanguageServer for Backend {
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 declaration_provider: Some(DeclarationCapability::Simple(true)),
                 selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
@@ -918,6 +920,20 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         Ok(Some(folding_range::folding_range(doc)))
+    }
+
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> Result<Option<Vec<InlayHint>>> {
+        let uri = &params.text_document.uri;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let idx = self.index.lock().unwrap();
+        let cfg = self.config.lock().unwrap().inlay_hint.clone();
+        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &idx, &cfg)))
     }
 
     async fn selection_range(
