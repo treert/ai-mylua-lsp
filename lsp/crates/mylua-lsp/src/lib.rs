@@ -46,8 +46,6 @@ use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
 
-const DIAGNOSTIC_DEBOUNCE_MS: u64 = 300;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
     Initializing,
@@ -62,7 +60,6 @@ pub struct Backend {
     workspace_roots: Mutex<Vec<PathBuf>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
-    diag_gen: Arc<Mutex<HashMap<Uri, u64>>>,
     /// Per-URI async serialization for document-mutating handlers
     /// (`did_open` / `did_change`). Without this, two concurrent
     /// `did_change` for the same URI could both `.remove(&uri)` from the
@@ -121,7 +118,6 @@ impl Backend {
             workspace_roots: Mutex::new(Vec::new()),
             config: Arc::new(Mutex::new(LspConfig::default())),
             index_state: Arc::new(Mutex::new(IndexState::Initializing)),
-            diag_gen: Arc::new(Mutex::new(HashMap::new())),
             edit_locks: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_counter: Arc::new(Mutex::new(0)),
@@ -215,11 +211,10 @@ impl Backend {
 
             // Snapshot the set of *indexed* URIs (entire workspace after
             // cold-start, not just client-opened ones) BEFORE locking
-            // index, to avoid lock-order inversion with
-            // schedule_semantic_diagnostics (which locks documents then
-            // index). Named `indexed_uris` to avoid confusion with the
-            // new `self.open_uris` field which is strictly the set of
-            // client-opened URIs.
+            // index, to avoid lock-order inversion with `consumer_loop`
+            // (which locks documents then index). Named `indexed_uris`
+            // to avoid confusion with the new `self.open_uris` field
+            // which is strictly the set of client-opened URIs.
             let indexed_uris: std::collections::HashSet<Uri> =
                 self.documents.lock().unwrap().keys().cloned().collect();
 
@@ -277,72 +272,39 @@ impl Backend {
                     .await;
             });
 
-            self.schedule_semantic_diagnostics(uri, version);
+            // Route semantic-diagnostic computation through the
+            // unified scheduler. Hot/Cold priority is decided by whether
+            // the client has `did_open`'d this URI.
+            let is_open = self.open_uris.lock().unwrap().contains(&uri);
+            let pri = if is_open {
+                diagnostic_scheduler::Priority::Hot
+            } else {
+                diagnostic_scheduler::Priority::Cold
+            };
+            self.scheduler.schedule(uri, pri);
 
+            // Cascade: signature-fingerprint change → re-diagnose
+            // dependent URIs. Scope config (Full | OpenOnly) decides
+            // whether we also re-diagnose closed dependants. Snapshot
+            // `open_uris` as a cheap clone (typical <100 opened URIs)
+            // and drop the lock before the scheduler.schedule loop to
+            // keep the lock-hold window tight — matches the style of
+            // `initialized`'s seed routine below.
+            let scope = self.config.lock().unwrap().diagnostics.scope.clone();
+            let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
             for dep_uri in dependant_uris {
-                self.schedule_semantic_diagnostics(dep_uri, None);
+                let dep_is_open = open.contains(&dep_uri);
+                if !dep_is_open && matches!(scope, config::DiagnosticScope::OpenOnly) {
+                    continue;
+                }
+                let dep_pri = if dep_is_open {
+                    diagnostic_scheduler::Priority::Hot
+                } else {
+                    diagnostic_scheduler::Priority::Cold
+                };
+                self.scheduler.schedule(dep_uri, dep_pri);
             }
         }
-    }
-
-    fn schedule_semantic_diagnostics(&self, uri: Uri, version: Option<i32>) {
-        let gen = {
-            let mut gens = self.diag_gen.lock().unwrap();
-            let entry = gens.entry(uri.clone()).or_insert(0);
-            *entry += 1;
-            *entry
-        };
-
-        let diag_gen = self.diag_gen.clone();
-        let documents = self.documents.clone();
-        let index = self.index.clone();
-        let config = self.config.clone();
-        let index_state = self.index_state.clone();
-        let client = self.client.clone();
-
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS)).await;
-
-            let current_gen = diag_gen.lock().unwrap().get(&uri).copied().unwrap_or(0);
-            if current_gen != gen {
-                return;
-            }
-
-            if *index_state.lock().unwrap() != IndexState::Ready {
-                return;
-            }
-
-            let diags = {
-                let docs = documents.lock().unwrap();
-                let Some(doc) = docs.get(&uri) else {
-                    return;
-                };
-                let mut syntax =
-                    diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
-                let mut idx = index.lock().unwrap();
-                let cfg = config.lock().unwrap();
-                let semantic = diagnostics::collect_semantic_diagnostics_with_version(
-                    doc.tree.root_node(),
-                    doc.text.as_bytes(),
-                    &uri,
-                    &mut idx,
-                    &doc.scope_tree,
-                    &cfg.diagnostics,
-                    &cfg.runtime.version,
-                );
-                syntax.extend(semantic);
-                // `---@diagnostic disable-*` post-processing: filter
-                // out suppressed entries and stamp the surviving ones
-                // with a stable `code` slug for client display.
-                diagnostics::apply_diagnostic_suppressions(
-                    doc.tree.root_node(),
-                    doc.text.as_bytes(),
-                    syntax,
-                )
-            };
-
-            client.publish_diagnostics(uri, diags, version).await;
-        });
     }
 
     fn index_file_from_disk(&self, path: &std::path::Path) {
@@ -529,46 +491,6 @@ impl Backend {
         }
     }
 
-    fn publish_diagnostics_for_open_files(&self) {
-        let uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
-        let (cfg, runtime_version) = {
-            let c = self.config.lock().unwrap();
-            (c.diagnostics.clone(), c.runtime.version.clone())
-        };
-
-        for uri in uris {
-            let diags = {
-                let docs = self.documents.lock().unwrap();
-                let Some(doc) = docs.get(&uri) else {
-                    continue;
-                };
-                let mut diags =
-                    diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
-                let mut idx = self.index.lock().unwrap();
-                let semantic = diagnostics::collect_semantic_diagnostics_with_version(
-                    doc.tree.root_node(),
-                    doc.text.as_bytes(),
-                    &uri,
-                    &mut idx,
-                    &doc.scope_tree,
-                    &cfg,
-                    &runtime_version,
-                );
-                diags.extend(semantic);
-                diagnostics::apply_diagnostic_suppressions(
-                    doc.tree.root_node(),
-                    doc.text.as_bytes(),
-                    diags,
-                )
-            };
-
-            let client = self.client.clone();
-            let uri_clone = uri.clone();
-            tokio::spawn(async move {
-                client.publish_diagnostics(uri_clone, diags, None).await;
-            });
-        }
-    }
 }
 
 /// Supervisor for the diagnostic consumer task. Spawns `consumer_loop`
@@ -974,7 +896,24 @@ impl LanguageServer for Backend {
             )
             .await;
         self.scan_workspace_parallel().await;
-        self.publish_diagnostics_for_open_files();
+
+        // Seed the scheduler queue based on `diagnostics.scope`.
+        // - Full (default): hot = client-opened URIs, cold = rest of
+        //   indexed workspace → consumer drains hot first, then cold.
+        // - OpenOnly: only seed hot; closed files get no diagnostics
+        //   until the user opens them.
+        let scope = self.config.lock().unwrap().diagnostics.scope.clone();
+        let all_uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
+        let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
+        let (hot, cold): (Vec<_>, Vec<_>) =
+            all_uris.into_iter().partition(|u| open.contains(u));
+        self.scheduler
+            .seed_bulk(hot, diagnostic_scheduler::Priority::Hot);
+        if matches!(scope, config::DiagnosticScope::Full) {
+            self.scheduler
+                .seed_bulk(cold, diagnostic_scheduler::Priority::Cold);
+        }
+
         self.client
             .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
             .await;
@@ -1003,10 +942,11 @@ impl LanguageServer for Backend {
         // conversely identical version numbers do not guarantee identical
         // content across clients. Byte-equality is the only safe signal.
         //
-        // Invariant: fast path does NOT touch the scheduler (`diag_gen`
-        // or queues). Any in-flight debounce from before still publishes
-        // correctly because its compute uses current `documents[uri]`
-        // which this check just proved equal to the incoming buffer.
+        // Invariant: fast path does NOT touch the scheduler (no
+        // `schedule()` / `seed_bulk()` / `invalidate()` calls). Any
+        // in-flight debounce from before still publishes correctly
+        // because its compute uses current `documents[uri]` which this
+        // check just proved equal to the incoming buffer.
         //
         // Lock ordering: `open_uris` FIRST, `documents` SECOND. We take
         // them sequentially (not nested) to avoid establishing an
@@ -1022,13 +962,17 @@ impl LanguageServer for Backend {
             }
         }
 
-        let uri_for_open_set = uri.clone();
+        // Mark open BEFORE `parse_and_store` so the `scheduler.schedule`
+        // call inside sees this URI as "open" and routes to the Hot
+        // queue. Otherwise the very first did_open of a fresh URI
+        // would route to Cold (steady state after workspace Ready,
+        // no seed_bulk tombstone upgrade to save us).
+        self.open_uris.lock().unwrap().insert(uri.clone());
         self.parse_and_store(
             uri,
             params.text_document.text,
             Some(params.text_document.version),
         );
-        self.open_uris.lock().unwrap().insert(uri_for_open_set);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -1102,8 +1046,8 @@ impl LanguageServer for Backend {
         // edits the user just discarded don't leave stale content in
         // the index, then let `parse_and_store` republish syntax +
         // semantic diagnostics and cascade to dependent open files.
-        // `edit_locks` / `diag_gen` entries are kept — they're reused
-        // on the next `did_open` for the same URI.
+        // `edit_locks` / scheduler state entries are kept — they're
+        // reused on the next `did_open` for the same URI.
         if let Some(path) = uri_to_path(&uri) {
             // Acquire the lock BEFORE reading disk so a racing
             // `did_change` (unusual after `did_close` but clients
@@ -1190,7 +1134,8 @@ impl LanguageServer for Backend {
                 FileChangeType::DELETED => {
                     self.index.lock().unwrap().remove_file(&change.uri);
                     self.documents.lock().unwrap().remove(&change.uri);
-                    self.diag_gen.lock().unwrap().remove(&change.uri);
+                    self.scheduler.invalidate(&change.uri);
+                    self.open_uris.lock().unwrap().remove(&change.uri);
                     self.edit_locks.lock().unwrap().remove(&change.uri);
                     self.semantic_tokens_cache.lock().unwrap().remove(&change.uri);
                 }
