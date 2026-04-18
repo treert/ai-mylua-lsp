@@ -173,6 +173,124 @@ a.b.c = 1
 }
 
 #[test]
+fn existing_field_on_local_table_must_not_be_flagged() {
+    // Counterpart to `unknown_field_still_reported_on_rhs_read`:
+    // verifies that legitimate fields on a local table literal are
+    // NOT reported as Unknown. Regression guard for a grammar/code
+    // drift where `extract_table_shape` failed to descend into the
+    // `field_list` node wrapping the fields — every shape ended up
+    // with an empty `fields` map, turning every `t.anything` into
+    // a false-positive diagnostic.
+    let src = r#"
+local t = { name = "hello", age = 10 }
+print(t.name)
+print(t.age)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "shape_fields.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "fields declared in the literal `{{ name=..., age=... }}` must not be flagged, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn static_bracket_string_key_is_normalized() {
+    // `["foo"] = 1` should land in `shape.fields["foo"]` (quotes
+    // stripped) so both `t.foo` and `t["foo"]` field diagnostics
+    // treat it as present. Without normalization the key would be
+    // stored as `"foo"` (with literal quotes) and every subsequent
+    // `t.foo` read would flag as Unknown.
+    let src = r#"
+local t = { ["foo"] = 1, [2] = "two" }
+print(t.foo)
+print(t[2])
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "bracket_key.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "static bracket keys must be stored under their normalized names, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn dynamic_bracket_key_opens_shape() {
+    // `[k] = 1` where `k` is a variable marks the shape as open. In
+    // that state, Unknown reads should be a *warning* (lua_field_warning),
+    // not an error — default severity is Warning. We just verify the
+    // diagnostic severity downgrades when the shape is open.
+    let src = r#"
+local k = "x"
+local t = { [k] = 1 }
+print(t.anything)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dyn_bracket.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let field_errors: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .filter(|d| d.severity == Some(tower_lsp_server::ls_types::DiagnosticSeverity::ERROR))
+        .collect();
+    assert!(
+        field_errors.is_empty(),
+        "dynamic bracket write must open the shape (no Error-severity Unknown-field diagnostics), got: {:?}",
+        field_errors,
+    );
+}
+
+#[test]
+fn array_style_field_does_not_flag_missing_field() {
+    // `{ "a", "b", "c" }` — no named fields; accessing `t.anything`
+    // on a shape with only array entries shouldn't accidentally fire
+    // any "Unknown field" diagnostic branch as if it were closed.
+    // Current behavior: the shape stays closed (no mark_open) and
+    // fields map is empty, so reads ARE flagged — this test documents
+    // and locks that behavior. If the policy later changes to "array
+    // literals are implicitly open", update the test accordingly.
+    let src = r#"
+local t = { "a", "b", "c" }
+print(t[1])
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "array_style.lua");
+    let cfg = DiagnosticsConfig::default();
+    // Subscript reads (`t[1]`) don't go through the named-field
+    // diagnostic path, so no diagnostic is expected here. This is a
+    // smoke test for the `None` arm of `extract_single_field`.
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "array-style subscript read must not produce a named-field diagnostic, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
 fn unknown_field_still_reported_on_rhs_read() {
     // Sanity counter-test: actual RHS reads of missing fields should still
     // be flagged.
@@ -192,6 +310,95 @@ print(t.no_exist)
         "rhs reads of unknown fields must still be diagnosed, got: {:?}",
         diags,
     );
+}
+
+#[test]
+fn no_unknown_field_on_global_table_with_class_annotation() {
+    // Regression for cross_globals.lua style:
+    //   ---@class Audit
+    //   ---@field enabled boolean
+    //   Audit = { enabled = true }
+    //   function Audit.log(action)
+    //       if Audit.enabled then ... end  -- must NOT flag unknown field
+    //   end
+    //
+    // The reference `Audit.enabled` in the function body resolves the
+    // base `Audit` to `Known(Table(shape_id))` (via `global_shard`).
+    // The shape for `{ enabled = true }` clearly has an `enabled`
+    // field, so no diagnostic should fire. A previous bug: a warm
+    // resolution cache dropped `def_uri` on cached GlobalRef
+    // resolutions, leaving the per-file `TableShapeId` unmoored.
+    let src = r#"---@class Audit
+---@field enabled boolean
+Audit = { enabled = true }
+
+---@param action string
+function Audit.log(action)
+    if Audit.enabled then
+        print("[audit] " .. action)
+    end
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "cross_globals.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "reading an existing field on a global table-with-@class must not emit Unknown field, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn global_table_field_hover_survives_warm_cache() {
+    // Companion to the diagnostic test above: once the resolution
+    // cache is warm (e.g. after diagnostics ran), hover on
+    // `Audit.enabled` must still resolve to the field's type rather
+    // than silently dropping to Unknown. The cached GlobalRef
+    // resolution needs to preserve enough info (def_uri) for per-file
+    // `TableShapeId` lookups.
+    use mylua_lsp::hover;
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{TypeFact, KnownType, SymbolicStub};
+    let src = r#"---@class Audit
+---@field enabled boolean
+Audit = { enabled = true }
+
+print(Audit.enabled)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "warm_cache.lua");
+
+    // Warm the resolution cache first (diagnostics does this in real
+    // LSP sessions before any hover arrives).
+    let base = TypeFact::Stub(SymbolicStub::GlobalRef { name: "Audit".to_string() });
+    let _ = resolver::resolve_type(&base, &mut agg);
+
+    // Now resolve the field chain — must succeed, not return Unknown.
+    let resolved = resolver::resolve_field_chain_in_file(
+        &uri, &base, &["enabled".to_string()], &mut agg,
+    );
+    assert!(
+        !matches!(resolved.type_fact, TypeFact::Unknown),
+        "warm-cache resolve_field_chain_in_file must find 'Audit.enabled', got Unknown"
+    );
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Known(KnownType::Boolean)),
+        "Audit.enabled should resolve to Boolean, got: {}",
+        resolved.type_fact,
+    );
+
+    // Full hover path sanity: we just verify it returns something.
+    let docs = std::collections::HashMap::from([(uri.clone(), doc)]);
+    let d = docs.get(&uri).unwrap();
+    // `Audit.enabled` — `enabled` starts at col 12 (0-based) on line 4 (`print(Audit.enabled)`).
+    let hv = hover::hover(d, &uri, pos(4, 12), &mut agg, &docs);
+    assert!(hv.is_some(), "hover on Audit.enabled after warm cache should produce a result");
 }
 
 #[test]

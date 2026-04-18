@@ -278,11 +278,17 @@ fn resolve_stub(
     }
     visited.insert(visit_key.clone());
 
-    // Check resolution cache
+    // Check resolution cache — preserving def_uri / def_range so that
+    // per-file shape ids (`Known(Table(shape_id))`) can still be looked
+    // up on warm hits.
     if let Some(cache_key) = stub_to_cache_key(stub) {
         if let Some(cached) = agg.resolution_cache.get(&cache_key) {
             if !cached.dirty {
-                let result = ResolvedType::from_fact(cached.resolved_type.clone());
+                let result = ResolvedType {
+                    type_fact: cached.resolved_type.clone(),
+                    def_uri: cached.def_uri.clone(),
+                    def_range: cached.def_range,
+                };
                 visited.remove(&visit_key);
                 return result;
             }
@@ -311,10 +317,13 @@ fn resolve_stub(
         }
     };
 
-    // Cache the result
+    // Cache the result — including def_uri / def_range (see the
+    // CachedResolution doc-comment for why).
     if let Some(cache_key) = stub_to_cache_key(stub) {
         agg.resolution_cache.insert(cache_key, CachedResolution {
             resolved_type: result.type_fact.clone(),
+            def_uri: result.def_uri.clone(),
+            def_range: result.def_range,
             dirty: false,
         });
     }

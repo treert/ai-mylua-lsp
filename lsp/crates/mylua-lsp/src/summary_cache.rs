@@ -5,7 +5,12 @@ use serde::{Deserialize, Serialize};
 
 use crate::summary::DocumentSummary;
 
-const SCHEMA_VERSION: u32 = 1;
+// v2 (2025-04): `extract_table_shape` now actually populates
+// `TableShape.fields` (previously the wrapping `field_list` grammar node
+// was skipped, so every cached shape was `{ fields: {}, is_closed: true
+// }`). Bumping the schema forces a one-time rebuild so users don't keep
+// seeing false-positive `Unknown field` diagnostics from stale caches.
+const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 struct CacheMeta {

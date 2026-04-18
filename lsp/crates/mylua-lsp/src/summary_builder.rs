@@ -1702,66 +1702,114 @@ fn extract_table_shape(
         return;
     }
 
-    let mut cursor = constructor.walk();
-    if !cursor.goto_first_child() {
-        return;
-    }
-
-    loop {
-        let child = cursor.node();
-        match child.kind() {
-            "field" => {
-                if let Some(key_node) = child.child_by_field_name("name") {
-                    let key = node_text(key_node, ctx.source).to_string();
-                    if let Some(val_node) = child.child_by_field_name("value") {
-                        let type_fact = infer_expression_type(ctx, val_node, depth);
-                        shape.set_field(key.clone(), FieldInfo {
-                            name: key,
-                            type_fact,
-                            def_range: Some(ts_node_to_range(child, ctx.source)),
-                            assignment_count: 1,
-                        });
-                    }
-                } else if let Some(key_node) = child.child_by_field_name("key") {
-                    // Bracket key: `[expr] = value`
-                    let key_text = node_text(key_node, ctx.source);
-                    let is_static = matches!(key_node.kind(), "string" | "number");
-                    if is_static {
-                        if let Some(val_node) = child.child_by_field_name("value") {
-                            let type_fact = infer_expression_type(ctx, val_node, depth);
-                            shape.set_field(key_text.to_string(), FieldInfo {
-                                name: key_text.to_string(),
-                                type_fact,
-                                def_range: Some(ts_node_to_range(child, ctx.source)),
-                                assignment_count: 1,
-                            });
-                        }
-                    } else {
-                        shape.mark_open();
-                        if let Some(val_node) = child.child_by_field_name("value") {
-                            let type_fact = infer_expression_type(ctx, val_node, depth);
-                            shape.array_element_type = Some(
-                                match shape.array_element_type.take() {
-                                    Some(existing) => merge_types(existing, type_fact),
-                                    None => type_fact,
-                                }
-                            );
-                        }
-                    }
-                } else if let Some(val_node) = child.child_by_field_name("value") {
-                    let type_fact = infer_expression_type(ctx, val_node, depth);
-                    shape.array_element_type = Some(
-                        match shape.array_element_type.take() {
-                            Some(existing) => merge_types(existing, type_fact),
-                            None => type_fact,
-                        }
-                    );
-                }
-            }
-            _ => {}
+    // Grammar (see grammar/grammar.js):
+    //   table_constructor → `{` field_list? `}`
+    //   field_list        → field (sep field)* sep?
+    //   field             → `[` key=_expression `]` `=` value=_expression
+    //                     | key=identifier `=` value=_expression
+    //                     | value=_expression
+    //
+    // So the entries live under a `field_list` wrapper, not as direct
+    // children of `table_constructor`. Previously this function looked
+    // for `field` nodes directly under the constructor, which meant
+    // EVERY literal ended up with an empty `fields` map — turning every
+    // `t.x` read into a false-positive "Unknown field" diagnostic.
+    //
+    // We also read the CST field `key` (not the historical name `name`)
+    // as defined by the grammar's `field` rule.
+    for i in 0..constructor.named_child_count() {
+        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        if field_list.kind() != "field_list" {
+            continue;
         }
-        if !cursor.goto_next_sibling() {
-            break;
+        for j in 0..field_list.named_child_count() {
+            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            if field_node.kind() != "field" {
+                continue;
+            }
+            extract_single_field(ctx, field_node, shape, depth);
+        }
+    }
+}
+
+fn extract_single_field(
+    ctx: &mut BuildContext,
+    field_node: tree_sitter::Node,
+    shape: &mut TableShape,
+    depth: usize,
+) {
+    let value_node = field_node.child_by_field_name("value");
+    let key_node = field_node.child_by_field_name("key");
+
+    match key_node {
+        // `name = value` — key is an identifier → named field.
+        Some(k) if k.kind() == "identifier" => {
+            let key = node_text(k, ctx.source).to_string();
+            if let Some(val) = value_node {
+                let type_fact = infer_expression_type(ctx, val, depth);
+                shape.set_field(key.clone(), FieldInfo {
+                    name: key,
+                    type_fact,
+                    def_range: Some(ts_node_to_range(field_node, ctx.source)),
+                    assignment_count: 1,
+                });
+            }
+        }
+        // `[literal] = value` — static bracket key (string / number).
+        // Normalize the raw lexeme:
+        //   - strings: strip surrounding quotes so `["foo"] = 1` is
+        //     indexed under `foo` (matching `t.foo` / `t["foo"]`
+        //     lookups in the diagnostics/hover paths).
+        //   - numbers: keep the source text as-is; callers that want
+        //     to compare `t[1]` look up by the decimal spelling.
+        // Non-string/number literals are rejected by the outer match.
+        Some(k) if matches!(k.kind(), "string" | "number") => {
+            let key_text = if k.kind() == "string" {
+                // Fall back to raw lexeme when the scanner produced an
+                // empty/exotic string that `extract_string_literal`
+                // can't reach.
+                extract_string_literal(ctx, k)
+                    .unwrap_or_else(|| node_text(k, ctx.source).to_string())
+            } else {
+                node_text(k, ctx.source).to_string()
+            };
+            if let Some(val) = value_node {
+                let type_fact = infer_expression_type(ctx, val, depth);
+                shape.set_field(key_text.clone(), FieldInfo {
+                    name: key_text,
+                    type_fact,
+                    def_range: Some(ts_node_to_range(field_node, ctx.source)),
+                    assignment_count: 1,
+                });
+            }
+        }
+        // `[expr] = value` with a non-literal key — dynamic bracket
+        // write. Mark the shape as open and roll the value type into
+        // `array_element_type` so `t[i]` subscript reads still pick up
+        // a hint.
+        Some(_) => {
+            shape.mark_open();
+            if let Some(val) = value_node {
+                let type_fact = infer_expression_type(ctx, val, depth);
+                shape.array_element_type = Some(
+                    match shape.array_element_type.take() {
+                        Some(existing) => merge_types(existing, type_fact),
+                        None => type_fact,
+                    }
+                );
+            }
+        }
+        // No key at all — array-style entry (`{ 1, 2, 3 }`).
+        None => {
+            if let Some(val) = value_node {
+                let type_fact = infer_expression_type(ctx, val, depth);
+                shape.array_element_type = Some(
+                    match shape.array_element_type.take() {
+                        Some(existing) => merge_types(existing, type_fact),
+                        None => type_fact,
+                    }
+                );
+            }
         }
     }
 }

@@ -80,9 +80,18 @@ pub enum CacheKey {
 }
 
 /// Cached result of cross-file type resolution.
+///
+/// `def_uri` / `def_range` are preserved so that subsequent cache hits
+/// produce the *same* `ResolvedType` as the cold-path resolution —
+/// crucial for `Known(Table(shape_id))` where the shape id is per-file
+/// and a dropped `def_uri` silently turns table field lookups into
+/// `Unknown` (manifested as false-positive `Unknown field` diagnostics
+/// and hover returning no type on the second access).
 #[derive(Debug, Clone)]
 pub struct CachedResolution {
     pub resolved_type: TypeFact,
+    pub def_uri: Option<Uri>,
+    pub def_range: Option<tower_lsp_server::ls_types::Range>,
     pub dirty: bool,
 }
 
