@@ -79,7 +79,7 @@ f:init()
 
 ## P1 新功能 — 常规 LSP 能力，用户能直接感知
 
-### [ ] P1-1 — `textDocument/foldingRange`
+### [x] P1-1 — `textDocument/foldingRange`
 
 **目标**：代码折叠（`do ... end` / `function ... end` / `if ... end` / `for ... end` / `while ... end` / `repeat ... until` / `--[[ ... ]]` 长注释块 / 连续的 `---` 块）。
 

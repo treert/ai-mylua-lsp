@@ -6,6 +6,7 @@ pub mod config;
 pub mod diagnostics;
 pub mod document;
 pub mod emmy;
+pub mod folding_range;
 pub mod goto;
 pub mod hover;
 pub mod references;
@@ -620,6 +621,7 @@ impl LanguageServer for Backend {
                     TextDocumentSyncKind::INCREMENTAL,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
+                folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
@@ -831,6 +833,17 @@ impl LanguageServer for Backend {
         };
         let syms = symbols::collect_document_symbols(doc.tree.root_node(), doc.text.as_bytes());
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
+    }
+
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> Result<Option<Vec<FoldingRange>>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        Ok(Some(folding_range::folding_range(doc)))
     }
 
     async fn goto_definition(
