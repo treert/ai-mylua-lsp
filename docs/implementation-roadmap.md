@@ -2,7 +2,16 @@
 
 本文档约束 **交付顺序**、**子工程协作方式** 与 **技术选型倾向**。需求见 [`requirements.md`](requirements.md)；架构见 [`architecture.md`](architecture.md)。
 
-**当前阶段：需求分析 + 仓库骨架**（方案趋于：自研 Tree-sitter 文法、Extension 与 LSP 分离、**workspace-wide** 能力为硬性目标）。顶层 `grammar/`、`lsp/`、`vscode-extension/` 已建，待填入实现。
+## 当前状态快照
+
+| 阶段 | 状态 |
+|------|------|
+| **A — 骨架**：Tree-sitter 文法 + TextMate + LSP 宿主 | ✅ 已完成 |
+| **B — 语义与工作区 MVP**：EmmyLua 绑定、跨文件定义、Hover、摘要驱动索引、诊断分层 | ✅ 已完成 |
+| **C — Workspace-wide 完整能力 + 5 万文件硬化**：references / workspace/symbol、增量索引、持久化缓存、状态机 + 进度 + 并行冷启动 | ✅ 已完成 |
+| **D — 体验与扩展**：semantic tokens / rename / completion / callHierarchy / documentLink / inlayHint / selectionRange 等 | ✅ 主体完成（详见 [`../ai-readme.md`](../ai-readme.md)「已实现 LSP 能力」） |
+
+当前没有排期中的后续阶段；新方向追加到 [`future-work.md`](future-work.md)。以下章节保留作为原始路线图。
 
 ## 1. 原则
 

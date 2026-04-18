@@ -1,54 +1,35 @@
-# Future Work — 后续可选增强
+# Future Work — 后续待办与维护提示
 
-> 本文档收录 **目前稳定可用之上的后续增强项**。这些不是阻塞项——核心 LSP 能力已在生产水准，本清单面向的是 "有空时继续打磨" 的方向。
+> **当前状态：无已知待办。**
 >
-> 已完成项的完整历史见 git log（commit 消息按 P0/P1/P2 编号归类），或直接查阅 [`../ai-readme.md`](../ai-readme.md) 的「已实现 LSP 能力」章节。
+> 过往的待办项（诊断扩展、selection_range 精细化、signature_help shape-owner、callHierarchy、documentLink、foldingRange 分支折叠、semantic tokens delta、`---@meta`、`fun()` 多返回 + `self` 泛型绑定 等）已全部落地。各能力的实现细节与测试覆盖记录在 [`../ai-readme.md`](../ai-readme.md) 的「已实现 LSP 能力」章节与 `lsp/crates/mylua-lsp/tests/` 下的集成测试文件中，commit 历史（按 P0/P1/P2 编号归类）可通过 git log 追溯。
+>
+> 本文档只保留 **真正还没做** 的方向；已实现的不再列在这里。
 
 ---
 
-## 1. 诊断扩展（P2-3 剩余子项）
+## 1. 待办清单
 
-**全部完成。** `duplicateTableKey` / `unusedLocal` / `argumentCountMismatch` / `argumentTypeMismatch` / `returnMismatch` 以及 `emmyTypeMismatch` 的 reassignment 扩展均已实现，每个都有独立的 `DiagnosticsConfig` 开关。
+暂无。
 
-后三项默认 Off —— 第一次开启会在老代码上产生大量告警，按需 opt-in。启用路径：
+新发现的方向追加到这里时请按以下模板：
 
-```json
-{
-  "mylua.diagnostics.argumentCountMismatch": "warning",
-  "mylua.diagnostics.argumentTypeMismatch": "warning",
-  "mylua.diagnostics.returnMismatch": "warning"
-}
+```markdown
+### <简短标题>
+
+- **动机**：为什么要做
+- **影响范围**：涉及的模块 / 数据结构 / 对外能力
+- **验收**：什么条件下认为做完
+- **风险 / 默认开关**：是否需要 opt-in、对既有行为的影响
 ```
 
-实现要点见 `ai-readme.md` 的「语义诊断」条目和 `tests/test_diagnostics.rs`（32 条集成测试）。
+同时在 [`README.md`](README.md) 的文档索引行同步一句话描述。
 
 ---
 
-## 2. selection_range / symbols 精细化
+## 2. 维护提示（新增能力时的清单）
 
-**全部完成。** `TypeDefinition.name_range` / `TypeFieldDef.name_range` 已加入 summary，并在 `symbols.rs` / `workspace_symbol.rs` 中替换 `selection_range` / `location.range`。`@field private name T` 里跳过 visibility 关键字后定位 name token。
-
----
-
-## 3. signature_help 继续打磨
-
-**已完成。** `TableShape.owner_name: Option<String>` 在 `visit_local_declaration` / `visit_assignment` 里由 `set_owner(binding_name)` 填充，shape 与其绑定名建立关联。实际的 field 解析已通过 `resolve_field_chain_in_file` 的 per-file `TableShapeId` 唯一性达成消歧；`owner_name` 为未来 hover / signature_help 的展示层增强（如 "method of `t`"）保留钩子。
-
----
-
-## 4. 其他低优先项
-
-- ~~`textDocument/prepareCallHierarchy` / `callHierarchy/incomingCalls` / `outgoingCalls`~~ ✅ 已完成（数据源 `DocumentSummary.call_sites`，名字匹配用 `last_segment`，嵌套函数作用域隔离）
-- ~~`textDocument/documentLink`：识别 `require("mod")` 里的 module path 作为可跳转链接~~ ✅ 已完成（paren + short-call 两种形态，别名调用 `m = require; m("x")` 不跟随）
-- ~~`textDocument/foldingRange` 的 `elseif` / `else` 分支独立折叠~~ ✅ 已完成（外层 + if-branch + 每个 elseif/else 各一个 fold）
-- ~~语义 tokens delta provider~~ ✅ 已完成（最长公共前后缀算法 + per-URI TokenCacheEntry + monotonic result_id）
-- ~~`---@meta` 元文件支持~~ ✅ 已完成（`DocumentSummary.is_meta` + 抑制 undefinedGlobal；globals 仍贡献 workspace 索引；位置必须在真实代码前）
-- ~~EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定~~ ✅ 已完成（fun 多返回 parse_type_list 已支持，self 在方法上下文中通过 `class_prefix_of` + `substitute_self` 替换）
-
----
-
-## 维护提示
-
-- 任何新增诊断类别 → 在 `DiagnosticsConfig` 加字段 + 默认 severity；默认开启时需在 fixture 上跑一遍确认不产生大量噪声
-- 任何新增 LSP capability → 在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 集成测试
-- 代码修改后按 `.cursor/rules/code-review-after-changes.mdc` 跑 code-reviewer
+- **新增诊断类别**：在 `DiagnosticsConfig` 加字段 + 默认 severity；默认开启时需在 fixture 上跑一遍确认不会在真实项目上产生大量噪声
+- **新增 LSP capability**：在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 对应集成测试文件
+- **代码修改后**：按 [`../.cursor/rules/code-review-after-changes.mdc`](../.cursor/rules/code-review-after-changes.mdc) 跑构建验证 + code-reviewer
+- **文档同步**：对外能力变动同步 [`../ai-readme.md`](../ai-readme.md)「已实现 LSP 能力」章节；架构/数据流变动同步 [`architecture.md`](architecture.md) / [`index-architecture.md`](index-architecture.md)

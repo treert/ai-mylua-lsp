@@ -12,9 +12,9 @@
 | [`architecture.md`](architecture.md) | Extension / LSP / Grammar 三分解、数据流；跨文件索引 **概要** |
 | [`index-architecture.md`](index-architecture.md) | **索引内部架构**：数据模型（DocumentSummary / 聚合层）、两层推断与惰性解析、类型推断与 Table Shape、链式追踪、索引构建与维护（冷启动 / 增量 / 签名指纹 / 持久化） |
 | [`lsp-semantic-spec.md`](lsp-semantic-spec.md) | **LSP 语义能力**：Lua/EmmyLua 语义约定（全局已见 / require 绑定 / Emmy 类型名）、LSP 能力消费（goto / hover / references / diagnostics / symbol）、候选决议与配置项 |
-| [`implementation-roadmap.md`](implementation-roadmap.md) | 阶段门禁、**已定 Monorepo** 布局与 CI、技术栈倾向（Rust/Go LSP + TS 扩展） |
-| [`index-implementation-plan.md`](index-implementation-plan.md) | **索引架构落地实施步骤**（步骤 1–7 全部完成，保留作为实现参考） |
-| [`future-work.md`](future-work.md) | **后续可选增强**：剩余诊断类别（参数 count/type 不匹配、`@return` 不匹配）、selection_range/symbols 精细化、signature_help shape-table 消歧、其他低优先项 |
+| [`implementation-roadmap.md`](implementation-roadmap.md) | 阶段门禁（A/B/C 已完成、D 主体完成）、**已定 Monorepo** 布局与 CI、技术栈倾向（Rust/Go LSP + TS 扩展） |
+| [`index-implementation-plan.md`](index-implementation-plan.md) | **索引架构落地实施步骤（历史归档）**：步骤 1–7 全部完成，作为类似量级改造的参考模板保留 |
+| [`future-work.md`](future-work.md) | **后续待办**（当前无已知待办）+ 新增条目模板 + 新增能力时的维护清单 |
 
 **测试**：LSP 具备独立测试能力（无需 VS Code 联调），集成测试覆盖所有核心功能。详见 [`lsp/README.md`](../lsp/README.md) 和 [`ai-readme.md`](../ai-readme.md) 的「独立测试框架」章节。
 

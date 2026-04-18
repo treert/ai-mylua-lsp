@@ -1,7 +1,13 @@
-# 索引架构落地实施计划
+# 索引架构落地实施计划（历史归档）
 
-**状态**：步骤 1–7 全部完成
-**前置文档**：[`index-architecture.md`](index-architecture.md)、[`lsp-semantic-spec.md`](lsp-semantic-spec.md)、[`requirements.md`](requirements.md)
+> **状态：已全部完成，本文档作为历史参考保留。**
+>
+> 步骤 1–7 所定义的：配置体系、核心数据模型、单文件 Summary 生成器、聚合层替换、跨文件链式解析、LSP 能力升级、索引生命周期与性能，**全部落地并通过集成测试**。
+>
+> - 当前实现状态与测试覆盖：见 [`../ai-readme.md`](../ai-readme.md)「LSP — Rust 语言服务器（阶段 C 完成）」章节
+> - 设计约束（活文档）：[`index-architecture.md`](index-architecture.md)、[`lsp-semantic-spec.md`](lsp-semantic-spec.md)、[`requirements.md`](requirements.md)
+>
+> 本文以下内容保留为 **规划过程的完整记录**——为未来需要做类似量级改造时提供可参考的分步模板。若架构边界再次变动，请新建实施计划文档，不要在本文原地编辑。
 
 ---
 
