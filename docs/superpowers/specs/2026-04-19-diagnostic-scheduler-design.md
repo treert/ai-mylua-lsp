@@ -301,19 +301,20 @@ async fn consumer_loop(
     client: Client,
 ) {
     loop {
+        // --- Ready 门槛（先于 pop）---
+        // 必须在 pop 之前检查，否则 Hot URI 被 pop 后又"推回 Cold"会导致
+        // 优先级降级。Not Ready 期间不动队列，仅轮询 state。
+        // 500ms 轮询开销：冷启动 scan 最多几分钟，~几十次空转，可忽略。
+        if *index_state.lock().unwrap() != IndexState::Ready {
+            tokio::time::sleep(Duration::from_millis(500)).await;
+            continue;
+        }
+
         // --- 等待有任务 ---
         let uri = loop {
             if let Some(u) = scheduler.pop() { break u; }
             scheduler.notify.notified().await;
         };
-
-        // --- Ready 门槛 ---
-        if *index_state.lock().unwrap() != IndexState::Ready {
-            // 暂时做不了，推回 Cold 再等等
-            scheduler.push(uri, Priority::Cold);
-            tokio::time::sleep(Duration::from_millis(500)).await;
-            continue;
-        }
 
         // --- Snapshot text（持 documents 锁最短时间）---
         let snapshot = {
@@ -437,7 +438,7 @@ for dep_uri in dependant_uris {
 |------|------|
 | compute 期间文件 DELETED | `documents[uri]` 已 remove → consumer snapshot 或一致性检查失败 → 跳过 publish，继续 loop |
 | compute panic（解析器 / summary_builder bug） | `tokio::spawn` 的 consumer task 带 catch_unwind 包裹；panic 记日志 + spawn 新 consumer 替代（避免整个 LSP 瘫痪） |
-| IndexState::Initializing 时被 pop 到 | 推回 Cold + sleep 500ms，避免 busy-loop |
+| IndexState::Initializing 时 consumer 启动 | **在 pop 之前检查 state**，Not Ready 则 sleep 500ms 轮询而不 pop（避免把 Hot URI 降级为 Cold，详见 §5.4） |
 | 冷启动过程中用户 did_open | 正常走 `schedule(Hot)` 路径，与冷启动 seed 互不干扰（入队去重阻止重复） |
 | 消费者 pop cold 时发现 tombstone | 跳过，继续 pop 下一个 |
 | `diagnostics.scope` 配置动态变化（通过 `didChangeConfiguration`） | 仅影响后续 seed / 级联决策；队列里已有的 URI 不清空（它们仍会被消费发布，即使 scope 刚切到 openOnly） |
