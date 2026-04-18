@@ -886,14 +886,67 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
-        self.diag_gen.lock().unwrap().remove(&uri);
-        // Drop the per-URI edit lock entry to keep the map bounded.
-        // Any in-flight did_change holding an `Arc` clone still sees a
-        // valid mutex; we only remove the HashMap entry.
-        self.edit_locks.lock().unwrap().remove(&uri);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
         self.semantic_tokens_cache.lock().unwrap().remove(&uri);
+
+        // Workspace-indexing LSP: diagnostics for closed files remain
+        // valid based on the index, so we do NOT clear them. If we
+        // cleared, VS Code's preview-mode tab cycling (single-click
+        // opens a preview tab that gets auto-closed when the user
+        // single-clicks the next file) would fire `didClose` on
+        // every tab-switch and silently erase diagnostics for
+        // everything the user has ever focused.
+        //
+        // Instead, re-read the file from disk so any unsaved buffer
+        // edits the user just discarded don't leave stale content in
+        // the index, then let `parse_and_store` republish syntax +
+        // semantic diagnostics and cascade to dependent open files.
+        // `edit_locks` / `diag_gen` entries are kept — they're reused
+        // on the next `did_open` for the same URI.
+        if let Some(path) = uri_to_path(&uri) {
+            // Acquire the lock BEFORE reading disk so a racing
+            // `did_change` (unusual after `did_close` but clients
+            // have bugs) can't sneak a buffer update in between our
+            // read and our parse_and_store — otherwise we'd
+            // overwrite fresher buffer content with stale disk.
+            let lock = self.edit_lock_for(&uri);
+            let _guard = lock.lock().await;
+            match tokio::fs::read_to_string(&path).await {
+                Ok(text) => {
+                    // Fast path: if the current indexed content
+                    // already matches disk, this close is just a
+                    // clean tab-switch. Skip re-parse and re-publish
+                    // entirely so VS Code's Problems panel, file
+                    // badges, and squiggles don't flicker on every
+                    // preview-mode tab toggle. Only when the buffer
+                    // diverged (user edited then discarded) do we
+                    // need to reset the index to disk state.
+                    let already_matches = {
+                        let docs = self.documents.lock().unwrap();
+                        docs.get(&uri).map_or(false, |d| d.text == text)
+                    };
+                    if already_matches {
+                        return;
+                    }
+                    self.parse_and_store(uri, text, None);
+                    return;
+                }
+                Err(e) => {
+                    lsp_log!(
+                        "[did_close] fallback-clear {:?}: read failed ({})",
+                        uri,
+                        e
+                    );
+                }
+            }
+        } else {
+            lsp_log!("[did_close] fallback-clear {:?}: non-file URI", uri);
+        }
+        // Non-file URI (e.g. `untitled:`) or the file was deleted on
+        // disk between open and close: fall back to clearing. For the
+        // deleted case `did_change_watched_files` will also fire a
+        // DELETED event that removes the file from the index.
         self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
@@ -938,6 +991,8 @@ impl LanguageServer for Backend {
                     self.index.lock().unwrap().remove_file(&change.uri);
                     self.documents.lock().unwrap().remove(&change.uri);
                     self.diag_gen.lock().unwrap().remove(&change.uri);
+                    self.edit_locks.lock().unwrap().remove(&change.uri);
+                    self.semantic_tokens_cache.lock().unwrap().remove(&change.uri);
                 }
                 _ => {}
             }
