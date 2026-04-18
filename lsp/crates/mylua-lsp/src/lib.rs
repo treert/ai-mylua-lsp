@@ -145,8 +145,8 @@ impl Backend {
             .clone()
     }
 
-    fn parse_and_store(&self, uri: Uri, text: String, version: Option<i32>) {
-        self.parse_and_store_with_old_tree(uri, text, version, None);
+    fn parse_and_store(&self, uri: Uri, text: String) {
+        self.parse_and_store_with_old_tree(uri, text, None);
     }
 
     /// Parse `text` optionally reusing an `old_tree` (already `.edit()`-ed
@@ -157,7 +157,6 @@ impl Backend {
         &self,
         uri: Uri,
         text: String,
-        version: Option<i32>,
         old_tree: Option<tree_sitter::Tree>,
     ) {
         let tree = {
@@ -194,9 +193,6 @@ impl Backend {
         };
 
         {
-            let syntax_diags =
-                diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
-
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
             lsp_log!(
                 "[index] summary for {:?}: locals={:?} types={:?} globals={}",
@@ -264,17 +260,18 @@ impl Backend {
                 Document { text, tree, scope_tree },
             );
 
-            let client = self.client.clone();
-            let uri_for_syntax = uri.clone();
-            tokio::spawn(async move {
-                client
-                    .publish_diagnostics(uri_for_syntax, syntax_diags, version)
-                    .await;
-            });
-
-            // Route semantic-diagnostic computation through the
-            // unified scheduler. Hot/Cold priority is decided by whether
-            // the client has `did_open`'d this URI.
+            // All diagnostics (both syntax and semantic) flow through
+            // the unified scheduler → consumer_loop, which recomputes
+            // syntax from the same tree and merges with semantic
+            // before a single `publishDiagnostics`. This eliminates
+            // the legacy two-step publish (syntax-first, semantic-
+            // later) and its visible flicker on close→reopen with
+            // unchanged content. Trade-off: syntax errors on
+            // `did_change` now appear after the 300ms debounce
+            // instead of immediately.
+            //
+            // Hot/Cold priority is decided by whether the client has
+            // `did_open`'d this URI.
             let is_open = self.open_uris.lock().unwrap().contains(&uri);
             let pri = if is_open {
                 diagnostic_scheduler::Priority::Hot
@@ -928,38 +925,43 @@ impl LanguageServer for Backend {
         let lock = self.edit_lock_for(&uri);
         let _guard = lock.lock().await;
 
-        // Fast path (symmetric to `did_close`): skip re-parse / re-build
-        // summary / re-publish when the indexed document already matches
-        // the incoming buffer byte-for-byte AND the URI is already
-        // tracked as open. Requiring `open_uris.contains` prevents
-        // "cold-start indexed, first did_open, text identical" from
-        // silently skipping diagnostics on a file the user just opened —
-        // the initial publish for the open file must go through
-        // parse_and_store → scheduler to reach the Hot queue.
+        // Fast path: skip re-parse / re-build summary when the indexed
+        // document already matches the incoming buffer byte-for-byte.
+        // After removing the legacy syntax-only spawn in
+        // `parse_and_store`, `consumer_loop` is the sole diagnostics
+        // publisher and always emits syntax + semantic merged from the
+        // current tree. Fast path still schedules Hot to guarantee
+        // the consumer processes this URI at least once — important
+        // for `scope=openOnly` (where cold-start never seeded the
+        // cold queue) and for `scope=Full` URIs whose cold-queue
+        // entry hasn't yet been popped. Re-scheduling produces a
+        // correct (usually identical, but not necessarily: a
+        // cross-file cascade during close could have changed the
+        // aggregation layer) `publishDiagnostics` payload, which
+        // the client typically renders as a no-op.
         //
         // We intentionally compare *text only*, not version: clients
         // reset `version` to 1 on reopen but content is unchanged, and
-        // conversely identical version numbers do not guarantee identical
-        // content across clients. Byte-equality is the only safe signal.
+        // conversely identical version numbers do not guarantee
+        // identical content across clients. Byte-equality is the only
+        // safe signal.
         //
-        // Invariant: fast path does NOT touch the scheduler (no
-        // `schedule()` / `seed_bulk()` / `invalidate()` calls). Any
-        // in-flight debounce from before still publishes correctly
-        // because its compute uses current `documents[uri]` which this
-        // check just proved equal to the incoming buffer.
-        //
-        // Lock ordering: `open_uris` FIRST, `documents` SECOND. We take
-        // them sequentially (not nested) to avoid establishing an
-        // `open_uris → documents` hold pattern that could deadlock
-        // against future consumers taking them in the opposite order.
-        let is_tracked_open = self.open_uris.lock().unwrap().contains(&uri);
-        if is_tracked_open {
+        // The previous `is_tracked_open` gate has been removed: it
+        // was there to prevent silent diagnostic skipping when the
+        // `parse_and_store` syntax spawn was the only immediate
+        // publisher. With that spawn gone, consumer_loop is the
+        // single source of truth and scheduling Hot here is
+        // sufficient.
+        let text_matches = {
             let docs = self.documents.lock().unwrap();
-            if let Some(doc) = docs.get(&uri) {
-                if doc.text == params.text_document.text {
-                    return;
-                }
-            }
+            docs.get(&uri)
+                .map_or(false, |d| d.text == params.text_document.text)
+        };
+        if text_matches {
+            self.open_uris.lock().unwrap().insert(uri.clone());
+            self.scheduler
+                .schedule(uri, diagnostic_scheduler::Priority::Hot);
+            return;
         }
 
         // Mark open BEFORE `parse_and_store` so the `scheduler.schedule`
@@ -968,16 +970,11 @@ impl LanguageServer for Backend {
         // would route to Cold (steady state after workspace Ready,
         // no seed_bulk tombstone upgrade to save us).
         self.open_uris.lock().unwrap().insert(uri.clone());
-        self.parse_and_store(
-            uri,
-            params.text_document.text,
-            Some(params.text_document.version),
-        );
+        self.parse_and_store(uri, params.text_document.text);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
-        let version = Some(params.text_document.version);
 
         // Serialize concurrent did_change / did_open for the same URI.
         // The two-phase remove→process→insert in `parse_and_store_with_old_tree`
@@ -1020,7 +1017,7 @@ impl LanguageServer for Backend {
             (text, tree)
         };
 
-        self.parse_and_store_with_old_tree(uri, final_text, version, old_tree);
+        self.parse_and_store_with_old_tree(uri, final_text, old_tree);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -1029,6 +1026,16 @@ impl LanguageServer for Backend {
         // closed, subsequent scheduler priority decisions for this URI
         // should default to Cold. This happens *before* any fast-path
         // return so tab cycling correctly reflects the close event.
+        //
+        // Lock-ordering note: this `open_uris.remove` runs BEFORE the
+        // `edit_lock` below. That's intentional — concurrent handlers
+        // (did_change / did_open) queuing on `edit_lock` observe the
+        // close state the moment they unblock, so their scheduling
+        // decisions don't use a stale "tracked open" view. Since
+        // `open_uris` is a plain `std::sync::Mutex` held only for the
+        // `.remove(&uri)` call, it can't race with any other lock in
+        // the `edit_lock → open_uris → documents → index` order used
+        // elsewhere.
         self.open_uris.lock().unwrap().remove(&uri);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
@@ -1073,7 +1080,7 @@ impl LanguageServer for Backend {
                     if already_matches {
                         return;
                     }
-                    self.parse_and_store(uri, text, None);
+                    self.parse_and_store(uri, text);
                     return;
                 }
                 Err(e) => {
