@@ -14,8 +14,10 @@ AppVersion = 1
 
 --- 审计 helper：全局 class
 ---@class Audit
----@field enabled boolean @ 是否启用审计
-Audit = { enabled = true }
+---@field enabled boolean @ 是否启用审计 11
+Audit = { 
+    enabled = true -- 是否启用审计 22
+}
 
 ---@param action string
 function Audit.log(action)

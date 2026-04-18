@@ -183,48 +183,73 @@ enum Token {
 }
 
 struct Tokenizer {
+    /// Original source text (owned). Needed so `rest_as_string` can return a
+    /// raw slice that preserves non-ASCII chars (e.g. Chinese), emoji, and
+    /// original whitespace — the token stream alone throws these away.
+    source: String,
     tokens: Vec<Token>,
+    /// Parallel to `tokens`: byte range `[start, end)` of each token inside
+    /// `source`. The trailing `Token::Eof` entry is `(consumable_end, consumable_end)`.
+    spans: Vec<(usize, usize)>,
     pos: usize,
+    /// Byte offset right after the most recently advanced token. Bumped by
+    /// `advance()` from `spans[pos].1`; used by `rest_as_string` as the start
+    /// of the "everything after what we've consumed" slice.
+    cursor: usize,
+    /// Byte offset where tokenization stopped. Equals `source.len()` unless a
+    /// trailing `--` Lua comment was hit, in which case it is the index of
+    /// the first `-`. `rest_as_string` never reads past this.
+    consumable_end: usize,
 }
 
-fn tokenize(input: &str) -> Vec<Token> {
+fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
     let mut tokens = Vec::new();
+    let mut spans: Vec<(usize, usize)> = Vec::new();
     let bytes = input.as_bytes();
     let len = bytes.len();
     let mut i = 0;
+    let consumable_end;
 
-    while i < len {
+    loop {
+        if i >= len {
+            consumable_end = len;
+            break;
+        }
         let b = bytes[i];
         match b {
             b' ' | b'\t' | b'\r' | b'\n' => { i += 1; }
-            b'@' => { tokens.push(Token::At); i += 1; }
-            b'|' => { tokens.push(Token::Pipe); i += 1; }
-            b'?' => { tokens.push(Token::Question); i += 1; }
-            b':' => { tokens.push(Token::Colon); i += 1; }
-            b',' => { tokens.push(Token::Comma); i += 1; }
-            b'(' => { tokens.push(Token::LParen); i += 1; }
-            b')' => { tokens.push(Token::RParen); i += 1; }
-            b'{' => { tokens.push(Token::LBrace); i += 1; }
-            b'}' => { tokens.push(Token::RBrace); i += 1; }
-            b'<' => { tokens.push(Token::LAngle); i += 1; }
-            b'>' => { tokens.push(Token::RAngle); i += 1; }
-            b'#' => { tokens.push(Token::Hash); i += 1; }
+            b'@' => { tokens.push(Token::At); spans.push((i, i + 1)); i += 1; }
+            b'|' => { tokens.push(Token::Pipe); spans.push((i, i + 1)); i += 1; }
+            b'?' => { tokens.push(Token::Question); spans.push((i, i + 1)); i += 1; }
+            b':' => { tokens.push(Token::Colon); spans.push((i, i + 1)); i += 1; }
+            b',' => { tokens.push(Token::Comma); spans.push((i, i + 1)); i += 1; }
+            b'(' => { tokens.push(Token::LParen); spans.push((i, i + 1)); i += 1; }
+            b')' => { tokens.push(Token::RParen); spans.push((i, i + 1)); i += 1; }
+            b'{' => { tokens.push(Token::LBrace); spans.push((i, i + 1)); i += 1; }
+            b'}' => { tokens.push(Token::RBrace); spans.push((i, i + 1)); i += 1; }
+            b'<' => { tokens.push(Token::LAngle); spans.push((i, i + 1)); i += 1; }
+            b'>' => { tokens.push(Token::RAngle); spans.push((i, i + 1)); i += 1; }
+            b'#' => { tokens.push(Token::Hash); spans.push((i, i + 1)); i += 1; }
             b'[' => {
                 if i + 1 < len && bytes[i + 1] == b']' {
                     tokens.push(Token::ArraySuffix);
+                    spans.push((i, i + 2));
                     i += 2;
                 } else {
                     tokens.push(Token::LBracket);
+                    spans.push((i, i + 1));
                     i += 1;
                 }
             }
-            b']' => { tokens.push(Token::RBracket); i += 1; }
+            b']' => { tokens.push(Token::RBracket); spans.push((i, i + 1)); i += 1; }
             b'.' => {
                 if i + 2 < len && bytes[i + 1] == b'.' && bytes[i + 2] == b'.' {
                     tokens.push(Token::Ellipsis);
+                    spans.push((i, i + 3));
                     i += 3;
                 } else {
                     tokens.push(Token::Dot);
+                    spans.push((i, i + 1));
                     i += 1;
                 }
             }
@@ -239,9 +264,13 @@ fn tokenize(input: &str) -> Vec<Token> {
                 if i < len { i += 1; } // closing quote
                 let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
                 tokens.push(Token::StringLit(s));
+                spans.push((start, i));
             }
             b'-' if i + 1 < len && bytes[i + 1] == b'-' => {
-                // Rest of line is a trailing comment, stop tokenizing
+                // Rest of line is a trailing Lua comment. Stop tokenizing AND
+                // treat everything past here as outside the annotation body
+                // (so `rest_as_string` won't leak `-- foo` into a desc).
+                consumable_end = i;
                 break;
             }
             b'0'..=b'9' => {
@@ -251,6 +280,7 @@ fn tokenize(input: &str) -> Vec<Token> {
                 }
                 let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
                 tokens.push(Token::Number(s));
+                spans.push((start, i));
             }
             _ if b.is_ascii_alphabetic() || b == b'_' => {
                 let start = i;
@@ -259,18 +289,28 @@ fn tokenize(input: &str) -> Vec<Token> {
                 }
                 let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
                 tokens.push(Token::Name(s));
+                spans.push((start, i));
             }
-            _ => { i += 1; } // skip unknown chars
+            _ => { i += 1; } // skip unknown bytes (e.g. UTF-8 continuation of CJK chars)
         }
     }
 
     tokens.push(Token::Eof);
-    tokens
+    spans.push((consumable_end, consumable_end));
+    (tokens, spans, consumable_end)
 }
 
 impl Tokenizer {
     fn new(input: &str) -> Self {
-        Self { tokens: tokenize(input), pos: 0 }
+        let (tokens, spans, consumable_end) = tokenize(input);
+        Self {
+            source: input.to_string(),
+            tokens,
+            spans,
+            pos: 0,
+            cursor: 0,
+            consumable_end,
+        }
     }
 
     fn peek(&self) -> &Token {
@@ -283,7 +323,12 @@ impl Tokenizer {
 
     fn advance(&mut self) -> Token {
         let tok = self.tokens.get(self.pos).cloned().unwrap_or(Token::Eof);
-        if self.pos < self.tokens.len() { self.pos += 1; }
+        if self.pos < self.tokens.len() {
+            if let Some(&(_, end)) = self.spans.get(self.pos) {
+                self.cursor = end;
+            }
+            self.pos += 1;
+        }
         tok
     }
 
@@ -308,40 +353,26 @@ impl Tokenizer {
         matches!(self.peek(), Token::Eof)
     }
 
-    /// Consume all remaining tokens as a description string.
+    /// Consume everything after the last advanced token as a raw description
+    /// string. Uses the original source slice (not a token rejoin) so that:
+    ///   - non-ASCII chars (Chinese, emoji, ...) survive
+    ///   - original whitespace is preserved (single trim at each end only)
+    ///   - an optional leading `@` or `#` — EmmyLua's conventional separator
+    ///     between the type and the description (`---@field x string @ desc`)
+    ///     — is stripped once.
     fn rest_as_string(&mut self) -> String {
-        let mut parts = Vec::new();
-        while !self.at_eof() {
-            let tok = self.advance();
-            parts.push(token_to_string(&tok));
-        }
-        parts.join(" ").trim().to_string()
-    }
-}
-
-fn token_to_string(tok: &Token) -> String {
-    match tok {
-        Token::Name(s) => s.clone(),
-        Token::Number(s) => s.clone(),
-        Token::StringLit(s) => s.clone(),
-        Token::At => "@".to_string(),
-        Token::Pipe => "|".to_string(),
-        Token::Question => "?".to_string(),
-        Token::Colon => ":".to_string(),
-        Token::Comma => ",".to_string(),
-        Token::Dot => ".".to_string(),
-        Token::LParen => "(".to_string(),
-        Token::RParen => ")".to_string(),
-        Token::LBracket => "[".to_string(),
-        Token::RBracket => "]".to_string(),
-        Token::LBrace => "{".to_string(),
-        Token::RBrace => "}".to_string(),
-        Token::LAngle => "<".to_string(),
-        Token::RAngle => ">".to_string(),
-        Token::ArraySuffix => "[]".to_string(),
-        Token::Ellipsis => "...".to_string(),
-        Token::Hash => "#".to_string(),
-        Token::Eof => String::new(),
+        let start = self.cursor.min(self.consumable_end);
+        let end = self.consumable_end;
+        let raw = self.source.get(start..end).unwrap_or("");
+        let trimmed = raw.trim();
+        let after_sep = trimmed
+            .strip_prefix('@')
+            .or_else(|| trimmed.strip_prefix('#'))
+            .unwrap_or(trimmed);
+        // Advance internal state so subsequent `at_eof` / `peek` calls behave.
+        self.pos = self.tokens.len().saturating_sub(1);
+        self.cursor = end;
+        after_sep.trim().to_string()
     }
 }
 
@@ -1605,5 +1636,126 @@ mod tests {
     fn extract_block_comment_not_block() {
         assert_eq!(extract_block_comment_content("-- regular comment"), None);
         assert_eq!(extract_block_comment_content("--- emmy comment"), None);
+    }
+
+    // -- Description capture: non-ASCII + separators --
+
+    #[test]
+    fn annotation_field_cjk_desc_with_at_separator() {
+        // Regression: previously the tokenizer skipped non-ASCII bytes and
+        // `rest_as_string` rejoined tokens with spaces, so CJK chars were
+        // lost and the literal `@` separator leaked into the desc.
+        let anns = parse_emmy_comments("---@field enabled boolean @ 是否启用审计 11");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { name, desc, .. } => {
+                assert_eq!(name, "enabled");
+                assert_eq!(desc, "是否启用审计 11");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_cjk_desc_no_separator() {
+        let anns = parse_emmy_comments("---@field name string 名字字段");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { desc, .. } => {
+                assert_eq!(desc, "名字字段");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_hash_separator() {
+        // EmmyLua / some tools also accept `#` as desc separator.
+        let anns = parse_emmy_comments("---@field x number # user id");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { desc, .. } => {
+                assert_eq!(desc, "user id");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_second_at_preserved() {
+        // Only ONE leading separator should be stripped; a literal `@` inside
+        // the desc body must survive.
+        let anns = parse_emmy_comments("---@field x string @ email like a@b.com");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { desc, .. } => {
+                assert_eq!(desc, "email like a@b.com");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_param_cjk_desc() {
+        let anns = parse_emmy_comments("---@param action string @ 动作名称");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Param { name, desc, .. } => {
+                assert_eq!(name, "action");
+                assert_eq!(desc, "动作名称");
+            }
+            _ => panic!("expected Param"),
+        }
+    }
+
+    #[test]
+    fn annotation_type_emoji_desc() {
+        let anns = parse_emmy_comments("---@type number @ count 🚀 rockets");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Type { desc, .. } => {
+                assert_eq!(desc, "count 🚀 rockets");
+            }
+            _ => panic!("expected Type"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_empty_desc() {
+        let anns = parse_emmy_comments("---@field x number");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { desc, .. } => {
+                assert_eq!(desc, "");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_desc_stops_at_trailing_lua_comment() {
+        // A trailing `-- ...` inside the same line should be treated as a Lua
+        // comment and excluded from the desc.
+        let anns = parse_emmy_comments("---@field x string foo -- trailing");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { desc, .. } => {
+                assert_eq!(desc, "foo");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_class_cjk_desc() {
+        let anns = parse_emmy_comments("---@class Audit @ 审计 helper：全局 class");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Class { name, desc, .. } => {
+                assert_eq!(name, "Audit");
+                assert_eq!(desc, "审计 helper：全局 class");
+            }
+            _ => panic!("expected Class"),
+        }
     }
 }
