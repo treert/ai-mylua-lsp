@@ -56,7 +56,20 @@ fn find_local_references(
 
     let def_byte = position_to_byte_offset(&doc.text, def.selection_range.start)
         .unwrap_or(0);
-    let scope_range = doc.scope_tree.scope_byte_range_for_def(def_byte, name);
+
+    // For `local` decls, `visible_after_byte == stmt.end_byte`, meaning the
+    // name is not yet visible inside its own declaration statement. So we
+    // probe at the end of the decl's full range (statement end) to land in
+    // a position where the ScopeDecl is in scope. For params / for-vars
+    // where `visible_after_byte == decl_byte`, this also works.
+    let probe_byte = position_to_byte_offset(&doc.text, def.range.end)
+        .unwrap_or(def_byte.saturating_add(name.len()));
+    let target_decl_byte = doc.scope_tree
+        .resolve_decl(probe_byte, name)
+        .map(|d| d.decl_byte)
+        .unwrap_or(def_byte);
+
+    let scope_range = doc.scope_tree.scope_byte_range_for_def(probe_byte, name);
     let scope_node = if let Some((start, end)) = scope_range {
         doc.tree.root_node().descendant_for_byte_range(start, end.saturating_sub(1))
     } else {
@@ -64,7 +77,16 @@ fn find_local_references(
     };
 
     if let Some(scope) = scope_node {
-        collect_identifier_occurrences(scope, name, source, uri, &mut locations, def);
+        collect_identifier_occurrences(
+            scope,
+            name,
+            source,
+            uri,
+            &mut locations,
+            def,
+            target_decl_byte,
+            &doc.scope_tree,
+        );
     }
 
     locations
@@ -77,9 +99,13 @@ fn collect_identifier_occurrences(
     uri: &Uri,
     locations: &mut Vec<Location>,
     def: &crate::types::Definition,
+    target_decl_byte: usize,
+    scope_tree: &crate::scope::ScopeTree,
 ) {
     let mut cursor = scope.walk();
-    collect_idents_recursive(&mut cursor, name, source, uri, locations, def);
+    collect_idents_recursive(
+        &mut cursor, name, source, uri, locations, def, target_decl_byte, scope_tree,
+    );
 }
 
 fn collect_idents_recursive(
@@ -89,16 +115,23 @@ fn collect_idents_recursive(
     uri: &Uri,
     locations: &mut Vec<Location>,
     def: &crate::types::Definition,
+    target_decl_byte: usize,
+    scope_tree: &crate::scope::ScopeTree,
 ) {
     let node = cursor.node();
 
     if node.kind() == "identifier" && node_text(node, source) == name {
-        let range = ts_node_to_range(node);
+        let range = ts_node_to_range(node, source);
         if range != def.selection_range {
-            let is_after_def = range.start.line > def.selection_range.start.line
-                || (range.start.line == def.selection_range.start.line
-                    && range.start.character >= def.selection_range.end.character);
-            if is_after_def {
+            // Use the scope tree to confirm this occurrence actually refers
+            // to the same declaration as the click. This correctly handles
+            // `local x = x + 1` (the RHS `x` resolves to an outer `x`, not
+            // the newly declared one) and shadowing in nested scopes.
+            let ident_byte = node.start_byte();
+            let resolves_to_target = scope_tree
+                .resolve_decl(ident_byte, name)
+                .map_or(false, |d| d.decl_byte == target_decl_byte);
+            if resolves_to_target {
                 locations.push(Location {
                     uri: uri.clone(),
                     range,
@@ -109,7 +142,9 @@ fn collect_idents_recursive(
 
     if cursor.goto_first_child() {
         loop {
-            collect_idents_recursive(cursor, name, source, uri, locations, def);
+            collect_idents_recursive(
+                cursor, name, source, uri, locations, def, target_decl_byte, scope_tree,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -201,7 +236,7 @@ fn collect_global_name_occurrences(
                 if is_bare_name {
                     locations.push(Location {
                         uri: uri.clone(),
-                        range: ts_node_to_range(node),
+                        range: ts_node_to_range(node, source),
                     });
                 }
             }

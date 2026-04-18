@@ -275,6 +275,37 @@ x.bar = 1"#;
 }
 
 #[test]
+fn hover_middle_field_in_chain_ast_driven() {
+    // Regression for Bug 7: clicking the middle identifier `b` in `a.b.c`
+    // used to rely on string splitn('.') which picked the wrong base.
+    // With AST-driven hover, clicking `b` should navigate via the
+    // enclosing `variable` node whose `field` is `b`.
+    let src = r#"---@class Inner
+---@field c integer
+---@class Outer
+---@field b Inner
+
+---@type Outer
+local a = {}
+local _ = a.b.c"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "chain.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on the middle `b` in `a.b.c` (line 7, col 12)
+    let result = hover::hover(doc, &uri, pos(7, 12), &mut agg, &docs);
+    assert!(result.is_some(), "hover on middle field `b` should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("Inner") || content.contains("(field)"),
+            "middle field hover should mention the `Inner` type or report it as a field, got: {}",
+            content,
+        );
+    }
+}
+
+#[test]
 fn hover_dotted_field_still_works() {
     let src = r#"---@class Baz
 ---@field qux integer

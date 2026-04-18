@@ -29,6 +29,11 @@ pub struct DocumentSummary {
     /// Type of the file-level `return` statement (module export).
     /// `None` if the file has no top-level return.
     pub module_return_type: Option<TypeFact>,
+    /// Source range of the file-level `return` statement, used by `require`
+    /// goto-definition to jump to the module's export. `None` if the file
+    /// has no top-level return.
+    #[serde(default)]
+    pub module_return_range: Option<Range>,
     /// Fingerprint of all externally-visible type signatures.
     /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
     pub signature_fingerprint: u64,

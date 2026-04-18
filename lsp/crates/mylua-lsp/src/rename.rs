@@ -26,12 +26,19 @@ pub fn prepare_rename(
         return None;
     }
 
-    let range = crate::util::ts_node_to_range(node);
+    let range = crate::util::ts_node_to_range(node, doc.text.as_bytes());
     Some(PrepareRenameResponse::RangeWithPlaceholder {
         range,
         placeholder: text.to_string(),
     })
 }
+
+/// Result of a rename request.
+///
+/// `Err` carries a user-facing reason the rename was rejected (e.g. invalid
+/// identifier). `Ok(None)` means the identifier under the cursor can't be
+/// renamed (keyword, `self`, etc.). `Ok(Some(edit))` is the success case.
+pub type RenameResult = std::result::Result<Option<WorkspaceEdit>, &'static str>;
 
 pub fn rename(
     doc: &Document,
@@ -40,8 +47,15 @@ pub fn rename(
     new_name: &str,
     index: &WorkspaceAggregation,
     all_docs: &HashMap<Uri, Document>,
-) -> Option<WorkspaceEdit> {
-    let locations = references::find_references(
+) -> RenameResult {
+    if !is_valid_lua_identifier(new_name) {
+        return Err("New name is not a valid Lua identifier");
+    }
+    if LUA_KEYWORDS.contains(&new_name) {
+        return Err("New name collides with a Lua keyword");
+    }
+
+    let locations = match references::find_references(
         doc,
         uri,
         position,
@@ -49,7 +63,10 @@ pub fn rename(
         index,
         all_docs,
         &ReferencesStrategy::Merge,
-    )?;
+    ) {
+        Some(locs) => locs,
+        None => return Ok(None),
+    };
 
     let mut changes: HashMap<Uri, Vec<TextEdit>> = HashMap::new();
     for loc in locations {
@@ -59,8 +76,45 @@ pub fn rename(
         });
     }
 
-    Some(WorkspaceEdit {
+    Ok(Some(WorkspaceEdit {
         changes: Some(changes),
         ..Default::default()
-    })
+    }))
+}
+
+/// Return `true` if `s` matches the Lua identifier production:
+/// `[A-Za-z_][A-Za-z0-9_]*`. Lua source is restricted to ASCII identifiers.
+pub fn is_valid_lua_identifier(s: &str) -> bool {
+    let mut chars = s.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if !(first.is_ascii_alphabetic() || first == '_') {
+        return false;
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_') {
+            return false;
+        }
+    }
+    true
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_valid_lua_identifier;
+
+    #[test]
+    fn valid_identifiers() {
+        for s in &["x", "foo", "_bar", "_", "a1", "snake_case", "__Mixed9"] {
+            assert!(is_valid_lua_identifier(s), "{} should be valid", s);
+        }
+    }
+
+    #[test]
+    fn invalid_identifiers() {
+        for s in &["", "1foo", "a-b", "a.b", "a b", "你好", "foo$", "a?"] {
+            assert!(!is_valid_lua_identifier(s), "{} should be invalid", s);
+        }
+    }
 }

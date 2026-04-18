@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::scope::ScopeTree;
-use crate::util::node_text;
+use crate::util::{node_text, ts_point_to_position};
 
 const TT_VARIABLE: u32 = 0;
 const TM_DEFAULT_LIBRARY: u32 = 1 << 0; // bit 0
@@ -79,9 +79,14 @@ fn collect_variable_tokens(
         let start = node.start_position();
         let end = node.end_position();
         if start.row == end.row {
-            let length = (end.column - start.column) as u32;
+            // Convert tree-sitter byte columns to LSP UTF-16 code-unit
+            // columns so non-ASCII lines (Chinese identifiers / comments
+            // preceding the token) align correctly in the client.
+            let start_pos = ts_point_to_position(start, source);
+            let end_pos = ts_point_to_position(end, source);
+            let length = end_pos.character.saturating_sub(start_pos.character);
             if length > 0 {
-                tokens.push((start.row as u32, start.column as u32, length, modifiers));
+                tokens.push((start_pos.line, start_pos.character, length, modifiers));
             }
         }
     }

@@ -193,8 +193,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: DefKind::ForVariable,
                         decl_byte: db,
                         visible_after_byte: db,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(name_node),
+                        range: ts_node_to_range(node, self.source),
+                        selection_range: ts_node_to_range(name_node, self.source),
                     });
                 }
                 self.visit_children(node, child_scope);
@@ -216,8 +216,8 @@ impl<'a> TreeBuilder<'a> {
                                     kind: DefKind::ForVariable,
                                     decl_byte: db,
                                     visible_after_byte: db,
-                                    range: ts_node_to_range(node),
-                                    selection_range: ts_node_to_range(id_node),
+                                    range: ts_node_to_range(node, self.source),
+                                    selection_range: ts_node_to_range(id_node, self.source),
                                 });
                             }
                         }
@@ -246,8 +246,8 @@ impl<'a> TreeBuilder<'a> {
                     kind: DefKind::LocalFunction,
                     decl_byte: db,
                     visible_after_byte: db,
-                    range: ts_node_to_range(node),
-                    selection_range: ts_node_to_range(name_node),
+                    range: ts_node_to_range(node, self.source),
+                    selection_range: ts_node_to_range(name_node, self.source),
                 });
             }
         }
@@ -264,8 +264,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: ts_node_to_range(child),
-                            selection_range: ts_node_to_range(child),
+                            range: ts_node_to_range(child, self.source),
+                            selection_range: ts_node_to_range(child, self.source),
                         });
                     } else if child.kind() == "name_list" {
                         for j in 0..child.named_child_count() {
@@ -277,8 +277,8 @@ impl<'a> TreeBuilder<'a> {
                                         kind: DefKind::Parameter,
                                         decl_byte: db,
                                         visible_after_byte: db,
-                                        range: ts_node_to_range(id),
-                                        selection_range: ts_node_to_range(id),
+                                        range: ts_node_to_range(id, self.source),
+                                        selection_range: ts_node_to_range(id, self.source),
                                     });
                                 }
                             }
@@ -300,8 +300,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: ts_node_to_range(func_body),
-                            selection_range: ts_node_to_range(func_body),
+                            range: ts_node_to_range(func_body, self.source),
+                            selection_range: ts_node_to_range(func_body, self.source),
                         });
                     }
                 }
@@ -325,8 +325,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: kind.clone(),
                         decl_byte: child.start_byte(),
                         visible_after_byte: visible_after,
-                        range: ts_node_to_range(stmt_node),
-                        selection_range: ts_node_to_range(child),
+                        range: ts_node_to_range(stmt_node, self.source),
+                        selection_range: ts_node_to_range(child, self.source),
                     });
                 }
             }

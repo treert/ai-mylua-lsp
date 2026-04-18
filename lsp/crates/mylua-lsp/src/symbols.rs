@@ -22,8 +22,8 @@ pub fn collect_document_symbols(root: tree_sitter::Node, source: &[u8]) -> Vec<D
                         kind: SymbolKind::FUNCTION,
                         tags: None,
                         deprecated: None,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(name_node),
+                        range: ts_node_to_range(node, source),
+                        selection_range: ts_node_to_range(name_node, source),
                         children: None,
                     });
                 }
@@ -38,8 +38,8 @@ pub fn collect_document_symbols(root: tree_sitter::Node, source: &[u8]) -> Vec<D
                         kind: SymbolKind::FUNCTION,
                         tags: None,
                         deprecated: None,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(name_node),
+                        range: ts_node_to_range(node, source),
+                        selection_range: ts_node_to_range(name_node, source),
                         children: None,
                     });
                 }
@@ -57,8 +57,8 @@ pub fn collect_document_symbols(root: tree_sitter::Node, source: &[u8]) -> Vec<D
                                     kind: SymbolKind::VARIABLE,
                                     tags: None,
                                     deprecated: None,
-                                    range: ts_node_to_range(node),
-                                    selection_range: ts_node_to_range(id_node),
+                                    range: ts_node_to_range(node, source),
+                                    selection_range: ts_node_to_range(id_node, source),
                                     children: None,
                                 });
                             }
@@ -77,8 +77,8 @@ pub fn collect_document_symbols(root: tree_sitter::Node, source: &[u8]) -> Vec<D
                             kind: SymbolKind::VARIABLE,
                             tags: None,
                             deprecated: None,
-                            range: ts_node_to_range(node),
-                            selection_range: ts_node_to_range(first_var),
+                            range: ts_node_to_range(node, source),
+                            selection_range: ts_node_to_range(first_var, source),
                             children: None,
                         });
                     }

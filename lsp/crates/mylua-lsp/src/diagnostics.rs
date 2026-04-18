@@ -84,7 +84,7 @@ fn check_undefined_globals(
                     && !index.global_shard.contains_key(name)
                 {
                     diagnostics.push(Diagnostic {
-                        range: ts_node_to_range(node),
+                        range: ts_node_to_range(node, source),
                         severity: Some(severity),
                         source: Some("mylua".to_string()),
                         message: format!("Undefined global '{}'", name),
@@ -114,7 +114,7 @@ fn collect_errors_recursive(
     let node = cursor.node();
     if node.is_error() {
         diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node),
+            range: ts_node_to_range(node, source),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("mylua".to_string()),
             message: format!("Syntax error near '{}'", truncate(node_text(node, source), 40)),
@@ -122,7 +122,7 @@ fn collect_errors_recursive(
         });
     } else if node.is_missing() {
         diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node),
+            range: ts_node_to_range(node, source),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("mylua".to_string()),
             message: format!("Missing '{}'", node.kind()),
@@ -158,20 +158,40 @@ fn check_field_access_diagnostics(
     );
 }
 
-/// Returns true if `node` is on the left-hand side of an assignment statement.
+/// Returns true if `node` is (or is any descendant of) the left-hand side
+/// of an assignment statement. Walks ancestors so that chained LHS like
+/// `a.b.c = 1` — where the outer node is `variable` and the inner
+/// `field_expression` node (`a.b`) is not a direct child of `variable_list` —
+/// is still recognized as an assignment target and skipped by field
+/// diagnostics.
 fn is_assignment_target(node: tree_sitter::Node) -> bool {
-    if let Some(parent) = node.parent() {
-        if parent.kind() == "variable_list" {
-            if let Some(grandparent) = parent.parent() {
-                if grandparent.kind() == "assignment_statement" {
-                    if let Some(left) = grandparent.child_by_field_name("left") {
-                        return left.id() == parent.id();
-                    }
-                }
-            }
+    let mut current = node;
+    while let Some(parent) = current.parent() {
+        if parent.kind() == "assignment_statement" {
+            // `current` is always an ancestor of (or equal to) `node`,
+            // so `is_ancestor_or_equal(left, node)` already covers the
+            // `left == current` case.
+            return parent
+                .child_by_field_name("left")
+                .map_or(false, |left| is_ancestor_or_equal(left, node));
         }
+        current = parent;
     }
     false
+}
+
+/// Returns true when `ancestor` is, or contains, `descendant`.
+fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter::Node) -> bool {
+    let mut n = descendant;
+    loop {
+        if n.id() == ancestor.id() {
+            return true;
+        }
+        match n.parent() {
+            Some(p) => n = p,
+            None => return false,
+        }
+    }
 }
 
 fn collect_field_diagnostics(
@@ -211,7 +231,7 @@ fn collect_field_diagnostics(
                             let qualified = format!("{}.{}", type_name, field_name);
                             if index.global_shard.get(&qualified).is_none() {
                                 diagnostics.push(Diagnostic {
-                                    range: ts_node_to_range(field),
+                                    range: ts_node_to_range(field, source),
                                     severity: Some(severity),
                                     source: Some("mylua".to_string()),
                                     message: format!(
@@ -236,7 +256,7 @@ fn collect_field_diagnostics(
                                 };
                                 if let Some(sev) = severity {
                                     diagnostics.push(Diagnostic {
-                                        range: ts_node_to_range(field),
+                                        range: ts_node_to_range(field, source),
                                         severity: Some(sev),
                                         source: Some("mylua".to_string()),
                                         message: format!(
@@ -311,18 +331,20 @@ fn find_actual_type_for_local(
     summary: &crate::summary::DocumentSummary,
 ) -> TypeFact {
     let target_line = decl_range.start.line;
-    let mut cursor = root.walk();
-    find_local_rhs_type(&mut cursor, name, target_line, summary, source)
+    find_local_rhs_type(root, name, target_line, summary, source)
 }
 
+/// Walk the subtree under `node` looking for a `local_declaration` that
+/// declares `name` on line `target_line` and return the inferred literal
+/// type of its matching RHS value. Pure recursion (no tree-cursor state)
+/// keeps the traversal robust against early returns.
 fn find_local_rhs_type(
-    cursor: &mut tree_sitter::TreeCursor,
+    node: tree_sitter::Node,
     name: &str,
     target_line: u32,
     summary: &crate::summary::DocumentSummary,
     source: &[u8],
 ) -> TypeFact {
-    let node = cursor.node();
     if node.kind() == "local_declaration" {
         if let Some(names) = node.child_by_field_name("names") {
             for i in 0..names.named_child_count() {
@@ -341,18 +363,13 @@ fn find_local_rhs_type(
             }
         }
     }
-    if cursor.goto_first_child() {
-        loop {
-            let result = find_local_rhs_type(cursor, name, target_line, summary, source);
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            let result = find_local_rhs_type(child, name, target_line, summary, source);
             if result != TypeFact::Unknown {
-                cursor.goto_parent();
                 return result;
             }
-            if !cursor.goto_next_sibling() {
-                break;
-            }
         }
-        cursor.goto_parent();
     }
     TypeFact::Unknown
 }

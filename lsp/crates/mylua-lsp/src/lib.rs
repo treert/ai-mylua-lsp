@@ -91,12 +91,54 @@ impl Backend {
     }
 
     fn parse_and_store(&self, uri: Uri, text: String, version: Option<i32>) {
+        self.parse_and_store_with_old_tree(uri, text, version, None);
+    }
+
+    /// Parse `text` optionally reusing an `old_tree` (already `.edit()`-ed
+    /// to reflect the delta). When `old_tree` is provided, tree-sitter
+    /// will incrementally reparse — only the changed regions get new
+    /// nodes, everything else is reused.
+    fn parse_and_store_with_old_tree(
+        &self,
+        uri: Uri,
+        text: String,
+        version: Option<i32>,
+        old_tree: Option<tree_sitter::Tree>,
+    ) {
         let tree = {
             let mut parser = self.parser.lock().unwrap();
-            parser.parse(text.as_bytes(), None)
+            // First try incremental reparse; on failure fall back to a
+            // fresh parse so that parser state (timeout / limits) does not
+            // propagate to the fresh attempt.
+            parser
+                .parse(text.as_bytes(), old_tree.as_ref())
+                .or_else(|| {
+                    let mut fresh = new_parser();
+                    fresh.parse(text.as_bytes(), None)
+                })
         };
 
-        if let Some(tree) = tree {
+        // If parsing failed even with a fresh parser (realistically only
+        // possible under parser cancellation / limits, neither currently
+        // enabled), preserve the previous document state rather than
+        // dropping the document entirely. `did_change` removed the old
+        // Document from the map; without this we'd leave the server
+        // claiming the file doesn't exist.
+        let tree = match tree {
+            Some(t) => t,
+            None => {
+                if let Some(old) = old_tree {
+                    let scope_tree = scope::build_scope_tree(&old, text.as_bytes());
+                    self.documents.lock().unwrap().insert(
+                        uri,
+                        Document { text, tree: old, scope_tree },
+                    );
+                }
+                return;
+            }
+        };
+
+        {
             let syntax_diags =
                 diagnostics::collect_diagnostics(tree.root_node(), text.as_bytes());
 
@@ -457,21 +499,28 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     }
 }
 
+/// Percent-decode a URI path. Accumulates decoded bytes and interprets the
+/// final buffer as UTF-8, so multi-byte encodings (e.g. `%E4%B8%AD` → 中)
+/// are decoded correctly. Falls back to lossy decoding if the result is
+/// not valid UTF-8.
 fn percent_decode(s: &str) -> String {
-    let mut result = String::with_capacity(s.len());
-    let mut chars = s.bytes();
-    while let Some(b) = chars.next() {
-        if b == b'%' {
-            let hi = chars.next().and_then(|c| hex_val(c));
-            let lo = chars.next().and_then(|c| hex_val(c));
-            if let (Some(h), Some(l)) = (hi, lo) {
-                result.push((h << 4 | l) as char);
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
             }
-        } else {
-            result.push(b as char);
         }
+        out.push(b);
+        i += 1;
     }
-    result
+    String::from_utf8(out)
+        .unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
 }
 
 fn hex_val(b: u8) -> Option<u8> {
@@ -480,6 +529,43 @@ fn hex_val(b: u8) -> Option<u8> {
         b'a'..=b'f' => Some(b - b'a' + 10),
         b'A'..=b'F' => Some(b - b'A' + 10),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{percent_decode, uri_to_path};
+    use tower_lsp_server::ls_types::Uri;
+
+    #[test]
+    fn percent_decode_ascii_space() {
+        assert_eq!(percent_decode("hello%20world"), "hello world");
+    }
+
+    #[test]
+    fn percent_decode_utf8_chinese() {
+        // %E4%B8%AD = U+4E2D "中"
+        assert_eq!(percent_decode("%E4%B8%AD"), "中");
+        assert_eq!(percent_decode("a/%E4%B8%AD/b.lua"), "a/中/b.lua");
+    }
+
+    #[test]
+    fn percent_decode_lowercase_hex() {
+        assert_eq!(percent_decode("%e4%b8%ad"), "中");
+    }
+
+    #[test]
+    fn percent_decode_trailing_percent_untouched() {
+        assert_eq!(percent_decode("abc%"), "abc%");
+        assert_eq!(percent_decode("abc%2"), "abc%2");
+    }
+
+    #[test]
+    #[cfg(not(windows))]
+    fn uri_to_path_decodes_utf8_paths() {
+        let uri: Uri = "file:///Users/%E4%B8%AD%E6%96%87/x.lua".parse().unwrap();
+        let path = uri_to_path(&uri).expect("should decode");
+        assert_eq!(path.to_string_lossy(), "/Users/中文/x.lua");
     }
 }
 
@@ -512,7 +598,7 @@ impl LanguageServer for Backend {
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
-                    TextDocumentSyncKind::FULL,
+                    TextDocumentSyncKind::INCREMENTAL,
                 )),
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
@@ -582,13 +668,45 @@ impl LanguageServer for Backend {
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        if let Some(change) = params.content_changes.into_iter().last() {
-            self.parse_and_store(
-                params.text_document.uri,
-                change.text,
-                Some(params.text_document.version),
-            );
-        }
+        let uri = params.text_document.uri;
+        let version = Some(params.text_document.version);
+
+        // Apply changes sequentially. For each range-scoped change we
+        // patch the stored text, call `tree.edit(&InputEdit)` so tree-sitter
+        // can reuse unchanged subtrees, and finally reparse using the
+        // edited tree as a base. A full-document change (range = None)
+        // restarts from scratch.
+        let (final_text, old_tree) = {
+            let mut docs = self.documents.lock().unwrap();
+            let mut text;
+            let mut tree: Option<tree_sitter::Tree>;
+            if let Some(doc) = docs.remove(&uri) {
+                text = doc.text;
+                tree = Some(doc.tree);
+            } else {
+                text = String::new();
+                tree = None;
+            }
+
+            for change in params.content_changes {
+                match change.range {
+                    None => {
+                        text = change.text;
+                        tree = None;
+                    }
+                    Some(range) => {
+                        let edit = util::apply_text_edit(&mut text, range, &change.text);
+                        if let Some(ref mut t) = tree {
+                            t.edit(&edit);
+                        }
+                    }
+                }
+            }
+
+            (text, tree)
+        };
+
+        self.parse_and_store_with_old_tree(uri, final_text, version, old_tree);
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
@@ -744,14 +862,14 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(rename::rename(
-            doc,
-            uri,
-            position,
-            &params.new_name,
-            &idx,
-            &docs,
-        ))
+        match rename::rename(doc, uri, position, &params.new_name, &idx, &docs) {
+            Ok(edit) => Ok(edit),
+            Err(msg) => Err(tower_lsp_server::jsonrpc::Error {
+                code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
+                message: msg.into(),
+                data: None,
+            }),
+        }
     }
 
     async fn symbol(

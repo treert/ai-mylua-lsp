@@ -57,17 +57,17 @@ pub struct RequireDependant {
 }
 
 /// Key for the cross-file resolution cache.
+///
+/// `FieldAccess { base_key, field }` covers both "field on a global" and
+/// "field on a type" via its `base_key` — there is no separate `GlobalField`
+/// / `TypeField` variant. Keep this enum minimal to avoid dead code.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CacheKey {
     RequireReturn { module_path: String },
     /// Resolve a global name itself (not a field on it).
     Global { name: String },
-    /// Resolve a field on a global: `name.field`.
-    GlobalField { global_name: String, field: String },
     /// Resolve an Emmy type name itself (not a field on it).
     Type { name: String },
-    /// Resolve a field on an Emmy type: `type.field`.
-    TypeField { type_name: String, field: String },
     CallReturn { base_key: Box<CacheKey>, func_name: String },
     FieldAccess { base_key: Box<CacheKey>, field: String },
 }
@@ -92,12 +92,8 @@ fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
         CacheKey::RequireReturn { module_path } => {
             affected.module_paths.contains(module_path)
         }
-        CacheKey::Global { name } | CacheKey::GlobalField { global_name: name, .. } => {
-            affected.global_names.contains(name)
-        }
-        CacheKey::Type { name } | CacheKey::TypeField { type_name: name, .. } => {
-            affected.type_names.contains(name)
-        }
+        CacheKey::Global { name } => affected.global_names.contains(name),
+        CacheKey::Type { name } => affected.type_names.contains(name),
         CacheKey::CallReturn { base_key, .. } | CacheKey::FieldAccess { base_key, .. } => {
             cache_key_affected(base_key, affected)
         }
@@ -200,6 +196,11 @@ impl WorkspaceAggregation {
     /// Remove a file from the aggregation layer entirely.
     pub fn remove_file(&mut self, uri: &Uri) {
         self.remove_contributions(uri);
+        // Only removing the file entirely should drop its require_map entries
+        // (module_path → this_uri). Re-indexing the same file (upsert) must
+        // NOT drop these — the file's path, and therefore its require-able
+        // module paths, don't change across edits.
+        self.require_map.retain(|_, target_uri| target_uri != uri);
         self.summaries.remove(uri);
     }
 
@@ -225,8 +226,6 @@ impl WorkspaceAggregation {
             deps.retain(|d| &d.source_uri != uri);
             !deps.is_empty()
         });
-
-        self.require_map.retain(|_, target_uri| target_uri != uri);
     }
 
     /// Collect the set of module paths, global names, and type names affected

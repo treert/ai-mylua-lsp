@@ -148,6 +148,53 @@ local Color = {
 }
 
 #[test]
+fn no_unknown_field_on_chained_lhs_assignment() {
+    // Regression: inner `a.b` of `a.b.c = 1` was previously not recognized as
+    // part of the LHS (is_assignment_target only looked at direct parent),
+    // leading to false "Unknown field 'b' on table" diagnostics.
+    let src = r#"
+local a = { b = { c = 0 } }
+a.b.c = 1
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "chained_lhs.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "LHS-of-assignment nested field accesses must not emit Unknown field diagnostics, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn unknown_field_still_reported_on_rhs_read() {
+    // Sanity counter-test: actual RHS reads of missing fields should still
+    // be flagged.
+    let src = r#"
+local t = { name = "hello", age = 10 }
+print(t.no_exist)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "rhs_read.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.lua_field_error = DiagnosticSeverityOption::Error;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("no_exist")),
+        "rhs reads of unknown fields must still be diagnosed, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn generic_class_field_resolution() {
     use mylua_lsp::resolver;
     use mylua_lsp::type_system::{TypeFact, KnownType};

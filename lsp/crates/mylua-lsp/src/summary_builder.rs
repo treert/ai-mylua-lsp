@@ -29,6 +29,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         pending_class: None,
         pending_generic_params: Vec::new(),
         module_return_type: None,
+        module_return_range: None,
     };
 
     let root = tree.root_node();
@@ -47,6 +48,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         local_type_facts: ctx.local_type_facts,
         table_shapes: ctx.table_shapes,
         module_return_type: ctx.module_return_type,
+        module_return_range: ctx.module_return_range,
         signature_fingerprint,
     }
 }
@@ -71,6 +73,8 @@ struct BuildContext<'a> {
     pending_generic_params: Vec<String>,
     /// Type of the file-level `return` statement (module export).
     module_return_type: Option<TypeFact>,
+    /// Source range of the file-level `return` statement.
+    module_return_range: Option<tower_lsp_server::ls_types::Range>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -139,6 +143,7 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
 }
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    ctx.module_return_range = Some(ts_node_to_range(node, ctx.source));
     if let Some(values) = node.child_by_field_name("values") {
         if let Some(first_expr) = values.named_child(0) {
             let type_fact = infer_expression_type(ctx, first_expr, 0);
@@ -208,7 +213,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             _ => continue,
         };
         let name = node_text(name_node, ctx.source).to_string();
-        let range = ts_node_to_range(name_node);
+        let range = ts_node_to_range(name_node, ctx.source);
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
@@ -308,7 +313,7 @@ fn try_extract_require<'a>(
     Some(RequireBinding {
         local_name: local_name.to_string(),
         module_path,
-        range: ts_node_to_range(value_node),
+        range: ts_node_to_range(value_node, ctx.source),
     })
 }
 
@@ -367,8 +372,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
         type_fact: TypeFact::Known(KnownType::Function(sig_for_global)),
-        range: ts_node_to_range(node),
-        selection_range: ts_node_to_range(name_node),
+        range: ts_node_to_range(node, ctx.source),
+        selection_range: ts_node_to_range(name_node, ctx.source),
     });
 }
 
@@ -436,7 +441,7 @@ fn build_function_summary(
     FunctionSummary {
         name: name.to_string(),
         signature: sig,
-        range: ts_node_to_range(decl_node),
+        range: ts_node_to_range(decl_node, ctx.source),
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
@@ -566,8 +571,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     kind: GlobalContributionKind::Variable,
                     type_fact,
-                    range: ts_node_to_range(node),
-                    selection_range: ts_node_to_range(var_node),
+                    range: ts_node_to_range(node, ctx.source),
+                    selection_range: ts_node_to_range(var_node, ctx.source),
                 });
             }
             // Field assignment: `x.foo = expr`
@@ -604,7 +609,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                                     shape.set_field(field_name.clone(), FieldInfo {
                                         name: field_name,
                                         type_fact,
-                                        def_range: Some(ts_node_to_range(node)),
+                                        def_range: Some(ts_node_to_range(node, ctx.source)),
                                         assignment_count: 1,
                                     });
                                     continue;
@@ -619,8 +624,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         name,
                         kind: GlobalContributionKind::TableExtension,
                         type_fact,
-                        range: ts_node_to_range(node),
-                        selection_range: ts_node_to_range(var_node),
+                        range: ts_node_to_range(node, ctx.source),
+                        selection_range: ts_node_to_range(var_node, ctx.source),
                     });
                 }
             }
@@ -659,7 +664,7 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             fields,
             alias_type: None,
             generic_params,
-            range: ts_node_to_range(node),
+            range: ts_node_to_range(node, ctx.source),
         });
     }
 }
@@ -676,7 +681,7 @@ fn emit_pending_class_as_typedef(
             fields,
             alias_type: None,
             generic_params: gparams,
-            range: ts_node_to_range(node),
+            range: ts_node_to_range(node, ctx.source),
         });
     }
 }
@@ -716,7 +721,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields.push(TypeFieldDef {
                         name: fname.clone(),
                         type_fact: emmy_type_to_fact(type_expr),
-                        range: ts_node_to_range(node),
+                        range: ts_node_to_range(node, ctx.source),
                     });
                 }
             }
@@ -734,7 +739,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: Vec::new(),
                     alias_type: Some(emmy_type_to_fact(type_expr)),
                     generic_params: Vec::new(),
-                    range: ts_node_to_range(node),
+                    range: ts_node_to_range(node, ctx.source),
                 });
             }
             EmmyAnnotation::Enum { name } => {
@@ -746,7 +751,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: Vec::new(),
                     alias_type: None,
                     generic_params: Vec::new(),
-                    range: ts_node_to_range(node),
+                    range: ts_node_to_range(node, ctx.source),
                 });
             }
             _ => {}
@@ -1008,7 +1013,7 @@ fn extract_table_shape(
                         shape.set_field(key.clone(), FieldInfo {
                             name: key,
                             type_fact,
-                            def_range: Some(ts_node_to_range(child)),
+                            def_range: Some(ts_node_to_range(child, ctx.source)),
                             assignment_count: 1,
                         });
                     }
@@ -1022,7 +1027,7 @@ fn extract_table_shape(
                             shape.set_field(key_text.to_string(), FieldInfo {
                                 name: key_text.to_string(),
                                 type_fact,
-                                def_range: Some(ts_node_to_range(child)),
+                                def_range: Some(ts_node_to_range(child, ctx.source)),
                                 assignment_count: 1,
                             });
                         }

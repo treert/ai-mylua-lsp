@@ -115,6 +115,47 @@ fn workspace_global_priority_by_path_depth() {
     }
 }
 
+/// Regression for bug where `upsert_summary` dropped a file's `require_map`
+/// entries as a side effect of `remove_contributions`. After editing (re-upserting)
+/// a file, other files that `require()` it must still resolve to it.
+#[test]
+fn require_map_survives_upsert() {
+    use mylua_lsp::summary_builder;
+
+    let mut parser = new_parser();
+    let mod_uri = make_uri("mymod.lua");
+    let mod_src = "return { x = 1 }";
+    let mod_doc = parse_doc(&mut parser, mod_src);
+    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_doc.tree, mod_src.as_bytes());
+
+    let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
+    agg.set_require_mapping("mymod".to_string(), mod_uri.clone());
+    agg.upsert_summary(mod_summary);
+
+    assert_eq!(
+        agg.resolve_module_to_uri("mymod").as_ref(),
+        Some(&mod_uri),
+        "baseline: require(\"mymod\") should resolve before any edit"
+    );
+
+    let new_src = "return { x = 2, y = 3 }";
+    let new_doc = parse_doc(&mut parser, new_src);
+    let new_summary = summary_builder::build_summary(&mod_uri, &new_doc.tree, new_src.as_bytes());
+    agg.upsert_summary(new_summary);
+
+    assert_eq!(
+        agg.resolve_module_to_uri("mymod").as_ref(),
+        Some(&mod_uri),
+        "after re-upserting (editing) mymod.lua, require(\"mymod\") must still resolve to it",
+    );
+
+    agg.remove_file(&mod_uri);
+    assert!(
+        agg.resolve_module_to_uri("mymod").is_none(),
+        "after remove_file, require(\"mymod\") should no longer resolve",
+    );
+}
+
 /// Test multi-file hover: hover2.lua depends on hover2_requrie.lua via require.
 #[test]
 fn workspace_hover_require_resolution() {

@@ -25,34 +25,36 @@ pub fn hover(
         ident_node.parent().map_or("none", |p| p.kind()),
     );
 
-    // Try field expression hover: walk up ancestors to find field_expression,
-    // a `variable` node that contains a dot, or a `function_name` in a declaration.
+    // Walk ancestors to find a dotted access (`variable` node with
+    // object+field fields, or the legacy `field_expression`) where this
+    // identifier is the `field`. That path is AST-driven and recurses
+    // through the resolver — it correctly handles `a[1].b`, `a:m().c`, etc.
     {
         let mut n = ident_node;
-        for _ in 0..4 {
+        for _ in 0..8 {
             if let Some(p) = n.parent() {
-                lsp_log!("[hover]   ancestor kind='{}' text='{}'", p.kind(), &node_text(p, doc.text.as_bytes()).chars().take(60).collect::<String>());
-                if p.kind() == "field_expression" {
-                    if let Some(result) = hover_field_expression(p, doc, uri, index, all_docs) {
-                        return Some(result);
-                    }
-                    break;
-                }
-                if p.kind() == "variable" {
-                    let var_text = node_text(p, doc.text.as_bytes());
-                    if var_text.contains('.') {
-                        let last_field = var_text.rsplit('.').next().unwrap_or("");
-                        if ident_text == last_field {
-                            if let Some(result) = hover_dotted_variable(var_text, ident_text, uri, index, all_docs) {
-                                return Some(result);
-                            }
-                            break;
+                lsp_log!(
+                    "[hover]   ancestor kind='{}' text='{}'",
+                    p.kind(),
+                    &node_text(p, doc.text.as_bytes()).chars().take(60).collect::<String>(),
+                );
+                if matches!(p.kind(), "variable" | "field_expression") {
+                    let field_is_ident = p
+                        .child_by_field_name("field")
+                        .map(|f| f.id() == ident_node.id())
+                        .unwrap_or(false);
+                    if field_is_ident {
+                        if let Some(result) = hover_variable_field(p, doc, uri, index, all_docs) {
+                            return Some(result);
                         }
+                        break;
                     }
                 }
                 if p.kind() == "function_name" {
                     if let Some(decl) = p.parent() {
-                        if decl.kind() == "function_declaration" || decl.kind() == "local_function_declaration" {
+                        if decl.kind() == "function_declaration"
+                            || decl.kind() == "local_function_declaration"
+                        {
                             return hover_at_declaration(decl, doc);
                         }
                     }
@@ -217,7 +219,7 @@ fn hover_at_declaration(
     }
 
     let name_node = decl_node.child_by_field_name("name");
-    let range = name_node.map(|n| crate::util::ts_node_to_range(n));
+    let range = name_node.map(|n| crate::util::ts_node_to_range(n, source));
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -228,103 +230,36 @@ fn hover_at_declaration(
     })
 }
 
-fn hover_dotted_variable(
-    var_text: &str,
-    field_ident: &str,
-    uri: &Uri,
-    index: &mut WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
-) -> Option<Hover> {
-    // Try each dot split point from right to left (prefer longest base).
-    // For `A.B.C`, tries: base="A.B" fields=["C"], then base="A" fields=["B","C"].
-    let dot_positions: Vec<usize> = var_text.match_indices('.').map(|(i, _)| i).collect();
-    if dot_positions.is_empty() {
-        return None;
-    }
-
-    for &pos in dot_positions.iter().rev() {
-        let base_name = &var_text[..pos];
-        let field_chain: Vec<String> = var_text[pos + 1..].split('.').map(|s| s.to_string()).collect();
-
-        lsp_log!("[hover_dotted] base='{}' fields={:?} target='{}'", base_name, field_chain, field_ident);
-
-        let base_fact = if let Some(summary) = index.summaries.get(uri) {
-            if let Some(ltf) = summary.local_type_facts.get(base_name) {
-                ltf.type_fact.clone()
-            } else {
-                TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
-            }
-        } else {
-            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: base_name.to_string() })
-        };
-
-        lsp_log!("[hover_dotted] base_fact={:?}", base_fact);
-        let resolved = resolver::resolve_field_chain(&base_fact, &field_chain, index);
-        lsp_log!("[hover_dotted] resolved type={:?} def_uri={:?}", resolved.type_fact, resolved.def_uri);
-
-        if resolved.def_uri.is_some() || resolved.type_fact != crate::type_system::TypeFact::Unknown {
-            let type_display = format_resolved_type(&resolved.type_fact);
-
-            if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-                if all_docs.contains_key(def_uri) {
-                    let fake_def = crate::types::Definition {
-                        name: field_ident.to_string(),
-                        kind: DefKind::GlobalVariable,
-                        range: *def_range,
-                        selection_range: *def_range,
-                        uri: def_uri.clone(),
-                    };
-                    return build_hover_for_definition(&fake_def, all_docs, Some(&type_display));
-                }
-            }
-
-            let mut parts = Vec::new();
-            parts.push(format!("```lua\n(field) {}\n```", field_ident));
-            if type_display != "unknown" {
-                parts.push(format!("Type: `{}`", type_display));
-            }
-            return Some(Hover {
-                contents: HoverContents::Markup(MarkupContent {
-                    kind: MarkupKind::Markdown,
-                    value: parts.join("\n\n"),
-                }),
-                range: None,
-            });
-        }
-    }
-
-    // Fallback: show field name even when resolution fails
-    Some(Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: format!("```lua\n(field) {}\n```", field_ident),
-        }),
-        range: None,
-    })
-}
-
-fn hover_field_expression(
-    field_expr: tree_sitter::Node,
+/// AST-driven hover for a dotted access: `var_node` is the enclosing
+/// `variable` (or `field_expression`) whose `field` is the identifier
+/// the user clicked. Handles arbitrary bases via `infer_node_type` which
+/// recurses through nested variables / subscripts / call returns.
+fn hover_variable_field(
+    var_node: tree_sitter::Node,
     doc: &Document,
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.text.as_bytes();
-    let object = field_expr.child_by_field_name("object")?;
-    let field = field_expr.child_by_field_name("field")?;
+    let object = var_node.child_by_field_name("object")?;
+    let field = var_node.child_by_field_name("field")?;
     let field_name = node_text(field, source).to_string();
 
     let base_fact = infer_node_type(object, source, uri, index);
-    lsp_log!("[hover_field] base='{}' base_fact={:?} field='{}'", node_text(object, source), base_fact, field_name);
+    lsp_log!(
+        "[hover_var_field] base='{}' base_fact={:?} field='{}'",
+        node_text(object, source),
+        base_fact,
+        field_name,
+    );
     let resolved = resolver::resolve_field_chain(&base_fact, &[field_name.clone()], index);
-    lsp_log!("[hover_field] resolved={:?}", resolved.type_fact);
+    lsp_log!("[hover_var_field] resolved={:?}", resolved.type_fact);
 
     let type_display = format_resolved_type(&resolved.type_fact);
 
-    // If we have a definition location, show full hover from there
     if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-        if let Some(_def_doc) = all_docs.get(def_uri) {
+        if all_docs.contains_key(def_uri) {
             let fake_def = crate::types::Definition {
                 name: field_name.clone(),
                 kind: DefKind::GlobalVariable,
@@ -336,7 +271,6 @@ fn hover_field_expression(
         }
     }
 
-    // Fallback: show just the type
     let mut parts = Vec::new();
     parts.push(format!("```lua\n(field) {}\n```", field_name));
     if type_display != "unknown" {
@@ -348,13 +282,22 @@ fn hover_field_expression(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(crate::util::ts_node_to_range(field)),
+        range: Some(crate::util::ts_node_to_range(field, source)),
     })
 }
 
 /// Recursively infer the type of an AST expression node.
-/// For `field_expression` nodes (like `t.x`), decomposes into base + field
-/// and uses the resolver chain rather than treating the whole text as one name.
+///
+/// The mylua grammar uses `variable` nodes for both plain identifiers and
+/// dotted access (`a.b.c` is a `variable` whose `object` field is another
+/// `variable` and whose `field` field is an identifier). `field_expression`
+/// is kept as a legacy alias for future grammar revisions.
+///
+/// For bases that are *not* purely dotted — e.g. `a[1].b` (subscript) or
+/// `a:m().c` (method call) — we return `Unknown` rather than concocting a
+/// bogus `GlobalRef("a[1]")` stub. Inferring those bases requires either
+/// table `array_element_type` lookup or replaying the call-return logic
+/// from `summary_builder`; neither is implemented here yet.
 pub fn infer_node_type(
     node: tree_sitter::Node,
     source: &[u8],
@@ -362,7 +305,7 @@ pub fn infer_node_type(
     index: &mut WorkspaceAggregation,
 ) -> TypeFact {
     match node.kind() {
-        "field_expression" => {
+        "variable" | "field_expression" => {
             if let (Some(object), Some(field)) = (
                 node.child_by_field_name("object"),
                 node.child_by_field_name("field"),
@@ -372,9 +315,27 @@ pub fn infer_node_type(
                 let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
                 return resolved.type_fact;
             }
+            // `variable` wraps either a single identifier or a subscript
+            // (`a[1]`). A single identifier has one child whose text equals
+            // the whole node text; treat that as local/global lookup.
+            // Anything else (subscript, malformed) → Unknown to avoid
+            // constructing meaningless `GlobalRef` names.
+            if node.named_child_count() == 1
+                && node.named_child(0).map(|c| c.kind()) == Some("identifier")
+            {
+                let text = node_text(node, source);
+                if let Some(summary) = index.summaries.get(uri) {
+                    if let Some(ltf) = summary.local_type_facts.get(text) {
+                        return ltf.type_fact.clone();
+                    }
+                }
+                return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
+                    name: text.to_string(),
+                });
+            }
             TypeFact::Unknown
         }
-        _ => {
+        "identifier" => {
             let text = node_text(node, source);
             if let Some(summary) = index.summaries.get(uri) {
                 if let Some(ltf) = summary.local_type_facts.get(text) {
@@ -385,6 +346,7 @@ pub fn infer_node_type(
                 name: text.to_string(),
             })
         }
+        _ => TypeFact::Unknown,
     }
 }
 
