@@ -102,7 +102,7 @@ flowchart TB
 
 **全局 table**：跨文件允许对同一全局路径做结构合并，并保留逐段节点树、完整路径索引与来源候选；当候选歧义较高时，`goto`、`hover`、`references` 采用不同程度的保守回退，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §3.1 与 §2.2。
 
-**索引内部架构**（数据模型、类型推断、构建与维护）维护在 **[`index-architecture.md`](index-architecture.md)**；**LSP 能力的协议层需求** 维护在 **[`lsp-semantic-spec.md`](lsp-semantic-spec.md)**（均为讨论稿）。
+**索引内部架构**（数据模型、类型推断、构建与维护）维护在 **[`index-architecture.md`](index-architecture.md)**；**LSP 能力的协议层需求** 维护在 **[`lsp-semantic-spec.md`](lsp-semantic-spec.md)**。
 
 ### 3.5 诊断流水线
 

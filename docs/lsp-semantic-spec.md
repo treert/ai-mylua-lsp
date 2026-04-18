@@ -1,4 +1,4 @@
-# LSP 语义能力需求（讨论稿）
+# LSP 语义能力需求
 
 本文档定义 **Lua/EmmyLua 的语义约定**，以及 `goto` / `hover` / `references` / `diagnostics` / `workspace/symbol` 五个 LSP 能力的 **协议层需求细节**。与 [`architecture.md`](architecture.md) 总览拆分、单独迭代定案。需求级约定见 [`requirements.md`](requirements.md) §3.2.1。
 
