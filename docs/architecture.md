@@ -110,6 +110,22 @@ flowchart TB
 - **诊断分层**：采用 **Emmy 路径严格、Lua 路径保守** 的平衡策略。命中明确 Emmy 类型后，字段类型不兼容与 `unknown field` 默认按 **`error`** 处理；纯 Lua 路径仅对高确定性问题报诊断（如显式 `nil` 成员访问、显式非对象值成员访问、封闭 shape 未知字段），其余更倾向 `warning` 或内部保留，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §2.4。
 - 遵守 **`$/cancelRequest`**。
 
+### 3.7 诊断调度（DiagnosticScheduler）
+
+`src/diagnostic_scheduler.rs` 是 semantic 诊断的唯一调度入口。三条进入路径均统一走它：
+
+- `did_change` / `did_open`（非 fast path）→ `scheduler.schedule(uri, Hot | Cold)`
+- 签名指纹级联 → `scheduler.schedule(dep_uri, ...)` 并按 scope 过滤
+- `initialized` 冷启动 → `scheduler.seed_bulk(hot, Hot)` + 条件 `seed_bulk(cold, Cold)`
+
+内部数据结构：hot/cold 双 `VecDeque` + `enqueued: HashMap<Uri, Priority>` 去重 + `cold_tombstones: HashSet<Uri>` 做 Cold→Hot 升级标记 + `diag_gen: HashMap<Uri, u64>` per-URI 代数用于 debounce 过滤。push 与 pop 均摊 O(1)。
+
+单消费者 supervisor：`start_diagnostic_consumer` spawn 外层 loop，每次 panic 日志 + 100ms 退避 + 重启内层 `consumer_loop`。内部状态靠 `Arc` 共享，重启不丢 queue。消费者 `consumer_loop` 的 Ready 门槛放在 pop 之前，避免 Hot URI 被降级为 Cold 推回队列。pop 后 snapshot text → compute → 发布前 text 未变二次确认再 publish。
+
+syntax 诊断（tree-sitter ERROR/MISSING 节点）不走 scheduler，保持 parse 完立即 publish 的即时反馈行为。
+
+配置 `mylua.diagnostics.scope`（`full` 默认 / `openOnly`）控制冷启动 seed 范围和级联是否惠及未打开文件。详细设计与决策记录见 [`docs/superpowers/specs/2026-04-19-diagnostic-scheduler-design.md`](superpowers/specs/2026-04-19-diagnostic-scheduler-design.md)。
+
 ## 4. LSP 能力映射（全工作区目标）
 
 | 能力 | 说明 |
