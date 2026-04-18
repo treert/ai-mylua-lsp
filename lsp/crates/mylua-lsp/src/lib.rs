@@ -4,6 +4,7 @@ pub mod aggregation;
 pub mod call_hierarchy;
 pub mod completion;
 pub mod config;
+pub mod diagnostic_scheduler;
 pub mod diagnostics;
 pub mod document;
 pub mod document_highlight;
