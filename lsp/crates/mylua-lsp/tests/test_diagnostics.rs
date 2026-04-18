@@ -1136,3 +1136,38 @@ utils2.doesnotexist()
         diags,
     );
 }
+
+#[test]
+fn alias_to_inline_table_exposes_fields_for_diagnostics() {
+    // `---@alias Vec2 { x: number, y: number }` should behave like a
+    // `@class Vec2` with x/y for the purpose of `emmyUnknownField`
+    // diagnostics: reading `p.x` on `---@type Vec2 local p = ...` must
+    // NOT flag "Unknown field 'x' on type 'Vec2'", while `p.z` must.
+    let src = r#"
+---@alias Vec2 { x: number, y: number }
+
+---@type Vec2
+local p = { x = 1, y = 2 }
+
+print(p.x, p.z)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "alias_shape.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        !unknown.iter().any(|d| d.message.contains("'x'")),
+        "p.x on ---@type Vec2 (alias to inline table) must NOT be flagged, got: {:?}",
+        unknown,
+    );
+    assert!(
+        unknown.iter().any(|d| d.message.contains("'z'")),
+        "p.z on alias Vec2 missing 'z' field must still be flagged, got: {:?}",
+        unknown,
+    );
+}

@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 
 use tower_lsp_server::ls_types::Uri;
 
-use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, parse_type_from_str, EmmyAnnotation, EmmyType};
+use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, parse_type_from_str, EmmyAnnotation, EmmyTableFieldKey, EmmyType};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape, TableShapeId, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
@@ -1255,11 +1255,37 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     "alias",
                 );
+                // When the alias targets an inline table literal
+                // (`---@alias Foo { x: number, y: number }`), flatten
+                // its named fields into `TypeDefinition.fields` so that
+                // `Foo` behaves like a class for field resolution,
+                // hover, diagnostics and completion. `emmy_type_to_fact`
+                // on `EmmyType::Table` otherwise collapses to an opaque
+                // `Table(MAX)` with no recorded shape, which breaks the
+                // `p.x` lookup on `---@type Foo local p = ...`.
+                // `IndexType` keys (`[string]: number`) are not
+                // nameable via dot/colon access, so they're skipped.
+                let aliased_fields = if let EmmyType::Table(tfs) = type_expr {
+                    let line_range = ts_node_to_range(line_node, ctx.source);
+                    tfs.iter()
+                        .filter_map(|tf| match &tf.key {
+                            EmmyTableFieldKey::Name(n) => Some(TypeFieldDef {
+                                name: n.clone(),
+                                type_fact: emmy_type_to_fact(&tf.value),
+                                range: line_range,
+                                name_range: None,
+                            }),
+                            EmmyTableFieldKey::IndexType(_) => None,
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 ctx.type_definitions.push(TypeDefinition {
                     name: name.clone(),
                     kind: TypeDefinitionKind::Alias,
                     parents: Vec::new(),
-                    fields: Vec::new(),
+                    fields: aliased_fields,
                     alias_type: Some(emmy_type_to_fact(type_expr)),
                     generic_params: Vec::new(),
                     range: ts_node_to_range(node, ctx.source),

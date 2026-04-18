@@ -708,3 +708,33 @@ a[1].c = 1
         junk,
     );
 }
+
+#[test]
+fn hover_field_on_alias_to_inline_table() {
+    // `---@alias Vec2 { x: number, y: number }` should expose `x` as a
+    // real field for hover — resolving `p.x` on a `---@type Vec2`
+    // binding must produce a hover result with the field's type
+    // (`number`), not `Unknown`.
+    let src = r#"---@alias Vec2 { x: number, y: number }
+
+---@type Vec2
+local p = { x = 1, y = 2 }
+
+print(p.x)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "alias_shape_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // cursor on `x` in `print(p.x)` — the `x` identifier sits at col 8
+    // on line 5 (0-indexed: `print(p.x)` → `(` is col 5, `p` is col 6,
+    // `.` is col 7, `x` is col 8).
+    let h = hover::hover(doc, &uri, pos(5, 8), &mut agg, &docs)
+        .expect("hover on p.x must resolve");
+    let text = hover_content_string(&h);
+    assert!(
+        text.contains("number"),
+        "p.x on alias-to-inline-table must show field type 'number', got:\n{}",
+        text,
+    );
+}
