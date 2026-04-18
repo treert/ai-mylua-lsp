@@ -364,6 +364,14 @@ impl ScopeTree {
         }
     }
 
+    /// Iterate every declaration in every scope. Used by the
+    /// `unused-local` diagnostic to walk every binding regardless of
+    /// position. Order is scope-creation order, then within-scope
+    /// declaration order.
+    pub fn all_declarations(&self) -> impl Iterator<Item = &ScopeDecl> {
+        self.scopes.iter().flat_map(|s| s.declarations.iter())
+    }
+
     pub fn visible_locals(&self, byte_offset: usize) -> Vec<&ScopeDecl> {
         let mut result = Vec::new();
         let Some(scope_id) = self.innermost_scope(byte_offset) else {

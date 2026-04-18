@@ -69,6 +69,12 @@ pub fn collect_semantic_diagnostics_with_version(
     if let Some(severity) = diag_config.emmy_type_mismatch.to_lsp_severity() {
         check_type_mismatch_diagnostics(root, source, uri, index, &mut diagnostics, severity);
     }
+    if let Some(severity) = diag_config.duplicate_table_key.to_lsp_severity() {
+        check_duplicate_table_keys(root, source, &mut diagnostics, severity);
+    }
+    if let Some(severity) = diag_config.unused_local.to_lsp_severity() {
+        check_unused_locals(root, source, scope_tree, &mut diagnostics, severity);
+    }
     diagnostics
 }
 
@@ -468,5 +474,166 @@ fn known_types_compatible(declared: &KnownType, actual: &KnownType) -> bool {
         (KnownType::Table(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Function(_)) => false,
         (KnownType::Function(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Table(_)) => false,
         _ => true,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — duplicate table keys and unused locals
+// ---------------------------------------------------------------------------
+
+/// Walk every `table_constructor` and report keys that appear more
+/// than once. Only named keys (`{ a = 1, a = 2 }`) and static
+/// bracket-key literals (`{ [1] = 'x', [1] = 'y' }`) can be reliably
+/// compared at summary-build time; dynamic `[expr]` keys are skipped.
+fn check_duplicate_table_keys(
+    root: tree_sitter::Node,
+    source: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let mut cursor = root.walk();
+    check_duplicate_keys_recursive(&mut cursor, source, diagnostics, severity);
+}
+
+fn check_duplicate_keys_recursive(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    let node = cursor.node();
+    if node.kind() == "table_constructor" {
+        let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
+        for i in 0..node.named_child_count() {
+            let Some(field_list) = node.named_child(i as u32) else { continue };
+            let fields = if field_list.kind() == "field_list" {
+                field_list
+            } else {
+                continue;
+            };
+            for j in 0..fields.named_child_count() {
+                let Some(field) = fields.named_child(j as u32) else { continue };
+                if field.kind() != "field" {
+                    continue;
+                }
+                let Some(key_text) = extract_field_key(field, source) else { continue };
+                if let Some(first_range) = seen.get(&key_text) {
+                    let range = ts_node_to_range(field, source);
+                    diagnostics.push(Diagnostic {
+                        range,
+                        severity: Some(severity),
+                        source: Some("mylua".to_string()),
+                        message: format!(
+                            "Duplicate table key '{}' (first defined at line {})",
+                            key_text,
+                            first_range.start.line + 1,
+                        ),
+                        ..Default::default()
+                    });
+                } else {
+                    seen.insert(key_text, ts_node_to_range(field, source));
+                }
+            }
+        }
+    }
+
+    if cursor.goto_first_child() {
+        loop {
+            check_duplicate_keys_recursive(cursor, source, diagnostics, severity);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
+    }
+}
+
+fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    // Identifier key: `a = 1`
+    if let Some(key) = field.child_by_field_name("key") {
+        match key.kind() {
+            "identifier" => {
+                return Some(node_text(key, source).to_string());
+            }
+            "string" => {
+                // Bracket string key: `["a"] = 1` — normalize by text
+                // content excluding quotes so that `["a"]` vs `['a']`
+                // dedup.
+                let t = node_text(key, source);
+                return Some(t.trim_matches(|c| c == '"' || c == '\'' || c == '[' || c == ']').to_string());
+            }
+            "number" => {
+                return Some(format!("num:{}", node_text(key, source)));
+            }
+            _ => return None,
+        }
+    }
+    None
+}
+
+/// Warn on locals that are declared but never referenced. Uses the
+/// `ScopeTree` to find every declaration, then scans the file for
+/// matching identifier usages (excluding the declaration site
+/// itself). `_` / `_*` names are conventionally "intentionally
+/// discarded" and don't trigger the warning.
+fn check_unused_locals(
+    root: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    diagnostics: &mut Vec<Diagnostic>,
+    severity: DiagnosticSeverity,
+) {
+    // Count references per (name, decl_byte) by walking the tree
+    // and resolving each identifier through the scope tree.
+    let mut ref_count: std::collections::HashMap<(String, usize), usize> =
+        std::collections::HashMap::new();
+    let mut cursor = root.walk();
+    count_identifier_references(&mut cursor, source, scope_tree, &mut ref_count);
+
+    // Any declaration whose ref_count is zero is unused.
+    for decl in scope_tree.all_declarations() {
+        // Convention: `_` or `_something` indicate intentional discard.
+        if decl.name == "_" || decl.name.starts_with('_') {
+            continue;
+        }
+        let key = (decl.name.clone(), decl.decl_byte);
+        if ref_count.get(&key).copied().unwrap_or(0) == 0 {
+            diagnostics.push(Diagnostic {
+                range: decl.selection_range,
+                severity: Some(severity),
+                source: Some("mylua".to_string()),
+                message: format!("Unused local '{}'", decl.name),
+                ..Default::default()
+            });
+        }
+    }
+}
+
+fn count_identifier_references(
+    cursor: &mut tree_sitter::TreeCursor,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+    ref_count: &mut std::collections::HashMap<(String, usize), usize>,
+) {
+    let node = cursor.node();
+    if node.kind() == "identifier" {
+        let name = node_text(node, source);
+        let byte = node.start_byte();
+        if let Some(decl) = scope_tree.resolve_decl(byte, name) {
+            // Skip if this identifier IS the declaration itself —
+            // decl.decl_byte's occurrence is the binding, not a use.
+            if byte != decl.decl_byte {
+                *ref_count.entry((name.to_string(), decl.decl_byte)).or_insert(0) += 1;
+            }
+        }
+    }
+    if cursor.goto_first_child() {
+        loop {
+            count_identifier_references(cursor, source, scope_tree, ref_count);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+        cursor.goto_parent();
     }
 }

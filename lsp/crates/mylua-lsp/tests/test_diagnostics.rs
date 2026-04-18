@@ -218,3 +218,112 @@ local c = getContainer()
         field_result.type_fact
     );
 }
+
+// ---------------------------------------------------------------------------
+// P2-3 — duplicate table keys
+// ---------------------------------------------------------------------------
+
+#[test]
+fn duplicate_table_key_reports_warning() {
+    let src = "local t = { a = 1, b = 2, a = 3 }\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "dup_key.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
+    assert_eq!(dup.len(), 1, "exactly one duplicate report, got: {:?}", diags);
+    assert!(dup[0].message.contains("'a'"), "message names the key, got: {}", dup[0].message);
+}
+
+#[test]
+fn duplicate_table_key_across_numeric_and_string_keys() {
+    // `[1] = "x"` vs `[1] = "y"` — numeric keys also dedup.
+    let src = "local t = { [1] = \"x\", [1] = \"y\" }\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
+    assert_eq!(dup.len(), 1, "numeric bracket keys dedup, got: {:?}", diags);
+}
+
+#[test]
+fn duplicate_table_key_off_via_config() {
+    let src = "local t = { a = 1, a = 2 }\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "dup_off.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.duplicate_table_key = DiagnosticSeverityOption::Off;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Duplicate table key")),
+        "off config should suppress duplicate-key diagnostic, got: {:?}", diags,
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P2-3 — unused locals
+// ---------------------------------------------------------------------------
+
+#[test]
+fn unused_local_off_by_default() {
+    let src = "local x = 1\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    // Default config has unused_local = Off; no such diagnostic.
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Unused local")),
+        "unused_local default off, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn unused_local_reports_when_enabled() {
+    let src = "local x = 1\nlocal y = 2\nprint(y)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "unused_on.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
+    assert_eq!(unused.len(), 1, "only `x` is unused, got: {:?}", diags);
+    assert!(unused[0].message.contains("'x'"));
+}
+
+#[test]
+fn unused_local_skips_underscore_names() {
+    // Conventional `_` / `_foo` names are intentionally discarded.
+    let src = "local _ = 1\nlocal _unused = 2\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "underscore.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Unused local")),
+        "underscore names shouldn't trigger unused, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn unused_local_counts_reference_in_expression() {
+    let src = "local x = 42\nreturn x + 1\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "used.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Unused local")),
+        "x is used in return expression, got: {:?}", diags,
+    );
+}

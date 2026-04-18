@@ -122,6 +122,15 @@ pub struct DiagnosticsConfig {
     pub lua_field_error: DiagnosticSeverityOption,
     #[serde(rename = "luaFieldWarning")]
     pub lua_field_warning: DiagnosticSeverityOption,
+    /// P2-3: report duplicate keys in a single `{ ... }` table
+    /// constructor, e.g. `{ a = 1, a = 2 }`.
+    #[serde(rename = "duplicateTableKey")]
+    pub duplicate_table_key: DiagnosticSeverityOption,
+    /// P2-3: report locals that are declared but never read. Off by
+    /// default to avoid flagging intentional `local _ = ...`
+    /// placeholders; opt-in via config.
+    #[serde(rename = "unusedLocal")]
+    pub unused_local: DiagnosticSeverityOption,
 }
 
 impl Default for DiagnosticsConfig {
@@ -133,6 +142,10 @@ impl Default for DiagnosticsConfig {
             emmy_unknown_field: DiagnosticSeverityOption::Error,
             lua_field_error: DiagnosticSeverityOption::Error,
             lua_field_warning: DiagnosticSeverityOption::Warning,
+            duplicate_table_key: DiagnosticSeverityOption::Warning,
+            // Unused-local is noisy (every `for _, v in pairs(t)` uses
+            // `_` which is legitimate). Default off.
+            unused_local: DiagnosticSeverityOption::Off,
         }
     }
 }

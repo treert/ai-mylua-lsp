@@ -243,7 +243,11 @@ f:init()
 
 ---
 
-### [ ] P2-3 — 更多诊断类别
+### [x] P2-3 — 更多诊断类别（部分完成：duplicateTableKey + unusedLocal）
+
+已完成：`duplicateTableKey`（默认 Warning，命中 `{ a = 1, a = 2 }` 与 `{ [1] = "x", [1] = "y" }`）+ `unusedLocal`（默认 Off 避免 `_`/`_x` 习惯写法被打扰；开启后跳过以 `_` 开头的名字）。
+
+剩余未完成（后续小任务）：参数个数/类型不匹配、`@return` count/type 不匹配、局部变量类型二次赋值不匹配（当前仅 check 首次字面量）。
 
 - 函数调用参数**个数**不匹配（`FunctionSummary.signature.params.len()` vs 实参数）
 - 函数调用参数**类型**不匹配（emmy `@param` vs 实参推断类型）
