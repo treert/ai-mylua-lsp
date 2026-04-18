@@ -14,6 +14,7 @@ pub mod references;
 pub mod rename;
 pub mod resolver;
 pub mod scope;
+pub mod selection_range;
 pub mod semantic_tokens;
 pub mod signature_help;
 pub mod summary;
@@ -682,6 +683,7 @@ impl LanguageServer for Backend {
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
                 declaration_provider: Some(DeclarationCapability::Simple(true)),
+                selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
@@ -910,6 +912,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         Ok(Some(folding_range::folding_range(doc)))
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> Result<Option<Vec<SelectionRange>>> {
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+        Ok(Some(selection_range::selection_range(doc, &params.positions)))
     }
 
     async fn document_highlight(

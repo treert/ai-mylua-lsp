@@ -278,7 +278,7 @@ f:init()
 
 ---
 
-### [ ] P2-6 — `textDocument/selectionRange`
+### [x] P2-6 — `textDocument/selectionRange`
 
 **目标**：VS Code "智能扩展选区" 快捷键（macOS `⌃⇧→`）。一个 AST 自底向上串。
 
