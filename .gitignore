@@ -3,6 +3,12 @@ node_modules/
 .pnp/
 .pnp.js
 
+# Any tool cache dir under the repo — our own `.cache-mylua-lsp/`
+# (summary cache, auto-created when testing the extension against
+# `tests/lua-root*`), plus `.cache/`, `.pytest_cache/`, `.mypy_cache/`,
+# `.ruff_cache/` and similar conventions.
+.cache*/
+
 # Build / artifacts
 dist/
 out/

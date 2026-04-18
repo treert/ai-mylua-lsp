@@ -364,7 +364,7 @@ impl Backend {
         };
 
         if index_mode == config::IndexMode::Isolated && roots.len() > 1 {
-            eprintln!(
+            lsp_log!(
                 "[mylua-lsp] WARNING: indexMode 'isolated' is not yet implemented; \
                  falling back to 'merged' for {} workspace roots",
                 roots.len()
@@ -375,7 +375,7 @@ impl Backend {
         let cache = if use_disk_cache {
             roots
                 .first()
-                .and_then(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
+                .map(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
         } else {
             None
         };
@@ -394,7 +394,7 @@ impl Backend {
 
         let files = workspace_scanner::collect_lua_files(&roots, &workspace_config);
         let total = files.len();
-        eprintln!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
+        lsp_log!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
 
         let token = NumberOrString::String("mylua-indexing".to_string());
         let progress = self
@@ -458,7 +458,7 @@ impl Backend {
             })
             .await
             .unwrap_or_else(|e| {
-                eprintln!("[mylua-lsp] indexing batch failed: {}", e);
+                lsp_log!("[mylua-lsp] indexing batch failed: {}", e);
                 vec![]
             });
 
@@ -481,17 +481,17 @@ impl Backend {
             indexed += chunk_len;
             let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
             progress.report(pct).await;
-            eprintln!("[mylua-lsp] indexed {}/{}", indexed, total);
+            lsp_log!("[mylua-lsp] indexed {}/{}", indexed, total);
         }
 
         let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
         if hits > 0 {
-            eprintln!("[mylua-lsp] cache hits: {}/{}", hits, total);
+            lsp_log!("[mylua-lsp] cache hits: {}/{}", hits, total);
         }
 
         *self.index_state.lock().unwrap() = IndexState::Ready;
         progress.finish().await;
-        eprintln!(
+        lsp_log!(
             "[mylua-lsp] workspace indexing complete: {} files (Ready)",
             total
         );
@@ -504,7 +504,7 @@ impl Backend {
                 move || {
                     let c = summary_cache::SummaryCache::new_from_dir(cache_dir, config_fp);
                     c.save_all(&summaries);
-                    eprintln!("[mylua-lsp] saved {} summaries to cache", summaries.len());
+                    lsp_log!("[mylua-lsp] saved {} summaries to cache", summaries.len());
                 }
             });
         }
@@ -687,11 +687,9 @@ mod tests {
 
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        if let Some(opts) = params.initialization_options {
-            let cfg = LspConfig::from_value(opts);
-            eprintln!("[mylua-lsp] config: {:?}", cfg);
-            *self.config.lock().unwrap() = cfg;
-        }
+        let incoming_cfg = params
+            .initialization_options
+            .map(LspConfig::from_value);
 
         let mut roots = Vec::new();
         if let Some(folders) = &params.workspace_folders {
@@ -709,6 +707,23 @@ impl LanguageServer for Backend {
                 }
             }
         }
+
+        // Initialize the file logger as early as possible so every subsequent
+        // `lsp_log!` (including the `config:` line below and anything in
+        // `scan_workspace_parallel`) is captured in `.vscode/mylua-lsp.log`.
+        if let Some(root) = roots.first() {
+            let file_log = incoming_cfg
+                .as_ref()
+                .map(|c| c.debug.file_log)
+                .unwrap_or_else(|| self.config.lock().unwrap().debug.file_log);
+            logger::init(root, file_log);
+        }
+
+        if let Some(cfg) = incoming_cfg {
+            lsp_log!("[mylua-lsp] config: {:?}", cfg);
+            *self.config.lock().unwrap() = cfg;
+        }
+
         *self.workspace_roots.lock().unwrap() = roots;
 
         Ok(InitializeResult {
@@ -793,13 +808,6 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
-        {
-            let roots = self.workspace_roots.lock().unwrap();
-            let cfg = self.config.lock().unwrap();
-            if let Some(root) = roots.first() {
-                logger::init(root, cfg.debug.file_log);
-            }
-        }
         self.client
             .log_message(
                 MessageType::INFO,
@@ -938,7 +946,7 @@ impl LanguageServer for Backend {
 
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let cfg = LspConfig::from_value(params.settings);
-        eprintln!("[mylua-lsp] config updated: {:?}", cfg);
+        lsp_log!("[mylua-lsp] config updated: {:?}", cfg);
         *self.config.lock().unwrap() = cfg;
     }
 

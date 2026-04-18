@@ -320,8 +320,15 @@ pub struct WorkspaceAggregation {
 #### 7d. 持久化缓存（可选，按配置）
 
 - `mylua.index.cacheMode = "summary"` 时，Summary 序列化到磁盘。
-- 缓存失效维度：文件内容哈希 + schema 版本 + 配置指纹。
-- 默认存放在用户缓存目录。
+- 缓存失效维度（`CacheMeta` 任一字段不匹配 → 整盘 wipe 重建）：
+  - `schema_version`：常量，破坏性 `DocumentSummary` 结构变化时手动 bump。
+  - `exe_mtime_ns`：当前 `mylua-lsp` 可执行文件 mtime（纳秒）。`cargo build` 重链接、extension 升级替换 binary 都会更新，开发与发版场景统一覆盖，无需手动 bump schema。
+  - `config_fingerprint`：`require.paths` + `require.aliases` 的哈希。
+  - 每文件另有 `content_hash` 二级门槛：meta 全匹配但单个 Lua 文件内容变了也会重建该文件 summary。
+- **缓存位置**：`<workspace_root>/.vscode/.cache-mylua-lsp/`（与 `mylua-lsp.log` 同驻 `.vscode/`，统一编辑器状态目录）。
+  - 随项目搬家/删除自动清理，避免 `~/.cache/` 下孤儿目录累积。
+  - 首次 `save_all` 会在缓存目录内自动写入 `.gitignore`（内容 `*` + `!.gitignore`）防止误提交。
+  - 双层自索引防护：默认 `workspace.exclude` 的 `**/.*` 已覆盖 `.vscode/` 整棵子树；外加 `workspace_scanner` 内置硬编码 `.vscode/.cache-mylua-lsp` 路径 exclude，用户完全 override 默认配置时仍然生效。
 
 **验收**：5 万文件工作区冷启动 < 30 秒（视硬件）；编辑期增量更新 < 100ms。
 

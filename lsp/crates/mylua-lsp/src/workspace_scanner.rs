@@ -11,6 +11,26 @@ pub struct FileFilter {
     exclude: GlobSet,
 }
 
+/// Built-in relative path that always holds our own summary cache.
+/// Hard-coded as an unconditional exclude below so that users who
+/// fully override `workspace.exclude` in settings don't accidentally
+/// pay the cost of walking tens of thousands of `<hash>.json` files
+/// every cold start. Writes happen via `SummaryCache::save_all`, so
+/// the path is effectively a contract of this crate.
+///
+/// The separate `.vscode/` component is normally already excluded
+/// by the default `**/.*` glob, but we hard-code the full path here
+/// as a belt-and-suspenders guarantee.
+const BUILTIN_CACHE_DIR: &str = ".vscode/.cache-mylua-lsp";
+
+fn is_builtin_cache_path(relative_path: &str) -> bool {
+    // `relative_path` is forward-slash normalized by the scanner
+    // (see `scan_dir_recursive`), so matching on `/` is
+    // cross-platform safe.
+    relative_path == BUILTIN_CACHE_DIR
+        || relative_path.starts_with(&format!("{}/", BUILTIN_CACHE_DIR))
+}
+
 impl FileFilter {
     pub fn from_config(config: &WorkspaceConfig) -> Self {
         Self {
@@ -21,6 +41,9 @@ impl FileFilter {
 
     /// Returns `true` if the file should be included in the workspace index.
     fn accepts(&self, relative_path: &str) -> bool {
+        if is_builtin_cache_path(relative_path) {
+            return false;
+        }
         if !self.include.is_empty() && !self.include.is_match(relative_path) {
             return false;
         }
@@ -30,6 +53,9 @@ impl FileFilter {
     /// Returns `true` if a directory should be recursed into.
     /// Skips directories that are themselves matched by an exclude pattern.
     fn should_enter_dir(&self, relative_dir: &str) -> bool {
+        if is_builtin_cache_path(relative_dir) {
+            return false;
+        }
         !self.exclude.is_match(relative_dir)
     }
 }
@@ -277,5 +303,49 @@ mod tests {
         let file = Path::new("/other/foo.lua");
         let result = file_to_module_paths(base, file, &default_patterns());
         assert!(result.is_empty());
+    }
+
+    #[test]
+    fn builtin_cache_dir_always_excluded_even_when_user_overrides_all_excludes() {
+        // Simulate a user who fully replaced the default exclude list
+        // with something narrow (or empty), removing both `**/.*` and
+        // `**/.cache*`. The built-in guard must still refuse to walk
+        // into our own cache directory, which now lives at
+        // `.vscode/.cache-mylua-lsp/`.
+        let cfg = WorkspaceConfig {
+            include: vec!["**/*.lua".to_string()],
+            exclude: vec![],
+            index_mode: crate::config::IndexMode::Merged,
+        };
+        let filter = FileFilter::from_config(&cfg);
+
+        assert!(
+            !filter.should_enter_dir(".vscode/.cache-mylua-lsp"),
+            "built-in cache dir must be skipped"
+        );
+        assert!(
+            !filter.should_enter_dir(".vscode/.cache-mylua-lsp/entries"),
+            "subdir inside built-in cache dir must be skipped"
+        );
+        assert!(
+            !filter.accepts(".vscode/.cache-mylua-lsp/entries/abc.lua"),
+            "file inside built-in cache dir must be rejected even if it happens to be .lua"
+        );
+        // A sibling name that merely *starts* with `.cache-mylua-lsp`
+        // but is not the same path (e.g. `.vscode/.cache-mylua-lsp-backup`)
+        // is not our cache dir and should still pass the built-in
+        // check (the user's exclude list would normally handle it).
+        assert!(
+            filter.should_enter_dir(".vscode/.cache-mylua-lsp-backup"),
+            "unrelated dir whose name only shares a prefix must not be skipped by the built-in check"
+        );
+        // Top-level `.cache-mylua-lsp/` (old layout before this
+        // change) is *not* covered by the built-in check anymore —
+        // users still have `**/.cache*` default glob to handle
+        // leftover directories during upgrade.
+        assert!(
+            filter.should_enter_dir(".cache-mylua-lsp"),
+            "top-level .cache-mylua-lsp is no longer the builtin path; left to user excludes"
+        );
     }
 }

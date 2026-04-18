@@ -179,8 +179,7 @@
 | `mylua.gotoDefinition.strategy` | `auto \| single \| list` | `auto`：有明显最佳候选则单跳，否则多目标 |
 | `mylua.references.strategy` | `best \| merge \| select` | `best`：只查最佳候选；`merge`：多候选并集；`select`：先选再查 |
 | `mylua.globalConflict.strategy` | `auto \| single \| list` | 全局同名冲突决议策略 |
-| `mylua.index.cacheMode` | `summary \| memory` | 默认 `summary` |
-| `mylua.index.cacheLocation` | `user \| workspace` | 默认 `user` |
+| `mylua.index.cacheMode` | `summary \| memory` | 默认 `summary`；`summary` 模式下缓存固定存放于 `<workspace>/.vscode/.cache-mylua-lsp/`（与 `mylua-lsp.log` 同驻 `.vscode/`），随项目搬家/删除自动清理 |
 | `mylua.workspace.indexMode` | `merged \| isolated` | 多根工作区默认 `merged` |
 | `mylua.workspaceSymbol.grouping` | `flat \| grouped` | 默认 `flat` |
 | `mylua.diagnostics.emmyTypeMismatchSeverity` | `error` | Emmy 字段赋值不兼容 |
