@@ -681,6 +681,7 @@ impl LanguageServer for Backend {
                 document_highlight_provider: Some(OneOf::Left(true)),
                 folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
                 type_definition_provider: Some(TypeDefinitionProviderCapability::Simple(true)),
+                declaration_provider: Some(DeclarationCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 completion_provider: Some(CompletionOptions {
@@ -952,6 +953,25 @@ impl LanguageServer for Backend {
         let mut idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         Ok(goto::goto_type_definition(doc, uri, position, &mut idx, &strategy))
+    }
+
+    /// Lua has no distinct forward-declaration concept: "declaration"
+    /// is the same as "definition". Alias to `goto_definition` so
+    /// clients that prefer `textDocument/declaration` (e.g. some IDE
+    /// refactor tools) get a sensible result.
+    async fn goto_declaration(
+        &self,
+        params: request::GotoDeclarationParams,
+    ) -> Result<Option<request::GotoDeclarationResponse>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let mut idx = self.index.lock().unwrap();
+        let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
+        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

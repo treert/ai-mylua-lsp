@@ -288,7 +288,7 @@ f:init()
 
 ---
 
-### [ ] P2-7 — `textDocument/declaration`
+### [x] P2-7 — `textDocument/declaration`
 
 Lua 里 declaration ≡ definition。最简实现：alias 到现有 `goto_definition`。
 
