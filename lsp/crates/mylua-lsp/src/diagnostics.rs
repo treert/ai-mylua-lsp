@@ -54,8 +54,15 @@ pub fn collect_semantic_diagnostics_with_version(
         .collect();
 
     let mut cursor = root.walk();
+    // `---@meta` files declare stubs for runtime-provided APIs, so
+    // many of the identifiers they reference are intentionally not
+    // declared in the workspace. Skip `undefinedGlobal` there to
+    // avoid a wall of noise on a legitimate stub file.
+    let is_meta = index.summaries.get(uri).map(|s| s.is_meta).unwrap_or(false);
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
-        check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity);
+        if !is_meta {
+            check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity);
+        }
     }
     let emmy_severity = diag_config.emmy_unknown_field.to_lsp_severity();
     let lua_error_severity = diag_config.lua_field_error.to_lsp_severity();

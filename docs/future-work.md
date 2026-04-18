@@ -46,7 +46,7 @@
 - ~~`textDocument/documentLink`：识别 `require("mod")` 里的 module path 作为可跳转链接~~ ✅ 已完成（paren + short-call 两种形态，别名调用 `m = require; m("x")` 不跟随）
 - ~~`textDocument/foldingRange` 的 `elseif` / `else` 分支独立折叠~~ ✅ 已完成（外层 + if-branch + 每个 elseif/else 各一个 fold）
 - ~~语义 tokens delta provider~~ ✅ 已完成（最长公共前后缀算法 + per-URI TokenCacheEntry + monotonic result_id）
-- `---@meta` 元文件支持（Lua-LS 习惯的 stub 文件约定）
+- ~~`---@meta` 元文件支持~~ ✅ 已完成（`DocumentSummary.is_meta` + 抑制 undefinedGlobal；globals 仍贡献 workspace 索引；位置必须在真实代码前）
 - EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定（`---@diagnostic disable-next-line` 等已完成 ✅）
 
 ---

@@ -44,6 +44,20 @@ pub struct DocumentSummary {
     /// older builds readable.
     #[serde(default)]
     pub call_sites: Vec<CallSite>,
+    /// `true` when this file carries a top-level `---@meta` annotation.
+    /// Meta files are treated as stub / definition sources per the
+    /// Lua-LS convention: their globals still populate `global_shard`
+    /// (so references elsewhere resolve), but diagnostics that reason
+    /// about runtime behavior (like `undefinedGlobal`) are suppressed
+    /// inside the meta file itself — meta files often reference
+    /// runtime-provided symbols that don't have a declaration in the
+    /// workspace.
+    #[serde(default)]
+    pub is_meta: bool,
+    /// Optional module name supplied via `---@meta <name>`; purely
+    /// informational at present (no require_map mapping yet).
+    #[serde(default)]
+    pub meta_name: Option<String>,
 }
 
 /// One `function_call` occurrence recorded during summary build.

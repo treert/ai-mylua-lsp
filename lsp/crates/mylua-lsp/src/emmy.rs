@@ -146,6 +146,10 @@ pub enum EmmyAnnotation {
     Enum { name: String },
     See { path: String },
     Diagnostic { text: String },
+    /// `---@meta [name]` — marks the file as a stub/definition file
+    /// per Lua-LS convention. The optional `name` is the logical
+    /// module the stub represents.
+    Meta { name: Option<String> },
     Other { tag: String, text: String },
 }
 
@@ -605,6 +609,12 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
         }
         "see" => Some(EmmyAnnotation::See { path: tz.rest_as_string() }),
         "diagnostic" => Some(EmmyAnnotation::Diagnostic { text: tz.rest_as_string() }),
+        "meta" => {
+            // `---@meta` or `---@meta <module_name>`. Anything after
+            // the first name token is ignored (no semantic role).
+            let name = tz.eat_name();
+            Some(EmmyAnnotation::Meta { name })
+        }
         _ => Some(EmmyAnnotation::Other { tag, text: tz.rest_as_string() }),
     }
 }

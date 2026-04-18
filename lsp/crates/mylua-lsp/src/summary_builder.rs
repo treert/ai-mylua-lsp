@@ -37,6 +37,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
     let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
     let call_sites = collect_call_sites(root, source);
+    let (is_meta, meta_name) = detect_meta_annotation(root, source);
 
     DocumentSummary {
         uri: uri.clone(),
@@ -51,7 +52,48 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
         module_return_range: ctx.module_return_range,
         signature_fingerprint,
         call_sites,
+        is_meta,
+        meta_name,
     }
+}
+
+/// Scan the first few top-level statements for a `---@meta [name]`
+/// annotation. Following Lua-LS convention the directive lives at
+/// the top of the file; we allow it to appear after a shebang or
+/// initial comments but stop looking once any real statement
+/// (`local_declaration` / `function_declaration` / `assignment_statement`
+/// / `return_statement`) precedes it, since `---@meta` placed after
+/// runtime code is almost certainly an authoring mistake.
+fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Option<String>) {
+    for i in 0..root.named_child_count() {
+        let Some(child) = root.named_child(i as u32) else { continue };
+        match child.kind() {
+            "emmy_comment" => {
+                for j in 0..child.named_child_count() {
+                    let Some(line) = child.named_child(j as u32) else { continue };
+                    if line.kind() != "emmy_line" {
+                        continue;
+                    }
+                    let text = node_text(line, source);
+                    let anns = parse_emmy_comments(text);
+                    for ann in anns {
+                        if let EmmyAnnotation::Meta { name } = ann {
+                            return (true, name);
+                        }
+                    }
+                }
+            }
+            // Any non-emmy sibling that represents real code tells us
+            // there's no leading `---@meta`.
+            "local_declaration"
+            | "local_function_declaration"
+            | "function_declaration"
+            | "assignment_statement"
+            | "return_statement" => return (false, None),
+            _ => continue,
+        }
+    }
+    (false, None)
 }
 
 /// Second single-pass over the AST to collect `CallSite` records
