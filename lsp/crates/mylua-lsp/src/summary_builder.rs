@@ -659,6 +659,29 @@ fn build_function_summary(
         }
     }
 
+    // `---@return self` / `---@param x self` on a method should
+    // resolve to the enclosing class, e.g. for `function Foo:m()`
+    // `self` becomes `Foo`. Derive the class prefix from the fully
+    // qualified `name` (`Foo:m` → `Foo`, `Foo.m` → `Foo`, free
+    // functions keep `self` untouched).
+    let class_name = crate::type_system::class_prefix_of(name).to_string();
+    if !class_name.is_empty() {
+        for p in params.iter_mut() {
+            p.type_fact = crate::type_system::substitute_self(&p.type_fact, &class_name);
+        }
+        for r in returns.iter_mut() {
+            *r = crate::type_system::substitute_self(r, &class_name);
+        }
+        for ol in overloads.iter_mut() {
+            for p in ol.params.iter_mut() {
+                p.type_fact = crate::type_system::substitute_self(&p.type_fact, &class_name);
+            }
+            for r in ol.returns.iter_mut() {
+                *r = crate::type_system::substitute_self(r, &class_name);
+            }
+        }
+    }
+
     let sig = FunctionSignature {
         params: params.clone(),
         returns: returns.clone(),

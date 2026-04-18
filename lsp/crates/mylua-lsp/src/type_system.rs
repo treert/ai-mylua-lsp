@@ -66,6 +66,66 @@ pub struct ParamInfo {
     pub type_fact: TypeFact,
 }
 
+/// Recursively replace `EmmyType("self")` / `EmmyGeneric("self", …)`
+/// references inside `fact` with the supplied `class_name`. Used by
+/// `summary_builder` when building method signatures so that
+/// `---@return self` on a class method surfaces as the method's
+/// owner class, which is what the user expects for fluent / builder
+/// APIs like `obj:chain():chain2()`.
+///
+/// A no-op when `class_name` is empty (free functions / top-level
+/// code); conservative about other type variants (unions recurse,
+/// functions recurse into params + returns, tables / generics too).
+pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
+    if class_name.is_empty() {
+        return fact.clone();
+    }
+    match fact {
+        TypeFact::Known(KnownType::EmmyType(name)) if name == "self" => {
+            TypeFact::Known(KnownType::EmmyType(class_name.to_string()))
+        }
+        TypeFact::Known(KnownType::EmmyGeneric(name, args)) if name == "self" => {
+            let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
+            TypeFact::Known(KnownType::EmmyGeneric(class_name.to_string(), new_args))
+        }
+        TypeFact::Known(KnownType::EmmyGeneric(name, args)) => {
+            let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
+            TypeFact::Known(KnownType::EmmyGeneric(name.clone(), new_args))
+        }
+        TypeFact::Known(KnownType::Function(sig)) => {
+            let params = sig
+                .params
+                .iter()
+                .map(|p| ParamInfo {
+                    name: p.name.clone(),
+                    type_fact: substitute_self(&p.type_fact, class_name),
+                })
+                .collect();
+            let returns = sig.returns.iter().map(|r| substitute_self(r, class_name)).collect();
+            TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
+        }
+        TypeFact::Union(parts) => {
+            TypeFact::Union(parts.iter().map(|p| substitute_self(p, class_name)).collect())
+        }
+        other => other.clone(),
+    }
+}
+
+/// Extract the class name from a qualified function name. Returns
+/// `""` for bare / dotted-without-class / top-level names.
+///
+/// - `Foo:m` → `Foo`
+/// - `Foo.m` → `Foo`
+/// - `a.b.c` → `a.b`   (dotted — treat everything before the last `.` as container)
+/// - `standalone` → `""`
+pub fn class_prefix_of(name: &str) -> &str {
+    if let Some(idx) = name.rfind(|c: char| c == ':' || c == '.') {
+        &name[..idx]
+    } else {
+        ""
+    }
+}
+
 impl fmt::Display for TypeFact {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

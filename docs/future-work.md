@@ -47,7 +47,7 @@
 - ~~`textDocument/foldingRange` 的 `elseif` / `else` 分支独立折叠~~ ✅ 已完成（外层 + if-branch + 每个 elseif/else 各一个 fold）
 - ~~语义 tokens delta provider~~ ✅ 已完成（最长公共前后缀算法 + per-URI TokenCacheEntry + monotonic result_id）
 - ~~`---@meta` 元文件支持~~ ✅ 已完成（`DocumentSummary.is_meta` + 抑制 undefinedGlobal；globals 仍贡献 workspace 索引；位置必须在真实代码前）
-- EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定（`---@diagnostic disable-next-line` 等已完成 ✅）
+- ~~EmmyLua 类型表达式扩展：`fun(...)` 返回多值、`self` 泛型绑定~~ ✅ 已完成（fun 多返回 parse_type_list 已支持，self 在方法上下文中通过 `class_prefix_of` + `substitute_self` 替换）
 
 ---
 
