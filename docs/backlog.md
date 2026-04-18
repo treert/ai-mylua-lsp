@@ -151,7 +151,7 @@ f:init()
 
 ---
 
-### [ ] P1-6 — rename 覆盖 Emmy 类型名 / 类成员（跨文件）
+### [x] P1-6 — rename 覆盖 Emmy 类型名 / 类成员（跨文件）
 
 **目标**：rename `Foo` 时，把所有 `---@class Foo` / `---@type Foo` / `---@param x Foo` / `---@class Bar : Foo` 等注解里的 `Foo` 一起改。类成员（field / method）rename 同理。
 
