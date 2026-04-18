@@ -162,6 +162,16 @@
           "default": "off",
           "description": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries."
         },
+        "mylua.diagnostics.scope": {
+          "type": "string",
+          "enum": ["full", "openOnly"],
+          "default": "full",
+          "enumDescriptions": [
+            "Diagnose the entire workspace (cold-start seeds all files; cascades to all dependants).",
+            "Only diagnose files currently opened in editor tabs; cascades skip closed files."
+          ],
+          "description": "Scope of semantic diagnostics publishing."
+        },
         "mylua.gotoDefinition.strategy": {
           "type": "string",
           "enum": ["auto", "single", "list"],
