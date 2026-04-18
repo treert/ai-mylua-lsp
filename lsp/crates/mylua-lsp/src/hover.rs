@@ -274,7 +274,9 @@ fn hover_variable_field(
         base_fact,
         field_name,
     );
-    let resolved = resolver::resolve_field_chain(&base_fact, &[field_name.clone()], index);
+    let resolved = resolver::resolve_field_chain_in_file(
+        uri, &base_fact, &[field_name.clone()], index,
+    );
     lsp_log!("[hover_var_field] resolved={:?}", resolved.type_fact);
 
     let type_display = format_resolved_type(&resolved.type_fact);
@@ -314,11 +316,14 @@ fn hover_variable_field(
 /// `variable` and whose `field` field is an identifier). `field_expression`
 /// is kept as a legacy alias for future grammar revisions.
 ///
-/// For bases that are *not* purely dotted — e.g. `a[1].b` (subscript) or
-/// `a:m().c` (method call) — we return `Unknown` rather than concocting a
-/// bogus `GlobalRef("a[1]")` stub. Inferring those bases requires either
-/// table `array_element_type` lookup or replaying the call-return logic
-/// from `summary_builder`; neither is implemented here yet.
+/// Handles:
+/// - Pure dotted chains (`a.b.c`) via recursive `variable.object/.field`.
+/// - Array-style subscripts (`a[1]`, `a[k]`) via `array_element_type` on
+///   the base's file-local Table shape.
+/// - Call returns (`foo()`, `mod.f()`, `obj:m()`) by reconstructing a
+///   `CallReturn` stub so the resolver can track declared `@return`
+///   types through the chain — this is what makes `make().field` hover
+///   work when `make`'s summary has `@return Foo`.
 pub fn infer_node_type(
     node: tree_sitter::Node,
     source: &[u8],
@@ -333,21 +338,34 @@ pub fn infer_node_type(
             ) {
                 let base_fact = infer_node_type(object, source, uri, index);
                 let field_name = node_text(field, source).to_string();
-                let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
+                let resolved = resolver::resolve_field_chain_in_file(
+                    uri, &base_fact, &[field_name], index,
+                );
                 return resolved.type_fact;
             }
-            // `variable` wraps either a single identifier or a subscript
-            // (`a[1]`). A single identifier has one child whose text equals
-            // the whole node text; treat that as local/global lookup.
-            // Anything else (subscript, malformed) → Unknown to avoid
-            // constructing meaningless `GlobalRef` names.
+            // Subscript variant: `variable { object, index }` — look up
+            // the base's shape `array_element_type` so chains like
+            // `a[1].field` can continue with a real element type.
+            if let (Some(object), Some(_index_node)) = (
+                node.child_by_field_name("object"),
+                node.child_by_field_name("index"),
+            ) {
+                let base_fact = infer_node_type(object, source, uri, index);
+                if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact {
+                    if let Some(summary) = index.summaries.get(uri) {
+                        if let Some(shape) = summary.table_shapes.get(shape_id) {
+                            if let Some(elem) = &shape.array_element_type {
+                                return elem.clone();
+                            }
+                        }
+                    }
+                }
+                return TypeFact::Unknown;
+            }
+            // `variable` wrapping a single identifier — local/global lookup.
             if node.named_child_count() == 1 {
                 if let Some(child) = node.named_child(0) {
                     if child.kind() == "identifier" {
-                        // Use the identifier child's text directly rather
-                        // than the full `variable` span — safer under ERROR
-                        // recovery where the wrapper's span may include
-                        // extraneous characters.
                         let text = node_text(child, source);
                         if let Some(summary) = index.summaries.get(uri) {
                             if let Some(ltf) = summary.local_type_facts.get(text) {
@@ -362,9 +380,16 @@ pub fn infer_node_type(
             }
             TypeFact::Unknown
         }
+        "function_call" => {
+            // Reconstruct a `CallReturn` stub (or `RequireRef` for
+            // `require("…")`) so the resolver can pick up declared
+            // `@return` types. Mirrors the logic in
+            // `summary_builder::infer_call_return_type` but works off the
+            // workspace aggregation + summary cache rather than the
+            // per-file `BuildContext`.
+            infer_call_return_fact(node, source, uri, index)
+        }
         "parenthesized_expression" => {
-            // `(expr)` — unwrap and recurse into the single enclosed
-            // expression so `(foo()).x` style bases resolve correctly.
             node.named_child(0)
                 .map(|inner| infer_node_type(inner, source, uri, index))
                 .unwrap_or(TypeFact::Unknown)
@@ -382,6 +407,127 @@ pub fn infer_node_type(
         }
         _ => TypeFact::Unknown,
     }
+}
+
+/// Build a `TypeFact` for the return value of a `function_call` node.
+/// Handles three shapes:
+/// - `require("mod")`  → `SymbolicStub::RequireRef { module_path }`
+/// - `obj:m(...)`      → `CallReturn { base: <obj-fact-as-stub>, func_name: "m" }`
+/// - `callee(...)` where callee is a `variable` (identifier or dotted) →
+///   `CallReturn { base: <callee-base-as-stub>, func_name }`
+/// - Plain local/global function call → look up `FunctionSummary.returns[0]`
+///   in the workspace to return the declared first return type.
+fn infer_call_return_fact(
+    node: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> TypeFact {
+    use crate::type_system::{SymbolicStub, KnownType};
+
+    let callee = match node.child_by_field_name("callee") {
+        Some(c) => c,
+        None => return TypeFact::Unknown,
+    };
+
+    // `require("mod")` — note callee is a plain identifier.
+    if callee.kind() == "identifier" && node_text(callee, source) == "require" {
+        if let Some(args) = node.child_by_field_name("arguments") {
+            if let Some(first_arg) = args.named_child(0) {
+                if let Some(module_path) = extract_string_literal(first_arg, source) {
+                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path });
+                }
+            }
+        }
+        return TypeFact::Unknown;
+    }
+
+    // `obj:m()` — grammar sets `method` field on the call node itself.
+    if let Some(method_node) = node.child_by_field_name("method") {
+        let method_name = node_text(method_node, source).to_string();
+        let base_fact = infer_node_type(callee, source, uri, index);
+        let base_stub = type_fact_to_stub_for_call_base(&base_fact, callee, source);
+        return TypeFact::Stub(SymbolicStub::CallReturn {
+            base: Box::new(base_stub),
+            func_name: method_name,
+        });
+    }
+
+    // Dotted call `mod.f()` — callee is a `variable` with `object`+`field`.
+    if matches!(callee.kind(), "variable" | "field_expression") {
+        if let (Some(base_node), Some(field_node)) = (
+            callee.child_by_field_name("object"),
+            callee.child_by_field_name("field"),
+        ) {
+            let func_name = node_text(field_node, source).to_string();
+            let base_fact = infer_node_type(base_node, source, uri, index);
+            let base_stub = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
+            return TypeFact::Stub(SymbolicStub::CallReturn {
+                base: Box::new(base_stub),
+                func_name,
+            });
+        }
+    }
+
+    // Plain local/global call — pick up the declared first return type
+    // from the callee's FunctionSummary (if any).
+    let callee_text = node_text(callee, source);
+    if let Some(summary) = index.summaries.get(uri) {
+        if let Some(fs) = summary.function_summaries.get(callee_text) {
+            if let Some(ret) = fs.signature.returns.first() {
+                // `@return T` gives us an EmmyType stub; keep it as-is
+                // so the resolver can look up `T`'s fields.
+                return match ret {
+                    TypeFact::Known(KnownType::EmmyType(name)) => {
+                        TypeFact::Stub(SymbolicStub::TypeRef { name: name.clone() })
+                    }
+                    other => other.clone(),
+                };
+            }
+        }
+    }
+    TypeFact::Unknown
+}
+
+/// Best-effort conversion of a base expression's inferred `TypeFact`
+/// into a `SymbolicStub` suitable for `CallReturn.base`. Mirrors the
+/// build-time logic in `summary_builder::infer_call_return_type`.
+fn type_fact_to_stub_for_call_base(
+    base_fact: &TypeFact,
+    base_node: tree_sitter::Node,
+    source: &[u8],
+) -> crate::type_system::SymbolicStub {
+    use crate::type_system::{SymbolicStub, KnownType};
+    match base_fact {
+        TypeFact::Stub(s) => s.clone(),
+        TypeFact::Known(KnownType::EmmyType(type_name)) => {
+            SymbolicStub::TypeRef { name: type_name.clone() }
+        }
+        _ => SymbolicStub::GlobalRef {
+            name: node_text(base_node, source).to_string(),
+        },
+    }
+}
+
+/// Extract the string literal payload from a `string` tree-sitter node
+/// (strips surrounding quotes). Returns None for non-string expressions.
+fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    if node.kind() != "string" {
+        return None;
+    }
+    let text = node_text(node, source);
+    // Strip single matching pair of quotes (handles "..." and '...'), no
+    // long bracket support needed because `require("...")` canonically
+    // uses short strings.
+    if text.len() >= 2 {
+        let bytes = text.as_bytes();
+        let first = bytes[0];
+        let last = bytes[text.len() - 1];
+        if (first == b'"' || first == b'\'') && first == last {
+            return Some(text[1..text.len() - 1].to_string());
+        }
+    }
+    None
 }
 
 fn resolve_local_type_info(

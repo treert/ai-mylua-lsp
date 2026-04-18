@@ -223,7 +223,11 @@ fn goto_variable_field(
     let field_name = node_text(field, source).to_string();
 
     let base_fact = crate::hover::infer_node_type(object, source, uri, index);
-    let resolved = resolver::resolve_field_chain(&base_fact, &[field_name], index);
+    // URI-aware resolve so per-file Table shapes from AST-driven `a.b.c`
+    // chains resolve to their definition site (shape ids are per-file).
+    let resolved = resolver::resolve_field_chain_in_file(
+        uri, &base_fact, &[field_name], index,
+    );
 
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
         return Some(GotoDefinitionResponse::Scalar(Location {

@@ -85,6 +85,81 @@ pub fn resolve_field_chain(
     current
 }
 
+/// URI-aware variant of `resolve_field_chain` for bases that are
+/// **file-local** table shapes. When the base is `Known(Table(shape_id))`,
+/// `TableShapeId` is per-file so the plain chain resolver returns
+/// `Unknown` (no `source_uri` hint to locate the shape). This seeds the
+/// uri and keeps it threaded through intermediate `Known(Table)` results
+/// so deep nested writes like `a.b.c = 1` hover-resolve correctly.
+pub fn resolve_field_chain_in_file(
+    uri: &Uri,
+    base_fact: &TypeFact,
+    fields: &[String],
+    agg: &mut WorkspaceAggregation,
+) -> ResolvedType {
+    let mut visited = HashSet::new();
+    let mut current = if matches!(base_fact, TypeFact::Known(KnownType::Table(_))) {
+        ResolvedType {
+            type_fact: base_fact.clone(),
+            def_uri: Some(uri.clone()),
+            def_range: None,
+        }
+    } else {
+        resolve_recursive(base_fact, agg, 0, &mut visited)
+    };
+
+    let mut global_prefix = match base_fact {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+        _ => None,
+    };
+
+    for field in fields {
+        let result = match &current.type_fact {
+            TypeFact::Known(KnownType::Table(shape_id)) => {
+                resolve_table_field(*shape_id, field, &current.def_uri, agg)
+            }
+            _ => resolve_field_access(&current.type_fact, field, agg, 0, &mut visited),
+        };
+
+        if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
+            if let Some(ref prefix) = global_prefix {
+                let qualified = format!("{}.{}", prefix, field);
+                let fallback = try_global_shard_qualified(&qualified, agg, 0, &mut visited);
+                if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
+                    current = fallback;
+                    global_prefix = Some(qualified);
+                    continue;
+                }
+            }
+        }
+
+        // Preserve uri hint when stepping into another file-local Table.
+        //
+        // Edge case: `resolve_field_access`'s Union branch may return a
+        // `Known(Table)` with `def_uri: None` when no variant has a
+        // best-location. In that narrow case we'll re-stamp `caller_uri`
+        // here even though the shape may actually live in a different
+        // file. Because `TableShapeId` is per-file, a mismatched uri
+        // causes `resolve_table_field` to miss silently and return
+        // `Unknown` — never wrong data, just a lost goto/hover hit.
+        // Accepting that trade for simpler data flow.
+        let kept_uri = matches!(result.type_fact, TypeFact::Known(KnownType::Table(_)))
+            && result.def_uri.is_none();
+        current = result;
+        if kept_uri {
+            current.def_uri = Some(uri.clone());
+        }
+
+        if current.type_fact == TypeFact::Unknown {
+            global_prefix = None;
+        } else {
+            global_prefix = global_prefix.map(|p| format!("{}.{}", p, field));
+        }
+    }
+
+    current
+}
+
 /// Given a file URI and a local variable name, resolve its type from the summary.
 pub fn resolve_local_in_file(
     uri: &Uri,

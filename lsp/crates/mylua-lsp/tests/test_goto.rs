@@ -5,6 +5,28 @@ use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
 
 #[test]
+fn goto_nested_chained_field_jumps_to_assignment_site() {
+    // P2 / future-work §0 (AST chained assign): after `a.b.c = 1`
+    // registers `c` on the inner `a.b` shape (AST-driven, not splitn),
+    // goto on `.c` in a subsequent read site must reach the assignment
+    // line. Previously this would fall back to None because
+    // `resolve_field_chain` had no URI context for the per-file Table
+    // shape id and silently returned Unknown.
+    let src = r#"local a = { b = { c = 0 } }
+a.b.c = 1
+print(a.b.c)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "nested_goto.lua");
+
+    // Line 2 `print(a.b.c)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
+    let result = goto::goto_definition(&doc, &uri, pos(2, 10), &mut agg, &GotoStrategy::Auto);
+    assert!(
+        result.is_some(),
+        "goto on chained .c should jump to the assignment site, got None",
+    );
+}
+
+#[test]
 fn goto_local_variable_definition() {
     let src = r#"local myVar = 42
 print(myVar)"#;

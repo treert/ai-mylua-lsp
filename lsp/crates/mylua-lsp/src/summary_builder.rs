@@ -685,59 +685,77 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: ts_node_to_range(var_node, ctx.source),
                 });
             }
-            // Field assignment: `x.foo = expr`
+            // Field assignment: `x.foo = expr` or `a.b.c = expr` etc.
+            //
+            // Strategy (AST-driven, not string splitn):
+            //   1. Walk the nested `variable(object, field)` chain to collect
+            //      field names outermost→innermost and reach the innermost
+            //      bare identifier.
+            //   2. If any intermediate node is not a pure dotted `variable`
+            //      (e.g. `function_call`, subscript, parenthesized) → bail:
+            //      the LHS targets a transient value that can't be named
+            //      again. No shape write, no global contribution.
+            //   3. Pure dotted chain:
+            //      - Base is a local with Table shape → walk/create nested
+            //        shapes for intermediate fields, then `set_field` on the
+            //        innermost. Intermediate shape creation is on-demand.
+            //      - Otherwise → legacy global TableExtension with the full
+            //        dotted path as name.
             "field_expression" | "variable" => {
-                let full_text = node_text(var_node, ctx.source);
-                if full_text.contains('.') {
-                    let type_fact = if i == 0 {
-                        if let Some(ref type_expr) = pending_type {
-                            emmy_type_to_fact(type_expr)
-                        } else {
-                            value_node
-                                .map(|v| infer_expression_type(ctx, v, 0))
-                                .unwrap_or(TypeFact::Unknown)
-                        }
+                let chain = match extract_dotted_chain(var_node, ctx.source) {
+                    Some(c) if !c.fields.is_empty() => c,
+                    _ => continue,
+                };
+
+                let type_fact = if i == 0 {
+                    if let Some(ref type_expr) = pending_type {
+                        emmy_type_to_fact(type_expr)
                     } else {
                         value_node
                             .map(|v| infer_expression_type(ctx, v, 0))
                             .unwrap_or(TypeFact::Unknown)
-                    };
-
-                    // Check if the base is a known local with a table shape
-                    let parts: Vec<&str> = full_text.splitn(2, '.').collect();
-                    let is_local_field = parts.len() == 2
-                        && ctx.local_type_facts.contains_key(parts[0]);
-
-                    if is_local_field {
-                        let base_name = parts[0];
-                        let field_name = parts[1].to_string();
-                        // Try to update the local's table shape
-                        if let Some(ltf) = ctx.local_type_facts.get(base_name) {
-                            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
-                                let sid = *shape_id;
-                                if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
-                                    shape.set_field(field_name.clone(), FieldInfo {
-                                        name: field_name,
-                                        type_fact,
-                                        def_range: Some(ts_node_to_range(node, ctx.source)),
-                                        assignment_count: 1,
-                                    });
-                                    continue;
-                                }
-                            }
-                        }
                     }
+                } else {
+                    value_node
+                        .map(|v| infer_expression_type(ctx, v, 0))
+                        .unwrap_or(TypeFact::Unknown)
+                };
 
-                    // Otherwise treat as global table extension
-                    let name = full_text.to_string();
-                    ctx.global_contributions.push(GlobalContribution {
-                        name,
-                        kind: GlobalContributionKind::TableExtension,
-                        type_fact,
-                        range: ts_node_to_range(node, ctx.source),
-                        selection_range: ts_node_to_range(var_node, ctx.source),
-                    });
+                let assign_range = ts_node_to_range(node, ctx.source);
+                if register_nested_field_write(
+                    ctx,
+                    &chain.base_name,
+                    &chain.fields,
+                    type_fact.clone(),
+                    assign_range,
+                ) {
+                    continue;
                 }
+
+                // `register_nested_field_write` returned `false` for one
+                // of two reasons:
+                //   (α) base isn't a local OR isn't a local with a Table
+                //       shape → legacy TableExtension is appropriate
+                //       (e.g. `GlobalTable.foo = 1`).
+                //   (β) base IS a local Table shape but an intermediate
+                //       field carries a non-Table type (e.g.
+                //       `local a = {}; a.b = 1; a.b.c = 2`) → bail
+                //       silently; writing to a non-Table via `.c` is
+                //       a likely user bug and we MUST NOT surface the
+                //       junk path through `global_shard` (the local `a`
+                //       is not a global).
+                if ctx.local_type_facts.contains_key(&chain.base_name) {
+                    continue;
+                }
+
+                let name = chain.joined();
+                ctx.global_contributions.push(GlobalContribution {
+                    name,
+                    kind: GlobalContributionKind::TableExtension,
+                    type_fact,
+                    range: ts_node_to_range(node, ctx.source),
+                    selection_range: ts_node_to_range(var_node, ctx.source),
+                });
             }
             // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
             "subscript_expression" => {
@@ -755,6 +773,159 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             _ => {}
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Dotted LHS helpers — AST-driven chain extraction & nested shape registration
+// ---------------------------------------------------------------------------
+
+/// Decomposition of a pure dotted LHS like `a.b.c` into the bare base name
+/// and an ordered list of field names. Returned by `extract_dotted_chain`
+/// only when the entire chain is made of `variable` nodes with an
+/// `object + field` pair (outer levels) plus a single bare `identifier`
+/// at the root. Any intermediate `function_call` / subscript /
+/// `parenthesized_expression` → `None` (caller should bail on shape writes).
+struct DottedChain {
+    base_name: String,
+    /// Field names in write order: for `a.b.c` this is `["b", "c"]`.
+    fields: Vec<String>,
+}
+
+impl DottedChain {
+    /// Full dotted path — `"a.b.c"`.
+    fn joined(&self) -> String {
+        let mut s = self.base_name.clone();
+        for f in &self.fields {
+            s.push('.');
+            s.push_str(f);
+        }
+        s
+    }
+}
+
+fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<DottedChain> {
+    // Walk down the `object` chain, collecting field names. Every
+    // intermediate node must itself be a `variable` (or legacy
+    // `field_expression`) with an `object` + `field` pair. The innermost
+    // `object` must be a `variable` whose only named child is a bare
+    // `identifier` — i.e. the chain roots at a plain local/global name.
+    //
+    // Rejected (return None):
+    //   - `foo().c`     → intermediate `function_call`
+    //   - `a[1].c`      → `variable` whose `object` has an `index` field
+    //                     instead of `field`
+    //   - `(x).c`       → `parenthesized_expression` intermediate
+    //   - `a:m().c`     → grammar wraps the method call as `function_call`
+    let mut fields_rev: Vec<String> = Vec::new();
+    let mut current = node;
+    loop {
+        if !matches!(current.kind(), "variable" | "field_expression") {
+            return None;
+        }
+        let field = match current.child_by_field_name("field") {
+            Some(f) => f,
+            None => {
+                // Innermost: a `variable` with a single `identifier` child.
+                if current.named_child_count() == 1 {
+                    let child = current.named_child(0)?;
+                    if child.kind() == "identifier" {
+                        let base_name = node_text(child, source).to_string();
+                        fields_rev.reverse();
+                        return Some(DottedChain {
+                            base_name,
+                            fields: fields_rev,
+                        });
+                    }
+                }
+                return None;
+            }
+        };
+        let object = current.child_by_field_name("object")?;
+        fields_rev.push(node_text(field, source).to_string());
+        current = object;
+    }
+}
+
+/// Register a field write `base.f1.f2...fn = value` against the local's
+/// table shape, creating intermediate nested shapes on demand. Returns
+/// `true` if the write was registered (the caller should skip legacy
+/// global_contribution emission), `false` if the base isn't a local with
+/// a Table shape (caller should fall through to legacy TableExtension).
+fn register_nested_field_write(
+    ctx: &mut BuildContext,
+    base_name: &str,
+    fields: &[String],
+    type_fact: TypeFact,
+    assign_range: tower_lsp_server::ls_types::Range,
+) -> bool {
+    let base_shape_id = match ctx.local_type_facts.get(base_name) {
+        Some(ltf) => match &ltf.type_fact {
+            TypeFact::Known(KnownType::Table(sid)) => *sid,
+            _ => return false,
+        },
+        None => return false,
+    };
+
+    // Walk the intermediate shapes. Three cases per step:
+    //   (a) field exists as `Known(Table(sid))` → reuse existing shape.
+    //   (b) field missing entirely → alloc a fresh shape + register it as
+    //       the field's type on the parent (on-demand nesting).
+    //   (c) field exists but is NOT a Table (e.g. `a.b = 1` then
+    //       `a.b.c = 2`) → bail. Silently overwriting `a.b`'s number
+    //       with a new Table shape would hide a likely user bug and
+    //       mislead downstream hover/sig-help.
+    //
+    // Invariant (no orphan shapes on bail): shapes allocated inside this
+    // loop are freshly created and therefore have empty `fields`, so
+    // subsequent iterations can only observe `None` and keep allocating.
+    // A `Some(non-Table) → return false` bail can therefore only trigger
+    // on a pre-existing shape encountered *before* any allocation in
+    // this call — guaranteeing we never leave an unreferenced shape
+    // behind when we return `false`.
+    let mut current_shape = base_shape_id;
+    let last_idx = fields.len().saturating_sub(1);
+    for (i, field_name) in fields.iter().enumerate() {
+        if i == last_idx {
+            break;
+        }
+        let existing_field = ctx.table_shapes.get(&current_shape)
+            .and_then(|s| s.fields.get(field_name))
+            .map(|fi| fi.type_fact.clone());
+        let next_shape = match existing_field {
+            Some(TypeFact::Known(KnownType::Table(sid))) => sid,
+            Some(_) => return false,
+            None => {
+                let new_id = ctx.alloc_shape_id();
+                ctx.table_shapes.insert(new_id, TableShape::new(new_id));
+                if let Some(parent) = ctx.table_shapes.get_mut(&current_shape) {
+                    parent.set_field(field_name.clone(), FieldInfo {
+                        name: field_name.clone(),
+                        type_fact: TypeFact::Known(KnownType::Table(new_id)),
+                        def_range: Some(assign_range),
+                        assignment_count: 1,
+                    });
+                }
+                new_id
+            }
+        };
+        current_shape = next_shape;
+    }
+
+    let final_field = match fields.last() {
+        Some(f) => f.clone(),
+        None => return false,
+    };
+    if let Some(shape) = ctx.table_shapes.get_mut(&current_shape) {
+        shape.set_field(final_field.clone(), FieldInfo {
+            name: final_field,
+            type_fact,
+            def_range: Some(assign_range),
+            assignment_count: 1,
+        });
+        true
+    } else {
+        false
     }
 }
 
@@ -1029,7 +1200,10 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
     }
 
     // `mod.func()` → CallReturn(RequireRef/GlobalRef, func_name)
-    if callee.kind() == "field_expression" {
+    // Current grammar wraps dotted access as a `variable` node with
+    // `object` + `field` fields; `field_expression` is kept for forward
+    // compatibility only.
+    if matches!(callee.kind(), "variable" | "field_expression") {
         if let Some(base) = callee.child_by_field_name("object") {
             if let Some(field) = callee.child_by_field_name("field") {
                 let base_text = node_text(base, ctx.source);

@@ -79,7 +79,7 @@ fn resolve_call_signatures(
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
         let base_fact = hover::infer_node_type(callee, source, uri, index);
-        let sigs = lookup_function_signatures_by_field(&base_fact, &method_name, index);
+        let sigs = lookup_function_signatures_by_field(uri, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
     }
@@ -92,7 +92,7 @@ fn resolve_call_signatures(
         ) {
             let field_name = node_text(field, source).to_string();
             let base_fact = hover::infer_node_type(object, source, uri, index);
-            let sigs = lookup_function_signatures_by_field(&base_fact, &field_name, index);
+            let sigs = lookup_function_signatures_by_field(uri, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
         }
@@ -154,6 +154,7 @@ fn resolve_call_signatures(
 /// primaries are filtered to avoid duplicate or blank entries in the
 /// client's signature popup.
 fn lookup_function_signatures_by_field(
+    caller_uri: &Uri,
     base_fact: &TypeFact,
     field_name: &str,
     index: &mut WorkspaceAggregation,
@@ -164,10 +165,14 @@ fn lookup_function_signatures_by_field(
         TypeFact::Known(KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
         _ => None,
     };
-    let resolved = resolver::resolve_field_chain(base_fact, &[field_name.to_string()], index);
+    // URI-aware chain resolve so `a.b.c` style callers whose base is a
+    // per-file Table shape can still find the signature.
+    let resolved = resolver::resolve_field_chain_in_file(
+        caller_uri, base_fact, &[field_name.to_string()], index,
+    );
     if let TypeFact::Known(KnownType::Function(sig)) = &resolved.type_fact {
-        if let Some(uri) = &resolved.def_uri {
-            if let Some(summary) = index.summaries.get(uri) {
+        if let Some(def_uri) = &resolved.def_uri {
+            if let Some(summary) = index.summaries.get(def_uri) {
                 // Try exact `{class}:{field}` / `{class}.{field}` lookup
                 // when we know the owner class (covers methods declared
                 // via `function Foo:m() end` or `function Foo.m() end`).

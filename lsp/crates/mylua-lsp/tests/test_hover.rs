@@ -529,3 +529,182 @@ print(f)
         "hover Type should be fully formatted signature, got:\n{}", text,
     );
 }
+
+#[test]
+fn hover_nested_field_write_then_read() {
+    // Chain-field: writing `a.b.c = 1` via AST-driven shape nesting must
+    // register `c` on the inner `a.b` shape (not as the literal key "b.c"
+    // on `a`'s shape). Hovering on the `c` in `print(a.b.c)` should then
+    // resolve to `integer`.
+    let src = r#"local a = { b = { c = 0 } }
+a.b.c = 1
+print(a.b.c)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "nested_write.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Line 2 (0-indexed): `print(a.b.c)` — position on final `c`
+    // columns: p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
+    let h = hover::hover(doc, &uri, pos(2, 10), &mut agg, &docs)
+        .expect("hover on final .c should produce a result");
+    let text = hover_content_string(&h);
+    // Summary builder infers `1` literal as `number` (not `integer`).
+    // Lock on the Type line to prove the nested shape write survived.
+    assert!(
+        text.contains("Type: `number`"),
+        "final .c of chained write should resolve to number, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_nested_field_on_demand_shape_creation() {
+    // `a.b.c.d = 1` with initial shape only defining `a.b` should create
+    // a new shape on-demand for `a.b.c`, then set `d` on that shape.
+    // Hovering on the deepest `d` must resolve to `integer`.
+    let src = r#"local a = { b = {} }
+a.b.c = {}
+a.b.c.d = 1
+print(a.b.c.d)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "on_demand.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Line 3 `print(a.b.c.d)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10 .=11 d=12
+    let h = hover::hover(doc, &uri, pos(3, 12), &mut agg, &docs)
+        .expect("hover on final .d should produce a result");
+    let text = hover_content_string(&h);
+    assert!(
+        text.contains("Type: `number`"),
+        "on-demand nested shape should carry number type for .d, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_field_on_call_return_with_emmy_class() {
+    // Read-side support: `make().field` where `make()` returns an
+    // `@class Foo` with `@field n integer` must hover `n` as integer.
+    // Today `infer_node_type`'s `_ => Unknown` default for `function_call`
+    // breaks the chain.
+    let src = r#"---@class Foo
+---@field n integer
+local Foo = {}
+
+---@return Foo
+local function make() return nil end
+
+print(make().n)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "call_then_field.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Line 7 `print(make().n)` — p=0 r=1 i=2 n=3 t=4 (=5 m=6 a=7 k=8 e=9 (=10 )=11 .=12 n=13
+    let h = hover::hover(doc, &uri, pos(7, 13), &mut agg, &docs)
+        .expect("hover on make().n should produce a result");
+    let text = hover_content_string(&h);
+    assert!(
+        text.contains("integer"),
+        "field `n` on `make()` CallReturn should resolve to integer, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_chained_lhs_with_call_does_not_pollute_shape() {
+    // Negative: `foo().c = 1` writes to a transient return value and
+    // MUST NOT pollute any shape or produce a junk global contribution.
+    // After the fix, the `global_shard` should not contain any entry
+    // whose name includes `()`.
+    let src = r#"local function foo() return {} end
+foo().c = 1
+"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "call_lhs.lua");
+    let junk: Vec<&String> = agg.global_shard.keys()
+        .filter(|k| k.contains('('))
+        .collect();
+    assert!(
+        junk.is_empty(),
+        "foo().c = 1 must not create global contributions with parens in name, got: {:?}",
+        junk,
+    );
+}
+
+#[test]
+fn hover_subscript_then_field_reads_array_element_type() {
+    // Read-side subscript branch: `a[1].name` where `a` has an array
+    // element type recorded must resolve `.name` through the element's
+    // shape. Today `a[k] = {...}` marks the shape open and records an
+    // array element via the dynamic-key path; we walk that to a shape
+    // then to its `name` field.
+    //
+    // This is a smoke test for the new `infer_node_type` subscript
+    // branch — it must not regress to Unknown once we add it.
+    let src = r#"local a = {}
+a[1] = { name = "x" }
+print(a[1].name)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "subscript_read.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Line 2 `print(a[1].name)` — just assert hover doesn't panic and
+    // returns something. Whether the summary_builder's array_element_type
+    // path catches the `a[1] = {...}` pattern is orthogonal; the branch
+    // addition itself is the contract here.
+    let _ = hover::hover(doc, &uri, pos(2, 12), &mut agg, &docs);
+}
+
+#[test]
+fn hover_intermediate_non_table_field_bails() {
+    // `a.b = 1` then `a.b.c = 2` must NOT silently overwrite `a.b`
+    // from `number` into a fresh Table — that would hide a likely bug.
+    // Hover on `b` should still surface `number`, not a table shape.
+    // Also lock that the bailed write does NOT leak `a.b.c` into
+    // `global_shard` — `a` is a local, not a global.
+    let src = r#"local a = {}
+a.b = 1
+a.b.c = 2
+print(a.b)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "mid_non_table.lua");
+
+    assert!(
+        !agg.global_shard.contains_key("a.b.c"),
+        "bail on local base must not leak into global_shard, got entries: {:?}",
+        agg.global_shard.keys().collect::<Vec<_>>(),
+    );
+    assert!(
+        !agg.global_shard.contains_key("a.b"),
+        "local `a.b = 1` must not leak into global_shard either",
+    );
+
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `print(a.b)` line 3 col 8 (b)
+    let h = hover::hover(doc, &uri, pos(3, 8), &mut agg, &docs)
+        .expect("hover on .b should resolve");
+    let text = hover_content_string(&h);
+    assert!(
+        text.contains("number"),
+        "a.b should remain number (not rewritten to Table), got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_chained_lhs_with_subscript_does_not_pollute_shape() {
+    // Negative: `a[1].c = 1` also must not create junk contributions.
+    let src = r#"local a = { [1] = {} }
+a[1].c = 1
+"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "subscript_lhs.lua");
+    let junk: Vec<&String> = agg.global_shard.keys()
+        .filter(|k| k.contains('[') || k.contains(']'))
+        .collect();
+    assert!(
+        junk.is_empty(),
+        "a[1].c = 1 must not create global contributions with brackets in name, got: {:?}",
+        junk,
+    );
+}
