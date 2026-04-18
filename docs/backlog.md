@@ -139,7 +139,7 @@ f:init()
 
 ---
 
-### [ ] P1-5 — `workspace/symbol` 含 @class 成员
+### [x] P1-5 — `workspace/symbol` 含 @class 成员
 
 **目标**：全工作区模糊搜索里能搜到 `bar`（某 class 的 field）/ `baz`（某 class 的 method），container_name 填 class 名。
 
