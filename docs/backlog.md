@@ -296,7 +296,7 @@ Lua 里 declaration ≡ definition。最简实现：alias 到现有 `goto_defini
 
 ---
 
-### [ ] P2-8 — `completionItem/resolve`
+### [x] P2-8 — `completionItem/resolve`
 
 **目标**：懒加载 completion item 的 `documentation` / `detail`，减少初始 payload。
 

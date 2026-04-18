@@ -6,6 +6,18 @@ use crate::resolver;
 use crate::util::{node_text, position_to_byte_offset};
 use crate::aggregation::WorkspaceAggregation;
 
+/// Build the resolve-payload attached to a completion item so that
+/// `completion_resolve` can re-locate the symbol on demand.
+fn resolve_data(kind: &str, uri: Option<&Uri>, name: &str) -> serde_json::Value {
+    let mut obj = serde_json::Map::new();
+    obj.insert("kind".into(), serde_json::Value::String(kind.to_string()));
+    obj.insert("name".into(), serde_json::Value::String(name.to_string()));
+    if let Some(u) = uri {
+        obj.insert("uri".into(), serde_json::Value::String(u.to_string()));
+    }
+    serde_json::Value::Object(obj)
+}
+
 const LUA_KEYWORDS: &[&str] = &[
     "and", "break", "do", "else", "elseif", "end",
     "false", "for", "function", "goto", "if", "in",
@@ -305,7 +317,7 @@ fn get_prefix(doc: &Document, position: Position) -> String {
 
 fn collect_scope_completions(
     doc: &Document,
-    _uri: &Uri,
+    uri: &Uri,
     position: Position,
     prefix: &str,
     items: &mut Vec<CompletionItem>,
@@ -324,6 +336,7 @@ fn collect_scope_completions(
             items.push(CompletionItem {
                 label: decl.name.clone(),
                 kind: Some(kind),
+                data: Some(resolve_data("local", Some(uri), &decl.name)),
                 ..Default::default()
             });
         }
@@ -349,10 +362,122 @@ fn collect_global_completions(
             items.push(CompletionItem {
                 label: name.clone(),
                 kind: Some(kind),
+                data: Some(resolve_data("global", None, name)),
                 ..Default::default()
             });
         }
     }
+}
+
+/// `completionItem/resolve` — enrich an item with `documentation`
+/// / `detail` on demand. Called by the client only when the user
+/// actually highlights the item, so we can defer expensive work
+/// (type-fact resolution, cross-file signature lookup) out of the
+/// initial completion response.
+///
+/// Reads `item.data` produced by `resolve_data` to re-locate the
+/// symbol. Missing or unrecognized `data` → return the item
+/// unchanged (e.g. keyword items, EmmyLua tags, `require` path
+/// items all carry their own `detail` already and don't need
+/// further resolve).
+pub fn resolve_completion(
+    item: CompletionItem,
+    index: &WorkspaceAggregation,
+) -> CompletionItem {
+    // Extract fields up front (owned Strings) so we can freely
+    // hand `item` into the per-kind helpers without clashing with
+    // the borrow.
+    let (kind, name, uri_str) = match item.data.as_ref() {
+        Some(data) => (
+            data.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            data.get("uri").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+        ),
+        None => return item,
+    };
+
+    match kind.as_str() {
+        "global" => resolve_global_item(item, index, &name),
+        "local" => {
+            let Ok(uri) = uri_str.parse::<Uri>() else {
+                return item;
+            };
+            resolve_local_item(item, index, &uri, &name)
+        }
+        _ => item,
+    }
+}
+
+fn resolve_global_item(
+    mut item: CompletionItem,
+    index: &WorkspaceAggregation,
+    name: &str,
+) -> CompletionItem {
+    let Some(candidates) = index.global_shard.get(name) else {
+        return item;
+    };
+    let Some(best) = candidates.first() else {
+        return item;
+    };
+
+    let mut detail_parts: Vec<String> = Vec::new();
+    // Type summary from the candidate's type_fact.
+    detail_parts.push(format!("{}", best.type_fact));
+    // File origin — trailing path segment for brevity.
+    let origin = best
+        .source_uri
+        .as_str()
+        .rsplit('/')
+        .next()
+        .unwrap_or("")
+        .to_string();
+    if !origin.is_empty() {
+        detail_parts.push(format!("(in {})", origin));
+    }
+    item.detail = Some(detail_parts.join(" "));
+
+    // Pull richer cross-file function summary documentation when the
+    // target file is indexed.
+    if let Some(summary) = index.summaries.get(&best.source_uri) {
+        if let Some(fs) = summary.function_summaries.get(name) {
+            let mut md = String::new();
+            md.push_str("```lua\n");
+            md.push_str(&format!("function {}(", name));
+            let params: Vec<String> = fs
+                .signature
+                .params
+                .iter()
+                .map(|p| p.name.clone())
+                .collect();
+            md.push_str(&params.join(", "));
+            md.push_str(")\n```");
+            if !fs.overloads.is_empty() {
+                md.push_str(&format!("\n\n+{} overload(s)", fs.overloads.len()));
+            }
+            item.documentation = Some(Documentation::MarkupContent(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: md,
+            }));
+        }
+    }
+    item
+}
+
+fn resolve_local_item(
+    mut item: CompletionItem,
+    index: &WorkspaceAggregation,
+    uri: &Uri,
+    name: &str,
+) -> CompletionItem {
+    let Some(summary) = index.summaries.get(uri) else {
+        return item;
+    };
+    if let Some(ltf) = summary.local_type_facts.get(name) {
+        item.detail = Some(format!("local {}: {}", name, ltf.type_fact));
+    } else {
+        item.detail = Some(format!("local {}", name));
+    }
+    item
 }
 
 fn collect_keyword_completions(

@@ -700,7 +700,7 @@ impl LanguageServer for Backend {
                         "\"".to_string(),
                         "'".to_string(),
                     ]),
-                    resolve_provider: None,
+                    resolve_provider: Some(true),
                     all_commit_characters: None,
                     work_done_progress_options: WorkDoneProgressOptions {
                         work_done_progress: None,
@@ -1014,6 +1014,14 @@ impl LanguageServer for Backend {
         let mut idx = self.index.lock().unwrap();
         let items = completion::complete(doc, uri, position, &mut idx);
         Ok(Some(CompletionResponse::Array(items)))
+    }
+
+    async fn completion_resolve(
+        &self,
+        item: CompletionItem,
+    ) -> Result<CompletionItem> {
+        let idx = self.index.lock().unwrap();
+        Ok(completion::resolve_completion(item, &idx))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
