@@ -13,6 +13,7 @@ pub mod rename;
 pub mod resolver;
 pub mod scope;
 pub mod semantic_tokens;
+pub mod signature_help;
 pub mod summary;
 pub mod summary_builder;
 pub mod symbols;
@@ -621,7 +622,28 @@ impl LanguageServer for Backend {
                 document_symbol_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
-                completion_provider: Some(CompletionOptions::default()),
+                completion_provider: Some(CompletionOptions {
+                    trigger_characters: Some(vec![
+                        ".".to_string(),
+                        ":".to_string(),
+                        "@".to_string(),
+                        "\"".to_string(),
+                        "'".to_string(),
+                    ]),
+                    resolve_provider: None,
+                    all_commit_characters: None,
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                    completion_item: None,
+                }),
+                signature_help_provider: Some(SignatureHelpOptions {
+                    trigger_characters: Some(vec!["(".to_string(), ",".to_string()]),
+                    retrigger_characters: Some(vec![",".to_string()]),
+                    work_done_progress_options: WorkDoneProgressOptions {
+                        work_done_progress: None,
+                    },
+                }),
                 references_provider: Some(OneOf::Left(true)),
                 rename_provider: Some(OneOf::Right(RenameOptions {
                     prepare_provider: Some(true),
@@ -906,6 +928,17 @@ impl LanguageServer for Backend {
         let idx = self.index.lock().unwrap();
         let results = workspace_symbol::search_workspace_symbols(&params.query, &idx);
         Ok(Some(WorkspaceSymbolResponse::Flat(results)))
+    }
+
+    async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
+        let uri = &params.text_document_position_params.text_document.uri;
+        let position = params.text_document_position_params.position;
+        let docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get(uri) else {
+            return Ok(None);
+        };
+        let mut idx = self.index.lock().unwrap();
+        Ok(signature_help::signature_help(doc, uri, position, &mut idx))
     }
 
     async fn semantic_tokens_full(

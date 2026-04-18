@@ -1,9 +1,9 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
+use crate::hover;
 use crate::resolver;
-use crate::type_system::{TypeFact, SymbolicStub};
-use crate::util::position_to_byte_offset;
+use crate::util::{node_text, position_to_byte_offset};
 use crate::aggregation::WorkspaceAggregation;
 
 const LUA_KEYWORDS: &[&str] = &[
@@ -13,17 +13,36 @@ const LUA_KEYWORDS: &[&str] = &[
     "then", "true", "until", "while",
 ];
 
+/// EmmyLua annotation tags that can appear after `---@`.
+const EMMY_TAGS: &[&str] = &[
+    "class", "field", "param", "return", "type", "alias", "enum",
+    "generic", "overload", "vararg", "deprecated", "async", "nodiscard",
+    "see", "meta", "diagnostic", "cast", "operator", "private", "protected",
+    "package", "public", "readonly", "version",
+];
+
 pub fn complete(
     doc: &Document,
     uri: &Uri,
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Vec<CompletionItem> {
-    // Check for dot-completion: `expr.`
-    if let Some(items) = try_dot_completion(doc, uri, position, index) {
+    // `require("<here>")` string-literal completion — highest priority.
+    if let Some(items) = try_require_path_completion(doc, position, index) {
         return items;
     }
 
+    // `---@<tag>` completion inside emmy comments.
+    if let Some(items) = try_emmy_tag_completion(doc, position) {
+        return items;
+    }
+
+    // Dot / method completion.
+    if let Some(items) = try_dot_completion_ast(doc, uri, position, index) {
+        return items;
+    }
+
+    // Fallback: identifier prefix completion (locals + globals + keywords).
     let prefix = get_prefix(doc, position);
     let mut items = Vec::new();
     let mut seen = HashSet::new();
@@ -35,7 +54,129 @@ pub fn complete(
     items
 }
 
-fn try_dot_completion(
+// ---------------------------------------------------------------------------
+// `---@` annotation tag completion
+// ---------------------------------------------------------------------------
+
+/// Returns completions for EmmyLua annotation tags when the cursor sits
+/// right after `---@` (with optional partial tag text). Triggered both via
+/// the `@` trigger character and manual invocation.
+fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<CompletionItem>> {
+    let offset = position_to_byte_offset(&doc.text, position)?;
+    let bytes = doc.text.as_bytes();
+    // EmmyLua tags are lowercase ASCII letters only (`class`, `param`, …).
+    // We deliberately do NOT skip digits / underscores here; doing so would
+    // let the cursor "eat" into an adjacent Lua identifier abutting the
+    // cursor, producing bogus matches.
+    let mut i = offset;
+    while i > 0 && bytes[i - 1].is_ascii_alphabetic() {
+        i -= 1;
+    }
+    if i == 0 || bytes[i - 1] != b'@' {
+        return None;
+    }
+    // Require the current line (trim_start) to begin with `--`, covering
+    // both `---@tag` (EmmyLua canonical) and `-- @tag` (occasional).
+    let at_pos = i - 1;
+    let line_start = bytes[..at_pos]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map_or(0, |p| p + 1);
+    let prefix_to_at = std::str::from_utf8(&bytes[line_start..at_pos]).ok()?.trim_start();
+    if !prefix_to_at.starts_with("--") {
+        return None;
+    }
+
+    let partial = std::str::from_utf8(&bytes[i..offset]).ok()?;
+    let items = EMMY_TAGS
+        .iter()
+        .filter(|t| t.starts_with(partial))
+        .map(|t| CompletionItem {
+            label: t.to_string(),
+            kind: Some(CompletionItemKind::KEYWORD),
+            detail: Some("EmmyLua annotation".to_string()),
+            insert_text: Some(t.to_string()),
+            ..Default::default()
+        })
+        .collect();
+    Some(items)
+}
+
+// ---------------------------------------------------------------------------
+// `require("<here>")` path completion
+// ---------------------------------------------------------------------------
+
+/// If the cursor is inside the string literal argument of a `require(...)`
+/// call, return completion items for every module path registered in the
+/// workspace's `require_map`.
+fn try_require_path_completion(
+    doc: &Document,
+    position: Position,
+    index: &WorkspaceAggregation,
+) -> Option<Vec<CompletionItem>> {
+    let offset = position_to_byte_offset(&doc.text, position)?;
+    let node = doc
+        .tree
+        .root_node()
+        .descendant_for_byte_range(offset, offset)?;
+
+    // Walk up looking for a string node whose ancestor is `require("...")`.
+    let source = doc.text.as_bytes();
+    let mut n = node;
+    for _ in 0..6 {
+        if matches!(n.kind(), "short_string" | "string") {
+            if is_inside_require_call(n, source) {
+                let mut items: Vec<CompletionItem> = index
+                    .require_map
+                    .keys()
+                    .cloned()
+                    .collect::<HashSet<_>>()
+                    .into_iter()
+                    .map(|m| CompletionItem {
+                        label: m.clone(),
+                        kind: Some(CompletionItemKind::MODULE),
+                        detail: Some("require target".to_string()),
+                        insert_text: Some(m),
+                        ..Default::default()
+                    })
+                    .collect();
+                items.sort_by(|a, b| a.label.cmp(&b.label));
+                return Some(items);
+            }
+        }
+        n = n.parent()?;
+    }
+    None
+}
+
+/// Returns true if `string_node` is the (first) argument of a `require(...)`
+/// call — i.e. its grandparent is a `function_call` whose callee reads
+/// `require`.
+fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool {
+    let mut current = string_node;
+    for _ in 0..6 {
+        let Some(parent) = current.parent() else {
+            return false;
+        };
+        if parent.kind() == "function_call" {
+            if let Some(callee) = parent.child_by_field_name("callee") {
+                return node_text(callee, source) == "require";
+            }
+            return false;
+        }
+        current = parent;
+    }
+    false
+}
+
+// ---------------------------------------------------------------------------
+// Dot / method completion — AST-driven
+// ---------------------------------------------------------------------------
+
+/// AST-driven dot/method completion. Replaces the old string `splitn('.')`
+/// base analysis so that bases like `a.b.c`, method returns (`foo():x`) and
+/// subscripts (`arr[1].`) are treated via the resolver chain.
+fn try_dot_completion_ast(
     doc: &Document,
     uri: &Uri,
     position: Position,
@@ -47,60 +188,26 @@ fn try_dot_completion(
     }
 
     let bytes = doc.text.as_bytes();
-    // Walk back past any partial identifier after the dot
+    // Walk back past any partial identifier after the dot/colon.
     let mut dot_pos = offset;
-    while dot_pos > 0 && (bytes[dot_pos - 1].is_ascii_alphanumeric() || bytes[dot_pos - 1] == b'_') {
+    while dot_pos > 0
+        && (bytes[dot_pos - 1].is_ascii_alphanumeric() || bytes[dot_pos - 1] == b'_')
+    {
         dot_pos -= 1;
     }
     if dot_pos == 0 || (bytes[dot_pos - 1] != b'.' && bytes[dot_pos - 1] != b':') {
         return None;
     }
     let is_method = bytes[dot_pos - 1] == b':';
-
-    // Find the base expression before the dot
     let base_end = dot_pos - 1;
-    let mut base_start = base_end;
-    while base_start > 0 && (bytes[base_start - 1].is_ascii_alphanumeric() || bytes[base_start - 1] == b'_' || bytes[base_start - 1] == b'.') {
-        base_start -= 1;
-    }
-    if base_start == base_end {
-        return None;
-    }
-
-    let base_text = std::str::from_utf8(&bytes[base_start..base_end]).ok()?;
     let prefix = std::str::from_utf8(&bytes[dot_pos..offset]).ok()?.to_string();
 
-    let base_fact = {
-        let parts: Vec<&str> = base_text.split('.').collect();
-        if parts.len() == 1 {
-            if let Some(summary) = index.summaries.get(uri) {
-                if let Some(ltf) = summary.local_type_facts.get(base_text) {
-                    ltf.type_fact.clone()
-                } else {
-                    TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
-                }
-            } else {
-                TypeFact::Stub(SymbolicStub::GlobalRef { name: base_text.to_string() })
-            }
-        } else {
-            let root = parts[0];
-            let root_fact = if let Some(summary) = index.summaries.get(uri) {
-                if let Some(ltf) = summary.local_type_facts.get(root) {
-                    ltf.type_fact.clone()
-                } else {
-                    TypeFact::Stub(SymbolicStub::GlobalRef { name: root.to_string() })
-                }
-            } else {
-                TypeFact::Stub(SymbolicStub::GlobalRef { name: root.to_string() })
-            };
-            let field_chain: Vec<String> = parts[1..].iter().map(|s| s.to_string()).collect();
-            let resolved = resolver::resolve_field_chain(&root_fact, &field_chain, index);
-            resolved.type_fact
-        }
-    };
+    // Find the AST node representing the base expression — the node ending
+    // exactly at `base_end`.
+    let base_node = find_base_expression_node(doc.tree.root_node(), base_end)?;
+    let base_fact = hover::infer_node_type(base_node, bytes, uri, index);
 
     let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
-
     if fields.is_empty() {
         return None;
     }
@@ -136,6 +243,48 @@ fn try_dot_completion(
 
     Some(items)
 }
+
+/// Locate the AST node whose span ends at `end_byte` — this is the base
+/// expression to the left of the dot/colon. Prefers the largest such node
+/// (e.g. the full `a.b.c` variable, not the trailing identifier `c`).
+/// `parenthesized_expression` is accepted so `(foo()).x` / `(x or y).name`
+/// style bases are resolved through `hover::infer_node_type`.
+fn find_base_expression_node(
+    root: tree_sitter::Node,
+    end_byte: usize,
+) -> Option<tree_sitter::Node> {
+    if end_byte == 0 {
+        return None;
+    }
+    let mut n = root.descendant_for_byte_range(end_byte - 1, end_byte - 1)?;
+    while let Some(parent) = n.parent() {
+        if parent.end_byte() == end_byte && is_base_expr_kind(parent.kind()) {
+            n = parent;
+            continue;
+        }
+        break;
+    }
+    if is_base_expr_kind(n.kind()) {
+        Some(n)
+    } else {
+        None
+    }
+}
+
+fn is_base_expr_kind(kind: &str) -> bool {
+    matches!(
+        kind,
+        "variable"
+            | "field_expression"
+            | "function_call"
+            | "identifier"
+            | "parenthesized_expression"
+    )
+}
+
+// ---------------------------------------------------------------------------
+// Identifier / keyword / global fallbacks
+// ---------------------------------------------------------------------------
 
 fn get_prefix(doc: &Document, position: Position) -> String {
     let Some(offset) = position_to_byte_offset(&doc.text, position) else {
@@ -222,3 +371,4 @@ fn collect_keyword_completions(
         }
     }
 }
+

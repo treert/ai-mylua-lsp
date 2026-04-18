@@ -341,6 +341,13 @@ pub fn infer_node_type(
             }
             TypeFact::Unknown
         }
+        "parenthesized_expression" => {
+            // `(expr)` — unwrap and recurse into the single enclosed
+            // expression so `(foo()).x` style bases resolve correctly.
+            node.named_child(0)
+                .map(|inner| infer_node_type(inner, source, uri, index))
+                .unwrap_or(TypeFact::Unknown)
+        }
         "identifier" => {
             let text = node_text(node, source);
             if let Some(summary) = index.summaries.get(uri) {

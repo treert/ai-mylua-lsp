@@ -128,6 +128,121 @@ fn references_shadowed_outer_not_claimed_by_inner() {
 }
 
 #[test]
+fn references_emmy_type_scans_annotations() {
+    // Regression: Emmy type names appearing inside `---@...` lines are not
+    // identifier AST nodes, so the regular identifier scan misses them.
+    // find_references must also scan emmy_comment text for the type name.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, scope,
+                    summary_builder};
+
+    let mut parser = new_parser();
+    let defn_src = "---@class Foo\n---@field x number\nFoo = {}";
+    let defn_uri = make_uri("defn.lua");
+    let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
+    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes());
+    let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes());
+    let defn_doc = Document { text: defn_src.to_string(), tree: defn_tree, scope_tree: defn_scope };
+
+    // Three distinct Emmy mentions of Foo in different annotation positions.
+    let user_src = r#"---@type Foo
+local a = nil
+---@param x Foo
+---@return Foo
+local function use(x) return x end
+---@class Bar : Foo
+Bar = {}"#;
+    let user_uri = make_uri("user.lua");
+    let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
+    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes());
+    let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes());
+    let user_doc = Document { text: user_src.to_string(), tree: user_tree, scope_tree: user_scope };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(defn_summary);
+    agg.upsert_summary(user_summary);
+
+    let docs = HashMap::from([
+        (defn_uri.clone(), defn_doc),
+        (user_uri.clone(), user_doc),
+    ]);
+    let defn_doc_ref = docs.get(&defn_uri).unwrap();
+
+    // Click on `Foo` in its `---@class Foo` header (line 0, col 10).
+    let locs = references::find_references(
+        defn_doc_ref, &defn_uri, pos(0, 10), true,
+        &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("references should resolve for Emmy class name");
+
+    // Count how many Foo annotation references we found in user.lua.
+    let user_refs: Vec<_> = locs.iter().filter(|l| l.uri == user_uri).collect();
+    assert!(
+        user_refs.len() >= 4,
+        "should find at least 4 annotation references to Foo (@type, @param, @return, : Foo), got {}: {:?}",
+        user_refs.len(), user_refs,
+    );
+
+    // Also must not emit a spurious match inside `function` / other words
+    // that merely contain "Foo" substrings. Sanity check.
+    for l in &user_refs {
+        let text = &docs[&user_uri].text;
+        let line = text.lines().nth(l.range.start.line as usize).unwrap_or("");
+        // Every reported range should actually sit at a Foo occurrence.
+        assert!(
+            line.contains("Foo"),
+            "reference line {} does not contain Foo: {:?}",
+            l.range.start.line, line,
+        );
+    }
+}
+
+#[test]
+fn references_emmy_type_word_boundary() {
+    // Must not match `FooBar` when the clicked type is `Foo`.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, scope,
+                    summary_builder};
+
+    let mut parser = new_parser();
+    let defn_src = "---@class Foo\nFoo = {}";
+    let defn_uri = make_uri("d.lua");
+    let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
+    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes());
+    let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes());
+    let defn_doc = Document { text: defn_src.to_string(), tree: defn_tree, scope_tree: defn_scope };
+
+    let user_src = "---@type FooBar\nlocal x = nil";
+    let user_uri = make_uri("u.lua");
+    let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
+    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes());
+    let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes());
+    let user_doc = Document { text: user_src.to_string(), tree: user_tree, scope_tree: user_scope };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(defn_summary);
+    agg.upsert_summary(user_summary);
+
+    let docs = HashMap::from([
+        (defn_uri.clone(), defn_doc),
+        (user_uri.clone(), user_doc),
+    ]);
+    let defn_doc_ref = docs.get(&defn_uri).unwrap();
+
+    let locs = references::find_references(
+        defn_doc_ref, &defn_uri, pos(0, 10), true,
+        &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .unwrap_or_default();
+
+    // Only the class declaration itself (defn.lua) should match; no `FooBar`
+    // in user.lua.
+    for l in &locs {
+        assert_ne!(l.uri, user_uri, "Foo must not match `FooBar`: {:?}", locs);
+    }
+}
+
+#[test]
 fn references_exclude_declaration() {
     let src = r#"local myvar = 1
 print(myvar)

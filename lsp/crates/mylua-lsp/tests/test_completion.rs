@@ -103,6 +103,103 @@ fn complete_keywords_present() {
 }
 
 #[test]
+fn complete_emmy_tag_after_at() {
+    // Typing `---@cl` should list emmy tags starting with "cl" (e.g. class).
+    let src = "---@cl\nlocal x = 1";
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_tag.lua");
+    let items = completion::complete(&doc, &uri, pos(0, 6), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        labels.contains(&"class"),
+        "`---@cl` should complete to `class`, got: {:?}",
+        labels,
+    );
+    // Should NOT leak locals/keywords into emmy-tag completion.
+    assert!(
+        !labels.contains(&"local"),
+        "emmy tag completion should not include Lua keywords: {:?}",
+        labels,
+    );
+}
+
+#[test]
+fn complete_emmy_tag_bare_at() {
+    let src = "---@\nlocal x = 1";
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_bare.lua");
+    let items = completion::complete(&doc, &uri, pos(0, 4), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    for expected in &["class", "field", "param", "return", "type", "overload"] {
+        assert!(
+            labels.contains(expected),
+            "`---@` should include `{}`, got: {:?}",
+            expected, labels,
+        );
+    }
+}
+
+#[test]
+fn complete_require_path_from_index() {
+    use mylua_lsp::{aggregation::WorkspaceAggregation, summary_builder};
+
+    let mut parser = new_parser();
+    let caller_src = "local m = require(\"\")";
+    let caller_uri = make_uri("caller.lua");
+    let caller_doc = parse_doc(&mut parser, caller_src);
+    let caller_summary = summary_builder::build_summary(
+        &caller_uri, &caller_doc.tree, caller_src.as_bytes(),
+    );
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.set_require_mapping("game.player".to_string(), make_uri("player.lua"));
+    agg.set_require_mapping("game.world".to_string(), make_uri("world.lua"));
+    agg.set_require_mapping("util.log".to_string(), make_uri("log.lua"));
+    agg.upsert_summary(caller_summary);
+
+    // Cursor inside the empty string `""` at line 0, col 19 (just inside the quote).
+    let items = completion::complete(&caller_doc, &caller_uri, pos(0, 19), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    for expected in &["game.player", "game.world", "util.log"] {
+        assert!(
+            labels.contains(expected),
+            "require completion should list `{}`, got: {:?}",
+            expected, labels,
+        );
+    }
+    // All items inside a require string should be MODULE, not KEYWORD.
+    for item in &items {
+        assert_eq!(
+            item.kind,
+            Some(tower_lsp_server::ls_types::CompletionItemKind::MODULE),
+            "require completion items should all be MODULE kind, got {:?}",
+            item.kind,
+        );
+    }
+}
+
+#[test]
+fn complete_dot_base_after_call_chain_is_ast_driven() {
+    // Regression for the string-splitn('.') based approach: clicking `.` on
+    // the result of a method call — even if we can't yet infer the exact
+    // return type — must not panic or propose obviously wrong global names.
+    let src = r#"---@class Obj
+---@field x integer
+local Obj = {}
+function Obj:get() return self end
+Obj:get()."#;
+    let (doc, uri, mut agg) = setup_single_file(src, "chain.lua");
+    // Cursor right after `.` (line 4, col 10)
+    let items = completion::complete(&doc, &uri, pos(4, 10), &mut agg);
+    // No assertion on exact content — just ensure we didn't crash and
+    // didn't spill the whole identifier table (which old splitn path did
+    // when base resolution failed).
+    assert!(
+        items.len() <= 64,
+        "AST-driven dot after method call should not spill a giant global list: {} items",
+        items.len(),
+    );
+}
+
+#[test]
 fn complete_empty_prefix_no_panic() {
     let src = "local x = 1\n";
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
