@@ -146,6 +146,9 @@ pub struct DiagnosticsConfig {
     /// `return` statements (including inside `if`/`do`/`while`).
     #[serde(rename = "returnMismatch")]
     pub return_mismatch: DiagnosticSeverityOption,
+    /// Scope of cold-start diagnostics publishing + cascade fan-out.
+    /// Default `"full"`. See `DiagnosticScope` for semantics.
+    pub scope: DiagnosticScope,
 }
 
 impl Default for DiagnosticsConfig {
@@ -167,7 +170,28 @@ impl Default for DiagnosticsConfig {
             argument_count_mismatch: DiagnosticSeverityOption::Off,
             argument_type_mismatch: DiagnosticSeverityOption::Off,
             return_mismatch: DiagnosticSeverityOption::Off,
+            scope: DiagnosticScope::Full,
         }
+    }
+}
+
+/// Scope of diagnostics publishing.
+///
+/// - `Full` (default): cold-start seeds the entire workspace (already
+///   open → Hot queue, others → Cold); cascade 触发所有 dependant URIs.
+/// - `OpenOnly`: cold-start seeds only `open_uris` as Hot; cascade 跳过
+///   未打开的 dependant URIs. Matches the default behavior of most LSPs
+///   (rust-analyzer, pyright).
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum DiagnosticScope {
+    Full,
+    OpenOnly,
+}
+
+impl Default for DiagnosticScope {
+    fn default() -> Self {
+        Self::Full
     }
 }
 
