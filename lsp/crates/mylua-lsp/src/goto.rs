@@ -122,41 +122,24 @@ fn try_require_goto(
     //   local_declaration
     //     names: <identifier "m">  OR  names: name_list -> identifier "m"
     //     values: expression_list -> function_call
-    let mut decl_node: Option<tree_sitter::Node> = None;
-    let mut idx_in_names: Option<u32> = None;
+    // Find the enclosing local_declaration and compute the identifier's
+    // index among ONLY the `identifier` children of the names list — so
+    // that non-identifier children like `<const>` / `<close>` attributes
+    // in `local x <const>, y = require(...)` don't push `y`'s index past
+    // the end of `values`.
     let mut p = ident_node.parent()?;
-    if matches!(p.kind(), "name_list" | "attribute_name_list") {
-        for i in 0..p.named_child_count() {
-            if let Some(c) = p.named_child(i as u32) {
-                if c.id() == ident_node.id() {
-                    idx_in_names = Some(i as u32);
-                }
-            }
-        }
+    let idx_in_names = if matches!(p.kind(), "name_list" | "attribute_name_list") {
+        let list = p;
         p = p.parent()?;
+        identifier_index_in_list(list, ident_node)?
     } else {
-        idx_in_names = Some(0);
+        0
+    };
+    if p.kind() != "local_declaration" {
+        return None;
     }
-    if p.kind() == "local_declaration" {
-        let names = p.child_by_field_name("names")?;
-        let mut matches_lhs = false;
-        for i in 0..names.named_child_count() {
-            if let Some(c) = names.named_child(i as u32) {
-                if c.id() == ident_node.id() {
-                    idx_in_names = Some(i as u32);
-                    matches_lhs = true;
-                    break;
-                }
-            }
-        }
-        if matches_lhs || names.id() == ident_node.id() {
-            decl_node = Some(p);
-        }
-    }
-    let decl = decl_node?;
-    let values = decl.child_by_field_name("values")?;
-    let idx = idx_in_names.unwrap_or(0);
-    let first_val = values.named_child(idx)?;
+    let values = p.child_by_field_name("values")?;
+    let first_val = values.named_child(idx_in_names)?;
     if first_val.kind() != "function_call" {
         return None;
     }
@@ -209,6 +192,28 @@ fn extract_string_content(node: tree_sitter::Node, source: &[u8]) -> Option<Stri
         }
     }
     find_string_content(node, source)
+}
+
+/// Return `target`'s position among the `identifier` children of `list`
+/// (`name_list` or `attribute_name_list`), ignoring non-identifier children
+/// like `<const>` / `<close>` attribute nodes so that downstream index
+/// lookups into `values` stay aligned.
+fn identifier_index_in_list(
+    list: tree_sitter::Node,
+    target: tree_sitter::Node,
+) -> Option<u32> {
+    let mut id_idx: u32 = 0;
+    for i in 0..list.named_child_count() {
+        if let Some(c) = list.named_child(i as u32) {
+            if c.kind() == "identifier" {
+                if c.id() == target.id() {
+                    return Some(id_idx);
+                }
+                id_idx += 1;
+            }
+        }
+    }
+    None
 }
 
 fn apply_goto_strategy(

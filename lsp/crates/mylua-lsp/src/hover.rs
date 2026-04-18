@@ -320,18 +320,24 @@ pub fn infer_node_type(
             // the whole node text; treat that as local/global lookup.
             // Anything else (subscript, malformed) → Unknown to avoid
             // constructing meaningless `GlobalRef` names.
-            if node.named_child_count() == 1
-                && node.named_child(0).map(|c| c.kind()) == Some("identifier")
-            {
-                let text = node_text(node, source);
-                if let Some(summary) = index.summaries.get(uri) {
-                    if let Some(ltf) = summary.local_type_facts.get(text) {
-                        return ltf.type_fact.clone();
+            if node.named_child_count() == 1 {
+                if let Some(child) = node.named_child(0) {
+                    if child.kind() == "identifier" {
+                        // Use the identifier child's text directly rather
+                        // than the full `variable` span — safer under ERROR
+                        // recovery where the wrapper's span may include
+                        // extraneous characters.
+                        let text = node_text(child, source);
+                        if let Some(summary) = index.summaries.get(uri) {
+                            if let Some(ltf) = summary.local_type_facts.get(text) {
+                                return ltf.type_fact.clone();
+                            }
+                        }
+                        return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
+                            name: text.to_string(),
+                        });
                     }
                 }
-                return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                    name: text.to_string(),
-                });
             }
             TypeFact::Unknown
         }

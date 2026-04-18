@@ -147,51 +147,73 @@ pub fn find_node_at_position<'a>(
     Some(node)
 }
 
-/// Convert an LSP `Position` (UTF-16) into a tree-sitter `Point` with
-/// BYTE column, relative to `source`.
-pub fn position_to_ts_point(source: &str, pos: Position) -> tree_sitter::Point {
-    let bytes = source.as_bytes();
-    let line_start = byte_offset_of_line(bytes, pos.line as usize).unwrap_or(source.len());
-    let line_bytes = line_bytes_after(bytes, line_start);
-    let byte_col = utf16_col_to_byte_col(line_bytes, pos.character);
-    tree_sitter::Point { row: pos.line as usize, column: byte_col }
-}
-
 /// Apply an LSP `TextDocumentContentChangeEvent`-style incremental edit to
 /// `text`, returning the `InputEdit` needed to tell tree-sitter about the
-/// edit. `range` is in LSP coordinates (UTF-16). If `range` is `None`,
-/// the caller should replace the entire document and pass a fresh parse.
+/// edit. `range` is in LSP coordinates (UTF-16).
+///
+/// If either endpoint of `range` cannot be resolved (e.g. the client sent a
+/// position past end-of-file), we clamp **both** endpoints to `text.len()`
+/// and emit the edit as an append at EOF. This is safer than silently
+/// inserting at byte 0, which would corrupt the document. A warning is
+/// logged so the mismatch is visible in the log file.
 pub fn apply_text_edit(
     text: &mut String,
     range: Range,
     new_text: &str,
 ) -> tree_sitter::InputEdit {
-    let start_byte = position_to_byte_offset(text, range.start).unwrap_or(0);
-    let old_end_byte = position_to_byte_offset(text, range.end).unwrap_or(text.len());
-    let start_point = position_to_ts_point(text, range.start);
-    let old_end_point = position_to_ts_point(text, range.end);
+    let raw_start = position_to_byte_offset(text, range.start);
+    let raw_end = position_to_byte_offset(text, range.end);
+
+    // Happy path: trust the client's row numbers (the byte offsets above
+    // were computed from them anyway). Only fall back to a full-text
+    // scan of `byte_offset_to_ts_point` when we clamp to EOF, so editing
+    // near the end of a large file doesn't force an O(file_size) rescan
+    // for every keystroke.
+    let (start_byte, start_point, old_end_byte, old_end_point) =
+        match (raw_start, raw_end) {
+            (Some(s), Some(e)) if s <= e => {
+                let bytes = text.as_bytes();
+                let s_line_start =
+                    byte_offset_of_line(bytes, range.start.line as usize).unwrap_or(0);
+                let e_line_start =
+                    byte_offset_of_line(bytes, range.end.line as usize).unwrap_or(s_line_start);
+                let s_point = tree_sitter::Point {
+                    row: range.start.line as usize,
+                    column: s.saturating_sub(s_line_start),
+                };
+                let e_point = tree_sitter::Point {
+                    row: range.end.line as usize,
+                    column: e.saturating_sub(e_line_start),
+                };
+                (s, s_point, e, e_point)
+            }
+            _ => {
+                crate::lsp_log!(
+                    "[apply_text_edit] out-of-range Range {:?}/{:?} (text len={}); \
+                     clamping to EOF",
+                    range.start,
+                    range.end,
+                    text.len(),
+                );
+                let p = byte_offset_to_ts_point(text.as_bytes(), text.len());
+                (text.len(), p, text.len(), p)
+            }
+        };
 
     text.replace_range(start_byte..old_end_byte, new_text);
 
     let new_end_byte = start_byte + new_text.len();
-    let new_end_point = {
-        let bytes = text.as_bytes();
+    let new_end_point = if let Some(last_nl) = new_text.rfind('\n') {
         let newlines = new_text.bytes().filter(|&b| b == b'\n').count();
-        if newlines == 0 {
-            tree_sitter::Point {
-                row: start_point.row,
-                column: start_point.column + new_text.len(),
-            }
-        } else {
-            let last_nl = new_text.rfind('\n').unwrap();
-            let tail_len = new_text.len() - (last_nl + 1);
-            // Start byte of the line that now contains new_end_byte:
-            let row = start_point.row + newlines;
-            // Column is bytes from the last newline in new_text to new_end_byte.
-            // If any leading bytes remain on the last inserted line before
-            // we hit new_end_byte, those are exactly `tail_len`.
-            let _ = bytes; // silence unused if we ever remove
-            tree_sitter::Point { row, column: tail_len }
+        let tail_len = new_text.len() - (last_nl + 1);
+        tree_sitter::Point {
+            row: start_point.row + newlines,
+            column: tail_len,
+        }
+    } else {
+        tree_sitter::Point {
+            row: start_point.row,
+            column: start_point.column + new_text.len(),
         }
     };
 
@@ -202,6 +224,26 @@ pub fn apply_text_edit(
         start_position: start_point,
         old_end_position: old_end_point,
         new_end_position: new_end_point,
+    }
+}
+
+/// Convert a byte offset in `source` into a tree-sitter `Point` with
+/// BYTE column. Used by `apply_text_edit` so the edit's start / old_end
+/// positions are always consistent with the text we actually modify, even
+/// when the caller's `Position` was out of range and got clamped.
+fn byte_offset_to_ts_point(source: &[u8], byte_offset: usize) -> tree_sitter::Point {
+    let clamped = byte_offset.min(source.len());
+    let mut row = 0usize;
+    let mut line_start = 0usize;
+    for (i, &b) in source.iter().take(clamped).enumerate() {
+        if b == b'\n' {
+            row += 1;
+            line_start = i + 1;
+        }
+    }
+    tree_sitter::Point {
+        row,
+        column: clamped - line_start,
     }
 }
 
@@ -267,6 +309,27 @@ mod tests {
         assert_eq!(edit.new_end_byte, 7);
         assert_eq!(edit.new_end_position.row, 0);
         assert_eq!(edit.new_end_position.column, 7);
+    }
+
+    #[test]
+    fn apply_text_edit_out_of_range_appends_at_eof() {
+        // A range starting past end-of-file must NOT silently insert at
+        // byte 0 (which would corrupt the document). Instead, clamp both
+        // endpoints to EOF and emit the edit as an append.
+        let mut text = String::from("hello");
+        let original = text.clone();
+        let edit = apply_text_edit(
+            &mut text,
+            Range {
+                start: Position { line: 99, character: 99 },
+                end: Position { line: 99, character: 99 },
+            },
+            "!",
+        );
+        assert_eq!(text, format!("{}{}", original, "!"), "must append, not prepend");
+        assert_eq!(edit.start_byte, original.len());
+        assert_eq!(edit.old_end_byte, original.len());
+        assert_eq!(edit.new_end_byte, original.len() + 1);
     }
 
     #[test]

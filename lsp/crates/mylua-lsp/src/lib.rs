@@ -54,6 +54,13 @@ pub struct Backend {
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
     diag_gen: Arc<Mutex<HashMap<Uri, u64>>>,
+    /// Per-URI async serialization for document-mutating handlers
+    /// (`did_open` / `did_change`). Without this, two concurrent
+    /// `did_change` for the same URI could both `.remove(&uri)` from the
+    /// documents map and race on the re-insert, corrupting text state.
+    /// The outer `std::sync::Mutex` only guards the HashMap itself; the
+    /// inner `tokio::sync::Mutex` is awaited while parsing/applying edits.
+    edit_locks: Arc<Mutex<HashMap<Uri, Arc<tokio::sync::Mutex<()>>>>>,
 }
 
 struct ParsedFile {
@@ -87,7 +94,18 @@ impl Backend {
             config: Arc::new(Mutex::new(LspConfig::default())),
             index_state: Arc::new(Mutex::new(IndexState::Initializing)),
             diag_gen: Arc::new(Mutex::new(HashMap::new())),
+            edit_locks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
+    /// `lock()` to serialize document mutations for a single URI.
+    fn edit_lock_for(&self, uri: &Uri) -> Arc<tokio::sync::Mutex<()>> {
+        let mut locks = self.edit_locks.lock().unwrap();
+        locks
+            .entry(uri.clone())
+            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .clone()
     }
 
     fn parse_and_store(&self, uri: Uri, text: String, version: Option<i32>) {
@@ -660,8 +678,11 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
+        let uri = params.text_document.uri;
+        let lock = self.edit_lock_for(&uri);
+        let _guard = lock.lock().await;
         self.parse_and_store(
-            params.text_document.uri,
+            uri,
             params.text_document.text,
             Some(params.text_document.version),
         );
@@ -670,6 +691,12 @@ impl LanguageServer for Backend {
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
         let uri = params.text_document.uri;
         let version = Some(params.text_document.version);
+
+        // Serialize concurrent did_change / did_open for the same URI.
+        // The two-phase remove→process→insert in `parse_and_store_with_old_tree`
+        // is not safe against interleaving otherwise.
+        let lock = self.edit_lock_for(&uri);
+        let _guard = lock.lock().await;
 
         // Apply changes sequentially. For each range-scoped change we
         // patch the stored text, call `tree.edit(&InputEdit)` so tree-sitter
@@ -710,13 +737,13 @@ impl LanguageServer for Backend {
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
-        self.diag_gen
-            .lock()
-            .unwrap()
-            .remove(&params.text_document.uri);
-        self.client
-            .publish_diagnostics(params.text_document.uri, vec![], None)
-            .await;
+        let uri = params.text_document.uri;
+        self.diag_gen.lock().unwrap().remove(&uri);
+        // Drop the per-URI edit lock entry to keep the map bounded.
+        // Any in-flight did_change holding an `Arc` clone still sees a
+        // valid mutex; we only remove the HashMap entry.
+        self.edit_locks.lock().unwrap().remove(&uri);
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {

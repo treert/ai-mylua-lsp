@@ -120,6 +120,62 @@ fn goto_require_jumps_to_module_return() {
 }
 
 #[test]
+fn goto_require_with_attribute_before_target() {
+    // Regression: `attribute_name_list` interleaves identifier and
+    // attribute children, so `local x <const>, y = require(...)` used
+    // to pick `values.named_child(2)` for `y` (off-by-attribute) and
+    // miss the require goto entirely. After fix, clicking `y` must
+    // still jump to the required module.
+    use mylua_lsp::{document::Document, summary_builder, scope};
+
+    let mut parser = new_parser();
+
+    let mod_src = "return { z = 1 }";
+    let mod_uri = make_uri("attr_mod.lua");
+    let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
+    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_src.as_bytes());
+
+    // `y` is the *second* identifier in the names list but it corresponds
+    // to `values.named_child(1)` (index 1 among expression values), not
+    // index 2 (which is where `<const>` pushed it structurally).
+    let caller_src = "local x <const>, y = 1, require(\"attr_mod\")";
+    let caller_uri = make_uri("attr_caller.lua");
+    let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
+    let caller_summary =
+        summary_builder::build_summary(&caller_uri, &caller_tree, caller_src.as_bytes());
+    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes());
+    let caller_doc = Document {
+        text: caller_src.to_string(),
+        tree: caller_tree,
+        scope_tree: caller_scope,
+    };
+
+    let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
+    agg.set_require_mapping("attr_mod".to_string(), mod_uri.clone());
+    agg.upsert_summary(mod_summary);
+    agg.upsert_summary(caller_summary);
+
+    // `y` is at column 17 in `local x <const>, y = ...`
+    let result =
+        goto::goto_definition(&caller_doc, &caller_uri, pos(0, 17), &mut agg, &GotoStrategy::Auto)
+            .expect("goto on `y` should resolve");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
+        assert_eq!(
+            loc.uri, mod_uri,
+            "y's require should target attr_mod.lua even with <const> attribute on x",
+        );
+        assert_eq!(
+            loc.range.start.line, 0,
+            "should land on `return ...` (line 0), got: {:?}",
+            loc.range,
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", result);
+    }
+}
+
+#[test]
 fn goto_position_with_chinese_comment_on_same_line() {
     // Regression: LSP Position.character is UTF-16 code units. When a line
     // contains non-ASCII characters (e.g. Chinese) before the identifier,
