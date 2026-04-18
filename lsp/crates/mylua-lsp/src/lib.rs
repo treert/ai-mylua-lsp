@@ -33,7 +33,7 @@ pub mod summary_cache;
 pub mod workspace_scanner;
 pub mod workspace_symbol;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -77,6 +77,14 @@ pub struct Backend {
     semantic_tokens_cache: Arc<Mutex<HashMap<Uri, semantic_tokens::TokenCacheEntry>>>,
     /// Monotonic counter used to mint unique `result_id`s.
     semantic_tokens_counter: Arc<Mutex<u64>>,
+    /// URIs currently in LSP `did_open` state (not yet `did_close`d).
+    /// Used by:
+    ///   - T1-1 fast path guard in `did_open` (skip parse only if already
+    ///     open AND text matches)
+    ///   - Diagnostic scheduler priority decision (Hot vs Cold)
+    ///   - Cold-start seed routing (`initialized` splits documents into
+    ///     Hot/Cold based on this set)
+    open_uris: Arc<Mutex<HashSet<Uri>>>,
 }
 
 struct ParsedFile {
@@ -113,6 +121,7 @@ impl Backend {
             edit_locks: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_counter: Arc::new(Mutex::new(0)),
+            open_uris: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -199,10 +208,14 @@ impl Backend {
                 summary.global_contributions.len(),
             );
 
-            // Snapshot open URIs BEFORE locking index, to avoid lock-order
-            // inversion with schedule_semantic_diagnostics (which locks
-            // documents then index).
-            let open_uris: std::collections::HashSet<Uri> =
+            // Snapshot the set of *indexed* URIs (entire workspace after
+            // cold-start, not just client-opened ones) BEFORE locking
+            // index, to avoid lock-order inversion with
+            // schedule_semantic_diagnostics (which locks documents then
+            // index). Named `indexed_uris` to avoid confusion with the
+            // new `self.open_uris` field which is strictly the set of
+            // client-opened URIs.
+            let indexed_uris: std::collections::HashSet<Uri> =
                 self.documents.lock().unwrap().keys().cloned().collect();
 
             let dependant_uris = {
@@ -238,7 +251,7 @@ impl Backend {
                             affected.push(n);
                         }
                     }
-                    collect_dependant_uris(&uri, &idx, &open_uris, &affected)
+                    collect_dependant_uris(&uri, &idx, &indexed_uris, &affected)
                 } else {
                     Vec::new()
                 }
@@ -553,19 +566,20 @@ impl Backend {
     }
 }
 
-/// Collect URIs of open files that depend on `uri` either via
-/// `require()` (require_by_return) or via Emmy type references
-/// (type_dependants — P1-7). Takes a pre-collected set of open
-/// URIs and the set of type names this edit may have touched
-/// (union of old-summary and new-summary type definitions — the
-/// old names cover rename/delete, the new names cover add/edit).
+/// Collect URIs of dependent files (from the given candidate set) that
+/// depend on `uri` either via `require()` (require_by_return) or via
+/// Emmy type references (type_dependants — P1-7). `candidate_uris` is
+/// the filter set — typically the whole indexed workspace; **not** to
+/// be confused with `Backend.open_uris` (client-opened subset). The
+/// scope-based filtering (open-only vs full) happens in the caller's
+/// scheduler loop, not here.
 ///
 /// De-duplicates across both sources so a file that both requires
 /// `uri` AND references one of its classes only appears once.
 fn collect_dependant_uris(
     uri: &Uri,
     idx: &aggregation::WorkspaceAggregation,
-    open_uris: &std::collections::HashSet<Uri>,
+    candidate_uris: &std::collections::HashSet<Uri>,
     affected_type_names: &[String],
 ) -> Vec<Uri> {
     let mut seen: std::collections::HashSet<Uri> = std::collections::HashSet::new();
@@ -573,7 +587,7 @@ fn collect_dependant_uris(
 
     if let Some(deps) = idx.require_by_return.get(uri) {
         for dep in deps {
-            if open_uris.contains(&dep.source_uri) && seen.insert(dep.source_uri.clone()) {
+            if candidate_uris.contains(&dep.source_uri) && seen.insert(dep.source_uri.clone()) {
                 result.push(dep.source_uri.clone());
             }
         }
@@ -591,7 +605,7 @@ fn collect_dependant_uris(
                 if dep_uri == uri {
                     continue;
                 }
-                if open_uris.contains(dep_uri) && seen.insert(dep_uri.clone()) {
+                if candidate_uris.contains(dep_uri) && seen.insert(dep_uri.clone()) {
                     result.push(dep_uri.clone());
                 }
             }
@@ -831,24 +845,31 @@ impl LanguageServer for Backend {
         let lock = self.edit_lock_for(&uri);
         let _guard = lock.lock().await;
 
-        // Fast path (symmetric to `did_close`): if the indexed document
-        // text already matches the incoming buffer byte-for-byte, skip
-        // re-parse / re-build-summary / re-publish entirely. Workspace
-        // scan inserts every file into `documents` at startup, so the
-        // very first user `did_open` of an unmodified file also hits
-        // this path — not just reopens after a close.
+        // Fast path (symmetric to `did_close`): skip re-parse / re-build
+        // summary / re-publish when the indexed document already matches
+        // the incoming buffer byte-for-byte AND the URI is already
+        // tracked as open. Requiring `open_uris.contains` prevents
+        // "cold-start indexed, first did_open, text identical" from
+        // silently skipping diagnostics on a file the user just opened —
+        // the initial publish for the open file must go through
+        // parse_and_store → scheduler to reach the Hot queue.
         //
         // We intentionally compare *text only*, not version: clients
         // reset `version` to 1 on reopen but content is unchanged, and
         // conversely identical version numbers do not guarantee identical
         // content across clients. Byte-equality is the only safe signal.
         //
-        // Invariant: fast path does NOT bump `diag_gen`. If a 300ms-
-        // debounced semantic diagnostics task from before is still in
-        // flight and ends up publishing, the result matches the current
-        // `documents[uri]` content (which this check just proved equal
-        // to the incoming buffer), so the publish is still correct.
-        {
+        // Invariant: fast path does NOT touch the scheduler (`diag_gen`
+        // or queues). Any in-flight debounce from before still publishes
+        // correctly because its compute uses current `documents[uri]`
+        // which this check just proved equal to the incoming buffer.
+        //
+        // Lock ordering: `open_uris` FIRST, `documents` SECOND. We take
+        // them sequentially (not nested) to avoid establishing an
+        // `open_uris → documents` hold pattern that could deadlock
+        // against future consumers taking them in the opposite order.
+        let is_tracked_open = self.open_uris.lock().unwrap().contains(&uri);
+        if is_tracked_open {
             let docs = self.documents.lock().unwrap();
             if let Some(doc) = docs.get(&uri) {
                 if doc.text == params.text_document.text {
@@ -857,11 +878,13 @@ impl LanguageServer for Backend {
             }
         }
 
+        let uri_for_open_set = uri.clone();
         self.parse_and_store(
             uri,
             params.text_document.text,
             Some(params.text_document.version),
         );
+        self.open_uris.lock().unwrap().insert(uri_for_open_set);
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -914,6 +937,11 @@ impl LanguageServer for Backend {
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {
         let uri = params.text_document.uri;
+        // Clear open_uris first — once the client says the file is
+        // closed, subsequent scheduler priority decisions for this URI
+        // should default to Cold. This happens *before* any fast-path
+        // return so tab cycling correctly reflects the close event.
+        self.open_uris.lock().unwrap().remove(&uri);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
         self.semantic_tokens_cache.lock().unwrap().remove(&uri);
