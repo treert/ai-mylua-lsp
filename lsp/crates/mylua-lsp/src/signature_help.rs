@@ -306,8 +306,18 @@ fn compute_active_parameter(
     if end <= start {
         return 0;
     }
-    let slice = &source[start..end];
+    count_top_level_commas(&source[start..end])
+}
 
+/// Count top-level (depth-0) `,` bytes in the given slice, treating
+/// Lua short / long string literals and both line (`--`) and block
+/// (`--[[ ... ]]`) comments as opaque regions where commas do not count.
+///
+/// Exposed at crate scope so it can be unit-tested directly against
+/// handcrafted slices (including unterminated-comment edge cases that
+/// tree-sitter's error recovery won't surface as a `function_call` at
+/// the integration level).
+pub(crate) fn count_top_level_commas(slice: &[u8]) -> u32 {
     let mut commas: u32 = 0;
     let mut depth_paren: i32 = 0;
     let mut depth_brace: i32 = 0;
@@ -348,12 +358,23 @@ fn compute_active_parameter(
                 let rest = &slice[i + 2..];
                 if rest.starts_with(b"[[") {
                     let mut j = i + 4;
+                    let mut closed = false;
                     while j + 1 < slice.len() {
                         if slice[j] == b']' && slice[j + 1] == b']' {
                             j += 2;
+                            closed = true;
                             break;
                         }
                         j += 1;
+                    }
+                    if !closed {
+                        // Unterminated `--[[ ...`: treat the rest of the
+                        // slice as comment and stop. Without this break,
+                        // the outer loop would re-enter with
+                        // `i = slice.len() - 1`, and if that last byte is
+                        // a top-level `,` the comma count gets bumped by
+                        // one (P0-R2 regression).
+                        break;
                     }
                     i = j;
                     continue;
@@ -436,28 +457,43 @@ mod tests {
         // Simulated `arguments` node would span `(a, b, {x=1, y=2}, c|)`.
         // The helper only consumes raw bytes starting past `(`, so we can
         // test the comma counter directly.
-        let src = b"a, b, {x=1, y=2}, c".to_vec();
-        let mut commas: u32 = 0;
-        let mut depth_paren: i32 = 0;
-        let mut depth_brace: i32 = 0;
-        let mut depth_bracket: i32 = 0;
-        let mut i = 0;
-        while i < src.len() {
-            let b = src[i];
-            match b {
-                b'(' => depth_paren += 1,
-                b')' => depth_paren -= 1,
-                b'{' => depth_brace += 1,
-                b'}' => depth_brace -= 1,
-                b'[' => depth_bracket += 1,
-                b']' => depth_bracket -= 1,
-                b',' if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
-                    commas += 1;
-                }
-                _ => {}
-            }
-            i += 1;
-        }
-        assert_eq!(commas, 3, "expected 3 top-level commas");
+        assert_eq!(
+            count_top_level_commas(b"a, b, {x=1, y=2}, c"),
+            3,
+            "3 top-level commas (the ones inside {{ ... }} must not count)",
+        );
+    }
+
+    #[test]
+    fn unterminated_block_comment_does_not_miscount_trailing_comma() {
+        // P0-R2 regression: the slice `1, --[[unclosed,` has one top-level
+        // `,` (after `1`) and one comma sitting inside an unterminated
+        // `--[[` block comment. The bug was that after the inner `j` loop
+        // failed to find `]]`, `j` ended at `slice.len() - 1`; setting
+        // `i = j; continue;` let the outer loop re-enter and process the
+        // final byte — if that byte was the top-level `,` we'd count it
+        // twice. The fix breaks out of the outer loop once `--[[` is
+        // detected as unterminated.
+        assert_eq!(
+            count_top_level_commas(b"1, --[[unclosed,"),
+            1,
+            "trailing `,` inside unterminated --[[ must not count",
+        );
+
+        // Companion case: slice where the unterminated `--[[` sits at
+        // the very end with no comma; still must not panic and must
+        // return only the commas counted before the `--[[`.
+        assert_eq!(
+            count_top_level_commas(b"1, 2, --[[unclosed"),
+            2,
+        );
+
+        // Properly-terminated block comment should not drop the
+        // top-level `,` that follows it.
+        assert_eq!(
+            count_top_level_commas(b"1, --[[note]], 3"),
+            2,
+            "terminated block comment preserves outer top-level commas",
+        );
     }
 }

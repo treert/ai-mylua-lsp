@@ -49,7 +49,7 @@ f:init()
 
 ---
 
-### [ ] P0-R2 — `compute_active_parameter` 未终止的 `--[[` 多跑一轮
+### [x] P0-R2 — `compute_active_parameter` 未终止的 `--[[` 多跑一轮
 
 **背景**：第二轮 reviewer 的 n2。如果用户输入一半 `foo(a, --[[noteb)`，`--[[` 找不到 `]]`，`j` 停在 `slice.len()-1`，continue 后还会跑一次循环末 `i += 1`。没有死循环，仅多一轮 match。
 
