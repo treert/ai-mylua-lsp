@@ -829,6 +829,33 @@ impl LanguageServer for Backend {
         let uri = params.text_document.uri;
         let lock = self.edit_lock_for(&uri);
         let _guard = lock.lock().await;
+
+        // Fast path (symmetric to `did_close`): if the indexed document
+        // text already matches the incoming buffer byte-for-byte, skip
+        // re-parse / re-build-summary / re-publish entirely. Workspace
+        // scan inserts every file into `documents` at startup, so the
+        // very first user `did_open` of an unmodified file also hits
+        // this path — not just reopens after a close.
+        //
+        // We intentionally compare *text only*, not version: clients
+        // reset `version` to 1 on reopen but content is unchanged, and
+        // conversely identical version numbers do not guarantee identical
+        // content across clients. Byte-equality is the only safe signal.
+        //
+        // Invariant: fast path does NOT bump `diag_gen`. If a 300ms-
+        // debounced semantic diagnostics task from before is still in
+        // flight and ends up publishing, the result matches the current
+        // `documents[uri]` content (which this check just proved equal
+        // to the incoming buffer), so the publish is still correct.
+        {
+            let docs = self.documents.lock().unwrap();
+            if let Some(doc) = docs.get(&uri) {
+                if doc.text == params.text_document.text {
+                    return;
+                }
+            }
+        }
+
         self.parse_and_store(
             uri,
             params.text_document.text,
