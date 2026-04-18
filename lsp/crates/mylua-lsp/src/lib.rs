@@ -834,7 +834,13 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&params.text_document.uri) else {
             return Ok(None);
         };
-        let syms = symbols::collect_document_symbols(doc.tree.root_node(), doc.text.as_bytes());
+        let idx = self.index.lock().unwrap();
+        let summary = idx.summaries.get(&params.text_document.uri);
+        let syms = symbols::collect_document_symbols(
+            doc.tree.root_node(),
+            doc.text.as_bytes(),
+            summary,
+        );
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
 

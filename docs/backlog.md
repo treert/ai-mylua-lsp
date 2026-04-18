@@ -122,7 +122,7 @@ f:init()
 
 ---
 
-### [ ] P1-4 — `documentSymbol` 展开 @class 层级
+### [x] P1-4 — `documentSymbol` 展开 @class 层级
 
 **目标**：VS Code outline 里看到 `@class Foo` 作为一个 CLASS 节点，`@field bar: integer` 与 `function Foo:baz()` 作为其子节点。
 
