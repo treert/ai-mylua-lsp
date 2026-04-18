@@ -147,6 +147,44 @@ pub fn find_node_at_position<'a>(
     Some(node)
 }
 
+/// Hard ceiling for "walk ancestors looking for X" loops across the
+/// codebase. Lua AST ancestor chains for the patterns we inspect
+/// (variable / field_expression / function_name / function_call)
+/// are at most a handful of levels deep; anything beyond `ANCESTOR_WALK_LIMIT`
+/// signals a malformed tree or a pathological source we'd rather
+/// bail out of than spin on.
+pub const ANCESTOR_WALK_LIMIT: usize = 64;
+
+/// Walk up from `node` calling `pred` on each ancestor; return the
+/// first ancestor for which `pred` yields `Some(T)`. Guards against
+/// runaway trees by capping depth at [`ANCESTOR_WALK_LIMIT`] and
+/// logging a warning via `crate::logger::log` if the cap is hit.
+///
+/// Note: `node` itself is NOT inspected — the walk starts at
+/// `node.parent()`. This matches the common "find an enclosing Xyz"
+/// pattern in hover / goto / completion.
+pub fn walk_ancestors<'a, T>(
+    node: tree_sitter::Node<'a>,
+    mut pred: impl FnMut(tree_sitter::Node<'a>) -> Option<T>,
+) -> Option<T> {
+    let mut current = node;
+    for _ in 0..ANCESTOR_WALK_LIMIT {
+        let Some(parent) = current.parent() else {
+            return None;
+        };
+        if let Some(v) = pred(parent) {
+            return Some(v);
+        }
+        current = parent;
+    }
+    crate::logger::log(&format!(
+        "[walk_ancestors] hit depth limit ({}) starting at {} — malformed tree?",
+        ANCESTOR_WALK_LIMIT,
+        node.kind(),
+    ));
+    None
+}
+
 /// Apply an LSP `TextDocumentContentChangeEvent`-style incremental edit to
 /// `text`, returning the `InputEdit` needed to tell tree-sitter about the
 /// edit. `range` is in LSP coordinates (UTF-16).
@@ -358,5 +396,89 @@ mod tests {
         let pos = Position { line: 1, character: 3 };
         let byte = position_to_byte_offset(src, pos).unwrap();
         assert_eq!(&src.as_bytes()[byte..byte + 1], b"c");
+    }
+
+    // Minimal parse-only helper for walk_ancestors tests; mirrors
+    // `tests/test_helpers::new_parser` but avoids pulling the test
+    // helpers crate into the lib's unit-test scope.
+    fn parse_source(src: &str) -> tree_sitter::Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_mylua::LANGUAGE.into())
+            .expect("mylua grammar");
+        parser.parse(src, None).expect("parse")
+    }
+
+    #[test]
+    fn walk_ancestors_finds_enclosing_kind() {
+        // `function foo() return 1 end` — starting from the `1` number
+        // literal, find the enclosing `function_declaration`.
+        let tree = parse_source("function foo() return 1 end\n");
+        let root = tree.root_node();
+        let number = root.descendant_for_byte_range(22, 22).expect("number node");
+        assert_eq!(number.kind(), "number");
+        let func = walk_ancestors(number, |p| {
+            if p.kind() == "function_declaration" {
+                Some(p)
+            } else {
+                None
+            }
+        });
+        assert!(func.is_some(), "should find function_declaration ancestor");
+    }
+
+    #[test]
+    fn walk_ancestors_returns_none_when_pred_never_matches() {
+        let tree = parse_source("local x = 1\n");
+        let root = tree.root_node();
+        let number = root.descendant_for_byte_range(10, 10).expect("number");
+        let hit: Option<()> = walk_ancestors(number, |p| {
+            // A kind that doesn't exist in Lua AST.
+            if p.kind() == "nonexistent_node_kind" {
+                Some(())
+            } else {
+                None
+            }
+        });
+        assert!(hit.is_none());
+    }
+
+    #[test]
+    fn walk_ancestors_caps_at_limit_on_deep_tree() {
+        // Build a source with enough nested parentheses to exceed the
+        // walk limit. Each `(` adds a `parenthesized_expression`
+        // wrapper, so `(...(((1)))...)` with N opens gives a chain
+        // whose inner `1` sits >= N ancestors down.
+        let depth = ANCESTOR_WALK_LIMIT + 20;
+        let mut src = String::from("local x = ");
+        for _ in 0..depth {
+            src.push('(');
+        }
+        src.push('1');
+        for _ in 0..depth {
+            src.push(')');
+        }
+        src.push('\n');
+
+        let tree = parse_source(&src);
+        let root = tree.root_node();
+        // Locate the `1` — sitting deep inside the parens.
+        let number_byte = "local x = ".len() + depth;
+        let number = root
+            .descendant_for_byte_range(number_byte, number_byte)
+            .expect("number node");
+        assert_eq!(number.kind(), "number");
+
+        let mut calls = 0usize;
+        let hit: Option<()> = walk_ancestors(number, |_p| {
+            calls += 1;
+            None
+        });
+        assert!(hit.is_none(), "never matching pred should return None");
+        assert_eq!(
+            calls, ANCESTOR_WALK_LIMIT,
+            "walk must cap iterations at ANCESTOR_WALK_LIMIT ({}), got {}",
+            ANCESTOR_WALK_LIMIT, calls,
+        );
     }
 }

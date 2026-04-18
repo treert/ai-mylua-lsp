@@ -4,7 +4,7 @@ use crate::emmy::{collect_preceding_comments, parse_emmy_comments, format_annota
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
-use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
+use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
@@ -29,41 +29,49 @@ pub fn hover(
     // object+field fields, or the legacy `field_expression`) where this
     // identifier is the `field`. That path is AST-driven and recurses
     // through the resolver — it correctly handles `a[1].b`, `a:m().c`, etc.
-    {
-        let mut n = ident_node;
-        for _ in 0..8 {
-            if let Some(p) = n.parent() {
-                lsp_log!(
-                    "[hover]   ancestor kind='{}' text='{}'",
-                    p.kind(),
-                    &node_text(p, doc.text.as_bytes()).chars().take(60).collect::<String>(),
-                );
-                if matches!(p.kind(), "variable" | "field_expression") {
-                    let field_is_ident = p
-                        .child_by_field_name("field")
-                        .map(|f| f.id() == ident_node.id())
-                        .unwrap_or(false);
-                    if field_is_ident {
-                        if let Some(result) = hover_variable_field(p, doc, uri, index, all_docs) {
-                            return Some(result);
-                        }
-                        break;
-                    }
-                }
-                if p.kind() == "function_name" {
-                    if let Some(decl) = p.parent() {
-                        if decl.kind() == "function_declaration"
-                            || decl.kind() == "local_function_declaration"
-                        {
-                            return hover_at_declaration(decl, doc);
-                        }
-                    }
-                }
-                n = p;
-            } else {
-                break;
+    //
+    // Uses the shared `walk_ancestors` helper so we never spin on a
+    // malformed tree; if it hits its safety cap it bails out with a
+    // log warning rather than looping.
+    //
+    // Closure contract:
+    //   Some(Some(hover)) → walker stops, `hover()` returns that hover
+    //   Some(None)        → walker stops, but we fall through to the
+    //                       scope / type_shard / global_shard paths
+    //                       (the dotted-field / function_name match
+    //                       was found but produced no hover content)
+    //   None              → keep walking
+    //
+    // NOTE: `hover_at_declaration` currently always returns `Some`, so
+    // the `function_name` branch below effectively short-circuits. If
+    // it ever gains a failure path (returning `None`), the current
+    // `Some(hover_at_declaration(...))` will silently fall through —
+    // update the invariant at `hover_at_declaration` if that changes.
+    if let Some(result) = walk_ancestors(ident_node, |p| {
+        if matches!(p.kind(), "variable" | "field_expression") {
+            let field_is_ident = p
+                .child_by_field_name("field")
+                .map(|f| f.id() == ident_node.id())
+                .unwrap_or(false);
+            if field_is_ident {
+                return Some(hover_variable_field(p, doc, uri, index, all_docs));
             }
         }
+        if p.kind() == "function_name" {
+            if let Some(decl) = p.parent() {
+                if decl.kind() == "function_declaration"
+                    || decl.kind() == "local_function_declaration"
+                {
+                    return Some(hover_at_declaration(decl, doc));
+                }
+            }
+        }
+        None
+    }) {
+        if result.is_some() {
+            return result;
+        }
+        // Match hit but no hover produced — fall through.
     }
 
     if let Some(def) = doc.scope_tree.resolve(byte_offset, ident_text, uri) {
@@ -141,6 +149,11 @@ pub fn hover(
         }
     }
 
+    // Synthesize a `Definition` from the best global candidate so the
+    // hover renderer below can reuse `build_hover_for_definition`.
+    // The candidate isn't an AST-local decl (`DocumentSummary.local_type_facts`),
+    // so we fabricate one carrying the candidate's source location +
+    // global kind — purely for the shared formatter.
     let global_info = index.global_shard.get(ident_text).and_then(|candidates| {
         let candidate = candidates.first()?;
         let def_kind = match candidate.kind {
@@ -155,7 +168,7 @@ pub fn hover(
             uri: candidate.source_uri.clone(),
         }, candidates.len(), candidate.source_uri.clone()))
     });
-    if let Some((fake_def, entry_count, source_uri)) = global_info {
+    if let Some((synth_def, entry_count, source_uri)) = global_info {
         let resolved = resolver::resolve_type(
             &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                 name: ident_text.to_string(),
@@ -176,13 +189,21 @@ pub fn hover(
                 }
             }
         }
-        return build_hover_for_definition(&fake_def, all_docs, Some(&type_info));
+        return build_hover_for_definition(&synth_def, all_docs, Some(&type_info));
     }
 
     None
 }
 
 /// Build hover directly from a function/local declaration node at the definition site.
+/// Build hover directly from a function/local declaration node at
+/// the definition site.
+///
+/// **Invariant**: currently always returns `Some(Hover)` — the
+/// caller in `hover()` relies on this so the `function_name` branch
+/// of the ancestor walker short-circuits rather than falling through
+/// to the scope / type_shard paths. If this function gains a real
+/// failure path, update the walker's closure contract comment too.
 fn hover_at_declaration(
     decl_node: tree_sitter::Node,
     doc: &Document,
@@ -260,14 +281,14 @@ fn hover_variable_field(
 
     if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
         if all_docs.contains_key(def_uri) {
-            let fake_def = crate::types::Definition {
+            let synth_def = crate::types::Definition {
                 name: field_name.clone(),
                 kind: DefKind::GlobalVariable,
                 range: *def_range,
                 selection_range: *def_range,
                 uri: def_uri.clone(),
             };
-            return build_hover_for_definition(&fake_def, all_docs, Some(&type_display));
+            return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
         }
     }
 

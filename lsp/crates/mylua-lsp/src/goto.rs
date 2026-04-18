@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, position_to_byte_offset, find_node_at_position};
+use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors};
 
 pub fn goto_definition(
     doc: &Document,
@@ -35,27 +35,27 @@ pub fn goto_definition(
     // `field_expression` node whose `field` is this identifier, then
     // resolve via the AST-driven infer chain (supports `a[1].b`,
     // `a:m().c`, `require("mod").field`, etc.).
-    {
-        let mut n = ident_node;
-        for _ in 0..8 {
-            if let Some(p) = n.parent() {
-                if matches!(p.kind(), "variable" | "field_expression") {
-                    let field_is_ident = p
-                        .child_by_field_name("field")
-                        .map(|f| f.id() == ident_node.id())
-                        .unwrap_or(false);
-                    if field_is_ident {
-                        if let Some(result) = goto_variable_field(p, doc, uri, index) {
-                            return Some(result);
-                        }
-                        break;
-                    }
-                }
-                n = p;
-            } else {
-                break;
+    //
+    // `walk_ancestors` caps depth to [`ANCESTOR_WALK_LIMIT`] and logs
+    // a warning if ever hit — protects against runaway trees on
+    // malformed input.
+    if let Some(result) = walk_ancestors(ident_node, |p| {
+        if matches!(p.kind(), "variable" | "field_expression") {
+            let field_is_ident = p
+                .child_by_field_name("field")
+                .map(|f| f.id() == ident_node.id())
+                .unwrap_or(false);
+            if field_is_ident {
+                return Some(goto_variable_field(p, doc, uri, index));
             }
         }
+        None
+    }) {
+        if result.is_some() {
+            return result;
+        }
+        // Found the dotted access but the recursive resolve gave up;
+        // fall through to the scope / type_shard / global_shard paths.
     }
 
     // Check if ident is a type name → jump to its definition

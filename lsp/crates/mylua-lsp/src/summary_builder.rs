@@ -16,7 +16,6 @@ use crate::util::{node_text, ts_node_to_range};
 /// Zero cross-file dependencies: all unresolved references become `SymbolicStub`s.
 pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> DocumentSummary {
     let mut ctx = BuildContext {
-        uri: uri.clone(),
         source,
         require_bindings: Vec::new(),
         global_contributions: Vec::new(),
@@ -54,8 +53,6 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
 }
 
 struct BuildContext<'a> {
-    #[allow(dead_code)]
-    uri: Uri,
     source: &'a [u8],
     require_bindings: Vec<RequireBinding>,
     global_contributions: Vec<GlobalContribution>,

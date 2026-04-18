@@ -22,7 +22,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::config::InlayHintConfig;
 use crate::document::Document;
 use crate::type_system::{KnownType, TypeFact};
-use crate::util::{node_text, position_to_byte_offset, ts_node_to_range, ts_point_to_position};
+use crate::util::{node_text, position_to_byte_offset, ts_point_to_position};
 
 pub fn inlay_hints(
     doc: &Document,
@@ -284,10 +284,4 @@ fn lookup_signature(
         }
     }
     None
-}
-
-// Silence unused-import warnings in edge builds.
-#[allow(dead_code)]
-fn _unused(_: Range) {
-    let _ = ts_node_to_range;
 }

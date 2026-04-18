@@ -3,7 +3,7 @@ use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::hover;
 use crate::resolver;
-use crate::util::{node_text, position_to_byte_offset};
+use crate::util::{node_text, position_to_byte_offset, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 
 /// Build the resolve-payload attached to a completion item so that
@@ -133,52 +133,58 @@ fn try_require_path_completion(
         .descendant_for_byte_range(offset, offset)?;
 
     // Walk up looking for a string node whose ancestor is `require("...")`.
+    // `walk_ancestors` caps depth with a shared safety limit + logs on
+    // overflow (see `util::ANCESTOR_WALK_LIMIT`).
     let source = doc.text.as_bytes();
-    let mut n = node;
-    for _ in 0..6 {
-        if matches!(n.kind(), "short_string" | "string") {
-            if is_inside_require_call(n, source) {
-                let mut items: Vec<CompletionItem> = index
-                    .require_map
-                    .keys()
-                    .cloned()
-                    .collect::<HashSet<_>>()
-                    .into_iter()
-                    .map(|m| CompletionItem {
-                        label: m.clone(),
-                        kind: Some(CompletionItemKind::MODULE),
-                        detail: Some("require target".to_string()),
-                        insert_text: Some(m),
-                        ..Default::default()
-                    })
-                    .collect();
-                items.sort_by(|a, b| a.label.cmp(&b.label));
-                return Some(items);
+    let string_node = if matches!(node.kind(), "short_string" | "string") {
+        Some(node)
+    } else {
+        walk_ancestors(node, |p| {
+            if matches!(p.kind(), "short_string" | "string") {
+                Some(p)
+            } else {
+                None
             }
-        }
-        n = n.parent()?;
+        })
+    };
+    let string_node = string_node?;
+    if !is_inside_require_call(string_node, source) {
+        return None;
     }
-    None
+    let mut items: Vec<CompletionItem> = index
+        .require_map
+        .keys()
+        .cloned()
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .map(|m| CompletionItem {
+            label: m.clone(),
+            kind: Some(CompletionItemKind::MODULE),
+            detail: Some("require target".to_string()),
+            insert_text: Some(m),
+            ..Default::default()
+        })
+        .collect();
+    items.sort_by(|a, b| a.label.cmp(&b.label));
+    Some(items)
 }
 
-/// Returns true if `string_node` is the (first) argument of a `require(...)`
-/// call — i.e. its grandparent is a `function_call` whose callee reads
-/// `require`.
+/// Returns true if `string_node` is an argument of a `require(...)`
+/// call — its nearest `function_call` ancestor has `callee` reading
+/// `require`. Uses `walk_ancestors` for depth-capped traversal.
 fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool {
-    let mut current = string_node;
-    for _ in 0..6 {
-        let Some(parent) = current.parent() else {
-            return false;
-        };
-        if parent.kind() == "function_call" {
-            if let Some(callee) = parent.child_by_field_name("callee") {
-                return node_text(callee, source) == "require";
-            }
-            return false;
+    walk_ancestors(string_node, |p| {
+        if p.kind() == "function_call" {
+            let callee_is_require = p
+                .child_by_field_name("callee")
+                .map(|callee| node_text(callee, source) == "require")
+                .unwrap_or(false);
+            Some(callee_is_require)
+        } else {
+            None
         }
-        current = parent;
-    }
-    false
+    })
+    .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
