@@ -941,3 +941,198 @@ takes_number(s)
         "passing @type string to @param number must be flagged, got: {:?}", diags,
     );
 }
+
+#[test]
+fn global_table_function_decl_is_not_flagged_as_unknown_field_same_file() {
+    // Regression: the Table(shape_id) diagnostic branch previously did
+    // NOT mirror the EmmyType branch's global_shard fallback, so
+    // `function utils2.hello()` (which registers a GlobalContribution
+    // `utils2.hello` but does NOT append `hello` to `utils2`'s empty
+    // table shape created by `utils2 = {}`) was incorrectly reported
+    // as "Unknown field 'hello' on table" whenever it was referenced.
+    // Hover already resolved correctly via `resolve_field_chain_in_file`'s
+    // global-prefix fallback; this test locks diagnostics in sync.
+    let src = r#"
+utils2 = {}
+
+function utils2.hello()
+    print("hi")
+end
+
+utils2.hello()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "global_table_fn_decl.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "`function <GlobalTable>.f()` declared on a global table must be treated as an \
+         existing field (via global_shard fallback); got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn global_table_function_decl_is_not_flagged_cross_file() {
+    // Cross-file (cross workspace-root in practice) variant of the
+    // same regression: file A defines `utils2 = {}` + `function utils2.hello()`,
+    // file B calls `utils2.hello()`. The Table branch resolves `utils2`'s
+    // shape in file A — which is empty — but the method lives in
+    // `global_shard["utils2.hello"]` (contributed by `function utils2.hello()`),
+    // so the fallback must suppress the false positive in file B too.
+    let file_a = r#"
+utils2 = {}
+
+function utils2.hello()
+    print("hi")
+end
+"#;
+    let file_b = r#"
+utils2.hello()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("utils2_def.lua", file_a),
+        ("utils2_use.lua", file_b),
+    ]);
+    let uri_b = make_uri("utils2_use.lua");
+    let doc_b = docs.get(&uri_b).expect("file_b document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
+        &mut agg, &doc_b.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "cross-file `utils2.hello()` must NOT flag Unknown field when `function utils2.hello()` \
+         is declared in another file; got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn global_table_field_assignment_is_not_flagged_cross_file() {
+    // Fallback must also cover plain field assignments (not just
+    // `function <table>.f()`). `utils2.bar = 1` registers
+    // `global_shard["utils2.bar"]` as a TableExtension contribution;
+    // reads of `utils2.bar` in other files must be suppressed the
+    // same way as function-declared fields.
+    let file_a = r#"
+utils2 = {}
+utils2.bar = 1
+"#;
+    let file_b = r#"
+print(utils2.bar)
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("utils2_def.lua", file_a),
+        ("utils2_use.lua", file_b),
+    ]);
+    let uri_b = make_uri("utils2_use.lua");
+    let doc_b = docs.get(&uri_b).expect("file_b document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
+        &mut agg, &doc_b.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "field-assignment contribution `utils2.bar = 1` must also satisfy the global_shard \
+         fallback for reads in other files; got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn nested_global_table_function_decl_is_not_flagged_cross_file() {
+    // Mirrors hover's `resolve_field_chain_in_file` chaining behavior:
+    // `utils2.sub = {}` + `function utils2.sub.hello()` lands in
+    // `global_shard["utils2.sub"]` and `global_shard["utils2.sub.hello"]`.
+    // A read `utils2.sub.hello()` in another file must resolve through
+    // the fallback at the outermost `variable` whose base text is
+    // `utils2.sub` (a nested dotted path), not just the single-level
+    // `utils2` case.
+    let file_a = r#"
+utils2 = {}
+utils2.sub = {}
+
+function utils2.sub.hello()
+    print("hi")
+end
+"#;
+    let file_b = r#"
+utils2.sub.hello()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("nested_def.lua", file_a),
+        ("nested_use.lua", file_b),
+    ]);
+    let uri_b = make_uri("nested_use.lua");
+    let doc_b = docs.get(&uri_b).expect("file_b document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
+        &mut agg, &doc_b.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "nested dotted global `utils2.sub.hello` must resolve via global_shard fallback \
+         (mirroring hover), got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn global_table_unknown_field_still_reported_cross_file() {
+    // Counterpart: the fallback must only suppress when the qualified
+    // name actually exists in global_shard. A genuinely missing field
+    // (`utils2.doesnotexist`) must still be flagged — otherwise we'd
+    // mask all diagnostics on global-table reads.
+    let file_a = r#"
+utils2 = {}
+
+function utils2.hello()
+    print("hi")
+end
+"#;
+    let file_b = r#"
+utils2.doesnotexist()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("utils2_def.lua", file_a),
+        ("utils2_use.lua", file_b),
+    ]);
+    let uri_b = make_uri("utils2_use.lua");
+    let doc_b = docs.get(&uri_b).expect("file_b document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
+        &mut agg, &doc_b.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field 'doesnotexist'"))
+        .collect();
+    assert!(
+        !unknown.is_empty(),
+        "genuinely missing field on a global table should still be flagged, got all diags: {:?}",
+        diags,
+    );
+}

@@ -258,6 +258,44 @@ fn collect_field_diagnostics(
             let base_fact = crate::hover::infer_node_type(object, source, uri, index);
             let field_name = node_text(field, source).to_string();
 
+            // Hover's `resolve_field_chain_in_file` threads a
+            // `global_prefix` through nested dotted lookups: on every
+            // unresolved step it tries `global_shard["<prefix>.<field>"]`,
+            // so `utils2.hello` and `utils2.sub.hello` alike find
+            // contributions that never land inside a table shape
+            // (e.g. `function utils2.hello()` → `utils2.hello`,
+            // `utils2.sub.bar = 1` → `utils2.sub.bar`). Diagnostics
+            // must mirror that fallback or hover succeeds while the
+            // same call site is flagged as an unknown field.
+            //
+            // Recovering the prefix post-resolution is tricky (the
+            // resolver collapses `GlobalRef` into `Known(Table)` and
+            // drops the name). Instead we reconstruct it from the AST:
+            //   - `Stub(GlobalRef { name })` — use `name` directly.
+            //   - `Known(Table(_))` base — use `node_text(object)` iff
+            //     it's a pure dotted path (bare identifiers joined by
+            //     `.`). This covers `utils2` as well as `utils2.sub`
+            //     without false-positive paths from subscripts, calls,
+            //     etc. The resolver itself never invents identifier
+            //     text, so this stays a read-only inspection.
+            let global_prefix = match &base_fact {
+                TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+                TypeFact::Known(KnownType::Table(_)) => {
+                    let text = node_text(object, source);
+                    if !text.is_empty()
+                        && text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+                        && !text.starts_with('.')
+                        && !text.ends_with('.')
+                        && !text.contains("..")
+                    {
+                        Some(text.to_string())
+                    } else {
+                        None
+                    }
+                }
+                _ => None,
+            };
+
             let resolved_base = resolver::resolve_type(&base_fact, index);
             match &resolved_base.type_fact {
                 TypeFact::Known(KnownType::EmmyType(type_name)) => {
@@ -289,22 +327,45 @@ fn collect_field_diagnostics(
                     if let Some(summary) = index.summaries.get(table_uri) {
                         if let Some(shape) = summary.table_shapes.get(shape_id) {
                             if !shape.fields.contains_key(&field_name) {
-                                let severity = if shape.is_closed {
-                                    lua_error_severity
-                                } else {
-                                    lua_warn_severity
-                                };
-                                if let Some(sev) = severity {
-                                    diagnostics.push(Diagnostic {
-                                        range: ts_node_to_range(field, source),
-                                        severity: Some(sev),
-                                        source: Some("mylua".to_string()),
-                                        message: format!(
-                                            "Unknown field '{}' on table",
-                                            field_name
-                                        ),
-                                        ..Default::default()
-                                    });
+                                // Global-prefix fallback: when the base
+                                // resolves to a global table, a
+                                // `global_shard["<prefix>.<field>"]`
+                                // hit means the field exists as a
+                                // separate global contribution (e.g.
+                                // `function utils2.hello()` or
+                                // `utils2.bar = 1` from any file in the
+                                // workspace), so the table shape's
+                                // emptiness is a red herring. Mirrors
+                                // the EmmyType branch above and hover's
+                                // `resolve_field_chain_in_file` fallback
+                                // so the two code paths stay in sync.
+                                let field_is_global = global_prefix
+                                    .as_ref()
+                                    .map(|prefix| {
+                                        index
+                                            .global_shard
+                                            .get(&format!("{}.{}", prefix, field_name))
+                                            .is_some()
+                                    })
+                                    .unwrap_or(false);
+                                if !field_is_global {
+                                    let severity = if shape.is_closed {
+                                        lua_error_severity
+                                    } else {
+                                        lua_warn_severity
+                                    };
+                                    if let Some(sev) = severity {
+                                        diagnostics.push(Diagnostic {
+                                            range: ts_node_to_range(field, source),
+                                            severity: Some(sev),
+                                            source: Some("mylua".to_string()),
+                                            message: format!(
+                                                "Unknown field '{}' on table",
+                                                field_name
+                                            ),
+                                            ..Default::default()
+                                        });
+                                    }
                                 }
                             }
                         }
