@@ -10,7 +10,11 @@
 
 ## 1. 待办清单
 
-暂无。
+### 索引系统优化（专题文档）
+
+- **内容**：`WorkspaceAggregation` / `upsert_summary` 的 7 项已知坑点 + 泛型支持的 6 项缺口，含动机/影响范围/验收/风险。
+- **专题文档**：[`indexing-future-work.md`](indexing-future-work.md)
+- **状态**：规划中，未排期。对小规模工作区（<5000 文件）无紧迫性；冷启动 `require_by_return` 反向边丢失（1.1）属于正确性问题，优先级最高。
 
 新发现的方向追加到这里时请按以下模板：
 

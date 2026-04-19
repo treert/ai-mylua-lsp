@@ -16,6 +16,7 @@
 | [`index-implementation-plan.md`](index-implementation-plan.md) | **索引架构落地实施步骤（历史归档）**：步骤 1–7 全部完成，作为类似量级改造的参考模板保留 |
 | [`performance-analysis.md`](performance-analysis.md) | **性能现状评估**：架构亮点 + 5 万文件目标下剩余的 4 个瓶颈（冷启动 cache 同步 IO、tree-sitter 全量 reparse、documents 全驻内存、references 线扫）+ 规模分级表 + 三档优化路线图（Tier 1 低垂果实 / Tier 2 架构调整 / Tier 3 高级）+ 已落地变更简史 |
 | [`future-work.md`](future-work.md) | **后续待办**（当前无已知待办）+ 新增条目模板 + 新增能力时的维护清单 |
+| [`indexing-future-work.md`](indexing-future-work.md) | **索引系统优化方向（领域专题）**：`WorkspaceAggregation` 已知坑点（冷启动反向边丢失、fingerprint 粒度、annotation 误判、反向图 O(N) 查重、affected 漏收等 7 项）+ 泛型支持缺口（variance 忽略、函数级实参推断、上界约束、arity 校验等 6 项）+ 推荐落地顺序 |
 
 **测试**：LSP 具备独立测试能力（无需 VS Code 联调），集成测试覆盖所有核心功能。详见 [`lsp/README.md`](../lsp/README.md) 和 [`ai-readme.md`](../ai-readme.md) 的「独立测试框架」章节。
 
