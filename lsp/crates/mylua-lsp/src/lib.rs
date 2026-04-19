@@ -328,6 +328,66 @@ impl Backend {
         }
     }
 
+    /// Cold-start workaround: while `IndexState != Ready`, the unified
+    /// `consumer_loop` gate-sleeps and publishes nothing — so users who
+    /// open a file during workspace indexing would see no diagnostics
+    /// at all for however long the scan takes.
+    ///
+    /// This helper publishes the *syntax-only* diagnostics snapshot
+    /// (tree-sitter ERROR / MISSING nodes: mismatched brackets, missing
+    /// `end`, malformed strings, etc.) immediately after a did_open /
+    /// did_change parse, but only when two conditions hold:
+    ///   1. `IndexState != Ready` — we are in the cold-start window.
+    ///   2. `uri` is in `open_uris` — the client has an active editor
+    ///      for this file and will render the diagnostics.
+    ///
+    /// Once the scan completes and `IndexState::Ready` is set,
+    /// `consumer_loop` takes over with merged (syntax + semantic)
+    /// diagnostics on its normal 300ms-debounced cadence. The client
+    /// sees a progressive enhancement: first the syntax-only snapshot
+    /// we published here, then a strict superset from `consumer_loop`.
+    /// There is no "downgrade flicker" (the historical reason this
+    /// kind of immediate syntax publish was removed in the past) —
+    /// that scenario required a *prior* full publish to downgrade from,
+    /// which cannot exist during cold-start when `consumer_loop` has
+    /// never run for this URI.
+    ///
+    /// Applies `apply_diagnostic_suppressions` for consistency with
+    /// `consumer_loop`, so `---@diagnostic disable-line syntax` still
+    /// takes effect in the early publish.
+    ///
+    /// Does NOT interact with the scheduler: the `schedule(Hot)` call
+    /// in `parse_and_store_with_old_tree` remains, and when Ready it
+    /// will fire normally.
+    async fn publish_syntax_only_during_indexing(&self, uri: &Uri) {
+        if *self.index_state.lock().unwrap() == IndexState::Ready {
+            return;
+        }
+        if !self.open_uris.lock().unwrap().contains(uri) {
+            return;
+        }
+        let diags = {
+            let docs = self.documents.lock().unwrap();
+            let Some(doc) = docs.get(uri) else {
+                return;
+            };
+            let syntax = diagnostics::collect_diagnostics(
+                doc.tree.root_node(),
+                doc.text.as_bytes(),
+            );
+            diagnostics::apply_diagnostic_suppressions(
+                doc.tree.root_node(),
+                doc.text.as_bytes(),
+                syntax,
+            )
+        };
+        lsp_log!(
+            "[cold-start] syntax-only publish for {:?}: {} diags",
+            uri,
+            diags.len()
+        );
+        self.client.publish_diagnostics(uri.clone(), diags, None).await;
+    }
 }
 
 /// Run the workspace scan as a background task (spawned from `initialized`).
@@ -1075,7 +1135,11 @@ impl LanguageServer for Backend {
         // would route to Cold (steady state after workspace Ready,
         // no seed_bulk tombstone upgrade to save us).
         self.open_uris.lock().unwrap().insert(uri.clone());
-        self.parse_and_store(uri, params.text_document.text);
+        self.parse_and_store(uri.clone(), params.text_document.text);
+
+        // Cold-start syntax-only fast path (no-op once IndexState::Ready).
+        // See `publish_syntax_only_during_indexing` for rationale.
+        self.publish_syntax_only_during_indexing(&uri).await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
@@ -1122,7 +1186,14 @@ impl LanguageServer for Backend {
             (text, tree)
         };
 
-        self.parse_and_store_with_old_tree(uri, final_text, old_tree);
+        self.parse_and_store_with_old_tree(uri.clone(), final_text, old_tree);
+
+        // Cold-start syntax-only fast path (no-op once IndexState::Ready).
+        // `did_close` and `did_change_watched_files` intentionally do NOT
+        // call this — see `publish_syntax_only_during_indexing` docstring
+        // for the rationale (closed / watcher-driven events bypass the
+        // in-editor cold-start window this path is meant to cover).
+        self.publish_syntax_only_during_indexing(&uri).await;
     }
 
     async fn did_close(&self, params: DidCloseTextDocumentParams) {

@@ -122,7 +122,7 @@ flowchart TB
 
 单消费者 supervisor：`start_diagnostic_consumer` spawn 外层 loop，每次 panic 日志 + 100ms 退避 + 重启内层 `consumer_loop`。内部状态靠 `Arc` 共享，重启不丢 queue。消费者 `consumer_loop` 的 Ready 门槛放在 pop 之前，避免 Hot URI 被降级为 Cold 推回队列。pop 后 snapshot text → compute → 发布前 text 未变二次确认再 publish。
 
-syntax 诊断（tree-sitter ERROR/MISSING 节点）不走 scheduler，保持 parse 完立即 publish 的即时反馈行为。
+稳态下 syntax 诊断由 `consumer_loop` pop 后与 semantic 合并一次 publish，不再走额外的 syntax-only 立即 spawn（避免历史上 `[syntax] → [syntax+semantic]` 两步 publish 造成的闪烁）。**冷启动例外**：`did_open` / `did_change` 在 `IndexState != Ready` 且 `open_uris.contains(uri)` 时调 `publish_syntax_only_during_indexing`，立即发 syntax-only 快照填补 scan 后台化期间的诊断真空；Ready 后该路径 no-op，`consumer_loop` 接管合并 publish（严格 superset，无 flicker）。
 
 配置 `mylua.diagnostics.scope`（`full` 默认 / `openOnly`）控制冷启动 seed 范围和级联是否惠及未打开文件。详细设计与决策记录见 [`docs/superpowers/specs/2026-04-19-diagnostic-scheduler-design.md`](superpowers/specs/2026-04-19-diagnostic-scheduler-design.md)。
 
