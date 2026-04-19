@@ -328,166 +328,256 @@ impl Backend {
         }
     }
 
-    async fn scan_workspace_parallel(&self) {
-        let roots = self.workspace_roots.lock().unwrap().clone();
-        let (require_config, workspace_config, cache_mode, config_fingerprint, index_mode) = {
-            let cfg = self.config.lock().unwrap();
-            (
-                cfg.require.clone(),
-                cfg.workspace.clone(),
-                cfg.index.cache_mode.clone(),
-                summary_cache::compute_config_fingerprint(&cfg),
-                cfg.workspace.index_mode.clone(),
-            )
-        };
+}
 
-        if index_mode == config::IndexMode::Isolated && roots.len() > 1 {
-            lsp_log!(
-                "[mylua-lsp] WARNING: indexMode 'isolated' is not yet implemented; \
-                 falling back to 'merged' for {} workspace roots",
-                roots.len()
-            );
-        }
+/// Run the workspace scan as a background task (spawned from `initialized`).
+///
+/// Keeping the scan off the `initialized` handler lets tower-lsp resume
+/// dispatching subsequent LSP messages (did_open / hover / completion /
+/// semantic tokens) while the index is still being built. Handlers that
+/// need the global index degrade gracefully during scanning:
+///   - `consumer_loop` gates semantic diagnostics on `IndexState::Ready`
+///     (already in place).
+///   - goto / hover / completion / references return partial results
+///     based on whatever is in the index at query time. For a URI not
+///     yet scanned they still have the per-file AST from `did_open` and
+///     can answer local queries.
+///
+/// `open_uris` is consulted before each batch's merge step so that a
+/// file the client has already `did_open`'d is **not overwritten** by
+/// the disk-snapshot version. `did_open`'s `parse_and_store` holds the
+/// per-URI `edit_lock` and produces an authoritative (possibly
+/// unsaved-buffer-based) `Document` + summary; re-inserting the disk
+/// version would clobber the user's edits for the lifetime of the
+/// session until the next `did_change`. See the lock-order notes in
+/// `docs/performance-analysis.md` (edit_locks → open_uris →
+/// documents → index).
+async fn run_workspace_scan(
+    client: Client,
+    roots: Vec<PathBuf>,
+    config: Arc<Mutex<LspConfig>>,
+    index: Arc<Mutex<WorkspaceAggregation>>,
+    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    open_uris: Arc<Mutex<HashSet<Uri>>>,
+    scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    index_state: Arc<Mutex<IndexState>>,
+) {
+    let (require_config, workspace_config, cache_mode, config_fingerprint, index_mode) = {
+        let cfg = config.lock().unwrap();
+        (
+            cfg.require.clone(),
+            cfg.workspace.clone(),
+            cfg.index.cache_mode.clone(),
+            summary_cache::compute_config_fingerprint(&cfg),
+            cfg.workspace.index_mode.clone(),
+        )
+    };
 
-        let use_disk_cache = cache_mode == config::CacheMode::Summary;
-        let cache = if use_disk_cache {
-            roots
-                .first()
-                .map(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
-        } else {
-            None
-        };
-
-        let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
-        let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-
-        let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &require_config, &workspace_config);
-        {
-            let mut idx = self.index.lock().unwrap();
-            idx.require_aliases = require_config.aliases.clone();
-            for (module, uri) in &require_map {
-                idx.set_require_mapping(module.clone(), uri.clone());
-            }
-        }
-
-        let files = workspace_scanner::collect_lua_files(&roots, &workspace_config);
-        let total = files.len();
-        lsp_log!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
-
-        let token = NumberOrString::String("mylua-indexing".to_string());
-        let progress = self
-            .client
-            .progress(token, "Indexing Lua workspace")
-            .with_percentage(0)
-            .with_message(format!("0/{} files", total))
-            .begin()
-            .await;
-
-        let batch_size = 200;
-        let mut indexed = 0usize;
-
-        for chunk in files.chunks(batch_size) {
-            let chunk_len = chunk.len();
-            let chunk = chunk.to_vec();
-            let cached_clone = cached_summaries.clone();
-            let hits_clone = cache_hits.clone();
-
-            let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
-                use rayon::prelude::*;
-                chunk
-                    .par_iter()
-                    .filter_map(|path| {
-                        let text = std::fs::read_to_string(path).ok()?;
-                        let uri = workspace_scanner::path_to_uri(path)?;
-                        let content_hash = content_hash(&text);
-
-                        if let Some(cached) = cached_clone.get(&uri.to_string()) {
-                            if cached.content_hash == content_hash {
-                                hits_clone
-                                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                let mut parser = new_parser();
-                                let tree = parser.parse(text.as_bytes(), None)?;
-                                let scope_tree =
-                                    scope::build_scope_tree(&tree, text.as_bytes());
-                                return Some(ParsedFile {
-                                    uri,
-                                    text,
-                                    tree,
-                                    summary: cached.clone(),
-                                    scope_tree,
-                                });
-                            }
-                        }
-
-                        let mut parser = new_parser();
-                        let tree = parser.parse(text.as_bytes(), None)?;
-                        let summary =
-                            summary_builder::build_summary(&uri, &tree, text.as_bytes());
-                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-                        Some(ParsedFile {
-                            uri,
-                            text,
-                            tree,
-                            summary,
-                            scope_tree,
-                        })
-                    })
-                    .collect()
-            })
-            .await
-            .unwrap_or_else(|e| {
-                lsp_log!("[mylua-lsp] indexing batch failed: {}", e);
-                vec![]
-            });
-
-            {
-                let mut docs = self.documents.lock().unwrap();
-                let mut idx = self.index.lock().unwrap();
-                for pf in parsed {
-                    idx.upsert_summary(pf.summary);
-                    docs.insert(
-                        pf.uri,
-                        Document {
-                            text: pf.text,
-                            tree: pf.tree,
-                            scope_tree: pf.scope_tree,
-                        },
-                    );
-                }
-            }
-
-            indexed += chunk_len;
-            let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
-            progress.report(pct).await;
-            lsp_log!("[mylua-lsp] indexed {}/{}", indexed, total);
-        }
-
-        let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-        if hits > 0 {
-            lsp_log!("[mylua-lsp] cache hits: {}/{}", hits, total);
-        }
-
-        *self.index_state.lock().unwrap() = IndexState::Ready;
-        progress.finish().await;
+    if index_mode == config::IndexMode::Isolated && roots.len() > 1 {
         lsp_log!(
-            "[mylua-lsp] workspace indexing complete: {} files (Ready)",
-            total
+            "[mylua-lsp] WARNING: indexMode 'isolated' is not yet implemented; \
+             falling back to 'merged' for {} workspace roots",
+            roots.len()
         );
+    }
 
-        if let Some(cache) = &cache {
-            let summaries = self.index.lock().unwrap().summaries.clone();
-            tokio::task::spawn_blocking({
-                let cache_dir = cache.cache_dir().to_path_buf();
-                let config_fp = config_fingerprint;
-                move || {
-                    let c = summary_cache::SummaryCache::new_from_dir(cache_dir, config_fp);
-                    c.save_all(&summaries);
-                    lsp_log!("[mylua-lsp] saved {} summaries to cache", summaries.len());
-                }
-            });
+    let use_disk_cache = cache_mode == config::CacheMode::Summary;
+    let cache = if use_disk_cache {
+        roots
+            .first()
+            .map(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
+    } else {
+        None
+    };
+
+    let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
+    let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    let require_map =
+        workspace_scanner::scan_workspace_lua_files(&roots, &require_config, &workspace_config);
+    {
+        let mut idx = index.lock().unwrap();
+        idx.require_aliases = require_config.aliases.clone();
+        for (module, uri) in &require_map {
+            idx.set_require_mapping(module.clone(), uri.clone());
         }
     }
 
+    let files = workspace_scanner::collect_lua_files(&roots, &workspace_config);
+    let total = files.len();
+    lsp_log!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
+
+    let token = NumberOrString::String("mylua-indexing".to_string());
+    let progress = client
+        .progress(token, "Indexing Lua workspace")
+        .with_percentage(0)
+        .with_message(format!("0/{} files", total))
+        .begin()
+        .await;
+
+    let batch_size = 200;
+    let mut indexed = 0usize;
+    let mut skipped_open = 0usize;
+
+    for chunk in files.chunks(batch_size) {
+        let chunk_len = chunk.len();
+        let chunk = chunk.to_vec();
+        let cached_clone = cached_summaries.clone();
+        let hits_clone = cache_hits.clone();
+
+        let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
+            use rayon::prelude::*;
+            chunk
+                .par_iter()
+                .filter_map(|path| {
+                    let text = std::fs::read_to_string(path).ok()?;
+                    let uri = workspace_scanner::path_to_uri(path)?;
+                    let content_hash = content_hash(&text);
+
+                    if let Some(cached) = cached_clone.get(&uri.to_string()) {
+                        if cached.content_hash == content_hash {
+                            hits_clone
+                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            let mut parser = new_parser();
+                            let tree = parser.parse(text.as_bytes(), None)?;
+                            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                            return Some(ParsedFile {
+                                uri,
+                                text,
+                                tree,
+                                summary: cached.clone(),
+                                scope_tree,
+                            });
+                        }
+                    }
+
+                    let mut parser = new_parser();
+                    let tree = parser.parse(text.as_bytes(), None)?;
+                    let summary =
+                        summary_builder::build_summary(&uri, &tree, text.as_bytes());
+                    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                    Some(ParsedFile {
+                        uri,
+                        text,
+                        tree,
+                        summary,
+                        scope_tree,
+                    })
+                })
+                .collect()
+        })
+        .await
+        .unwrap_or_else(|e| {
+            lsp_log!("[mylua-lsp] indexing batch failed: {}", e);
+            vec![]
+        });
+
+        // Hold `open_uris` for the full merge — any concurrent `did_open`
+        // blocks on `open_uris.lock()` at `Backend::did_open` line
+        // `self.open_uris.lock().unwrap().insert(uri.clone())`, so the
+        // scan and did_open are forced into a strict before/after ordering
+        // on a per-URI basis. Without this, `parse_and_store_with_old_tree`
+        // uses two *separate* short-held `documents` locks and one
+        // independent `index` lock, leaving gaps where scan can interleave
+        // and either (a) stomp the buffer version entirely or (b) leave
+        // `docs[uri]` and `index.summaries[uri]` in disagreement (buffer
+        // vs disk). Holding `open_uris` for the ~200-item merge critical
+        // section (all in-memory, typically < 20ms) closes both windows:
+        // - URIs already in `open_uris` are skipped → did_open's write wins.
+        // - URIs not yet in `open_uris` are written here; a later did_open
+        //   for the same URI observes `open_uris` as "not inserted by us"
+        //   after we release, takes the lock, and runs to completion
+        //   atomically — overwriting our disk version with the buffer
+        //   version in its own properly-ordered lock sequence.
+        //
+        // Lock order: open_uris → documents → index (canonical).
+        // No existing handler holds `documents` or `index` while acquiring
+        // `open_uris`, so nesting here does not create an inversion.
+        {
+            let open_held = open_uris.lock().unwrap();
+            let mut docs = documents.lock().unwrap();
+            let mut idx = index.lock().unwrap();
+            for pf in parsed {
+                if open_held.contains(&pf.uri) {
+                    skipped_open += 1;
+                    continue;
+                }
+                idx.upsert_summary(pf.summary);
+                docs.insert(
+                    pf.uri,
+                    Document {
+                        text: pf.text,
+                        tree: pf.tree,
+                        scope_tree: pf.scope_tree,
+                    },
+                );
+            }
+        }
+
+        indexed += chunk_len;
+        let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
+        progress.report(pct).await;
+        lsp_log!("[mylua-lsp] indexed {}/{}", indexed, total);
+    }
+
+    let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+    if hits > 0 {
+        lsp_log!("[mylua-lsp] cache hits: {}/{}", hits, total);
+    }
+    if skipped_open > 0 {
+        lsp_log!(
+            "[mylua-lsp] scan skipped {} open-file merges (did_open version kept)",
+            skipped_open
+        );
+    }
+
+    *index_state.lock().unwrap() = IndexState::Ready;
+    progress.finish().await;
+    lsp_log!(
+        "[mylua-lsp] workspace indexing complete: {} files (Ready)",
+        total
+    );
+
+    // Seed the diagnostics scheduler now that `IndexState::Ready` is
+    // set — previously this lived directly in `initialized`, but with
+    // the scan running in background we must defer it until scanning
+    // finishes so `documents` is populated.
+    //
+    // - Full (default): hot = client-opened URIs, cold = rest of
+    //   indexed workspace → consumer drains hot first, then cold.
+    // - OpenOnly: only seed hot; closed files get no diagnostics
+    //   until the user opens them.
+    //
+    // Lock acquisitions below are sequential (each released before
+    // the next), but the ordering still matches canonical
+    // `open_uris → documents → (…)` to make it obvious to future
+    // maintainers that widening any of these scopes into a nested
+    // hold would stay correct.
+    let open: HashSet<Uri> = open_uris.lock().unwrap().clone();
+    let all_uris: Vec<Uri> = documents.lock().unwrap().keys().cloned().collect();
+    let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
+    let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter().partition(|u| open.contains(u));
+    scheduler.seed_bulk(hot, diagnostic_scheduler::Priority::Hot);
+    if matches!(diag_scope, config::DiagnosticScope::Full) {
+        scheduler.seed_bulk(cold, diagnostic_scheduler::Priority::Cold);
+    }
+
+    client
+        .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
+        .await;
+
+    if let Some(cache) = &cache {
+        let summaries = index.lock().unwrap().summaries.clone();
+        tokio::task::spawn_blocking({
+            let cache_dir = cache.cache_dir().to_path_buf();
+            let config_fp = config_fingerprint;
+            move || {
+                let c = summary_cache::SummaryCache::new_from_dir(cache_dir, config_fp);
+                c.save_all(&summaries);
+                lsp_log!("[mylua-lsp] saved {} summaries to cache", summaries.len());
+            }
+        });
+    }
 }
 
 /// Supervisor for the diagnostic consumer task. Spawns `consumer_loop`
@@ -776,7 +866,7 @@ impl LanguageServer for Backend {
 
         // Initialize the file logger as early as possible so every subsequent
         // `lsp_log!` (including the `config:` line below and anything in
-        // `scan_workspace_parallel`) is captured in `.vscode/mylua-lsp.log`.
+        // `run_workspace_scan`) is captured in `.vscode/mylua-lsp.log`.
         if let Some(root) = roots.first() {
             let file_log = incoming_cfg
                 .as_ref()
@@ -889,31 +979,46 @@ impl LanguageServer for Backend {
         self.client
             .log_message(
                 MessageType::INFO,
-                "mylua-lsp initialized, scanning workspace...",
+                "mylua-lsp initialized, scanning workspace in background...",
             )
             .await;
-        self.scan_workspace_parallel().await;
 
-        // Seed the scheduler queue based on `diagnostics.scope`.
-        // - Full (default): hot = client-opened URIs, cold = rest of
-        //   indexed workspace → consumer drains hot first, then cold.
-        // - OpenOnly: only seed hot; closed files get no diagnostics
-        //   until the user opens them.
-        let scope = self.config.lock().unwrap().diagnostics.scope.clone();
-        let all_uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
-        let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
-        let (hot, cold): (Vec<_>, Vec<_>) =
-            all_uris.into_iter().partition(|u| open.contains(u));
-        self.scheduler
-            .seed_bulk(hot, diagnostic_scheduler::Priority::Hot);
-        if matches!(scope, config::DiagnosticScope::Full) {
-            self.scheduler
-                .seed_bulk(cold, diagnostic_scheduler::Priority::Cold);
-        }
+        // Spawn the workspace scan as a background task so `initialized`
+        // returns immediately. tower-lsp dispatches subsequent messages
+        // serially on a single task, so blocking here would queue every
+        // `did_open` / `hover` / `completion` behind the whole scan.
+        //
+        // During the scan window `IndexState` remains `Initializing`:
+        //   - `consumer_loop` gates semantic diagnostics on Ready.
+        //   - goto / hover / completion / references serve per-file
+        //     queries from whatever is in `documents` + `index` at
+        //     the moment (potentially partial for cross-file lookups).
+        //
+        // Seed-bulk of the diagnostic scheduler moved into
+        // `run_workspace_scan` after the `Ready` transition so that
+        // `documents` is populated before we enumerate URIs to seed.
+        let client = self.client.clone();
+        let roots = self.workspace_roots.lock().unwrap().clone();
+        let config = self.config.clone();
+        let index = self.index.clone();
+        let documents = self.documents.clone();
+        let open_uris = self.open_uris.clone();
+        let scheduler = self.scheduler.clone();
+        let index_state = self.index_state.clone();
 
-        self.client
-            .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
+        tokio::spawn(async move {
+            run_workspace_scan(
+                client,
+                roots,
+                config,
+                index,
+                documents,
+                open_uris,
+                scheduler,
+                index_state,
+            )
             .await;
+        });
     }
 
     async fn shutdown(&self) -> Result<()> {

@@ -116,7 +116,7 @@ flowchart TB
 
 - `did_change` / `did_open`（非 fast path）→ `scheduler.schedule(uri, Hot | Cold)`
 - 签名指纹级联 → `scheduler.schedule(dep_uri, ...)` 并按 scope 过滤
-- `initialized` 冷启动 → `scheduler.seed_bulk(hot, Hot)` + 条件 `seed_bulk(cold, Cold)`
+- `initialized` 冷启动：scan 由 `tokio::spawn` 异步后台执行（`run_workspace_scan`），scan 完成（`IndexState::Ready`）后再 `scheduler.seed_bulk(hot, Hot)` + 条件 `seed_bulk(cold, Cold)`；`initialized` 本身立即返回，让 tower-lsp 能并行处理后续请求
 
 内部数据结构：hot/cold 双 `VecDeque` + `enqueued: HashMap<Uri, Priority>` 去重 + `cold_tombstones: HashSet<Uri>` 做 Cold→Hot 升级标记 + `diag_gen: HashMap<Uri, u64>` per-URI 代数用于 debounce 过滤。push 与 pop 均摊 O(1)。
 
