@@ -7,6 +7,13 @@ import {
 } from 'vscode-languageclient/node';
 
 let client: LanguageClient | undefined;
+let statusBarItem: vscode.StatusBarItem | undefined;
+
+type IndexStatusParams = {
+  state: 'indexing' | 'ready';
+  indexed: number;
+  total: number;
+};
 
 function collectLspConfig(): Record<string, unknown> {
   const cfg = vscode.workspace.getConfiguration('mylua');
@@ -46,7 +53,36 @@ function collectLspConfig(): Record<string, unknown> {
   };
 }
 
+function renderStatus(status: IndexStatusParams): void {
+  if (!statusBarItem) return;
+  if (status.state === 'ready') {
+    statusBarItem.text = '💚mylua';
+    statusBarItem.tooltip = `MyLua: index ready (${status.total} files)`;
+  } else {
+    const total = status.total;
+    if (total > 0) {
+      statusBarItem.text = `💛${status.indexed}/${total}`;
+    } else {
+      statusBarItem.text = '💛mylua';
+    }
+    statusBarItem.tooltip = `MyLua: indexing workspace (${status.indexed}/${total})`;
+  }
+  statusBarItem.show();
+}
+
 export function activate(context: vscode.ExtensionContext) {
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100,
+  );
+  statusBarItem.name = 'MyLua';
+  statusBarItem.text = '💛mylua';
+  statusBarItem.tooltip = 'MyLua: starting…';
+  statusBarItem.show();
+  // Owned by context.subscriptions; VS Code will dispose on extension
+  // unload, so `deactivate` does not need to dispose explicitly.
+  context.subscriptions.push(statusBarItem);
+
   const serverPath = getServerPath(context);
 
   const serverOptions: ServerOptions = {
@@ -69,6 +105,17 @@ export function activate(context: vscode.ExtensionContext) {
     clientOptions,
   );
 
+  // Register the notification handler BEFORE start() to avoid any
+  // race where an early `mylua/indexStatus` could fire before a
+  // post-start `.then()` callback runs. `vscode-languageclient`
+  // buffers handler registrations until the connection is up.
+  context.subscriptions.push(
+    client.onNotification(
+      'mylua/indexStatus',
+      (params: IndexStatusParams) => renderStatus(params),
+    ),
+  );
+
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
       if (e.affectsConfiguration('mylua') && client) {
@@ -79,7 +126,13 @@ export function activate(context: vscode.ExtensionContext) {
     }),
   );
 
-  client.start();
+  client.start().catch((err: unknown) => {
+    if (statusBarItem) {
+      statusBarItem.text = '⚠️mylua';
+      const msg = err instanceof Error ? err.message : String(err);
+      statusBarItem.tooltip = `MyLua: failed to start (${msg})`;
+    }
+  });
 }
 
 export function deactivate(): Thenable<void> | undefined {

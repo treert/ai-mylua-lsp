@@ -39,6 +39,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tower_lsp_server::jsonrpc::Result;
+use tower_lsp_server::ls_types::notification::Notification;
 use tower_lsp_server::ls_types::*;
 use tower_lsp_server::{Client, LanguageServer};
 
@@ -50,6 +51,36 @@ use document::Document;
 pub enum IndexState {
     Initializing,
     Ready,
+}
+
+/// Custom notification `mylua/indexStatus` pushed to the client
+/// whenever indexing progress changes (scan start, per-batch, and
+/// Ready). The VS Code extension uses it to drive a status-bar item
+/// (`💛mylua 123/5000` → `💚mylua`). `state` is either `"indexing"`
+/// or `"ready"`; `indexed`/`total` are file counts.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IndexStatusParams {
+    pub state: String,
+    pub indexed: u64,
+    pub total: u64,
+}
+
+pub enum IndexStatusNotification {}
+
+impl Notification for IndexStatusNotification {
+    type Params = IndexStatusParams;
+    const METHOD: &'static str = "mylua/indexStatus";
+}
+
+async fn send_index_status(client: &Client, state: &str, indexed: u64, total: u64) {
+    client
+        .send_notification::<IndexStatusNotification>(IndexStatusParams {
+            state: state.to_string(),
+            indexed,
+            total,
+        })
+        .await;
 }
 
 pub struct Backend {
@@ -475,7 +506,14 @@ async fn run_workspace_scan(
         .begin()
         .await;
 
-    let batch_size = 200;
+    send_index_status(&client, "indexing", 0, total as u64).await;
+
+    // Smaller batch (50) keeps the `open_uris` merge critical section
+    // short (~5ms), minimizing the window where concurrent `did_open`
+    // is queued behind scan, and also yields per-batch status updates
+    // to the client at ~50-file granularity for a smooth progress bar
+    // in the VS Code status bar item.
+    let batch_size = 50;
     let mut indexed = 0usize;
     let mut skipped_open = 0usize;
 
@@ -541,8 +579,8 @@ async fn run_workspace_scan(
         // independent `index` lock, leaving gaps where scan can interleave
         // and either (a) stomp the buffer version entirely or (b) leave
         // `docs[uri]` and `index.summaries[uri]` in disagreement (buffer
-        // vs disk). Holding `open_uris` for the ~200-item merge critical
-        // section (all in-memory, typically < 20ms) closes both windows:
+        // vs disk). Holding `open_uris` for the ~50-item merge critical
+        // section (all in-memory, typically ~5ms) closes both windows:
         // - URIs already in `open_uris` are skipped → did_open's write wins.
         // - URIs not yet in `open_uris` are written here; a later did_open
         //   for the same URI observes `open_uris` as "not inserted by us"
@@ -577,6 +615,7 @@ async fn run_workspace_scan(
         indexed += chunk_len;
         let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
         progress.report(pct).await;
+        send_index_status(&client, "indexing", indexed as u64, total as u64).await;
         lsp_log!("[mylua-lsp] indexed {}/{}", indexed, total);
     }
 
@@ -593,6 +632,7 @@ async fn run_workspace_scan(
 
     *index_state.lock().unwrap() = IndexState::Ready;
     progress.finish().await;
+    send_index_status(&client, "ready", total as u64, total as u64).await;
     lsp_log!(
         "[mylua-lsp] workspace indexing complete: {} files (Ready)",
         total
