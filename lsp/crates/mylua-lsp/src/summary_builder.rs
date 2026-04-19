@@ -339,8 +339,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let pending_type = ctx.take_pending_type().or_else(|| {
         extract_preceding_type_annotation(node, ctx.source)
     });
-    let prev_kind = node.prev_sibling().map(|s| s.kind().to_string()).unwrap_or_default();
-    lsp_log!("[summary] visit_local_declaration: pending_type={:?} prev_sibling_kind='{}'", pending_type, prev_kind);
 
     let names_node = match node.child_by_field_name("names") {
         Some(n) => n,
@@ -1139,7 +1137,6 @@ fn register_nested_field_write(
 /// Called when a non-emmy_comment node is encountered.
 fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if let Some((cname, parents, fields, generic_params, name_range)) = ctx.pending_class.take() {
-        lsp_log!("[flush_class] '{}' with {} fields: {:?}", cname, fields.len(), fields.iter().map(|f| &f.name).collect::<Vec<_>>());
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
             kind: TypeDefinitionKind::Class,

@@ -667,18 +667,40 @@ async fn run_workspace_scan(
     let mut indexed = 0usize;
     let mut skipped_open = 0usize;
 
-    for chunk in files.chunks(batch_size) {
+    for (batch_idx, chunk) in files.chunks(batch_size).enumerate() {
         let chunk_len = chunk.len();
         let chunk = chunk.to_vec();
         let cached_clone = cached_summaries.clone();
         let hits_clone = cache_hits.clone();
 
         let library_file_uris_clone = library_file_uris.clone();
+        // Per-batch instrumentation: lets us pinpoint whether a
+        // stall happens during (a) parallel parse, (b) main-thread
+        // merge, or (c) client notification round-trip. Each log
+        // is a handful of lines per batch, negligible next to the
+        // indexing work itself.
+        lsp_log!(
+            "[scan] batch #{} start ({} files, indexed so far={})",
+            batch_idx,
+            chunk_len,
+            indexed
+        );
+        let batch_started = std::time::Instant::now();
         let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
             chunk
                 .par_iter()
                 .filter_map(|path| {
+                    // Per-file SLOW log (> 500 ms): surfaces pathological
+                    // files without flooding the log in the common case.
+                    // When a file actually hangs, the last "[scan] parsing
+                    // <path>" we emitted is usually enough to identify it
+                    // from the post-mortem — but we emit that line only
+                    // after read_to_string so we don't drown every scan in
+                    // per-file output under normal operation. (If a future
+                    // hang recurs, flip this back to unconditional "parsing"
+                    // / "parsed" pairs around parse + build_summary.)
+                    let file_started = std::time::Instant::now();
                     let text = std::fs::read_to_string(path).ok()?;
                     let uri = workspace_scanner::path_to_uri(path)?;
                     let content_hash = content_hash(&text);
@@ -701,6 +723,14 @@ async fn run_workspace_scan(
                             if is_library {
                                 summary.is_meta = true;
                             }
+                            let elapsed_ms = file_started.elapsed().as_millis();
+                            if elapsed_ms > 500 {
+                                lsp_log!(
+                                    "[scan] SLOW (cache-hit) {} ms: {}",
+                                    elapsed_ms,
+                                    path.display()
+                                );
+                            }
                             return Some(ParsedFile {
                                 uri,
                                 text,
@@ -719,6 +749,15 @@ async fn run_workspace_scan(
                         summary.is_meta = true;
                     }
                     let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                    let elapsed_ms = file_started.elapsed().as_millis();
+                    if elapsed_ms > 500 {
+                        lsp_log!(
+                            "[scan] SLOW {} ms ({} bytes): {}",
+                            elapsed_ms,
+                            text.len(),
+                            path.display()
+                        );
+                    }
                     Some(ParsedFile {
                         uri,
                         text,
@@ -734,6 +773,12 @@ async fn run_workspace_scan(
             lsp_log!("[mylua-lsp] indexing batch failed: {}", e);
             vec![]
         });
+        lsp_log!(
+            "[scan] batch #{} parsed {} files in {} ms",
+            batch_idx,
+            parsed.len(),
+            batch_started.elapsed().as_millis()
+        );
 
         // Hold `open_uris` for the full merge — any concurrent `did_open`
         // blocks on `open_uris.lock()` at `Backend::did_open` line
@@ -756,6 +801,7 @@ async fn run_workspace_scan(
         // Lock order: open_uris → documents → index (canonical).
         // No existing handler holds `documents` or `index` while acquiring
         // `open_uris`, so nesting here does not create an inversion.
+        let merge_started = std::time::Instant::now();
         {
             let open_held = open_uris.lock().unwrap();
             let mut docs = documents.lock().unwrap();
@@ -776,6 +822,11 @@ async fn run_workspace_scan(
                 );
             }
         }
+        lsp_log!(
+            "[scan] batch #{} merged in {} ms",
+            batch_idx,
+            merge_started.elapsed().as_millis()
+        );
 
         indexed += chunk_len;
         let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;

@@ -155,9 +155,18 @@ impl WorkspaceAggregation {
             .get(&uri)
             .map(|s| s.signature_fingerprint);
 
-        // Collect affected names from BOTH old and new summaries before removal,
-        // so invalidation can target the right cache entries.
-        let affected = self.collect_affected_names(&uri, &summary);
+        // `affected` only drives `invalidate_dependants_targeted`,
+        // which walks `resolution_cache` looking for stale entries.
+        // Skip the collection pass entirely when the cache is empty
+        // (true for the entire cold-start scan, since no resolver
+        // has run yet) — this avoids an O(require_map) + O(old
+        // summary contributions) pass per upsert that compounded
+        // the merge-phase O(N²) alongside `remove_contributions`.
+        let affected = if self.resolution_cache.is_empty() {
+            None
+        } else {
+            Some(self.collect_affected_names(&uri, &summary))
+        };
 
         self.remove_contributions(&uri);
 
@@ -215,7 +224,9 @@ impl WorkspaceAggregation {
         let fingerprint_changed = old_fingerprint
             .map_or(true, |old| old != summary.signature_fingerprint);
         if fingerprint_changed {
-            self.invalidate_dependants_targeted(&affected);
+            if let Some(ref affected) = affected {
+                self.invalidate_dependants_targeted(affected);
+            }
         }
 
         self.summaries.insert(uri, summary);
@@ -238,6 +249,33 @@ impl WorkspaceAggregation {
     }
 
     fn remove_contributions(&mut self, uri: &Uri) {
+        // Invariant (enforced contract): if `self.summaries` does not
+        // contain `uri`, NO shard may contain any candidate /
+        // dependant keyed on that URI. This holds because the only
+        // shard writers in the whole crate are `upsert_summary` and
+        // `remove_contributions` below, and `upsert_summary` always
+        // writes to shards *then* inserts into `self.summaries` in
+        // the same method with no fallible step between them.
+        //
+        // If a future refactor introduces a new per-URI shard on
+        // `WorkspaceAggregation`, it MUST be pruned here AND its
+        // writes MUST happen in the same atomic window under
+        // `upsert_summary`'s `index.lock()`, otherwise this
+        // short-circuit silently leaves orphan entries behind.
+        //
+        // The short-circuit turns first-insert upserts from
+        // O(total_shard_size) into O(1). On a 20k-file cold start
+        // the merge phase was previously O(N²) overall (~269 s out
+        // of 295 s total in a recent debug-build run) because each
+        // of the four `retain` passes walked the entire growing
+        // shard state on every first-time upsert. Re-indexing an
+        // already-known file still performs the full prune (needed
+        // to drop contributions whose names disappeared between
+        // revisions), matching the pre-existing semantics.
+        if !self.summaries.contains_key(uri) {
+            return;
+        }
+
         self.global_shard.retain(|_, candidates| {
             candidates.retain(|c| &c.source_uri != uri);
             !candidates.is_empty()

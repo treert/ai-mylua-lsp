@@ -1,39 +1,86 @@
-use std::io::Write;
-use std::path::PathBuf;
+use std::fs::File;
+use std::io::{BufWriter, Write};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
-static LOG_PATH: Mutex<Option<PathBuf>> = Mutex::new(None);
-static ENABLED: Mutex<bool> = Mutex::new(true);
+/// Fast gate for `lsp_log!` consumers. Reading this `AtomicBool` is a
+/// single relaxed load, whereas grabbing the writer mutex is not
+/// free. The macro checks it *before* `format!`-ing the message so a
+/// future regression that adds a hot-path `lsp_log!("… {:?}", big)`
+/// pays zero cost when `mylua.debug.fileLog` is disabled — no
+/// allocation, no lock, no syscall.
+static ENABLED: AtomicBool = AtomicBool::new(true);
 
-pub fn init(workspace_root: &std::path::Path, enable_file_log: bool) {
-    *ENABLED.lock().unwrap() = enable_file_log;
+/// Writer holder. Initialized once by `init`; `log()` reuses the same
+/// `BufWriter<File>` instead of reopening the log file per line. The
+/// previous design (open/append/close per message) serialized every
+/// log call through the kernel's inode lock — catastrophic under the
+/// rayon-parallel cold-start indexer, where 8+ worker threads could
+/// contend millions of times on even routine debug output.
+static WRITER: Mutex<Option<BufWriter<File>>> = Mutex::new(None);
+
+pub fn enabled() -> bool {
+    ENABLED.load(Ordering::Relaxed)
+}
+
+pub fn init(workspace_root: &Path, enable_file_log: bool) {
+    ENABLED.store(enable_file_log, Ordering::Relaxed);
     if !enable_file_log {
+        if let Ok(mut w) = WRITER.lock() {
+            *w = None;
+        }
         return;
     }
     let vscode_dir = workspace_root.join(".vscode");
     let _ = std::fs::create_dir_all(&vscode_dir);
     let log_path = vscode_dir.join("mylua-lsp.log");
-    let _ = std::fs::write(&log_path, "");
-    *LOG_PATH.lock().unwrap() = Some(log_path.clone());
-    log(&format!("=== mylua-lsp started, log at {} ===", log_path.display()));
+    // Truncate on each session start so the log reflects only the
+    // current run — matches the previous behavior.
+    let new_writer = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(true)
+        .open(&log_path)
+        .ok()
+        .map(BufWriter::new);
+
+    if let Ok(mut w) = WRITER.lock() {
+        *w = new_writer;
+    }
+    log(&format!(
+        "=== mylua-lsp started, log at {} ===",
+        log_path.display()
+    ));
 }
 
 pub fn log(msg: &str) {
-    eprintln!("{}", msg);
-    if !*ENABLED.lock().unwrap() {
+    if !enabled() {
         return;
     }
-    let guard = LOG_PATH.lock().unwrap();
-    if let Some(ref path) = *guard {
-        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(path) {
-            let _ = writeln!(f, "{}", msg);
-        }
+    eprintln!("{}", msg);
+    // `unwrap_or_else(|p| p.into_inner())` recovers from a poisoned
+    // mutex — the logger has no invariants to maintain, so falling
+    // back to the tainted state and continuing is strictly better
+    // than permanently swallowing every subsequent log line, which
+    // would hide exactly the kind of diagnostic we most want after
+    // a panic.
+    let mut guard = WRITER.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(ref mut w) = *guard {
+        // Ignore write errors: a transient I/O failure shouldn't
+        // crash the LSP or wedge the caller. Flush each line so
+        // `tail -f` style debugging keeps its live feel; the
+        // cost is comparable to a `LineWriter`.
+        let _ = writeln!(w, "{}", msg);
+        let _ = w.flush();
     }
 }
 
 #[macro_export]
 macro_rules! lsp_log {
     ($($arg:tt)*) => {
-        $crate::logger::log(&format!($($arg)*))
+        if $crate::logger::enabled() {
+            $crate::logger::log(&format!($($arg)*))
+        }
     };
 }

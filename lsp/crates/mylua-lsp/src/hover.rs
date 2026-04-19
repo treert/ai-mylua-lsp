@@ -18,6 +18,12 @@ pub fn hover(
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let ident_text = node_text(ident_node, doc.text.as_bytes());
 
+    // Request-path logs: bounded by user interaction (one hover click),
+    // never triggered during cold-start indexing. Invaluable for
+    // diagnosing "hover returned nothing / wrong type" bug reports —
+    // the log line pinpoints exactly what identifier the LSP saw at
+    // the cursor position, its AST kind, and its parent context
+    // before any of the resolution branches below can swallow it.
     lsp_log!(
         "[hover] ident='{}' kind='{}' parent='{}'",
         ident_text,
@@ -95,7 +101,11 @@ pub fn hover(
 
     if let Some(def) = doc.scope_tree.resolve(byte_offset, ident_text, uri) {
         let type_info = resolve_local_type_info(uri, ident_text, index);
-        lsp_log!("[hover] scope resolved '{}', type_info={:?}", ident_text, type_info);
+        lsp_log!(
+            "[hover] scope resolved '{}', type_info={:?}",
+            ident_text,
+            type_info
+        );
         return build_hover_for_definition(&def, all_docs, type_info.as_deref());
     }
 
@@ -319,6 +329,11 @@ fn hover_variable_field(
     let field_name = node_text(field, source).to_string();
 
     let base_fact = infer_node_type(object, source, uri, index);
+    // Field-chain trace: fires only when hover touches `a.b` / `a:m().c`
+    // style expressions. Pairs a "what did we infer for the base" line
+    // with a "what did the resolver produce" line so a reader of the
+    // log can spot exactly which step broke a chain like
+    // `obj:build():meta().name` hovering wrong.
     lsp_log!(
         "[hover_var_field] base='{}' base_fact={:?} field='{}'",
         node_text(object, source),

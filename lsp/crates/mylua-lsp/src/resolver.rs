@@ -628,16 +628,34 @@ fn resolve_emmy_field_with_visited(
         return ResolvedType::unknown();
     }
 
+    // Request-path trace block: only fires when hover / goto /
+    // completion / references / signatureHelp is traversing an Emmy
+    // type's fields. Never hit during indexing. Gives a clear
+    // succeeds/falls-back/misses breadcrumb trail for diagnosing
+    // "`---@type Foo local f = ...` can't find field `x`" bug
+    // reports, where the answer is usually one of:
+    //   - Foo isn't in `type_shard` at all (name typo / not indexed)
+    //   - Foo found but field `x` missing (need @field in the stub)
+    //   - fell through to global_shard with qualified `Foo.x` (legacy)
+    // Field-count is logged instead of the full name list to avoid
+    // megabyte-long lines on heavily annotated UE-style classes.
     if let Some(candidates) = agg.type_shard.get(type_name) {
-        lsp_log!("[resolve_emmy_field] type '{}' has {} candidates", type_name, candidates.len());
+        lsp_log!(
+            "[resolve_emmy_field] type '{}' has {} candidates",
+            type_name,
+            candidates.len()
+        );
 
         for candidate in candidates {
             if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
-                        lsp_log!("[resolve_emmy_field] found class '{}' with {} fields: {:?}",
-                            type_name, td.fields.len(),
-                            td.fields.iter().map(|f| &f.name).collect::<Vec<_>>());
+                        lsp_log!(
+                            "[resolve_emmy_field] found class '{}' with {} fields (looking for '{}')",
+                            type_name,
+                            td.fields.len(),
+                            field
+                        );
 
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
                             if let Some(ref alias_fact) = td.alias_type {
@@ -671,13 +689,19 @@ fn resolve_emmy_field_with_visited(
             }
         }
     } else {
-        lsp_log!("[resolve_emmy_field] type '{}' not found in type_shard", type_name);
+        lsp_log!(
+            "[resolve_emmy_field] type '{}' not found in type_shard",
+            type_name
+        );
     }
 
     let qualified = format!("{}.{}", type_name, field);
     if let Some(global_candidates) = agg.global_shard.get(&qualified) {
         if let Some(c) = global_candidates.first() {
-            lsp_log!("[resolve_emmy_field] found '{}' via global_shard fallback", qualified);
+            lsp_log!(
+                "[resolve_emmy_field] found '{}' via global_shard fallback",
+                qualified
+            );
             return ResolvedType::with_location(
                 c.type_fact.clone(),
                 c.source_uri.clone(),
