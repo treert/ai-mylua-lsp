@@ -59,6 +59,170 @@ print(undefined_var)
 }
 
 #[test]
+fn undefined_global_on_method_declaration_base() {
+    // `function A1213:f()` at the top level is equivalent to
+    // `A1213.f = function(self, ...) end` — it *reads* `A1213` as an
+    // existing table. If `A1213` is not defined anywhere, it must be
+    // flagged as an undefined global, exactly like `print(A1213)`.
+    let src = r#"
+function A1213:f()
+    self.ff = 2
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "undef_method.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    let undefined: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Undefined global 'A1213'"))
+        .collect();
+    assert_eq!(undefined.len(), 1,
+        "expected exactly one Undefined global 'A1213' on method base. diags={:?}", diags);
+    // The method name `f` is a field write, must NOT be flagged.
+    assert!(!diags.iter().any(|d| d.message.contains("'f'")),
+        "method name should not be flagged as undefined global. diags={:?}", diags);
+    // White-box: the diagnostic correctness here depends on the
+    // indexer *not* registering `A1213` as a global from
+    // `function A1213:f()`. If that ever regresses (e.g. summary
+    // builder starts auto-registering dotted/method bases as
+    // globals), this diagnostic will silently break — this assertion
+    // protects the contract.
+    assert!(!agg.global_shard.contains_key("A1213"),
+        "indexer must not register method-decl base as global, otherwise undefinedGlobal will silently break");
+}
+
+#[test]
+fn undefined_global_on_multi_segment_chain_only_flags_base() {
+    // `function NoSuch.b.c()` and `function NoSuch.b.c:m()` — only
+    // the leftmost identifier (`NoSuch`) is a read; `b` / `c` / `m`
+    // are field/method writes and must NOT be flagged.
+    let src = r#"
+function NoSuch.b.c()
+    return 1
+end
+
+function NoSuchToo.b.c:m()
+    return 2
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "multi_chain.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    // Exactly two undefined-global diagnostics: the two distinct bases.
+    let undefined_messages: Vec<&str> = diags.iter()
+        .filter(|d| d.message.starts_with("Undefined global"))
+        .map(|d| d.message.as_str())
+        .collect();
+    assert!(
+        undefined_messages.iter().any(|m| m.contains("'NoSuch'")),
+        "expected 'NoSuch' undefined. diags={:?}", diags
+    );
+    assert!(
+        undefined_messages.iter().any(|m| m.contains("'NoSuchToo'")),
+        "expected 'NoSuchToo' undefined. diags={:?}", diags
+    );
+    // Intermediate / tail segments must NOT produce diagnostics.
+    for forbidden in &["'b'", "'c'", "'m'"] {
+        assert!(
+            !diags.iter().any(|d| d.message.contains(forbidden)),
+            "segment {} must not be flagged. diags={:?}", forbidden, diags
+        );
+    }
+}
+
+#[test]
+fn undefined_global_on_dotted_function_declaration_base() {
+    // `function foo.bar()` — same rule as method form: `foo` is a
+    // read, must be flagged if undefined.
+    let src = r#"
+function NoSuch.bar()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "undef_dotted.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    let undefined: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Undefined global 'NoSuch'"))
+        .collect();
+    assert_eq!(undefined.len(), 1,
+        "expected Undefined global on dotted base 'NoSuch'. diags={:?}", diags);
+    assert!(!diags.iter().any(|d| d.message.contains("'bar'")),
+        "tail field 'bar' should not be flagged. diags={:?}", diags);
+}
+
+#[test]
+fn bare_function_declaration_is_still_a_definition() {
+    // `function foo() end` DEFINES global `foo`. It must not be
+    // flagged as undefined even though `foo` isn't declared elsewhere.
+    let src = r#"
+function foo()
+    return 1
+end
+
+foo()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "bare_def.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'foo'")),
+        "bare `function foo()` must define foo, not flag it. diags={:?}", diags);
+}
+
+#[test]
+fn method_declaration_on_defined_local_is_silent() {
+    // `local ABC = {}` + `function ABC:f()` — `ABC` is a local, so
+    // the method base resolves and produces no diagnostic.
+    let src = r#"
+local ABC = {}
+
+function ABC:f()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_method.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
+        "local ABC must not be flagged as undefined. diags={:?}", diags);
+}
+
+#[test]
+fn method_declaration_on_defined_global_is_silent() {
+    // `ABC = {}` + `function ABC:f()` — `ABC` becomes a global via
+    // assignment; the subsequent method decl must not re-flag it.
+    let src = r#"
+ABC = {}
+
+function ABC:f()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "global_method.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &diag_config,
+    );
+    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
+        "global ABC (assigned earlier) must not be flagged. diags={:?}", diags);
+}
+
+#[test]
 fn lua_field_error_on_closed_table() {
     let src = r#"
 local t = { name = "hello", age = 10 }

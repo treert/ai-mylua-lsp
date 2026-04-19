@@ -43,10 +43,15 @@ pub fn hover(
     //   None              → keep walking
     //
     // NOTE: `hover_at_declaration` currently always returns `Some`, so
-    // the `function_name` branch below effectively short-circuits. If
-    // it ever gains a failure path (returning `None`), the current
-    // `Some(hover_at_declaration(...))` will silently fall through —
-    // update the invariant at `hover_at_declaration` if that changes.
+    // the `function_name` tail branch below effectively short-circuits.
+    // For non-tail identifiers we *deliberately* return `Some(None)`
+    // to stop walking (there's no ancestor above `function_name` that
+    // would want to match) and hand control to the scope / type_shard
+    // / global_shard paths below — so `function A1213:f()` hover on
+    // `A1213` falls through to normal variable resolution and (since
+    // `A1213` is undefined) returns no hover, rather than impersonating
+    // a function. If `hover_at_declaration` ever gains a real failure
+    // path, revisit the tail `return Some(...)` too.
     if let Some(result) = walk_ancestors(ident_node, |p| {
         if matches!(p.kind(), "variable" | "field_expression") {
             let field_is_ident = p
@@ -62,7 +67,21 @@ pub fn hover(
                 if decl.kind() == "function_declaration"
                     || decl.kind() == "local_function_declaration"
                 {
-                    return Some(hover_at_declaration(decl, doc));
+                    // `function a.b.c()` / `function a:m()` — only short
+                    // circuit to the whole-declaration hover when the
+                    // cursor is on the *last* identifier (the method
+                    // name `m` / tail field `c`, or the bare decl name
+                    // `a` when there's no separator). Intermediate or
+                    // base identifiers refer to existing table values
+                    // and must fall through to scope / global / type
+                    // resolution so `A1213:f()` on unknown `A1213`
+                    // doesn't claim it's a function.
+                    if is_function_name_tail(p, ident_node) {
+                        return Some(hover_at_declaration(decl, doc));
+                    }
+                    // Match hit but the clicked identifier is the base
+                    // / intermediate segment — let outer branches try.
+                    return Some(None);
                 }
             }
         }
@@ -195,15 +214,47 @@ pub fn hover(
     None
 }
 
-/// Build hover directly from a function/local declaration node at the definition site.
+/// Returns true when `ident` is the tail identifier of `function_name`,
+/// i.e. the part that actually names the function being defined:
+///   `function foo()`         → tail = `foo`
+///   `function a.b.c()`       → tail = `c`  (`a`, `b` are reads)
+///   `function obj:method()`  → tail = `method` (`obj` is a read)
+/// For the tail we want hover to show the function declaration; for
+/// the base / intermediate identifiers we let the caller fall through
+/// to ordinary variable resolution so `A1213:f()` with unknown
+/// `A1213` surfaces as undefined instead of masquerading as a
+/// function signature.
+fn is_function_name_tail(
+    function_name: tree_sitter::Node,
+    ident: tree_sitter::Node,
+) -> bool {
+    // Grammar: function_name = identifier ( '.' identifier )* ( ':' identifier )?
+    // The method form exposes the trailing identifier via the
+    // `method` field.
+    if let Some(method) = function_name.child_by_field_name("method") {
+        return method.id() == ident.id();
+    }
+    // Dotted / bare form: the tail is the last `identifier` child.
+    let mut last_ident: Option<tree_sitter::Node> = None;
+    for i in 0..function_name.child_count() {
+        if let Some(child) = function_name.child(i as u32) {
+            if child.kind() == "identifier" {
+                last_ident = Some(child);
+            }
+        }
+    }
+    last_ident.is_some_and(|n| n.id() == ident.id())
+}
+
 /// Build hover directly from a function/local declaration node at
 /// the definition site.
 ///
 /// **Invariant**: currently always returns `Some(Hover)` — the
-/// caller in `hover()` relies on this so the `function_name` branch
-/// of the ancestor walker short-circuits rather than falling through
-/// to the scope / type_shard paths. If this function gains a real
-/// failure path, update the walker's closure contract comment too.
+/// caller in `hover()` relies on this so the `function_name` tail
+/// branch of the ancestor walker short-circuits rather than falling
+/// through to the scope / type_shard paths. If this function gains
+/// a real failure path, update the walker's closure contract comment
+/// too.
 fn hover_at_declaration(
     decl_node: tree_sitter::Node,
     doc: &Document,

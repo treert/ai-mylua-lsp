@@ -328,6 +328,143 @@ obj.qux = 1"#;
     }
 }
 
+#[test]
+fn hover_on_method_decl_base_falls_through_to_variable() {
+    // `function ABC:f1()` — hover on `ABC` (the base) must NOT show
+    // the function declaration; it should resolve `ABC` as a local.
+    let src = r#"local ABC = {}
+
+function ABC:f1()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "method_base.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `function ABC:f1()` is at line 2; `A` is col 9.
+    let result = hover::hover(doc, &uri, pos(2, 9), &mut agg, &docs);
+    assert!(result.is_some(), "hover on method base `ABC` should resolve to the local, got None");
+    let content = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        !content.contains("function ABC:f1"),
+        "hover on base `ABC` must not show the whole function signature. content={}",
+        content
+    );
+}
+
+#[test]
+fn hover_on_method_decl_name_still_shows_function() {
+    // `function ABC:f1()` — hover on the method tail `f1` must still
+    // show the function declaration.
+    let src = r#"local ABC = {}
+
+function ABC:f1()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "method_tail.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `function ABC:f1()` — `f1` starts at col 13.
+    let result = hover::hover(doc, &uri, pos(2, 13), &mut agg, &docs);
+    assert!(result.is_some(), "hover on method name `f1` should succeed");
+    let content = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        content.contains("function ABC:f1"),
+        "hover on tail `f1` should show the function declaration. content={}",
+        content
+    );
+}
+
+#[test]
+fn hover_on_undefined_method_base_returns_none() {
+    // `function A1213:f()` with `A1213` undefined — hover on `A1213`
+    // must not impersonate a function. With no local / global / type
+    // match, hover returns None (or at most a non-function variable
+    // fallback). Asserting `content` does not claim `A1213` is a
+    // function.
+    let src = r#"function A1213:f()
+    self.ff = 2
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "undef_base.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `function A1213:f()` — `A1213` starts at col 9.
+    let result = hover::hover(doc, &uri, pos(0, 9), &mut agg, &docs);
+    if let Some(h) = result {
+        let content = hover_content_string(&h);
+        assert!(
+            !content.contains("function A1213:f"),
+            "undefined base `A1213` must not show a function hover. content={}",
+            content
+        );
+    }
+    // None is also an acceptable outcome (no hover for undefined ref).
+}
+
+#[test]
+fn hover_on_intermediate_dotted_segment_does_not_impersonate_function() {
+    // `function a.b.c()` — hover on the intermediate `b` must not
+    // show the function signature. Only the tail `c` should.
+    let src = r#"local a = { b = {} }
+
+function a.b.c()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "inter_dot.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `function a.b.c()` at line 2: `a` col 9, `.` col 10, `b` col 11,
+    // `.` col 12, `c` col 13. Hover on intermediate `b` (col 11).
+    let result = hover::hover(doc, &uri, pos(2, 11), &mut agg, &docs);
+    if let Some(h) = result {
+        let content = hover_content_string(&h);
+        assert!(
+            !content.contains("function a.b.c"),
+            "intermediate segment `b` must not show the function declaration. content={}",
+            content
+        );
+    }
+    // Tail `c` (col 13) still shows the function decl.
+    let tail = hover::hover(doc, &uri, pos(2, 13), &mut agg, &docs);
+    assert!(tail.is_some(), "tail hover should succeed");
+    let tail_content = hover_content_string(tail.as_ref().unwrap());
+    assert!(
+        tail_content.contains("function a.b.c"),
+        "tail `c` should show the function declaration. content={}",
+        tail_content
+    );
+}
+
+#[test]
+fn hover_on_bare_function_decl_name_still_shows_function() {
+    // `function foo()` — bare form, hover on `foo` is the tail and
+    // must still show the function declaration (the common case).
+    let src = r#"function foo()
+    return 1
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "bare_decl.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // `function foo()` — `foo` starts at col 9.
+    let result = hover::hover(doc, &uri, pos(0, 9), &mut agg, &docs);
+    assert!(result.is_some(), "hover on bare function name should succeed");
+    let content = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        content.contains("function foo"),
+        "hover on bare `foo` should show the function declaration. content={}",
+        content
+    );
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
     use tower_lsp_server::ls_types::HoverContents;
