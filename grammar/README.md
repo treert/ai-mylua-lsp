@@ -39,7 +39,7 @@
 | `src/scanner.c` | 外部扫描器：短字符串（含全部 Lua 5.3+ 转义序列）、长字符串 `[=[...]=]`、所有注释类型（短注释 / 长注释 / `---` 文档注释）、shebang、column-0 块边界检测。 |
 | `test/corpus/` | 37 个回归测试（语句 + 表达式 + column-0 边界），100% 通过。 |
 
-已通过以下文件的无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`assets/lua5.4/*.lua`（全部 11 个标准库桩文件）。
+已通过以下文件的无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`vscode-extension/assets/lua5.4/*.lua`（全部 11 个标准库桩文件）。
 
 ### 依赖与命令
 

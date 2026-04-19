@@ -1,0 +1,148 @@
+name: Release VSIX
+
+# Build platform-specific .vsix files for each target in the matrix
+# and upload them as workflow artifacts. When a `v*` tag is pushed,
+# the artifacts are additionally published as a GitHub Release.
+#
+# The job deliberately skips Marketplace publishing by default —
+# you can add a `vsce publish` step with a `VSCE_PAT` secret when
+# ready to push to the VS Code Marketplace. See the comment block
+# at the bottom of this file for the exact snippet.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      targets:
+        description: 'Comma-separated VS Code target list (e.g. darwin-arm64,linux-x64). Empty = all matrix targets.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # Needed for `actions/upload-artifact` and the
+                    # `softprops/action-gh-release` step below.
+
+jobs:
+  # The matrix below is a curated subset of what `TARGET_MAP` in
+  # `vscode-extension/scripts/prepackage.mjs` knows how to build.
+  # Add a row here when you want CI to cover another target; the
+  # prepackage + vsce pipeline already supports all 9 entries in
+  # TARGET_MAP, so extending only requires picking a runner +
+  # rust_target pair.
+  build:
+    name: Package ${{ matrix.target }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: darwin-arm64
+            runner: macos-latest        # Apple Silicon (M-series) — GitHub's macos-latest is arm64 since Aug 2024.
+            rust_target: aarch64-apple-darwin
+          - target: darwin-x64
+            runner: macos-latest        # ARM runner cross-compiles to x86_64 trivially via the bundled Apple SDK.
+            rust_target: x86_64-apple-darwin
+          - target: win32-x64
+            runner: windows-latest
+            rust_target: x86_64-pc-windows-msvc
+          - target: linux-x64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm    # GitHub native ARM runner (public-repo free tier GA Jan 2025).
+                                        # Fallback when unavailable: `runner: ubuntu-latest` + install `cross`
+                                        # and call `cross build` instead of `cargo build` (slower but portable).
+            rust_target: aarch64-unknown-linux-gnu
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_target }}
+
+      - name: Cache cargo registry + build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: lsp
+          key: ${{ matrix.target }}
+
+      - name: Build LSP (release, ${{ matrix.rust_target }})
+        working-directory: lsp
+        run: cargo build --release --target ${{ matrix.rust_target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Install extension deps
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Package .vsix (${{ matrix.target }})
+        working-directory: vscode-extension
+        env:
+          MYLUA_TARGET: ${{ matrix.target }}
+        run: npm run package
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vsix-${{ matrix.target }}
+          path: vscode-extension/*.vsix
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - name: Attach .vsix files to the Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.vsix
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+
+# ---------------------------------------------------------------------
+# OPTIONAL: Marketplace publish.
+#
+# Uncomment the block below and add a `VSCE_PAT` repo secret (a
+# Personal Access Token from Azure DevOps with Marketplace: Manage
+# scope) to auto-publish on tag push.
+#
+#   publish:
+#     name: Publish to VS Code Marketplace
+#     needs: build
+#     if: startsWith(github.ref, 'refs/tags/v')
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/download-artifact@v4
+#         with:
+#           path: artifacts
+#           merge-multiple: true
+#       - uses: actions/setup-node@v4
+#         with: { node-version: '20' }
+#       - name: vsce publish (loop over each platform-specific .vsix)
+#         env:
+#           VSCE_PAT: ${{ secrets.VSCE_PAT }}
+#         # `vsce publish --packagePath` takes a single file; loop
+#         # here so one command doesn't silently publish only the
+#         # first glob expansion (shell would pass `artifacts/*.vsix`
+#         # as N separate args and vsce would choke).
+#         run: |
+#           for f in artifacts/*.vsix; do
+#             npx @vscode/vsce publish --packagePath "$f"
+#           done
+# ---------------------------------------------------------------------

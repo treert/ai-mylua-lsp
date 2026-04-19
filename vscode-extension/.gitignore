@@ -1,5 +1,6 @@
 node_modules/
 out/
+server/
 *.vsix
 .DS_Store
 Thumbs.db

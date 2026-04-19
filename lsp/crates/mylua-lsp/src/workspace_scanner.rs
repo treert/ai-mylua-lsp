@@ -209,6 +209,84 @@ fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>, fi
     }
 }
 
+/// Resolve user-configured `workspace.library` strings to absolute,
+/// canonicalized directory paths.
+///
+/// Semantics:
+/// - Absolute paths are used as-is.
+/// - Strings prefixed with `~/` are expanded against `$HOME`
+///   (Unix) / `%USERPROFILE%` (Windows).
+/// - Relative paths are resolved against the **first** workspace
+///   root. With no workspace roots (headless LSP scenarios),
+///   relative entries are dropped since we have nothing to anchor
+///   them against.
+/// - Empty / whitespace-only entries are silently ignored.
+/// - Non-existent paths are silently dropped — callers already log
+///   what they end up indexing, and a log here would double up on
+///   every startup for the common "user configured library that
+///   doesn't exist on this machine" case.
+/// - Entries resolving to the same canonical path are de-duplicated
+///   in input order.
+///
+/// Returned paths are suitable to pass as additional roots to
+/// `scan_workspace_lua_files` / `collect_lua_files`.
+pub fn resolve_library_roots(
+    library: &[String],
+    workspace_roots: &[PathBuf],
+) -> Vec<PathBuf> {
+    let first_root = workspace_roots.first();
+    let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+    let mut out: Vec<PathBuf> = Vec::new();
+
+    for entry in library {
+        let trimmed = entry.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        let expanded: PathBuf = if let Some(stripped) = trimmed.strip_prefix("~/") {
+            match home_dir() {
+                Some(home) => home.join(stripped),
+                None => continue,
+            }
+        } else {
+            PathBuf::from(trimmed)
+        };
+
+        let absolute: PathBuf = if expanded.is_absolute() {
+            expanded
+        } else if let Some(root) = first_root {
+            root.join(&expanded)
+        } else {
+            continue;
+        };
+
+        // Fail-closed on canonicalization: a broken symlink or a
+        // path whose containing directory is unreadable would
+        // otherwise leave a non-canonical form in `seen`, allowing
+        // two entries that resolve to the same physical location
+        // to slip through as separate roots and get scanned twice.
+        let canonical = match absolute.canonicalize() {
+            Ok(c) => c,
+            Err(_) => continue,
+        };
+        if !canonical.is_dir() {
+            continue;
+        }
+        if seen.insert(canonical.clone()) {
+            out.push(canonical);
+        }
+    }
+
+    out
+}
+
+fn home_dir() -> Option<PathBuf> {
+    std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(PathBuf::from)
+}
+
 /// Check whether a file path should be included in the workspace index.
 pub fn should_index_path(path: &Path, roots: &[PathBuf], filter: &FileFilter) -> bool {
     for root in roots {
@@ -306,6 +384,78 @@ mod tests {
     }
 
     #[test]
+    fn library_resolver_drops_empty_and_missing_entries() {
+        let roots = vec![PathBuf::from("/no/such/project")];
+        let out = resolve_library_roots(
+            &[
+                "".to_string(),
+                "   ".to_string(),
+                "/definitely/does/not/exist/xyzzy123".to_string(),
+            ],
+            &roots,
+        );
+        assert!(out.is_empty(), "no valid entries should resolve: {:?}", out);
+    }
+
+    /// Unique per-process, per-test name to avoid collisions when
+    /// `cargo test` runs tests in parallel (`-j N`) or when a
+    /// previous failed run left residue behind. `process::id()`
+    /// alone is insufficient because two parallel tests in the same
+    /// process share it.
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let seq = COUNTER.fetch_add(1, Ordering::Relaxed);
+        std::env::temp_dir().join(format!(
+            "mylua_libtest_{}_{}_{}",
+            std::process::id(),
+            seq,
+            label
+        ))
+    }
+
+    #[test]
+    fn library_resolver_deduplicates_same_canonical_path() {
+        let p = unique_temp_dir("dedupe");
+        std::fs::create_dir_all(&p).unwrap();
+
+        let canonical = p.canonicalize().unwrap();
+        let out = resolve_library_roots(
+            &[
+                canonical.to_string_lossy().to_string(),
+                canonical.to_string_lossy().to_string(),
+            ],
+            &[],
+        );
+        assert_eq!(out.len(), 1, "duplicate absolute paths should collapse");
+
+        let _ = std::fs::remove_dir_all(&p);
+    }
+
+    #[test]
+    fn library_resolver_expands_relative_against_first_workspace_root() {
+        let root = unique_temp_dir("relroot");
+        let lib = root.join("stubs");
+        std::fs::create_dir_all(&lib).unwrap();
+
+        let out = resolve_library_roots(&["stubs".to_string()], &[root.clone()]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].canonicalize().unwrap(), lib.canonicalize().unwrap());
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn library_resolver_skips_relative_when_no_workspace_root() {
+        // Without a workspace root to anchor against, a bare relative
+        // path has no sensible canonical form — drop it rather than
+        // guess against CWD (tests and headless LSP scenarios are not
+        // intended to resolve user-relative library paths).
+        let out = resolve_library_roots(&["stubs".to_string()], &[]);
+        assert!(out.is_empty());
+    }
+
+    #[test]
     fn builtin_cache_dir_always_excluded_even_when_user_overrides_all_excludes() {
         // Simulate a user who fully replaced the default exclude list
         // with something narrow (or empty), removing both `**/.*` and
@@ -316,6 +466,7 @@ mod tests {
             include: vec!["**/*.lua".to_string()],
             exclude: vec![],
             index_mode: crate::config::IndexMode::Merged,
+            library: Vec::new(),
         };
         let filter = FileFilter::from_config(&cfg);
 

@@ -144,3 +144,84 @@ pub fn setup_workspace_from_dir(
 
     (docs, agg, parser)
 }
+
+/// Set up a workspace with one or more library roots scanned alongside
+/// workspace files. Mimics the production `run_workspace_scan` path:
+/// library file URIs are force-flagged `is_meta=true` on their
+/// summaries, and caller receives the resolved library URI set for
+/// assertions. `workspace_files` may be empty (pure library scenario).
+pub fn setup_workspace_with_library(
+    workspace_files: &[(&str, &str)],
+    library_roots_absolute: &[PathBuf],
+) -> (
+    HashMap<Uri, Document>,
+    WorkspaceAggregation,
+    tree_sitter::Parser,
+    std::collections::HashSet<Uri>,
+) {
+    use std::collections::HashSet;
+    let mut parser = new_parser();
+    let mut docs = HashMap::new();
+    let mut agg = WorkspaceAggregation::new();
+
+    for (filename, source) in workspace_files {
+        let uri = make_uri(filename);
+        let doc = parse_doc(&mut parser, source);
+        let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+        agg.upsert_summary(summary);
+        docs.insert(uri, doc);
+    }
+
+    let ws_config = WorkspaceConfig::default();
+    let require_config = RequireConfig::default();
+
+    // Library files — enumerate for URI set, then build summaries.
+    // `require_map` also gets library entries so `require("string")`
+    // works from workspace files.
+    let library_files = workspace_scanner::collect_lua_files(library_roots_absolute, &ws_config);
+    let library_uris: HashSet<Uri> = library_files
+        .iter()
+        .filter_map(|p| workspace_scanner::path_to_uri(p))
+        .collect();
+
+    let require_map = workspace_scanner::scan_workspace_lua_files(
+        library_roots_absolute,
+        &require_config,
+        &ws_config,
+    );
+    for (module, uri) in &require_map {
+        agg.set_require_mapping(module.clone(), uri.clone());
+    }
+
+    for file in &library_files {
+        let Ok(text) = std::fs::read_to_string(file) else {
+            continue;
+        };
+        let Some(uri) = workspace_scanner::path_to_uri(file) else {
+            continue;
+        };
+        let Some(tree) = parser.parse(text.as_bytes(), None) else {
+            continue;
+        };
+        let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+        // Production `run_workspace_scan` does this override for any
+        // URI originating from a library root; tests mirror the same
+        // contract.
+        summary.is_meta = true;
+        agg.upsert_summary(summary);
+        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+        docs.insert(uri, Document { text, tree, scope_tree });
+    }
+
+    (docs, agg, parser, library_uris)
+}
+
+/// Absolute path to the bundled Lua 5.4 stdlib stubs inside the VS Code
+/// extension asset tree. Used by library-related tests to avoid
+/// hard-coding per-machine paths.
+pub fn bundled_lua54_library_path() -> PathBuf {
+    repo_root()
+        .join("vscode-extension")
+        .join("assets")
+        .join("lua5.4")
+}

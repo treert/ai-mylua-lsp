@@ -1,9 +1,17 @@
 {
-  "name": "mylua",
+  "name": "mylua-lsp",
   "displayName": "MyLua",
   "description": "Lua 5.3+ language support with EmmyLua annotations",
   "version": "0.1.0",
-  "publisher": "mylua",
+  "publisher": "onemore",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/treert/ai-mylua-lsp.git"
+  },
+  "homepage": "https://github.com/treert/ai-mylua-lsp#readme",
+  "bugs": {
+    "url": "https://github.com/treert/ai-mylua-lsp/issues"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },
@@ -46,9 +54,24 @@
       "title": "MyLua",
       "properties": {
         "mylua.server.path": {
-          "type": "string",
+          "type": ["string", "object"],
           "default": "",
-          "description": "Path to mylua-lsp executable. If empty, uses bundled or PATH."
+          "properties": {
+            "darwin": {
+              "type": "string",
+              "description": "macOS override for the mylua-lsp executable path."
+            },
+            "linux": {
+              "type": "string",
+              "description": "Linux override for the mylua-lsp executable path."
+            },
+            "win32": {
+              "type": "string",
+              "description": "Windows override for the mylua-lsp executable path (include the .exe extension)."
+            }
+          },
+          "additionalProperties": false,
+          "markdownDescription": "Path to the mylua-lsp executable. Two forms are accepted:\n\n- **string** — one path applied to all platforms (backwards compatible).\n- **object** — per-platform overrides keyed by Node.js `process.platform`, e.g.\n  ```json\n  { \"darwin\": \"/abs/mac/mylua-lsp\", \"win32\": \"C:/tools/mylua-lsp.exe\" }\n  ```\n\nWhen empty, the extension locates the binary automatically: production builds load `<extension>/server/<bin>`; the Extension Development Host (F5 debug) bypasses `server/` and loads `<extension>/../lsp/target/debug/<bin>` directly so freshly `cargo build`ed changes take effect without re-running `npm run prepackage`."
         },
         "mylua.debug.fileLog": {
           "type": "boolean",
@@ -58,8 +81,8 @@
         "mylua.runtime.version": {
           "type": "string",
           "enum": ["5.3", "5.4"],
-          "default": "5.3",
-          "description": "Assumed Lua runtime version."
+          "default": "5.4",
+          "description": "Assumed Lua runtime version. Affects the builtin identifier set used for `undefinedGlobal` suppression and the path of the bundled stdlib stubs auto-loaded via `mylua.workspace.useBundledStdlib`. If a bundled stub tree for the requested version does not exist, the extension falls back to the latest available bundled version (currently 5.4)."
         },
         "mylua.require.paths": {
           "type": "array",
@@ -90,6 +113,17 @@
           "enum": ["merged", "isolated"],
           "default": "merged",
           "description": "Multi-root workspace strategy: merge all roots or isolate per root."
+        },
+        "mylua.workspace.library": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "markdownDescription": "Additional directories to index alongside the workspace, typically for Lua stdlib stubs or third-party EmmyLua annotation packages. Each entry may be an absolute path, a `~/…` path (expanded against `$HOME`), or a path relative to the first workspace root. Files reached via these roots are indexed read-only: they contribute globals / types to hover, goto, completion, and require resolution, but their own diagnostics are suppressed."
+        },
+        "mylua.workspace.useBundledStdlib": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When enabled, the extension auto-injects the bundled Lua stdlib stubs (`<extension>/assets/lua<version>/`) into `#mylua.workspace.library#`, so `print`, `string.format`, `table.concat`, etc. have hover / goto / signature help without any user configuration. Disable only if you want to supply your own complete stdlib annotations via `#mylua.workspace.library#`. The version selected follows `#mylua.runtime.version#`."
         },
         "mylua.index.cacheMode": {
           "type": "string",
@@ -190,7 +224,10 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package"
+    "prepackage": "node scripts/prepackage.mjs",
+    "package": "node scripts/package.mjs",
+    "build:local": "node scripts/build-local.mjs",
+    "release": "node scripts/publish.mjs"
   },
   "dependencies": {
     "vscode-languageclient": "^9.0.1"
@@ -198,6 +235,7 @@
   "devDependencies": {
     "@types/vscode": "^1.85.0",
     "@types/node": "^20.0.0",
+    "@vscode/vsce": "^3.2.1",
     "typescript": "^5.3.0"
   }
 }

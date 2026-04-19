@@ -1,0 +1,21 @@
+# Source & build config — not shipped in the .vsix
+src/**
+scripts/**
+tsconfig.json
+tsconfig.*.json
+*.map
+.vscode/**
+.gitignore
+.eslintrc*
+
+# Test artifacts
+node_modules/**
+.nyc_output/**
+coverage/**
+
+# VS Code marketplace already knows the repo; no need to ship
+*.vsix
+
+# macOS / Windows junk
+.DS_Store
+Thumbs.db

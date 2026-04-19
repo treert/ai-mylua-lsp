@@ -67,6 +67,28 @@ pub struct WorkspaceConfig {
     pub exclude: Vec<String>,
     #[serde(rename = "indexMode")]
     pub index_mode: IndexMode,
+    /// Additional directories to index alongside the user's workspace
+    /// roots. Intended for Lua stdlib stubs (bundled with the VS Code
+    /// extension) and optional third-party annotation packages.
+    ///
+    /// Each entry may be:
+    /// - Absolute path — used as-is;
+    /// - `~/…` — expanded against `$HOME` / `%USERPROFILE%`;
+    /// - Relative — resolved against the first workspace root.
+    ///
+    /// Files reached via these roots are force-flagged
+    /// `DocumentSummary.is_meta = true` (so `undefinedGlobal` stays
+    /// quiet even though the stubs reference runtime-provided
+    /// symbols), and the diagnostic consumer publishes an empty
+    /// diagnostic set for them so they never pollute the client's
+    /// Problems panel.
+    ///
+    /// Duplicates with the user's own workspace roots are harmless:
+    /// `resolve_library_roots` canonicalizes and deduplicates; when a
+    /// path appears in both, the scan walks it once and library
+    /// semantics (is_meta / empty diagnostics) take precedence only
+    /// for URIs that originated from the library walk.
+    pub library: Vec<String>,
 }
 
 impl Default for WorkspaceConfig {
@@ -75,6 +97,7 @@ impl Default for WorkspaceConfig {
             include: vec!["**/*.lua".to_string()],
             exclude: vec!["**/.*".to_string(), "**/node_modules".to_string()],
             index_mode: IndexMode::Merged,
+            library: Vec::new(),
         }
     }
 }

@@ -131,6 +131,15 @@ pub struct Backend {
     ///   - Cold-start seed routing (`initialized` splits documents into
     ///     Hot/Cold based on this set)
     open_uris: Arc<Mutex<HashSet<Uri>>>,
+    /// URIs indexed via `config.workspace.library` (stdlib stubs and
+    /// other external annotation packages). Populated by
+    /// `run_workspace_scan` after library roots are resolved. Used by
+    /// `consumer_loop` to publish an empty diagnostic set for these
+    /// files — library stubs exist only to contribute type facts, so
+    /// they should never clutter the client's Problems panel even if
+    /// a stub file happens to contain tree-sitter ERROR nodes or
+    /// shape-level warnings.
+    library_uris: Arc<Mutex<HashSet<Uri>>>,
     /// Unified semantic diagnostics scheduler (priority queue + single
     /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
     /// spawns and the cold-start `publish_diagnostics_for_open_files`.
@@ -171,6 +180,7 @@ impl Backend {
             semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_counter: Arc::new(Mutex::new(0)),
             open_uris: Arc::new(Mutex::new(HashSet::new())),
+            library_uris: Arc::new(Mutex::new(HashSet::new())),
             scheduler: diagnostic_scheduler::DiagnosticScheduler::new(),
         }
     }
@@ -182,6 +192,54 @@ impl Backend {
         let mut c = self.semantic_tokens_counter.lock().unwrap();
         *c += 1;
         format!("mylua-stk-{}", *c)
+    }
+
+    /// Resolve `config.workspace.library` into absolute roots and
+    /// the corresponding URI set, write the URI set into
+    /// `self.library_uris`, and return both for downstream use by
+    /// `run_workspace_scan`. Called from `initialized` BEFORE the
+    /// handler's first `.await` so that tower-lsp-server cannot
+    /// interleave a concurrent `did_open` / `did_change` on a
+    /// library URI before `self.library_uris` is populated —
+    /// otherwise `parse_and_store_with_old_tree` would fail to
+    /// force `is_meta=true` on library URIs during the cold-start
+    /// race window, leaving stubs flagged as regular user code and
+    /// drowning in `undefinedGlobal` warnings.
+    fn initialize_library_uris(
+        &self,
+        workspace_roots: &[PathBuf],
+    ) -> (Vec<PathBuf>, HashSet<Uri>) {
+        let (library_cfg, workspace_config) = {
+            let cfg = self.config.lock().unwrap();
+            (cfg.workspace.library.clone(), cfg.workspace.clone())
+        };
+        let library_roots =
+            workspace_scanner::resolve_library_roots(&library_cfg, workspace_roots);
+        if !library_roots.is_empty() {
+            lsp_log!(
+                "[mylua-lsp] library roots: {:?}",
+                library_roots
+                    .iter()
+                    .map(|p| p.display().to_string())
+                    .collect::<Vec<_>>()
+            );
+        }
+        let library_file_uris: HashSet<Uri> = if library_roots.is_empty() {
+            HashSet::new()
+        } else {
+            workspace_scanner::collect_lua_files(&library_roots, &workspace_config)
+                .into_iter()
+                .filter_map(|p| workspace_scanner::path_to_uri(&p))
+                .collect()
+        };
+        if !library_file_uris.is_empty() {
+            *self.library_uris.lock().unwrap() = library_file_uris.clone();
+            lsp_log!(
+                "[mylua-lsp] library files to index: {}",
+                library_file_uris.len()
+            );
+        }
+        (library_roots, library_file_uris)
     }
 
     /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
@@ -242,7 +300,17 @@ impl Backend {
         };
 
         {
-            let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            // Library stubs retain their meta treatment across edits.
+            // `summary_builder::build_summary` infers `is_meta` from
+            // `---@meta` headers, and bundled stdlib stubs typically
+            // don't carry that header — without the override here, a
+            // user navigating to `print`'s definition and editing the
+            // stub would flip the flag back to false and start
+            // triggering `undefinedGlobal` inside the library file.
+            if self.library_uris.lock().unwrap().contains(&uri) {
+                summary.is_meta = true;
+            }
             lsp_log!(
                 "[index] summary for {:?}: locals={:?} types={:?} globals={}",
                 uri,
@@ -367,7 +435,19 @@ impl Backend {
             parser.parse(text.as_bytes(), None)
         };
         if let Some(tree) = tree {
-            let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            // Keep library files flagged `is_meta=true` across
+            // watcher-driven re-indexes. `summary_builder` infers
+            // `is_meta` from an explicit `---@meta` header which
+            // bundled stdlib stubs rarely carry, so without this
+            // override a `didChangeWatchedFiles(CHANGED)` on a
+            // library file (happens only when the user configured a
+            // library path inside the workspace tree) would flip the
+            // flag back to false and surface `undefinedGlobal`
+            // warnings inside the stub file.
+            if self.library_uris.lock().unwrap().contains(&uri) {
+                summary.is_meta = true;
+            }
             self.index.lock().unwrap().upsert_summary(summary);
             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
             self.documents
@@ -413,6 +493,14 @@ impl Backend {
             return;
         }
         if !self.open_uris.lock().unwrap().contains(uri) {
+            return;
+        }
+        // Library stubs never publish diagnostics. Skipping here
+        // matches the steady-state `consumer_loop` contract (which
+        // also publishes an empty vector for library URIs) and
+        // prevents a one-shot syntax publish from flashing in the
+        // cold-start window, only to be cleared microseconds later.
+        if self.library_uris.lock().unwrap().contains(uri) {
             return;
         }
         let diags = {
@@ -464,6 +552,8 @@ impl Backend {
 async fn run_workspace_scan(
     client: Client,
     roots: Vec<PathBuf>,
+    library_roots: Vec<PathBuf>,
+    library_file_uris: HashSet<Uri>,
     config: Arc<Mutex<LspConfig>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
@@ -491,6 +581,47 @@ async fn run_workspace_scan(
         );
     }
 
+    // `library_roots` and `library_file_uris` are resolved
+    // synchronously in `initialized` before this scan spawns (see
+    // `initialize_library_uris`) so that any `did_open` arriving
+    // before the scan makes progress can still observe the library
+    // set and apply `is_meta=true` in `parse_and_store_with_old_tree`.
+    //
+    // Combined roots feed both the `require_map` scan (so
+    // `require("string")` inside a user file resolves into the
+    // library's `string.lua`) and `collect_lua_files` (so library
+    // files get indexed alongside workspace files). We deduplicate
+    // library roots that fall under an existing workspace root —
+    // otherwise the same file would be read/parsed twice in the
+    // parallel batch (once per root path), doubling I/O and merge
+    // work for large library trees vendored inside the workspace.
+    //
+    // `workspace_roots` come from `uri_to_path(folder.uri)` and are
+    // NOT canonicalized, while `library_roots` always are (by
+    // `resolve_library_roots`). Without also canonicalizing the
+    // workspace side, a symlinked workspace (`/Users/me/proj`
+    // symlink to `/Users/me/project`) would miss the dedup and
+    // double-scan. Fall back to the raw path if canonicalize fails
+    // (deleted dir, permissions) so a transiently-unavailable
+    // workspace root still contributes to `all_roots`.
+    let canonical_roots: Vec<PathBuf> = roots
+        .iter()
+        .map(|r| r.canonicalize().unwrap_or_else(|_| r.clone()))
+        .collect();
+    let mut all_roots = roots.clone();
+    for lib in &library_roots {
+        let already_covered = canonical_roots.iter().any(|r| lib.starts_with(r));
+        if !already_covered {
+            all_roots.push(lib.clone());
+        } else {
+            lsp_log!(
+                "[mylua-lsp] library root {} already covered by workspace; \
+                 skipping duplicate scan",
+                lib.display()
+            );
+        }
+    }
+
     let use_disk_cache = cache_mode == config::CacheMode::Summary;
     let cache = if use_disk_cache {
         roots
@@ -504,7 +635,7 @@ async fn run_workspace_scan(
     let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let require_map =
-        workspace_scanner::scan_workspace_lua_files(&roots, &require_config, &workspace_config);
+        workspace_scanner::scan_workspace_lua_files(&all_roots, &require_config, &workspace_config);
     {
         let mut idx = index.lock().unwrap();
         idx.require_aliases = require_config.aliases.clone();
@@ -513,7 +644,7 @@ async fn run_workspace_scan(
         }
     }
 
-    let files = workspace_scanner::collect_lua_files(&roots, &workspace_config);
+    let files = workspace_scanner::collect_lua_files(&all_roots, &workspace_config);
     let total = files.len();
     lsp_log!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
 
@@ -542,6 +673,7 @@ async fn run_workspace_scan(
         let cached_clone = cached_summaries.clone();
         let hits_clone = cache_hits.clone();
 
+        let library_file_uris_clone = library_file_uris.clone();
         let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
             chunk
@@ -550,6 +682,7 @@ async fn run_workspace_scan(
                     let text = std::fs::read_to_string(path).ok()?;
                     let uri = workspace_scanner::path_to_uri(path)?;
                     let content_hash = content_hash(&text);
+                    let is_library = library_file_uris_clone.contains(&uri);
 
                     if let Some(cached) = cached_clone.get(&uri.to_string()) {
                         if cached.content_hash == content_hash {
@@ -558,11 +691,21 @@ async fn run_workspace_scan(
                             let mut parser = new_parser();
                             let tree = parser.parse(text.as_bytes(), None)?;
                             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                            let mut summary = cached.clone();
+                            // Force is_meta on library files even if
+                            // the cached summary was produced before
+                            // the library config existed. Stubs
+                            // rarely carry an explicit `---@meta`
+                            // header, so we can't rely on the
+                            // builder to flag them.
+                            if is_library {
+                                summary.is_meta = true;
+                            }
                             return Some(ParsedFile {
                                 uri,
                                 text,
                                 tree,
-                                summary: cached.clone(),
+                                summary,
                                 scope_tree,
                             });
                         }
@@ -570,8 +713,11 @@ async fn run_workspace_scan(
 
                     let mut parser = new_parser();
                     let tree = parser.parse(text.as_bytes(), None)?;
-                    let summary =
+                    let mut summary =
                         summary_builder::build_summary(&uri, &tree, text.as_bytes());
+                    if is_library {
+                        summary.is_meta = true;
+                    }
                     let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
                     Some(ParsedFile {
                         uri,
@@ -711,6 +857,7 @@ fn start_diagnostic_consumer(
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
+    library_uris: Arc<Mutex<HashSet<Uri>>>,
     client: Client,
 ) {
     tokio::spawn(async move {
@@ -720,10 +867,11 @@ fn start_diagnostic_consumer(
             let i = index.clone();
             let c = config.clone();
             let st = index_state.clone();
+            let lu = library_uris.clone();
             let cl = client.clone();
 
             let handle = tokio::spawn(async move {
-                consumer_loop(s, d, i, c, st, cl).await;
+                consumer_loop(s, d, i, c, st, lu, cl).await;
             });
 
             match handle.await {
@@ -761,6 +909,7 @@ async fn consumer_loop(
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
+    library_uris: Arc<Mutex<HashSet<Uri>>>,
     client: Client,
 ) {
     loop {
@@ -775,6 +924,18 @@ async fn consumer_loop(
             }
             scheduler.notified().await;
         };
+
+        // Library stubs (Lua stdlib + user-configured annotation
+        // packages) contribute type facts but should never produce
+        // user-visible diagnostics — they're not the user's code.
+        // Publishing an empty diagnostic vector clears any stale
+        // state on the client side if this URI was ever diagnosed
+        // previously (e.g. config change enabling the library path).
+        let is_library = library_uris.lock().unwrap().contains(&uri);
+        if is_library {
+            client.publish_diagnostics(uri, Vec::new(), None).await;
+            continue;
+        }
 
         let snapshot = {
             let docs = documents.lock().unwrap();
@@ -1012,6 +1173,7 @@ impl LanguageServer for Backend {
             self.index.clone(),
             self.config.clone(),
             self.index_state.clone(),
+            self.library_uris.clone(),
             self.client.clone(),
         );
 
@@ -1105,6 +1267,16 @@ impl LanguageServer for Backend {
         // a one-shot toast ("MyLua 索引完成，耗时 X.X 秒").
         let started_at = std::time::Instant::now();
 
+        // Resolve library roots + URIs BEFORE the first `.await`.
+        // `tower-lsp-server` may poll concurrent notifications (e.g.
+        // `did_open`) once this handler yields at an `.await` point,
+        // so populating `self.library_uris` up-front guarantees that
+        // any cold-start `did_open` observing a library URI applies
+        // `is_meta=true` in `parse_and_store_with_old_tree`. See
+        // `initialize_library_uris` docstring for background.
+        let roots = self.workspace_roots.lock().unwrap().clone();
+        let (library_roots, library_file_uris) = self.initialize_library_uris(&roots);
+
         self.client
             .log_message(
                 MessageType::INFO,
@@ -1127,7 +1299,10 @@ impl LanguageServer for Backend {
         // `run_workspace_scan` after the `Ready` transition so that
         // `documents` is populated before we enumerate URIs to seed.
         let client = self.client.clone();
-        let roots = self.workspace_roots.lock().unwrap().clone();
+        // `roots`, `library_roots`, `library_file_uris` were resolved
+        // at the very top of this handler (before the first `.await`)
+        // so that concurrent `did_open` handlers observe a populated
+        // `library_uris` set.
         let config = self.config.clone();
         let index = self.index.clone();
         let documents = self.documents.clone();
@@ -1139,6 +1314,8 @@ impl LanguageServer for Backend {
             run_workspace_scan(
                 client,
                 roots,
+                library_roots,
+                library_file_uris,
                 config,
                 index,
                 documents,
@@ -1391,6 +1568,13 @@ impl LanguageServer for Backend {
                     self.open_uris.lock().unwrap().remove(&change.uri);
                     self.edit_locks.lock().unwrap().remove(&change.uri);
                     self.semantic_tokens_cache.lock().unwrap().remove(&change.uri);
+                    // Also drop from `library_uris` so a deleted
+                    // library file doesn't leave a stale entry
+                    // behind — otherwise a later file CREATED at
+                    // the same path (perhaps of different content)
+                    // would still be force-flagged meta just because
+                    // its URI was previously registered.
+                    self.library_uris.lock().unwrap().remove(&change.uri);
                 }
                 _ => {}
             }
