@@ -64,7 +64,7 @@ function renderStatus(status: IndexStatusParams): void {
   if (!statusBarItem) return;
   if (status.state === 'ready') {
     statusBarItem.text = '💚mylua';
-    statusBarItem.tooltip = `MyLua: index ready (${status.total} files)`;
+    statusBarItem.tooltip = `MyLua: index ready (${status.total} files) — click to open settings`;
     // Show the one-shot "索引完成" toast exactly once per session —
     // the server only emits a single `ready` with elapsed_ms, but
     // guard here too so a defensive re-emit doesn't spam the user.
@@ -94,7 +94,7 @@ function renderStatus(status: IndexStatusParams): void {
     } else {
       statusBarItem.text = '💛mylua';
     }
-    statusBarItem.tooltip = `MyLua: indexing workspace (${status.indexed}/${total})`;
+    statusBarItem.tooltip = `MyLua: indexing workspace (${status.indexed}/${total}) — click to open settings`;
   }
   statusBarItem.show();
 }
@@ -106,7 +106,18 @@ export function activate(context: vscode.ExtensionContext) {
   );
   statusBarItem.name = 'MyLua';
   statusBarItem.text = '💛mylua';
-  statusBarItem.tooltip = 'MyLua: starting…';
+  statusBarItem.tooltip = 'MyLua: starting… (click to open settings)';
+  // Clicking the status-bar item opens the Settings UI already
+  // filtered to this extension's contributed configuration. The
+  // `@ext:<publisher>.<name>` filter is resolved from package.json:
+  // publisher="mylua" + name="mylua" → `mylua.mylua`. No need to
+  // register a wrapper command — the built-in
+  // `workbench.action.openSettings` accepts a filter argument.
+  statusBarItem.command = {
+    command: 'workbench.action.openSettings',
+    title: 'Open MyLua Settings',
+    arguments: ['@ext:mylua.mylua'],
+  };
   statusBarItem.show();
   // Owned by context.subscriptions; VS Code will dispose on extension
   // unload, so `deactivate` does not need to dispose explicitly.
@@ -159,7 +170,7 @@ export function activate(context: vscode.ExtensionContext) {
     if (statusBarItem) {
       statusBarItem.text = '⚠️mylua';
       const msg = err instanceof Error ? err.message : String(err);
-      statusBarItem.tooltip = `MyLua: failed to start (${msg})`;
+      statusBarItem.tooltip = `MyLua: failed to start (${msg}) — click to open settings`;
     }
   });
 }
