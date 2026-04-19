@@ -82,7 +82,7 @@ flowchart TB
 
 - **文件发现**：`.gitignore`、用户 exclude、globs；支持 5 万级路径。
 - **符号与引用索引**：为 **definition / references / workspace/symbol** 维护可增量更新的结构（例如 **工作区全局符号合并表**、`local = require` **绑定边**、引用发生列表）；**不**依赖「未 require 则不可见」的模块隔离模型，见 §3.4。
-- **AST 驻留策略**：全量 AST 不强制常驻；可采用 **摘要 + 按需解析** 或 **分层缓存**；**查询语义**仍覆盖全工作区，与 [`requirements.md`](requirements.md) 一致。
+- **AST 驻留策略**：**全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse**（设计契约，见 [`performance-analysis.md`](performance-analysis.md) §3.1）。理由：goto / hover / references / 级联诊断都需要任意文件的语法树，驱逐未打开文件会导致首次跨文件跳转触发 on-demand parse 的可感知卡顿。代价是 5 万文件级别峰值 RSS ~1.5–3GB、冷启动必须全量 parse 一遍（`tree_sitter::Tree` 不可序列化）；冷启动已完全后台化，用户侧不存在"等 Ready"的阻塞窗口。**查询语义**覆盖全工作区，与 [`requirements.md`](requirements.md) 一致。
 - **监听与批量变更**：`didChangeWatchedFiles`、去抖、合并重索引；**可取消**长任务。
 
 ### 3.3 语义模型与查询
