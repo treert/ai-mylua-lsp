@@ -57,13 +57,19 @@ pub enum IndexState {
 /// whenever indexing progress changes (scan start, per-batch, and
 /// Ready). The VS Code extension uses it to drive a status-bar item
 /// (`💛mylua 123/5000` → `💚mylua`). `state` is either `"indexing"`
-/// or `"ready"`; `indexed`/`total` are file counts.
+/// or `"ready"`; `indexed`/`total` are file counts. `elapsed_ms` is
+/// only populated on the terminal `"ready"` notification and carries
+/// the wall-clock duration from the `initialized` handler entry to
+/// the moment `IndexState::Ready` is committed — the extension uses
+/// it to show a one-shot "索引完成，耗时 X.X 秒" toast.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexStatusParams {
     pub state: String,
     pub indexed: u64,
     pub total: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub elapsed_ms: Option<u64>,
 }
 
 pub enum IndexStatusNotification {}
@@ -79,6 +85,18 @@ async fn send_index_status(client: &Client, state: &str, indexed: u64, total: u6
             state: state.to_string(),
             indexed,
             total,
+            elapsed_ms: None,
+        })
+        .await;
+}
+
+async fn send_index_ready(client: &Client, indexed: u64, total: u64, elapsed_ms: u64) {
+    client
+        .send_notification::<IndexStatusNotification>(IndexStatusParams {
+            state: "ready".to_string(),
+            indexed,
+            total,
+            elapsed_ms: Some(elapsed_ms),
         })
         .await;
 }
@@ -452,6 +470,7 @@ async fn run_workspace_scan(
     open_uris: Arc<Mutex<HashSet<Uri>>>,
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
     index_state: Arc<Mutex<IndexState>>,
+    started_at: std::time::Instant,
 ) {
     let (require_config, workspace_config, cache_mode, config_fingerprint, index_mode) = {
         let cfg = config.lock().unwrap();
@@ -632,10 +651,12 @@ async fn run_workspace_scan(
 
     *index_state.lock().unwrap() = IndexState::Ready;
     progress.finish().await;
-    send_index_status(&client, "ready", total as u64, total as u64).await;
+    let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
+    send_index_ready(&client, total as u64, total as u64, elapsed_ms).await;
     lsp_log!(
-        "[mylua-lsp] workspace indexing complete: {} files (Ready)",
-        total
+        "[mylua-lsp] workspace indexing complete: {} files (Ready) in {} ms",
+        total,
+        elapsed_ms
     );
 
     // Seed the diagnostics scheduler now that `IndexState::Ready` is
@@ -1076,6 +1097,14 @@ impl LanguageServer for Backend {
     }
 
     async fn initialized(&self, _: InitializedParams) {
+        // Capture the wall-clock start as the very first action: the
+        // `elapsed_ms` reported to the client on the terminal
+        // `mylua/indexStatus { state: "ready" }` notification is
+        // measured from this point to the moment
+        // `IndexState::Ready` is committed. The extension shows it as
+        // a one-shot toast ("MyLua 索引完成，耗时 X.X 秒").
+        let started_at = std::time::Instant::now();
+
         self.client
             .log_message(
                 MessageType::INFO,
@@ -1116,6 +1145,7 @@ impl LanguageServer for Backend {
                 open_uris,
                 scheduler,
                 index_state,
+                started_at,
             )
             .await;
         });

@@ -8,11 +8,13 @@ import {
 
 let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let readyNotified = false;
 
 type IndexStatusParams = {
   state: 'indexing' | 'ready';
   indexed: number;
   total: number;
+  elapsedMs?: number;
 };
 
 function collectLspConfig(): Record<string, unknown> {
@@ -53,11 +55,38 @@ function collectLspConfig(): Record<string, unknown> {
   };
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} 秒`;
+}
+
 function renderStatus(status: IndexStatusParams): void {
   if (!statusBarItem) return;
   if (status.state === 'ready') {
     statusBarItem.text = '💚mylua';
     statusBarItem.tooltip = `MyLua: index ready (${status.total} files)`;
+    // Show the one-shot "索引完成" toast exactly once per session —
+    // the server only emits a single `ready` with elapsed_ms, but
+    // guard here too so a defensive re-emit doesn't spam the user.
+    //
+    // VS Code's `showInformationMessage` has no auto-dismiss — it
+    // stays until the user clicks the close button. We use
+    // `withProgress({ location: Notification })` + a timed promise
+    // instead, which renders the same kind of notification toast
+    // but is torn down as soon as our task promise resolves. ~4s
+    // is enough to read a short status line without being intrusive.
+    if (!readyNotified && typeof status.elapsedMs === 'number') {
+      readyNotified = true;
+      const elapsed = formatElapsed(status.elapsedMs);
+      vscode.window.withProgress(
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: `MyLua 索引完成，耗时 ${elapsed}（${status.total} 个文件）`,
+          cancellable: false,
+        },
+        () => new Promise<void>((resolve) => setTimeout(resolve, 4000)),
+      );
+    }
   } else {
     const total = status.total;
     if (total > 0) {
