@@ -80,7 +80,11 @@ pub fn truncate(s: &str, max: usize) -> String {
     if s.len() <= max {
         s.replace('\n', "\\n")
     } else {
-        format!("{}...", &s[..max].replace('\n', "\\n"))
+        let mut cut = max;
+        while cut > 0 && !s.is_char_boundary(cut) {
+            cut -= 1;
+        }
+        format!("{}...", &s[..cut].replace('\n', "\\n"))
     }
 }
 
@@ -592,5 +596,41 @@ mod tests {
             Some(4),
             "src_a row 1 after round-trip through src_b"
         );
+    }
+
+    #[test]
+    fn truncate_respects_utf8_char_boundary() {
+        // Regression for panic "byte index N is not a char boundary;
+        // it is inside '动' (bytes ...)". The original implementation
+        // did `&s[..max]` with a raw byte index, which explodes if the
+        // cut falls inside a multibyte UTF-8 character. We now snap the
+        // cut down to the nearest char boundary.
+        //
+        // Input crafted so `max == 40` lands inside the 3-byte '动'
+        // (U+52A8): "nil\r\nend\r\n\r\n---获取七日签到BP活动..." where
+        // '动' occupies bytes 38..41, so max=40 is mid-char.
+        let s = "nil\r\nend\r\n\r\n---获取七日签到BP活动详细数据\r\nfunction NoviceRewardModel";
+        assert!(s.len() > 40, "precondition: source longer than cut point");
+        let t = truncate(s, 40);
+        assert!(t.ends_with("..."), "must include ellipsis when truncated");
+        // Ensure the result ends cleanly before '动' (U+52A8, bytes 38..41).
+        // After `\n → \\n` expansion the prefix length is not directly
+        // comparable to the original cut, so instead check the char
+        // straddling the boundary was dropped (not partially sliced).
+        let prefix = t.strip_suffix("...").unwrap();
+        assert!(
+            !prefix.contains('动'),
+            "prefix should not contain the char straddling the cut: {:?}",
+            prefix
+        );
+
+        // ASCII path stays unchanged.
+        assert_eq!(truncate("hello", 40), "hello");
+        assert_eq!(truncate("hello\nworld", 40), "hello\\nworld");
+
+        // Exactly-on-boundary cut works: '中' is 3 bytes (0..3).
+        // max=3 is a valid boundary, so the prefix is '中' and ellipsis appended.
+        let z = truncate("中国人民", 3);
+        assert_eq!(z, "中...");
     }
 }
