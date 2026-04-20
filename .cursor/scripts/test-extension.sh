@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
 #
-# Launch (or restart) the MyLua Extension Development Host
-# opening tests/lua-root as the workspace.
+# Launch (or restart) the MyLua Extension Development Host.
 #
 # Usage:
-#   .cursor/scripts/test-extension.sh [--skip-build] [--skip-lsp] [--skip-ext] [-w] [-w 0] [-w 1]
+#   .cursor/scripts/test-extension.sh [--skip-build] [--skip-lsp] [--skip-ext]
+#                                     [--release]
+#                                     [--target <path>] [-w] [-w 0] [-w 1]
+#
+# --release          Build LSP with `cargo build --release` (default: debug).
+#                    The extension will resolve the binary from target/release/.
+#
+# --target <path>    Open any directory or .code-workspace file.
+#                    Overrides -w when both are supplied (with a warning).
+#
+# -w / -w 1          Open tests/mylua-tests.code-workspace (default: lua-root).
+# -w 0               Explicitly open tests/lua-root.
 #
 set -euo pipefail
 
@@ -21,13 +31,21 @@ EDH_MARKER="extensionDevelopmentPath=$EXT_DIR"
 SKIP_BUILD=false
 SKIP_LSP=false
 SKIP_EXT=false
+RELEASE=false
 OPEN_WORKSPACE=false
+CUSTOM_TARGET=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --skip-build) SKIP_BUILD=true; shift ;;
     --skip-lsp)   SKIP_LSP=true; shift ;;
     --skip-ext)   SKIP_EXT=true; shift ;;
+    --release)    RELEASE=true; shift ;;
+    --target)
+      if [[ $# -lt 2 ]]; then
+        echo "ERROR: --target requires a path argument." >&2; exit 1
+      fi
+      CUSTOM_TARGET="$2"; shift 2 ;;
     -w)
       OPEN_WORKSPACE=true
       if [[ $# -gt 1 && "$2" =~ ^[01]$ ]]; then
@@ -40,20 +58,38 @@ while [[ $# -gt 0 ]]; do
       fi
       ;;
     -h|--help)
-      echo "Usage: $0 [--skip-build] [--skip-lsp] [--skip-ext] [-w] [-w 0] [-w 1]"
-      echo "  --skip-build  Skip both LSP and extension build"
-      echo "  --skip-lsp    Skip LSP cargo build only"
-      echo "  --skip-ext    Skip extension npm compile only"
-      echo "  -w            Open tests/mylua-tests.code-workspace"
-      echo "  -w 0          Open tests/lua-root"
-      echo "  -w 1          Open tests/mylua-tests.code-workspace"
+      echo "Usage: $0 [--skip-build] [--skip-lsp] [--skip-ext] [--release] [--target <path>] [-w] [-w 0] [-w 1]"
+      echo "  --skip-build    Skip both LSP and extension build"
+      echo "  --skip-lsp      Skip LSP cargo build only"
+      echo "  --skip-ext      Skip extension npm compile only"
+      echo "  --release       Build LSP in release mode (default: debug)"
+      echo "  --target <path> Open a custom directory or .code-workspace file"
+      echo "  -w              Open tests/mylua-tests.code-workspace"
+      echo "  -w 0            Open tests/lua-root"
+      echo "  -w 1            Open tests/mylua-tests.code-workspace"
       exit 0
       ;;
     *) echo "Unknown option: $1"; exit 1 ;;
   esac
 done
 
-if [[ "$OPEN_WORKSPACE" == true ]]; then
+# ── Resolve build profile ─────────────────────────────────────────────
+if [[ "$RELEASE" == true ]]; then
+  BUILD_PROFILE="release"
+  CARGO_BUILD_ARGS="build --release"
+else
+  BUILD_PROFILE="debug"
+  CARGO_BUILD_ARGS="build"
+fi
+
+# ── Resolve launch target ─────────────────────────────────────────────
+if [[ -n "$CUSTOM_TARGET" ]]; then
+  if [[ "$OPEN_WORKSPACE" == true ]]; then
+    echo "WARNING: --target and -w were both supplied; --target takes precedence." >&2
+  fi
+  LAUNCH_TARGET="$CUSTOM_TARGET"
+  LAUNCH_TARGET_LABEL="custom ($CUSTOM_TARGET)"
+elif [[ "$OPEN_WORKSPACE" == true ]]; then
   LAUNCH_TARGET="$WORKSPACE_FILE"
   LAUNCH_TARGET_LABEL="workspace"
 else
@@ -78,8 +114,8 @@ fi
 
 # ── Step 1: Build LSP server ──────────────────────────────────────────
 if [[ "$SKIP_BUILD" == false && "$SKIP_LSP" == false ]]; then
-  echo "==> [1/4] Building LSP server (cargo build)..."
-  (cd "$REPO_ROOT/lsp" && cargo build)
+  echo "==> [1/4] Building LSP server (cargo build [$BUILD_PROFILE])..."
+  (cd "$REPO_ROOT/lsp" && cargo $CARGO_BUILD_ARGS)
 else
   echo "==> [1/4] Skipping LSP build"
 fi
@@ -112,11 +148,11 @@ else
 fi
 
 # ── Step 4: Launch Extension Development Host ─────────────────────────
-echo "==> [4/4] Launching Extension Development Host ($EDITOR_CLI)..."
+echo "==> [4/4] Launching Extension Development Host ($EDITOR_CLI) [$BUILD_PROFILE]..."
 echo "    Extension: $EXT_DIR"
 echo "    Target ($LAUNCH_TARGET_LABEL): $LAUNCH_TARGET"
-"$EDITOR_CLI" --extensionDevelopmentPath="$EXT_DIR" "$LAUNCH_TARGET" &
+MYLUA_LSP_BUILD="$BUILD_PROFILE" "$EDITOR_CLI" --extensionDevelopmentPath="$EXT_DIR" "$LAUNCH_TARGET" &
 
 echo ""
-echo "==> Done! Extension Development Host launched with $LAUNCH_TARGET_LABEL."
+echo "==> Done! Extension Development Host launched with $LAUNCH_TARGET_LABEL ($BUILD_PROFILE)."
 echo "    Run again to restart."

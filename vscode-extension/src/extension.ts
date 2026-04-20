@@ -293,12 +293,13 @@ function pickConfiguredServerPath(raw: ServerPathConfig): string | undefined {
 }
 
 function devServerPath(context: vscode.ExtensionContext): string {
+  const buildMode = process.env.MYLUA_LSP_BUILD ?? 'debug';
   return path.resolve(
     context.extensionPath,
     '..',
     'lsp',
     'target',
-    'debug',
+    buildMode,
     serverBinaryName(),
   );
 }

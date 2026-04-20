@@ -37,6 +37,11 @@ Both scripts perform **all 4 steps** automatically:
 | `--skip-build` | Skip both LSP and extension compilation |
 | `--skip-lsp` | Skip only `cargo build` (useful when only TS changed) |
 | `--skip-ext` | Skip only `npm run compile` (useful when only Rust changed) |
+| `--release` | Build LSP with `cargo build --release` (default: debug) |
+| `--target <path>` | Open any directory or `.code-workspace` file (overrides `-w`) |
+| `-w` | Open `tests/mylua-tests.code-workspace` |
+| `-w 0` | Explicitly open `tests/lua-root` |
+| `-w 1` | Open `tests/mylua-tests.code-workspace` |
 
 **PowerShell:**
 
@@ -45,6 +50,11 @@ Both scripts perform **all 4 steps** automatically:
 | `-SkipBuild` | Skip both LSP and extension compilation |
 | `-SkipLsp` | Skip only `cargo build` (useful when only TS changed) |
 | `-SkipExt` | Skip only `npm run compile` (useful when only Rust changed) |
+| `-Release` | Build LSP with `cargo build --release` (default: debug) |
+| `-Target <path>` | Open any directory or `.code-workspace` file (overrides `-w`) |
+| `-w` | Open `tests/mylua-tests.code-workspace` |
+| `-w 0` | Explicitly open `tests/lua-root` |
+| `-w 1` | Open `tests/mylua-tests.code-workspace` |
 
 ## When to Use Each Flag
 
@@ -52,6 +62,15 @@ Both scripts perform **all 4 steps** automatically:
 - `--skip-lsp` / `-SkipLsp`: Only changed TextMate grammar or `extension.ts`
 - `--skip-ext` / `-SkipExt`: Only changed Rust LSP code
 - `--skip-build` / `-SkipBuild`: Just want to restart the test window without rebuilding
+- `--release` / `-Release`: Test release binary performance or behaviour
+- `--target` / `-Target`: Open a custom workspace not under `tests/`
+
+## Release Mode
+
+When `--release` / `-Release` is specified:
+- LSP is built with `cargo build --release`
+- The environment variable `MYLUA_LSP_BUILD=release` is passed to the EDH process
+- `extension.ts` reads this variable and resolves the binary from `target/release/` instead of `target/debug/`
 
 ## Workflow for the Agent
 
@@ -83,5 +102,5 @@ If `npm run compile` fails — fix TS code, then re-run with `--skip-lsp` / `-Sk
 
 - Both scripts auto-detect `code` vs `cursor` CLI (prefers `code`)
 - `tests/lua-root/` contains Lua files for testing: require, EmmyLua class, member functions, json4lua
-- LSP binary is found by the extension at `lsp/target/debug/mylua-lsp` in dev mode
+- LSP binary is found by the extension at `lsp/target/debug/mylua-lsp` in dev mode (or `target/release/` with `-Release`)
 - On Windows, running `cargo test` while EDH is active may lock the exe; use `$env:CARGO_TARGET_DIR="target-test"; cargo test --tests` to avoid
