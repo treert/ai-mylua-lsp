@@ -24,6 +24,14 @@ build/
 Thumbs.db
 .DS_Store
 
+# Claude Code — local/personal overrides and runtime-generated files
+# (team-shared settings.json, agents/, commands/, skills/ DO stay in git)
+.claude/settings.local.json
+.claude/worktrees/
+.claude/scheduled_tasks.json
+.claude/todos.json
+.claude/*.output
+
 # Logs & temp
 *.log
 .tmp/
