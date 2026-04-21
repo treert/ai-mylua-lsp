@@ -265,3 +265,122 @@ print("hello")
           (string
             (short_string
               (short_string_content_double))))))))
+
+================================================================================
+Short string starting with dash (regression: scanner dash branch)
+================================================================================
+
+local a = "-"
+local b = "-foo"
+local c = '-'
+local d = "a" .. "-" .. "b"
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_double)))))
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_double)))))
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_single)))))
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (binary_expression
+        left: (string
+          (short_string
+            (short_string_content_double)))
+        right: (binary_expression
+          left: (string
+            (short_string
+              (short_string_content_double)))
+          right: (string
+            (short_string
+              (short_string_content_double))))))))
+
+================================================================================
+Short string containing multiple dashes (looks like comment prefix)
+================================================================================
+
+local a = "--"
+local b = "---"
+local c = { "-", "--", "---" }
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_double)))))
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_double)))))
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (table_constructor
+        (field_list
+          (field
+            value: (string
+              (short_string
+                (short_string_content_double))))
+          (field
+            value: (string
+              (short_string
+                (short_string_content_double))))
+          (field
+            value: (string
+              (short_string
+                (short_string_content_double)))))))))
+
+================================================================================
+Binary minus followed by newline (regression: scanner emmy 1-dash fallthrough)
+================================================================================
+
+local x = (32 - 32) / 2 -
+    y.z
+
+---
+
+(source_file
+  (local_declaration
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (binary_expression
+        left: (binary_expression
+          left: (parenthesized_expression
+            (binary_expression
+              left: (number)
+              right: (number)))
+          right: (number))
+        right: (variable
+          object: (variable
+            (identifier))
+          field: (identifier))))))

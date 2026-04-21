@@ -264,8 +264,28 @@ bool tree_sitter_lua_external_scanner_scan(
     skip_ws(lexer);
   }
 
-  /* EmmyLua line or Comment */
-  if (lexer->lookahead == '-') {
+  /* Short string content (check BEFORE the comment/emmy `-` branch):
+     inside a `"..."` / `'...'` string literal, a leading `-` is just
+     a string character. The comment/emmy branch below would otherwise
+     consume it as a short-form comment or return false, producing a
+     spurious "syntax error near '-'" on strings like `"-"` or `"-foo"`
+     (and any concat expression like `.. "-" ..`).
+     Because `$.comment` sits in `extras`, `valid_symbols[COMMENT]` is
+     true almost everywhere — including inside short strings — so we
+     can't rely on valid_symbols alone to tell the contexts apart.
+     The short-string-content symbols are the unambiguous signal that
+     we're mid-string and must scan content. */
+  if (valid_symbols[SHORT_STRING_CONTENT_DOUBLE] && lexer->lookahead != '"') {
+    return scan_short_string_content(lexer, '"');
+  }
+  if (valid_symbols[SHORT_STRING_CONTENT_SINGLE] && lexer->lookahead != '\'') {
+    return scan_short_string_content(lexer, '\'');
+  }
+
+  /* EmmyLua line or Comment.
+     Only enter this branch when the parser is actually expecting a
+     comment or emmy line at the current state. */
+  if (lexer->lookahead == '-' && (valid_symbols[EMMY_LINE] || valid_symbols[COMMENT])) {
     /* Peek ahead: is this --- ? */
     lexer->mark_end(lexer);
 
@@ -289,14 +309,20 @@ bool tree_sitter_lua_external_scanner_scan(
           lexer->mark_end(lexer);
           return true;
         }
-      }
-      /* Not ---; fall through. We consumed 1-2 dashes already.
-         Continue as regular comment. */
-      if (valid_symbols[COMMENT]) {
-        /* We already consumed '--', finish as comment */
-        if (lexer->lookahead == '[') {
-          advance(lexer);
-          if (scan_long_bracket_content(lexer)) {
+        /* Consumed '--' (regular comment start, not emmy). Fall through
+           to the COMMENT branch below to finish scanning the comment. */
+        if (valid_symbols[COMMENT]) {
+          /* We already consumed '--', finish as comment */
+          if (lexer->lookahead == '[') {
+            advance(lexer);
+            if (scan_long_bracket_content(lexer)) {
+              lexer->result_symbol = COMMENT;
+              lexer->mark_end(lexer);
+              return true;
+            }
+            while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
+              advance(lexer);
+            }
             lexer->result_symbol = COMMENT;
             lexer->mark_end(lexer);
             return true;
@@ -308,13 +334,13 @@ bool tree_sitter_lua_external_scanner_scan(
           lexer->mark_end(lexer);
           return true;
         }
-        while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
-          advance(lexer);
-        }
-        lexer->result_symbol = COMMENT;
-        lexer->mark_end(lexer);
-        return true;
+        return false;
       }
+      /* Only one `-` consumed (no second dash) — this is the minus
+         operator, not a comment. A single `-` must NEVER be classified
+         as COMMENT; Lua requires `--` to start a comment.
+         Return false so the parser's built-in `-` token rule can claim
+         this character as the binary/unary minus operator. */
       return false;
     }
 
@@ -333,13 +359,9 @@ bool tree_sitter_lua_external_scanner_scan(
     return scan_long_string_external(lexer);
   }
 
-  /* Short string content */
-  if (valid_symbols[SHORT_STRING_CONTENT_DOUBLE] && lexer->lookahead != '"') {
-    return scan_short_string_content(lexer, '"');
-  }
-  if (valid_symbols[SHORT_STRING_CONTENT_SINGLE] && lexer->lookahead != '\'') {
-    return scan_short_string_content(lexer, '\'');
-  }
+  /* Short-string content is handled at the top of this function,
+     before the comment/emmy `-` branch, so a string starting with `-`
+     scans correctly. */
 
   return false;
 }
