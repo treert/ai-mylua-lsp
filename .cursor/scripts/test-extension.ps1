@@ -35,7 +35,10 @@ $EdhMarker = "extensionDevelopmentPath=$ExtDir"
 
 # ── Resolve build profile ─────────────────────────────────────────────
 $BuildProfile = if ($Release) { "release" } else { "debug" }
-$CargoBuildArgs = if ($Release) { @("build", "--release") } else { @("build") }
+# NOTE: [string[]] cast is required. PowerShell unwraps single-element arrays
+# returned from `if` to a scalar string, which would then be splatted as a
+# char array ("build" → b u i l d), causing `cargo: unexpected argument 'u'`.
+[string[]]$CargoBuildArgs = if ($Release) { @("build", "--release") } else { @("build") }
 
 # ── Resolve launch target ─────────────────────────────────────────────
 $OpenWorkspace = $UseWorkspace.IsPresent
