@@ -1,0 +1,114 @@
+================================================================================
+Col-0 'function' terminates an unclosed function — error recovery
+================================================================================
+
+function func1()
+    if a == 1 then
+
+end
+
+function func2()
+    if a == 1 then
+    end
+end
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number)))))
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number))))))
+
+================================================================================
+Col-0 'local' terminates a function whose 'if' is missing 'end'
+================================================================================
+
+function foo()
+    if a == 1 then
+        bar()
+local x = 1
+
+---
+
+(source_file
+  (ERROR
+    (function_name (identifier))
+    (parameter_list)
+    (if_statement
+      condition: (binary_expression
+        left: (variable (identifier))
+        right: (number))
+      (function_call_statement
+        (function_call
+          callee: (variable (identifier))
+          arguments: (arguments)))))
+  (local_declaration
+    names: (attribute_name_list (identifier))
+    values: (expression_list (number))))
+
+================================================================================
+Col-0 keyword chain-closes multiple unclosed blocks at once
+================================================================================
+
+function foo()
+    if a then
+        while b do
+            bar()
+function other() end
+
+---
+
+(source_file
+  (ERROR
+    (function_name (identifier))
+    (parameter_list)
+    (variable (identifier))
+    (while_statement
+      condition: (variable (identifier))
+      (function_call_statement
+        (function_call
+          callee: (variable (identifier))
+          arguments: (arguments)))))
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list))))
+
+================================================================================
+Col-0 'return' stays inside the enclosing function (Lua semantic: return must
+be the last statement of its block). Missing 'end' is reported at EOF.
+================================================================================
+
+function foo()
+    if a == 1 then
+
+end
+
+return 123
+
+---
+
+(source_file
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number)))
+      (return_statement
+        (expression_list (number))))))
