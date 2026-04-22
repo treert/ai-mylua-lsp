@@ -89,6 +89,44 @@ static const KeywordEntry keyword_table[] = {
 
 static const int keyword_table_size = sizeof(keyword_table) / sizeof(keyword_table[0]);
 
+/* First-character index into keyword_table.
+   keyword_index['x' - 'a'] = { start, count } where start is the index
+   of the first keyword starting with 'x' and count is how many there are.
+   This turns O(22) linear scan into O(1-3) lookups per word. */
+typedef struct {
+  uint8_t start;
+  uint8_t count;
+} KeywordIndex;
+
+static const KeywordIndex keyword_index[26] = {
+  /* a */ {0,  1},
+  /* b */ {1,  1},
+  /* c */ {0,  0},
+  /* d */ {2,  1},
+  /* e */ {3,  3},
+  /* f */ {6,  3},
+  /* g */ {9,  1},
+  /* h */ {0,  0},
+  /* i */ {10, 2},
+  /* j */ {0,  0},
+  /* k */ {0,  0},
+  /* l */ {12, 1},
+  /* m */ {0,  0},
+  /* n */ {13, 2},
+  /* o */ {15, 1},
+  /* p */ {0,  0},
+  /* q */ {0,  0},
+  /* r */ {16, 2},
+  /* s */ {0,  0},
+  /* t */ {18, 2},
+  /* u */ {20, 1},
+  /* v */ {0,  0},
+  /* w */ {21, 1},
+  /* x */ {0,  0},
+  /* y */ {0,  0},
+  /* z */ {0,  0},
+};
+
 /* Unified word scanner: handles ALL tokens starting with [a-zA-Z_].
    Reads the full identifier at the current position into a buffer,
    then matches it against the keyword table.
@@ -125,13 +163,17 @@ static bool scan_word(TSLexer *lexer) {
   bool word_complete = lexer->eof(lexer) || !is_identifier_char(lexer->lookahead);
 
   /* Phase 2: If the word is complete (≤ MAX_KEYWORD_LEN) and starts with
-     a lowercase letter, try matching it against the keyword table. */
+     a lowercase letter, try matching it against the keyword table.
+     Uses first-character index to narrow the search to 1-3 candidates. */
   if (word_complete && first >= 'a' && first <= 'z') {
-    bool at_col0 = (lexer->get_column(lexer) == len); /* column after reading == len means started at col 0 */
-    for (int i = 0; i < keyword_table_size; i++) {
+    const KeywordIndex *idx = &keyword_index[first - 'a'];
+    for (int i = idx->start, end = idx->start + idx->count; i < end; i++) {
       if (strcmp(buf, keyword_table[i].keyword) == 0) {
         lexer->mark_end(lexer);
-        if (at_col0 && keyword_table[i].top_token >= 0) {
+        /* Defer get_column to here: only called on keyword match,
+           and only matters when the keyword has a top variant. */
+        if (keyword_table[i].top_token >= 0 &&
+            lexer->get_column(lexer) == len) {
           lexer->result_symbol = keyword_table[i].top_token;
         } else {
           lexer->result_symbol = keyword_table[i].normal_token;
@@ -154,7 +196,7 @@ static bool scan_word(TSLexer *lexer) {
 }
 
 static bool scan_long_bracket_content(TSLexer *lexer) {
-  uint8_t level = 0;
+  uint16_t level = 0;
   while (lexer->lookahead == '=') {
     level++;
     advance(lexer);
@@ -166,7 +208,7 @@ static bool scan_long_bracket_content(TSLexer *lexer) {
     if (lexer->eof(lexer)) return false;
     if (lexer->lookahead == ']') {
       advance(lexer);
-      uint8_t close_level = 0;
+      uint16_t close_level = 0;
       while (lexer->lookahead == '=' && close_level < level) {
         close_level++;
         advance(lexer);
@@ -182,7 +224,7 @@ static bool scan_long_bracket_content(TSLexer *lexer) {
 }
 
 static bool scan_long_string_external(TSLexer *lexer) {
-  uint8_t level = 0;
+  uint16_t level = 0;
   while (lexer->lookahead == '=') {
     level++;
     advance(lexer);
@@ -194,7 +236,7 @@ static bool scan_long_string_external(TSLexer *lexer) {
     if (lexer->eof(lexer)) return false;
     if (lexer->lookahead == ']') {
       advance(lexer);
-      uint8_t close_level = 0;
+      uint16_t close_level = 0;
       while (lexer->lookahead == '=' && close_level < level) {
         close_level++;
         advance(lexer);
@@ -245,7 +287,14 @@ static bool scan_short_string_content(TSLexer *lexer, char quote) {
         case 'x':
           advance(lexer);
           for (int i = 0; i < 2; i++) {
-            if (!lexer->eof(lexer)) advance(lexer);
+            if (!lexer->eof(lexer) && (
+                (lexer->lookahead >= '0' && lexer->lookahead <= '9') ||
+                (lexer->lookahead >= 'a' && lexer->lookahead <= 'f') ||
+                (lexer->lookahead >= 'A' && lexer->lookahead <= 'F'))) {
+              advance(lexer);
+            } else {
+              break;
+            }
           }
           break;
         case 'u':
@@ -289,18 +338,12 @@ static bool scan_short_string_content(TSLexer *lexer, char quote) {
   }
 }
 
-/* Try to scan a comment. If it's a --- line AND EMMY_LINE is valid, returns false
-   so the caller can try emmy_line instead. */
-static bool scan_comment(TSLexer *lexer, bool emmy_valid) {
+/* Scan a plain comment (not emmy). Called only when EMMY_LINE is not valid. */
+static bool scan_comment(TSLexer *lexer) {
   if (lexer->lookahead != '-') return false;
   advance(lexer);
   if (lexer->lookahead != '-') return false;
   advance(lexer);
-
-  /* Check for --- (emmy doc comment) */
-  if (lexer->lookahead == '-' && emmy_valid) {
-    return false; /* Let caller handle as EMMY_LINE */
-  }
 
   /* Try long comment: --[=*[ ... ]=*] */
   if (lexer->lookahead == '[') {
@@ -461,7 +504,7 @@ bool tree_sitter_lua_external_scanner_scan(
 
     /* EMMY_LINE not valid, try as plain COMMENT */
     if (valid_symbols[COMMENT]) {
-      if (scan_comment(lexer, false)) {
+      if (scan_comment(lexer)) {
         lexer->mark_end(lexer);
         return true;
       }
