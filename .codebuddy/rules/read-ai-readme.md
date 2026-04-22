@@ -1,0 +1,20 @@
+---
+# Please note: Do not modify the header of this document. If modified, CodeBuddy (Internal Edition) will apply the default logic settings.
+type: always
+---
+# 项目上下文（必读）
+
+在回答与本仓库 **ai-mylua-lsp** 相关的实现、调试、重构或规划前：
+
+1. **先阅读** 仓库根目录的 `ai-readme.md`（AI 会话入口与关键路径表）。
+2. **再按需查阅** `docs/README.md` 及其中链向的设计需求、架构、使用说明等文档。
+
+# 文档同步（必须）
+
+代码改动涉及以下情况时，**必须在同一次提交中**更新对应文档：
+
+- **新增/删除/重构 LSP 能力**（如 semantic tokens、completion、diagnostics）→ 更新 `ai-readme.md` 的「已实现 LSP 能力」列表
+- **改变架构或数据流**（如索引策略、模块边界）→ 更新 `docs/architecture.md` 相关章节
+- **改变实现路线或阶段完成状态** → 更新 `docs/implementation-roadmap.md`
+
+不需要更新文档的场景：bug 修复（不改变功能描述）、纯重构（对外行为不变）、配置微调。
