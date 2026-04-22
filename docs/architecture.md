@@ -106,13 +106,9 @@ flowchart TB
 
 ### 3.4.1 External Library Roots（stdlib / 注解包）
 
-除了用户 workspace 本身，LSP 还支持 **额外的库目录** 以同等方式参与索引——典型场景是 **Lua 标准库的 EmmyLua 注解 stub**（`print`、`string.format`、`io.open` 等）与第三方注解包（LÖVE、OpenResty 等）。
+除了用户 workspace 本身，LSP 还支持 **额外的库目录**（`mylua.workspace.library`）以同等方式参与索引——典型场景是 Lua 标准库的 EmmyLua 注解 stub 与第三方注解包。库文件被强制标记 `is_meta = true`，享受诊断抑制。
 
-- **配置入口**：`mylua.workspace.library: string[]`（绝对 / `~/…` / 相对首个 workspace root 均可）；`mylua.workspace.useBundledStdlib: boolean`（默认 `true`）控制是否自动注入 VS Code 扩展内置的 `<extensionPath>/assets/lua<runtime.version>/` stubs。
-- **解析路径**：`workspace_scanner::resolve_library_roots` 负责路径展开、规范化、去重与不存在路径的剔除；解析后的绝对路径作为额外 scan root 传给 `scan_workspace_lua_files`（填充 `require_map`）与 `collect_lua_files`（参与并行 Summary 构建）。
-- **Meta 语义**：库文件 Summary 被强制标记 `is_meta = true`——即使文件没写 `---@meta` 头，也享受 stub 文件的诊断抑制，避免 stdlib stubs 里引用 runtime-only 符号时误报 `undefinedGlobal`。
-- **诊断策略**：`consumer_loop` pop 到库 URI 时直接 publish 空 Diagnostics 列表，保证 Problems 面板不会被 stub 文件自身内容污染；跨文件诊断（例如用户文件里的 `string.bytes` 不存在）不受影响，因为它们的 URI 不是库 URI。
-- **打包一致**：`vscode-extension/assets/lua5.4/` 在 dev 与打包后的 `.vsix` 布局**同构**（都在 `<extensionPath>/assets/lua5.4/`），因此扩展侧 `resolveBundledLibrary` 只需一次路径查找、无 dev/packaged 双档 fallback。
+> 详细实现（路径解析、Meta 语义、诊断策略、打包布局）见 [`lsp-capabilities.md`](lsp-capabilities.md)「外部库索引」章节。
 
 ### 3.5 诊断流水线
 
@@ -122,19 +118,11 @@ flowchart TB
 
 ### 3.7 诊断调度（DiagnosticScheduler）
 
-`src/diagnostic_scheduler.rs` 是 semantic 诊断的唯一调度入口。三条进入路径均统一走它：
+`src/diagnostic_scheduler.rs` 是 semantic 诊断的唯一调度入口，统一管理 `did_change`/`did_open`、签名指纹级联、冷启动三条路径。采用 hot/cold 双优先级队列 + 单消费者 supervisor 架构，300ms debounce，Cold→Hot tombstone 升级。
 
-- `did_change` / `did_open`（非 fast path）→ `scheduler.schedule(uri, Hot | Cold)`
-- 签名指纹级联 → `scheduler.schedule(dep_uri, ...)` 并按 scope 过滤
-- `initialized` 冷启动：scan 由 `tokio::spawn` 异步后台执行（`run_workspace_scan`），scan 完成（`IndexState::Ready`）后再 `scheduler.seed_bulk(hot, Hot)` + 条件 `seed_bulk(cold, Cold)`；`initialized` 本身立即返回，让 tower-lsp 能并行处理后续请求
+配置 `mylua.diagnostics.scope`（`full` 默认 / `openOnly`）控制冷启动 seed 范围和级联是否惠及未打开文件。
 
-内部数据结构：hot/cold 双 `VecDeque` + `enqueued: HashMap<Uri, Priority>` 去重 + `cold_tombstones: HashSet<Uri>` 做 Cold→Hot 升级标记 + `diag_gen: HashMap<Uri, u64>` per-URI 代数用于 debounce 过滤。push 与 pop 均摊 O(1)。
-
-单消费者 supervisor：`start_diagnostic_consumer` spawn 外层 loop，每次 panic 日志 + 100ms 退避 + 重启内层 `consumer_loop`。内部状态靠 `Arc` 共享，重启不丢 queue。消费者 `consumer_loop` 的 Ready 门槛放在 pop 之前，避免 Hot URI 被降级为 Cold 推回队列。pop 后 snapshot text → compute → 发布前 text 未变二次确认再 publish。
-
-稳态下 syntax 诊断由 `consumer_loop` pop 后与 semantic 合并一次 publish，不再走额外的 syntax-only 立即 spawn（避免历史上 `[syntax] → [syntax+semantic]` 两步 publish 造成的闪烁）。**冷启动例外**：`did_open` / `did_change` 在 `IndexState != Ready` 且 `open_uris.contains(uri)` 时调 `publish_syntax_only_during_indexing`，立即发 syntax-only 快照填补 scan 后台化期间的诊断真空；Ready 后该路径 no-op，`consumer_loop` 接管合并 publish（严格 superset，无 flicker）。
-
-配置 `mylua.diagnostics.scope`（`full` 默认 / `openOnly`）控制冷启动 seed 范围和级联是否惠及未打开文件。详细设计与决策记录见 [`docs/superpowers/specs/2026-04-19-diagnostic-scheduler-design.md`](superpowers/specs/2026-04-19-diagnostic-scheduler-design.md)。
+> 详细实现见 [`lsp-capabilities.md`](lsp-capabilities.md)「诊断」章节与 [`performance-analysis.md`](performance-analysis.md) §1「诊断优先级调度」。
 
 ## 4. LSP 能力映射（全工作区目标）
 
@@ -151,13 +139,15 @@ flowchart TB
 ## 5. 扩展侧职责（VS Code）约束
 
 - **不做**语言理解；**不做** Tree-sitter 解析（解析在 LSP）。
-- **TextMate**：自研 grammar，承担 **基础语法高亮**（关键字、注释、字符串、数字、运算符、EmmyLua 注解块等**静态可判定**的全部着色）。
-- **Semantic tokens**：**刻意最小化**，仅补充 TextMate 无法静态判定的语义类别（全局 `defaultLibrary`、全局/局部区分、Emmy 类型名等）。**不做** token type 细分；`keyword` / `number` / `string` 等一律让 TextMate 着色。扩展侧只配置 **默认 token 作用域/主题适配**；具体 range 与类型由 **LSP** 计算。详见 [`requirements.md`](requirements.md) §3.1。
+- **TextMate**：自研 grammar，承担基础语法高亮；**Semantic tokens** 刻意最小化，仅补充 TextMate 无法静态判定的语义类别。
+- 着色分工细节见 §3.1 与 [`requirements.md`](requirements.md) §3.1。
 
-## 6. 实现选型方向（与路线图一致）
+## 6. 实现选型（已定稿）
 
-- **LSP 实现语言**：优先选择与 **Tree-sitter official FFI** 契合度高、且利于单机性能的栈（例如 **Rust、Go**）；若选 TypeScript，须明确 **native addon / 子进程** 承载 Tree-sitter 的成本。定稿写在 [`implementation-roadmap.md`](implementation-roadmap.md)。
+- **LSP Server**：**Rust**（与 Tree-sitter C FFI 零开销互操作、单二进制分发）。
+- **VS Code Extension**：**TypeScript**（官方路径；通过子进程启动 LSP 二进制）。
 - **禁止**：长期依赖「无法 fork/扩展」的外部闭源语法包作为唯一解析来源。
+- 选型详情见 [`implementation-roadmap.md`](implementation-roadmap.md) §4。
 
 ## 7. 变更约定
 

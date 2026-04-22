@@ -7,7 +7,7 @@
 //! 生产者侧 `schedule` 带 300ms debounce（`diag_gen` 代数过滤过期任务）。
 //! 冷启动 `seed_bulk` 绕过 debounce，批量入队后统一 notify 一次。
 //!
-//! 设计细节见 `docs/superpowers/specs/2026-04-19-diagnostic-scheduler-design.md`。
+//! 设计细节见 `docs/architecture.md` §3.7 与 `docs/performance-analysis.md` §6。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};

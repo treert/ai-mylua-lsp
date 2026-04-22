@@ -1,6 +1,6 @@
 # 需求说明
 
-本文档描述 **Mylua LSP**（工作名）在功能与非功能上的约定边界，供架构与实现方案对齐。当前处于 **需求分析阶段**；实现细节见 [`architecture.md`](architecture.md) 与 [`implementation-roadmap.md`](implementation-roadmap.md)。
+本文档描述 **Mylua LSP**（工作名）在功能与非功能上的约定边界，供架构与实现方案对齐。实现细节见 [`architecture.md`](architecture.md) 与 [`implementation-roadmap.md`](implementation-roadmap.md)。
 
 ## 1. 产品形态
 

@@ -8,214 +8,132 @@
 2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档（跨文件索引见 [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md)），避免文档与代码脱节。
 
 ## 项目目标
+
 实现 lua vscode 插件，支持语法高亮，语义跳转，hover tips, 诊断，outline 等功能。
 **需要支持 emmylua 类型的类型注释。**
 **仅支持 Lua 5.3 及以上版本。**
 对性能有较高要求，需要支持5万个lua文件级别。
 
-**方案取向（需求分析阶段）**
+**方案取向**：
+- **全工作区能力**：定义、所有引用、工作区符号均为硬性目标
+- **解析与高亮**：自研 Tree-sitter（LSP 内）+ 自研 TextMate（基色）+ LSP semantic tokens（语义着色）
+- **分体工程**：VS Code Extension 与 LSP Server 分开实现、可分开发布
+- **Monorepo**：单仓管理文法、LSP、扩展
 
-- **全工作区能力**：定义、**所有引用**、**工作区符号** 均为硬性目标，而非「仅打开文件」级能力。
-- **解析与高亮**：**自研 Tree-sitter** 置于 **LSP** 内，负责 **语法树** 与增量解析；**基色高亮**以 **自研 TextMate** 为主；**LSP semantic tokens** 在 TextMate 之上叠加语义着色（如全局/局部等），与 Tree-sitter **不冲突、分工不同**。
-- **分体工程**：**VS Code Extension** 与 **LSP Server** **分开实现、可分开发布**，可并行开发；LSP 可独立服务其他编辑器或工具。
-- **仓库**：**Monorepo**（单仓）管理文法、LSP、扩展等，详见 [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md) §2。
+## 仓库结构
+
+```
+ai-mylua-lsp/
+├── grammar/          # Tree-sitter 解析器（BNF + scanner.c + 测试）
+├── lsp/              # Rust LSP Server（Cargo workspace）
+│   └── crates/
+│       ├── tree-sitter-mylua/   # Tree-sitter 包装 crate
+│       └── mylua-lsp/           # LSP server 主 crate
+├── vscode-extension/ # VS Code 扩展（TypeScript）
+├── tests/            # 测试 fixture + 端到端测试目录
+└── docs/             # 设计文档中心
+```
 
 ## 开发进度
 
-### 需求分析
-- 文档见 [`docs/README.md`](docs/README.md)（需求、架构、路线图与技术倾向）。
+| 阶段 | 状态 | 说明 |
+|------|------|------|
+| A — Grammar | ✅ 完成 | Tree-sitter 文法 + 外部扫描器 + Column-0 块边界 |
+| B — LSP 骨架 | ✅ 完成 | Rust + tower-lsp-server + 增量解析 |
+| C — 全功能 LSP | ✅ 完成 | 30+ LSP 能力，全工作区索引 |
+| D — VS Code Extension | ✅ 完成 | TextMate 着色 + LSP 客户端 + 打包发布 |
 
-### Monorepo 骨架
-- 已按计划创建顶层目录：`grammar/`、`lsp/`、`vscode-extension/`（各含 README）；根目录 [`README.md`](README.md) 说明布局。
+## 已实现 LSP 能力一览
 
-### 测试与资源文件
+> 详细实现描述见 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
 
-| 路径 | 用途 |
-|------|------|
-| [`vscode-extension/assets/lua5.4/`](vscode-extension/assets/lua5.4/) | Lua 5.4 标准库 EmmyLua 类型注释（`basic.lua`、`string.lua`、`table.lua`、`math.lua`、`io.lua`、`os.lua` 等 11 个文件），作为 VS Code 扩展打包时的内置 stdlib stub 资源；通过 `mylua.workspace.library` 配置被 LSP 索引 |
-| [`tests/lua-root/`](tests/lua-root/) | **手工端到端测试目录**（详见下方说明）：用于在 Extension Development Host 中实际体验 LSP 能力 |
-| [`tests/complete/`](tests/complete/) | 补全功能测试 Lua fixture（17 个文件）：局部变量、表字段、require、class 方法、智能补全 |
-| [`tests/hover/`](tests/hover/) | Hover 功能测试 Lua fixture（18 个文件）：EmmyLua class、链式调用、require 模块、表展开、函数返回类型 |
-| [`tests/define/`](tests/define/) | 跳转定义测试 Lua fixture（7 个文件）：局部/全局定义、require 跳转、文件夹 init.lua |
-| [`tests/parse/`](tests/parse/) | 解析测试 Lua fixture（2 个文件）：语法错误恢复、各种语句类型 |
-| [`tests/project/`](tests/project/) | 多文件工程级测试 Lua fixture（5 个文件）：全局变量跨文件、枚举段 |
+**基础**：initialize / shutdown / 文档同步（Incremental）/ 位置编码（UTF-16）/ 配置体系（20 项）/ 外部库索引（`workspace.library`）
 
-#### `tests/lua-root/` + `tests/lua-root2/` — 手工端到端测试目录
+**导航**：goto definition / goto declaration / goto typeDefinition / references / rename / callHierarchy / documentLink
 
-这两个目录一起被 [`tests/mylua-tests.code-workspace`](tests/mylua-tests.code-workspace) 作为**两个 workspace folder** 挂载，用于在 Extension Development Host 中人工验证 LSP 行为（含跨 workspace 场景）。与 `tests/` 下其他目录的区别：其他目录是 Rust 集成测试读取的 fixture，而这两个目录是人手动操作的端到端体验环境。
+**信息展示**：hover / signatureHelp / inlayHint
 
-**启动方式**：运行 `.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows），脚本会自动构建 LSP + 扩展并打开这两个 workspace。参见 Skill `.cursor/skills/test-extension/` 和 [`tests/lua-root/README.md`](tests/lua-root/README.md)、[`tests/lua-root2/README.md`](tests/lua-root2/README.md)。
+**符号与大纲**：documentSymbol / workspace/symbol
 
-**`tests/lua-root/` 文件清单**：
+**语法着色**：semantic tokens（full / range / delta）
 
-| 文件 | 覆盖场景 |
-|------|----------|
-| `main.lua` | 入口；require 跳转、module return 类型、跨 workspace require、跨文件全局调用、completion 测试点 |
-| `math_utils.lua` | `return M` 模块风格；`@overload` / `@vararg` / `@deprecated` / `@async` / `@nodiscard`；复杂类型（union / optional / array / fun() / table shape / 泛型）|
-| `emmy_basics.lua` | `@class` / `@field` / `@alias`（字面量 + union 字符串）/ `@enum` / `@type` |
-| `emmy_types.lua` | EmmyLua 类型表达式全覆盖：union、optional、array、`T<U>`、`fun()`、`{k:v}`、括号分组 |
-| `player.lua` | OOP：`@class A: B,C` 多继承、self 方法、字段；全局 `Player` 跨文件使用 |
-| `scopes.lua` | 作用域树全部 block 类型、参数、vararg、隐式 self、`local x = x + 1` 语义、closure |
-| `generics.lua` | `@generic T`（函数级）+ `@class C<T>`（容器）+ 泛型参数替换 |
-| `diagnostics.lua` | 预期诊断清单（每行 `-- !diag:` 标注）：undefinedGlobal / emmyTypeMismatch / emmyUnknownField / luaFieldError / luaFieldWarning / syntax error |
-| `refs_rename.lua` | references / rename / semantic tokens（defaultLibrary）|
-| `json.lua` | 真实第三方库（json4lua）解析健壮性 |
-| `UEAnnotation/test_utils.lua` | UE4 场景：多继承 `T3: T1,T2`、`---@return` 链式调用、UE 风格 stub 重写 |
-| `UEAnnotation/ue-comment/ue-comment-xxxxx.lua` | UE4 自动导出风格：`--[[ ]]` + `---@class` 继承链、子目录 require |
+**编辑器辅助**：completion（+ resolve）/ selectionRange / foldingRange / documentHighlight
 
-**`tests/lua-root2/` 文件清单**（跨 workspace 场景）：
+**诊断**：语法诊断 / 语义诊断（undefinedGlobal / unknownField / typeMismatch / duplicateTableKey / unusedLocal / argumentCount / argumentType / returnMismatch）/ `---@meta` 元文件 / `---@diagnostic` 抑制
 
-| 文件 | 覆盖场景 |
-|------|----------|
-| `shared/config.lua` | 跨 workspace require：`lua-root/main.lua` 通过 `require("shared.config")` 引用 |
-| `shared/logger.lua` | 跨 workspace require + `@overload` 示例 |
-| `cross_globals.lua` | 跨 workspace 全局贡献（`AppName` / `Audit` 等），测试 workspace/symbol + 跨 root goto |
+**EmmyLua 注解**：完整类型表达式 / @class / @field / @param / @return / @type / @alias / @enum / @generic / @overload / self 泛型绑定 / 多返回值
 
-### Grammar — Tree-sitter 解析器（阶段 A 核心）
+**自定义通知**：`mylua/indexStatus`（索引进度）
 
-**BNF 规范**：[`grammar/lua.bnf`](grammar/lua.bnf)（Lua 5.3+/5.4 EBNF）+ [`grammar/emmy.bnf`](grammar/emmy.bnf)（EmmyLua 注解子语法）。
-
-**解析器实现**（已完成并通过验证）：
+## Grammar — Tree-sitter 解析器
 
 | 文件 | 说明 |
 |------|------|
-| [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式、table/function/prefix 完整语法；EmmyLua 注解产生式已定义 |
-| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短字符串（全部 Lua 5.3+ 转义）、长字符串、所有注释类型、shebang、**column-0 块边界** |
-| [`grammar/test/corpus/`](grammar/test/corpus/) | 37 个回归测试，100% 通过 |
+| [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式 |
+| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短/长字符串、注释、shebang、column-0 块边界 |
+| [`grammar/test/corpus/`](grammar/test/corpus/) | 37 个回归测试 |
+| [`grammar/lua.bnf`](grammar/lua.bnf) | Lua 5.3+/5.4 EBNF |
+| [`grammar/emmy.bnf`](grammar/emmy.bnf) | EmmyLua 注解子语法 |
 
 **定制扩展 — Column-0 块边界**：行首 column 0 处的关键字/标识符强制关闭未配对的嵌套块，让缺少 `end` 的错误在下一个顶层语句处即时报出。嵌套代码必须缩进。详见 BNF §2.1.1。
 
-- 无错误解析验证：`tests/lua-root/test.lua`、`tests/lua-root/json.lua`、`vscode-extension/assets/lua5.4/` 全部 11 个标准库桩文件。
-- 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
+命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
 
-### LSP — Rust 语言服务器（阶段 C 完成）
+## LSP — Rust 语言服务器
 
 **技术栈**：Rust + `tower-lsp-server` 0.23 + `tree-sitter` 0.26 + `tokio`。
 
-| 路径 | 说明 |
-|------|------|
-| [`lsp/Cargo.toml`](lsp/Cargo.toml) | Cargo workspace root |
-| [`lsp/crates/tree-sitter-mylua/`](lsp/crates/tree-sitter-mylua/) | 包装 crate：`build.rs` 编译 `grammar/src/` 的 C parser，导出 `LANGUAGE` |
-| [`lsp/crates/mylua-lsp/`](lsp/crates/mylua-lsp/) | LSP server（lib + bin 架构，24 个模块 + 9 个集成测试文件） |
+> 能力实现细节见 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
+> 索引架构见 [`docs/index-architecture.md`](docs/index-architecture.md)
+> 性能分析见 [`docs/performance-analysis.md`](docs/performance-analysis.md)
 
-**已实现 LSP 能力**：
-- `initialize` / `shutdown` / 文档同步（**Incremental sync** + tree-sitter 增量 reparse：`tree.edit(&InputEdit)` → `parse(new, Some(old))`，只改动区域的子树被重建）
-- **documentSymbol**（层级化 outline）：`DocumentSummary.type_definitions` 驱动 Class/Enum/Alias 顶层节点，`@field` 进入 Field 子节点，`function Class:m()` / `function Class.m()` 进入 Method/Function 子节点；`function`/`local function` 顶层声明 → Function；`local x = ...` / 非点号 LHS 的全局赋值 → Variable；点号/下标 LHS（`t.foo = 1` / `m[1] = v`）静默跳过避免噪声；class 名同名 local/global 的 anchor 声明被折叠进 class 节点不重复展示；**`selection_range` 精细化**：`@class Foo` / `@alias Foo` / `@enum Foo` / `@field bar T` 的 outline 条目 `selection_range` 指向 `Foo` / `bar` 标识符 byte range 本身（UTF-16 编码），而非粗粒度的整行或 anchor 语句——点击 outline 精准跳到类型/字段名；workspace/symbol 的 `location.range` 同源
-- **位置编码**：LSP Position 按 **UTF-16 code unit** 语义处理；`util::byte_col_to_utf16_col` / `utf16_col_to_byte_col` 在 tree-sitter 字节列与 LSP UTF-16 列之间转换，中文/emoji 等非 ASCII 行上 hover/goto/semantic token 也能对齐
-- **配置体系**：20 个扩展配置项，通过 `initializationOptions` + `didChangeConfiguration` 下发；`require.aliases` 参与模块解析；**`runtime.version` 真正生效**（P2-5）：`lua_builtins::builtins_for(version)` 统一输出内置标识符集合，`5.1`/`5.2`/`5.3`/`5.4`/`luajit` 各有细分（5.3+ 加 `utf8`、5.2 独有 `bit32`、5.1/5.2/luajit 保留 `unpack`、luajit 额外 `bit`/`jit`/`ffi`）；`collect_semantic_diagnostics` 与 `collect_semantic_tokens` 均有 `_with_version` 变体，lib.rs handler 从 config 读 runtime.version 透传
-- **外部库索引**（`workspace.library`）：`workspace_scanner::resolve_library_roots(library, workspace_roots)` 把用户配置的 `string[]` 解析为绝对 canonical paths（支持 `~/`、相对首个 workspace root、去重、不存在路径静默剔除）；解析结果作为额外 scan root 并入 `scan_workspace_lua_files` + `collect_lua_files`，让库里的 `string.lua` / `table.lua` 等参与 `global_shard`、`type_shard`、`require_map` 与普通 workspace 文件等价。所有库 URI 汇入 `Backend.library_uris: Arc<Mutex<HashSet<Uri>>>`，并在 `run_workspace_scan` 的 ParsedFile 阶段把对应 Summary 强制 `is_meta = true`（fresh parse 与 cached 两条路径都覆盖，`parse_and_store_with_old_tree` 在用户编辑库文件时也重新 enforce）；`consumer_loop` pop 到 library URI 直接 publish 空 Diagnostics 列表，保证 Problems 面板不会被 stub 文件污染。VS Code 扩展侧 `mylua.workspace.useBundledStdlib`（默认 `true`）会把打包在 `<extensionPath>/assets/lua<version>/` 的 stdlib stubs 自动注入到 `workspace.library` 列表最前端，用户的自定义库 append 在后
-- **语法诊断**：Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`
-- **documentSymbol**：顶层 function / local / assignment 提取为大纲
-- **goto definition**：local 作用域 + 全局符号表 + `require` 跳转（优先跳到目标文件的 `return` 语句位置，回退到首个全局贡献）+ **点击 `local x = require("mod")` 的 LHS 名称直接跳转到模块 return**（正确处理 `attribute_name_list` 中 `<const>` / `<close>` 属性的索引偏移，`local x <const>, y = require(...)` 的 `y` 也能跳到模块）+ **AST 驱动的任意深度 dotted field 跳转**（`a.b.c` / `a.b.c.d` 通过嵌套 `variable` 节点的 `object`/`field` 字段递归解析；写入侧严格 bail：`foo().c = 1` / `a[1].c = 1` / 中间字段非 Table 时的 `a.b = 1; a.b.c = 2` 等链不污染 `global_shard` 也不乱设 shape；读取侧 `infer_node_type` 覆盖 `function_call` / subscript / 纯点号三类 base，`make().field` 这类 CallReturn 链可追踪 `@return` 声明类型）+ **Emmy 类型名跳转**（`type_shard`）；**多候选策略可配置**（`gotoDefinition.strategy`: Auto/Single/List）
-- **goto declaration** (P2-7)：Lua 里 declaration ≡ definition，alias 到 `goto_definition`，让偏好 `textDocument/declaration` 的客户端也能得到跳转结果
-- **goto typeDefinition**：点击 `---@type Foo local f = nil` 的 `f` 跳到 `@class Foo` 的声明位置；点击注解内的类型名（`---@type Foo` 里的 `Foo`）走 `extract_word_at` fallback 同样跳到声明；支持 `EmmyType` / `EmmyGeneric` / `TypeRef`；stub 链（`GlobalRef` / `RequireRef` 等）通过 `resolve_type` 追踪到 Emmy 名；无 Emmy 类型时回退到 `goto_definition`（保证不会"什么都找不到"）
-- **hover**：定义源码 + EmmyLua 注解 + 文档注释 + **`function_name` tail-only 短路**（hover 在 `function a.b.c()` / `function obj:m()` 的 base/中间段 identifier 上不再错误地把整个函数签名当作 base 的 hover；只有 tail —— method 名 / dot 链末端 / bare 形式的唯一名字 —— 才返回函数声明 hover，其他位置落到普通 scope/global/type 解析，让未定义的 base 表现为"无 hover"而非"看起来是个函数"）+ **AST 驱动的推断类型展示**（`infer_node_type` 递归 `variable` 节点 + 新增 `function_call` / subscript 分支 → URI-aware `resolve_field_chain_in_file`；per-file `TableShapeId` 通过 `caller_uri` 正确寻址到原文件的 shape；`make().field` 构造 `CallReturn` stub 让 resolver 追踪 `@return` 声明类型；`a[1].x` 走 shape 的 `array_element_type`）+ **Emmy 类型 hover**（class/alias/enum 区分展示、字段列表）+ **全局多候选提示** + **`@overload` 签名展示** + **匿名函数 local/global 绑定签名展示**（`local f = function(a, b) end` / 带 `@param`/`@return` 时 hover 显示完整 `fun(a: number, b: string): boolean`）
-- **references**：单文件 local scope（用 `scope_tree.resolve_decl` 比对 `decl_byte`，正确区分 `local x = x + 1` 的 RHS 指向外层；shadowing 下不把被遮蔽的内部使用算作对外层的引用）+ 全工作区全局符号引用（`global_shard` + `type_shard` 声明 + 去重）+ **EmmyLua 类型名的注解内引用**（扫描所有索引文件的 `emmy_comment` / `comment` 节点文本，按 ASCII 词边界匹配，能收集 `---@type Foo` / `---@param x Foo` / `---@return Foo` / `---@class Bar : Foo` 等所有用法）；**点击注解内的类型名也能触发**（`find_node_at_position` 找不到 identifier 时回落到按源码字节范围提取 ASCII 词）；**声明包含策略可配置**（`references.strategy`: Best/Merge/Select）
-- **workspace/symbol**：全局函数/变量 + **Emmy class/alias/enum**（`type_shard`）模糊搜索；**Class 成员搜索**（P1-5）：`function Foo:m` / `function Foo.m` 以 METHOD/FUNCTION 形式展示 name=m + container_name=Foo（不再作为 `Foo:m` 融合名出现）；所有 `@field` 生成 FIELD 条目带 container_name，搜索 `ba` 能同时匹配两个 class 各自的 `bar` 字段；alias 的 kind 改为 INTERFACE 更符合语义
-- **EmmyLua `self` 泛型绑定**：`---@return self` / `---@param x self` 在 `function Foo:method()` / `function Foo.method()` 形式的方法定义上自动替换为 `Foo`，让 fluent-style 的 `obj:chain():chain2()` 返回类型能正确链式追踪。`class_prefix_of(name)` 从 `Foo:m`/`Foo.m`/`a.b.c` 截取类名，`substitute_self(fact, class_name)` 递归走 `Union` / `Function.params` / `Function.returns` / `EmmyGeneric.args` 统一替换；`substitute_self` 同时应用到主签名和所有 `@overload`；自由函数（无类名前缀）保留 `self` 字面
-- **EmmyLua `fun(): A, B` 多返回值**：`parse_fun_type` 已通过 `parse_type_list` 支持冒号后多类型，`@param cb fun(): A, B` 会产出含 2 个 returns 的 FunctionSignature（原本已生效，现加入测试覆盖）
-- **EmmyLua 注解**：递归下降解析器（`emmy.rs`），完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型、括号分组）；注解标签 `@class`/`@field`/`@param`/`@return`/`@type`/`@alias`/`@enum`/`@generic`/`@overload`/`@vararg`/`@deprecated`/`@async`/`@nodiscard` 等；**泛型参数替换**（`EmmyGeneric` 变体；字段解析和补全中自动将 `T` 替换为实际类型参数）；**`@overload` 参与 FunctionSummary + hover 展示**；**`@alias` 右侧类型保存和展开**（`---@alias Foo { x: number, y: number }` 这种指向 inline table literal 的 alias，会把 **named 字段** 平铺进 `TypeDefinition.fields`，让 `---@type Foo local p = ...` 的 `p.x` 在 hover / 诊断 / 补全 / 字段解析中都等价于一个同名 class；`IndexType` 形式如 `[string]: T` 不可命名访问故跳过）；**`@enum` 写入 TypeShard**
-- **completion**：局部变量 + 全局名 + 关键字 + **AST 驱动的点号字段补全**（通过 `hover::infer_node_type` 递归 `variable` 节点的 `object`/`field`，不再用字符串 splitn）+ **冒号补全过滤方法**（结构化 `is_function` 判定）+ **`---@` EmmyLua tag 补全**（class/field/param/return/type/alias/enum/generic/overload/vararg/deprecated/async/nodiscard/see/meta/diagnostic/cast/operator/private/protected/package/public/readonly/version）+ **`require("…")` 模块路径补全**（来自 `require_map`）；**声明 `trigger_characters = ['.', ':', '@', '"', "'"]`** 让客户端自动触发；**`completionItem/resolve`** (P2-8)：initial payload 不带 `documentation`/`detail`，client 高亮 item 时才用 `data: {kind, uri, name}` 回调 resolve 拉取——global function 附 markdown 签名 + origin 文件、local 附 `local <name>: <type>`、keyword / emmy tag / require path 无 data 保持原样
-- **signatureHelp**：基于 `FunctionSummary` 的参数签名浮窗；支持 `foo(a, b)` / `obj.m(...)` / `obj:m(...)` / 跨文件 require 返回的 callable；`---@overload` 生成多个 SignatureInformation；**匿名函数绑定识别**（`local f = function(a, b) end` / `f = function(x, y) end` 走 `infer_node_type + resolve_type` 拉出 Function sig，AST 参数 + 前置 `@param`/`@return` Emmy 注解合并）；**跨文件 class 声明/实现分离时合并 overloads**（`@class Foo` + `@field init fun(...)` 在 a.lua，而 `function Foo:init() end ---@overload ...` 在 b.lua 时，`@field` sig 与 b.lua 的 overloads 一起回传；visually-empty 的 self-only impl primary 自动过滤掉）；`active_parameter` 由 `(` 到光标间顶层 `,` 的计数得到（感知嵌套 `()` / `{}` / `[]` 与字符串、行注释）；方法调用时 `self` 不出现在显示参数列表
-- **rename**：单文件 local + 全工作区全局（含 prepareRename）；**新名字校验为合法 Lua 标识符**（非法返回 `InvalidParams` JSON-RPC 错误，关键字拒绝）；**Emmy 类型名 rename（P1-6）**：通过 `references::find_references` 的 Emmy 注解扫描链路，rename `Foo` → `Gadget` 时同步替换所有 `---@class`、`---@type Foo`、`---@param x Foo`、`---@return Foo`、`---@class Bar : Foo` 等跨文件注解引用
-- **semantic tokens**：全局变量 `defaultLibrary` + 局部变量标记（作用域感知）；**发出的列号为 UTF-16 code unit**。**设计取舍：刻意最小化，只补 TextMate 无法静态判定的语义区分**（全局 `defaultLibrary`、全局/局部、Emmy 类型名等）；`keyword` / `number` / `string` / 注释等基色交由 TextMate，**不做** token type 细分（详见 [`docs/requirements.md`](docs/requirements.md) §3.1）。**range provider** (P2-2)：`textDocument/semanticTokens/range` 支持客户端只请求视口内 token，delta 编码从 (0,0) 重新起算（与 full 独立）；按起始行过滤。**delta provider**：`textDocument/semanticTokens/full/delta` 通过最长公共前缀/后缀算法计算一条 `SemanticTokensEdit`（start 和 delete_count 按 LSP 约定以 u32 为单位 = token_count × 5），client previous_result_id 匹配时返回 edits、否则 fallback 为完整 Tokens；per-URI 的 `TokenCacheEntry` 在 `did_close` 时清理避免内存泄漏；monotonic 计数器确保 result_id 全会话唯一
-- **inlayHint** (P2-4)：两类虚拟标签，均 opt-in（`inlayHint.enable` 默认 off），细分 `parameterNames` / `variableTypes`。参数名：`foo(1, 2)` 当 `foo`'s FunctionSummary 已知时在每个实参前加 `a:` / `b:` 标签，method 调用隐藏 `self`，实参名与形参名相同时不 emit，变参参数跳过；变量类型：`local n = 42` 在 `n` 后加 `: integer` 标签，已有 `---@type` 注解时不重复，`Unknown` / `Table` / `Function` / `Nil` 类型跳过以减少噪声；支持 range 过滤（客户端通常按视口请求）
-- **selectionRange** (P2-6)：VS Code "智能扩展选区"。从光标处最深 named descendant 开始，沿 parent 链向上收集所有 named 节点 range，去掉相邻等价项后串成 `SelectionRange { range, parent: ... }` 链表。跳过 unnamed token（如 `(`、`,`、关键字）避免单字符抖动。多 position 各自独立构链
-- **foldingRange**：Tree-sitter walk 驱动。Region 折叠覆盖 `function/local function/function() ... end`、`do`/`while`/`for`/`repeat`、`if/elseif/else` 以及多行 table constructor；`end_line = end_row - 1` 保留闭合关键字可见。**`if/elseif/else` 每个分支都有独立 fold**：整个 `if_statement` 一个外层 fold，另加一个 if-branch（从 `if` 到首个 `elseif`/`else` 前一行）、每个 `elseif_clause` / `else_clause` 一个独立 fold（用 `next_sibling.start_row - 1` 避免 tree-sitter 把 clause 停在最后一条语句、导致最后一行 body 不被折叠）。Comment 折叠覆盖多行 `--[[ ... ]]` / `--[=[ ... ]=]` 长块注释和连续的 `---@tag` 注释行（按行号合并相邻 `emmy_comment`）；`end_line = end_row` 整块折成一行。单行构造自动跳过
-- **callHierarchy**（`prepareCallHierarchy` + `incomingCalls` + `outgoingCalls`）：数据来源是 `DocumentSummary.call_sites`（`(callee_name, caller_name, range)` 三元组），在 `build_summary` 中通过专门的 `collect_calls_in_scope` 遍历填充，遇到 `function_declaration` / `local_function_declaration` / `function_definition` 更新 `caller_name` 作为嵌套函数的作用域边界——内层匿名函数里的 call 不会被归到外层 caller 上。prepareCallHierarchy 支持光标落在声明名（直接构建 item）和调用点（通过 `function_summaries` → `global_shard` 链式解析到目标函数）两种形态；incomingCalls 用 `last_segment` 做名字匹配（`m.sub.foo` → `foo`，`obj:bar` → `bar`）扫所有文件的 call_sites；outgoingCalls 按 `caller_name` 过滤本文件的 call_sites 后解析每个 callee 到其声明位置。`CallSite` 存 `#[serde(default)]` 兼容旧缓存
-- **documentLink**：`require("mod")` / `require "mod"` 字符串内容作为可点击链接，`target` 为 `resolve_module_to_uri` 解析到的目标 URI；范围是引号内文本，未解析的模块不产生链接；`m = require; m("foo")` 的别名调用不跟随；`resolve_provider: false`（target 在 emit 时就绪）
-- **documentHighlight**：同文件 identifier 同义高亮，按 AST 祖先分 Read/Write —— 局部/函数/for-var/参数声明处发 Write，`assignment_statement` LHS 发 Write，其他发 Read。作用域感知：光标落在 local 上时通过 `scope_tree.resolve_decl` 过滤掉被 shadow 的同名占用；`local x = x + 1` 的 RHS `x` 正确归属于外层；全局/Emmy 类型名无 scope decl 时退化为文本匹配
-- **`---@meta [name]` 元文件支持**：识别靠前的 `---@meta` 标签标记该文件为 stub/定义文件（遇到真实代码前的 emmy_comment 才算，避免把文件中段的 `@meta` 误识别）；`DocumentSummary.is_meta + meta_name` 持久化；该文件内 `undefinedGlobal` 诊断被跳过（stub 文件常引用运行时提供的符号，本就没有声明），但其他诊断保留；meta 文件声明的 global 正常进 `global_shard` 参与 workspace 索引，让引用这些符号的其他文件也不会误报
-- **`---@diagnostic` 抑制**：`disable-next-line` / `disable-line` / `disable` ... `enable` (file-scoped) 覆盖所有诊断，支持逗号分隔的 code 列表（`undefined-global` / `unused-local` / `unknown-field` / `type-mismatch` / `duplicate-table-key` / `argument-count` / `argument-type` / `return-mismatch` / `syntax`）和通配符 `*`；未知 tag 静默忽略；每条存活的 Diagnostic 都带 `code` 字段供客户端展示；`apply_diagnostic_suppressions` 作为 post-process 在 `publish_diagnostics` 前运行，对 syntax + semantic 混合列表都生效
-- **语义诊断**：未定义全局变量（**正确处理 `function a.b.c()` / `function a:m()` 形式**：首个 identifier 是对已有表的**读取**而非定义，未定义时报告 `Undefined global 'a'`；`function foo()` 纯 bare 形式仍识别为定义不报；`a` / `b` / `c` / `m` 等中间/尾段字段写入不报）+ **Emmy 类型未知字段访问** warning + **Lua table shape 未知字段**（closed→error / open→warning，`luaFieldError`/`luaFieldWarning` 可配置）+ **Emmy 类型不匹配**（`---@type` 声明与赋值字面量类型冲突时报告，`emmyTypeMismatch` 可配置，**覆盖 `local x = ...` 初始赋值 + `x = ...` 后续赋值两种场景**；shadowing 下用 `scope_tree.resolve_decl` 过滤，内层同名 `local x` 的赋值不算到外层类型上）+ **重复 table key** (P2-3) `{ a = 1, a = 2 }` / `{ [1] = "x", [1] = "y" }` 命中 warning（`duplicateTableKey` 可配置，默认 Warning）+ **未使用 local** (P2-3) 跳过 `_`/`_prefix` 习惯写法（`unusedLocal` 可配置，默认 Off）+ **函数调用参数个数不匹配** (P2-3) `foo(1, 2, 3)` 对 `function foo(a, b)` 报告（`argumentCountMismatch` 可配置，默认 Off；vararg `...` 吸收多余实参；任一 `---@overload` 的形参数匹配都清掉诊断；`obj:m()` 隐式 `self` 不计入）+ **函数调用参数类型不匹配** (P2-3) `foo("str", 42)` 对 `---@param a number, @param b string` 报告（`argumentTypeMismatch` 可配置，默认 Off；`Unknown` 字面量跳过）+ **`@return` 与实际 return 不匹配** (P2-3) `---@return number` 下 `return "str"` 或 `return` 无值报告（`returnMismatch` 可配置，默认 Off；walk 所有嵌套 `return`，遇到内层 `function_declaration` / `function_definition` 停住避免污染外层）；**诊断 enable/severity 受配置控制**
-- **作用域树**（`scope.rs`）：arena-based `ScopeTree`，单趟 AST 遍历构建；支持 `function_body` / `do` / `while` / `repeat` / `if` / `for` 等所有块级作用域 + 参数 + for 变量 + 隐式 `self`；正确处理 `local x = x + 1` RHS 引用外层变量的 Lua 语义
+**关键架构特性**：
+- **索引状态机**：`Initializing` → `Ready`，冷启动 `rayon` 并行解析，50 文件一批流式 merge
+- **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
+- **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
+- **诊断调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双队列
+- **磁盘持久化缓存**：`CacheMeta` 四维失效
+- **文件过滤**：`workspace.include` / `workspace.exclude` glob
 
-**索引架构（步骤 1-7）**：
-- `summary_builder.rs`：单文件 AST → DocumentSummary；支持文件级 `return` 语句的**类型与源 range 提取**（`module_return_type` + `module_return_range`，后者供 `require` goto 跳到 return 行）、递归进入 `if`/`do`/`for`/`while` 块（含 local/emmy_comment）收集全局赋值和函数声明、全局函数 `GlobalContribution` 携带真实 `FunctionSignature`、**冒号方法调用生成 CallReturn stub**、**Known(EmmyType) base 生成 TypeRef**；**Open/Closed shape 判定**（动态 bracket key 写入自动 `mark_open()`）；**匿名函数类型推断**（`local f = function(a, b) end` 抽 AST 参数 + 前置 Emmy 注解合并）；**多返回值分派**（`local a, b = f()` 当 RHS 是单个同文件 `function_call` 时按 `signature.returns[i]` 分派给 `names[i]`）；**AST 驱动的链式 LHS 写入**（`extract_dotted_chain` 识别纯点号链；`register_nested_field_write` 按需创建嵌套 shape 并在最内层 `set_field`；中间非 Table 字段或中间含 `function_call` / subscript / parenthesized 时严格 bail，base 是 local 时也不走 legacy TableExtension 以免污染 `global_shard`；取代旧 `splitn(2, '.')` 文本切分）
-- `aggregation.rs`：WorkspaceAggregation（GlobalShard / TypeShard / RequireByReturn / **TypeDependants**）；同名全局候选按 URI 路径深度优先排序（浅路径 > 深路径）；`resolve_module_to_uri` 优先查 `require_map`；**精细化级联失效**（签名指纹变化仅标脏受影响的缓存条目，非全量标脏）；**`require_map` 在 `upsert_summary`（重新索引）中保留，只在 `remove_file`（文件删除）中清除**——编辑已打开文件不会丢失 "别人能 require 到我" 的映射；**反向类型依赖图（P1-7）**：`collect_referenced_type_names` 扫描 summary 的 `local_type_facts` / `type_definitions.parents` / `type_definitions.fields` / `@alias target` / `function_summaries.params/returns/overloads` / `module_return_type` 的所有 EmmyType/TypeRef，写入 `type_dependants[type_name] → Vec<Uri>`；`upsert_summary` 重新索引时先清旧再加新；`remove_file` 清除该 URI；`collect_dependant_uris` 同时走 `require_by_return` + `type_dependants`，使得修改 a.lua 的 `@class Foo` 能触发 b.lua（仅 `@type Foo` 但不 require）的诊断重算；legacy `globals` 字段已移除，所有消费方统一使用 `global_shard`
-- `resolver.rs`：跨文件 stub 链式解析 + 缓存 + 环路保护；`resolve_require` 基于目标文件 `module_return_type` 解析模块返回值类型；`resolve_field_chain` 对 table-extension 全局变量支持 global_shard 限定名回退；**`resolve_field_chain_in_file(uri, base, fields, agg)`**（per-file `TableShapeId` 需要 URI 上下文；hover / goto / signature_help 的 dotted 链路统一走这个 API，避免 `Known(Table(shape_id))` 在无 def_uri 时丢失文件归属）；Emmy 继承链字段解析（沿 `parents` 递归）+ **alias 类型展开**（`resolve_emmy_field` 自动跟踪 alias 目标）；`collect_fields` / `resolve_table_field` 强制 `source_uri`；**EmmyGeneric 类型的字段/补全支持**；**CacheKey 语义分离**（`Global`/`Type`/`FieldAccess` 独立变体）
-- `summary.rs`：`DocumentSummary` 含 `module_return_type`、`call_sites`（`Vec<CallSite>` 供 callHierarchy）、`is_meta` / `meta_name`（`---@meta` 元文件支持）；`TypeDefinition` 含 `parents`（继承链）、`alias_type`（别名目标）、`name_range`（`@class/@alias/@enum <Name>` 的标识符 byte range）；`TypeFieldDef` 含 `name_range`（`@field <name>` 的标识符 byte range）；`FunctionSummary` 含 `overloads`；`TableShape` 含 `owner_name`（`local t = { ... }` / `Foo = { ... }` 时写入绑定名，用于 shape-table 同名方法消歧的展示）；签名指纹包含全局类型信息和 module return
-- `workspace_scanner.rs`：**include/exclude glob 过滤**（`FileFilter` + `globset`），扫描和增量文件变更均受 `WorkspaceConfig` 控制
-- 设计文档：[`docs/index-architecture.md`](docs/index-architecture.md) / [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md)
-
+命令：
 - 构建：`cd lsp && cargo build`
-- 测试：`cd lsp && cargo test --tests`
+- 测试：`cd lsp && cargo test --tests`（434 条测试）
 
-**独立测试框架**（无需 VS Code 联调）：
+> 测试清单见 [`docs/testing.md`](docs/testing.md)
 
-LSP crate 采用 **lib + bin 拆分架构**：`lib.rs` 导出所有核心模块（hover / completion / goto / diagnostics 等），`main.rs` 仅为薄启动入口。集成测试直接调用核心函数，无需 LSP stdio 通信。
+## VS Code Extension
 
-| 测试文件 | 测试数 | 覆盖功能 |
-|----------|--------|----------|
-| `test_parse.rs` | 8 | 基础解析、EmmyLua 注解、方法链、for 循环、fixture 文件 |
-| `test_hover.rs` | 34 | 局部变量、表字面量、EmmyLua class 返回类型、链式调用、块注释文档、函数声明处 hover、点号变量 base/field 区分、**链中间字段 AST 驱动 hover**、**匿名函数 AST 参数展示**、**匿名函数 Emmy 注解类型展示**、**`local a, b = f()` 多返回值分派**、**超出 returns 的 name 回退到 Unknown**、**`obj:m()` 不偷同名 top-level `obj()` 的 returns**、**`mod.f()` dotted call 回退 Unknown**、**嵌套 `a.b.c = 1` 写入 AST 化后 hover 命中 number**、**`a.b.c.d = 1` 按需创建嵌套 shape**、**`make().field` 通过 CallReturn stub 追踪 Emmy @return 类型**、**中间字段非 Table 时 bail 保持原类型 + 不泄漏 `global_shard`**、**subscript `a[1].name` 读取 smoke**、**`foo().c = 1` 不创建带 `()` 的全局 TableExtension**、**`a[1].c = 1` 不创建带 `[]` 的全局 TableExtension**、**`---@alias Foo { x: number, ... }` alias-to-inline-table 字段展开后 hover 正确显示字段类型**、**`function ABC:f1()` 的 base `ABC` 不显示函数签名（fall through 到 local）**、**method tail `f1` 仍显示函数声明**、**未定义 base `A1213` 不冒充函数**、**bare `function foo()` hover 仍显示函数**、**`function a.b.c()` 中间段 `b` 不显示函数，tail `c` 显示** |
-| `test_completion.rs` | 11 | 局部变量补全、点号字段补全、class 方法、关键字、去重、**`---@` tag 补全**、**`require("…")` 模块路径补全**、**AST 驱动的点号 base 对方法调用链不 spill 全局列表** |
-| `test_completion_resolve.rs` | 5 | local/global item 携带 resolve data、resolve 给 global 附 detail、resolve 给 local 附 `local x: number` 类型、keyword/无 data item 保持原样、function 附 markdown 签名 |
-| `test_signature_help.rs` | 13 | 简单 local 函数签名、参数进度、嵌套 `{}` 里的逗号不推进、`---@overload` 多签名、非 call 位置返回 None、`:method` 调用隐藏 self、**table-call (`foo{}`) active_param 恒为 0**、**同名方法 class 消歧（只出当前 class 的 overload）**、**跨文件 class 声明/实现分离时合并 @field sig + impl overloads**、**`@field` sig 不被同名 top-level global function 覆盖（P0-R3 bare fallback 移除）**、**匿名函数绑定 `local f = function(a, b) end` AST 参数**、**匿名函数绑定 Emmy 注解合并**、**全局匿名函数赋值** |
-| `test_goto.rs` | 11 | 局部变量、函数、参数、for 变量、嵌套作用域跳转、**require LHS 跳到 module return**、**`local x <const>, y = require(...)` 正确处理 attribute 索引偏移**、**非 ASCII 行上 UTF-16 位置对齐**、**semantic token 列数为 UTF-16 unit**、**嵌套 `a.b.c` 链式赋值后 goto 到写入点**（URI-aware `resolve_field_chain_in_file` 修复 per-file TableShapeId 丢失）|
-| `test_type_definition.rs` | 6 | `---@type Foo local f` 跳到 Foo class、点击注解内类型名（word fallback）、原始类型回退到 goto_definition、`EmmyGeneric` (`Box<T>`)、CallReturn → EmmyType、空文件返回 None |
-| `test_workspace_symbol.rs` | 7 | `@field bar` 带 container_name、跨文件同名字段各自带 container、`function Foo:m` 拆成 METHOD + container_name、普通 global function 无 container、class 本身 CLASS 可搜、dot-form 方法 FUNCTION kind、`Foo.bar = function()` 也归 FUNCTION |
-| `test_rename.rs` | 5 | 局部变量 rename、拒绝非法名（数字首、空格、关键字）、跨文件全局函数、**Emmy 类名跨文件注解全替换**（`@class` / `@type` / `@param` / `@return` / `@class : Parent`）、`@field` 名 rename（当前行为文档化）|
-| `test_type_dependants.rs` | 9 | `@type Foo` 注册反向依赖、`@param`/`@return`/`@class : Parent` 注册、`@field Foo`/`@alias target` 注册、self 引用排除、re-summary 后旧引用清除、`remove_file` 后依赖清除、`---@type Foo MyGlobal = nil` global 路径注册、`@generic T` 不被误注册、class rename 后旧 key 仍保留（配合 lib.rs 的 old_type_names 快照做 cascade）|
-| `test_scope.rs` | 11 | 函数体内 local 解析、声明站点、参数、for 变量、嵌套遮蔽、`local x = x + 1` 语义、`:method` self、visible_locals |
-| `test_diagnostics.rs` | 42 | 干净代码无诊断、语法错误检测、语义诊断、**LHS 链式赋值不误报 unknown field**、**closed table RHS 仍报错**、`@type` 不匹配、enum workspace symbol、泛型字段替换、**duplicate table key 命中/禁用**、**numeric bracket key 去重**、**unused local 默认 off / 启用后命中 / 跳过下划线 / 表达式内引用计为已用**、**`@type` reassignment 后续 `x = ...` 冲突报告**、**reassignment shadowing 不误报外层类型**、**arg count 过多/过少/vararg 吸收/method self 隐藏/overload 清零/默认 off**、**arg type mismatch 命中**、**arg type 读取 `@type` 声明的 local**、**return count mismatch**、**return type mismatch**、**嵌套 `if` 内 return 被 walk**、**内层 function 的 return 不污染外层**、**returnMismatch 默认 off**、**`return foo()` 尾调用跳过 count 检查**、**`return ...` vararg 跳过 count 检查**、**`---@alias Foo { x: number, ... }` alias-to-inline-table 的字段访问不再误报 emmyUnknownField（真缺的字段仍报）**、**`function A1213:f()` base 未定义报 undefinedGlobal（白盒守护 `global_shard` 未污染）**、**`function NoSuch.bar()` dotted base 未定义报警**、**bare `function foo()` 仍识别为定义不报**、**local/global 已声明时方法定义不报**、**`function NoSuch.b.c()` / `NoSuchToo.b.c:m()` 只报 base，`b`/`c`/`m` 不报** |
-| `test_symbols.rs` | 13 | 函数声明、方法声明、空文件、fixture 文件、**@class 顶层 + @field/method 子节点层级**、**`function Class.m` 子节点为 Function 不是 Method**、**dotted LHS 赋值 (`x.foo = 1`) 不产生 outline symbol**、**@class/@alias/@enum/@field 的 `selection_range` 精确到标识符 byte range**、**@field 前 visibility 关键字（private/public）不被误当 name** |
-| `test_folding_range.rs` | 16 | 空文件/单行不折叠、function 体、嵌套 if/for、repeat/while/do、for 数值+泛型、多行 table、块注释、行注释不折、emmy 注释连续行合并、带 `=` 层级的块注释、**if/elseif/else 每分支独立 fold (外层 + if-branch + elseif + else 共 4 个 Region)**、**简单 `if ... end` 只产生外层 fold**、**单行 elseif body 跳过** |
-| `test_selection_range.rs` | 5 | 空 positions 返回空、范围单调外扩（每层 outer 严格包含 inner）、多 position 各自构链、函数体内链延伸到整个 decl、跳过单字符 unnamed token |
-| `test_semantic_tokens_delta.rs` | 4 | 相同 token 流无 edits、append 一行 → 单 edit 且 delete_count=0、删除一行 → delete_count>0、中间修改时 prefix/suffix 被保留 |
-| `test_semantic_tokens_range.rs` | 4 | 范围过滤只返回区间内 token、delta 编码从 (0,0) 重起、范围外返回空、全覆盖范围等价于 full |
-| `test_runtime_version.rs` | 5 | `5.3` 识别 `utf8` 为 builtin、`5.1` 下 `utf8` 触发 undefinedGlobal、`5.2` 有 `bit32` 但 `5.3` 没有、`luajit` 有 `bit`/`jit`、`5.1`/`5.3` 的 `unpack` 差异 |
-| `test_inlay_hint.rs` | 6 | 默认 disabled 返回空、调用点参数名、同名参数跳过、primitive 变量类型、有 `---@type` 时不重复、范围过滤生效 |
-| `test_call_hierarchy.rs` | 8 | prepare 落在函数声明名 / 落在调用点解析到目标 / 落在非函数标识符返回空、incoming 单文件多 caller 聚合、incoming 跨文件追到 `b.lua` 调用者、outgoing 聚合同名目标 + 统计 ranges、dotted 和 method call 的 callee 走 last_segment（`M.foo()` → `foo`，`obj:bar()` → `bar`）、内层匿名函数的调用不泄漏到外层 caller |
-| `test_shape_owner.rs` | 4 | `local t = { ... }` 写入 owner="t"、`Foo = { ... }` 全局赋值写入 owner="Foo"、两个同文件 shape 各自独立 owner、非 table RHS 不产生 shape |
-| `test_emmy_self_and_multireturn.rs` | 8 | `class_prefix_of` 各种形态、`substitute_self` 替换 EmmyType / 嵌套 Union、空 class 时 no-op、`Builder:chain()` 的 `@return self` → Builder、`@param other self` → Builder、自由函数保留 self 字面、`fun(): A, B` 多返回值端到端 |
-| `test_meta.rs` | 6 | 顶层 `---@meta` 识别、`---@meta io` 名称保留、`---@meta` 在真实代码之后不被识别、meta 文件 undefinedGlobal 被抑制、非 meta 文件未定义 global 仍报错、meta 文件的 global 贡献到 workspace 其他文件可见 |
-| `test_diagnostic_suppress.rs` | 9 | `disable-next-line` 全局 / 特定 code、`disable-line` 同行、`disable`+`enable` 区域、`disable: *` 通配 + `enable` 结束、存活诊断都带 code slug、未知 tag 忽略、EOF 边界、多 code 列表 |
-| `test_document_link.rs` | 6 | paren 形 `require("util")`、短调用形 `require "util"`、未解析模块不发链接、非 `require` 调用（`print`/`error`）不发链接、`m = require; m("util")` 别名调用不跟随、同一文件多个 require 各自生成链接 |
-| `test_document_highlight.rs` | 10 | 局部 Read/Write、参数 Write、for 数值/泛型循环变量、function 声明名、**shadowing 尊重 scope**、全局变量、`local x = x + 1` 内外层区分、**`t.x = 1` / `t[k] = v` 的 base 分类为 READ**、空文件 |
-| `test_references.rs` | 8 | 局部引用、参数引用、包含/排除声明选项、**`local x = x + 1` RHS 不算新 local 的引用**、**shadowing 下不把被遮蔽的内部使用算作外层引用**、**Emmy 类型名扫注解内 `---@type/@param/@return/@class : Foo` 全部引用**、**词边界不匹配 `FooBar` 子串** |
-| `test_workspace.rs` | 7 | 多文件 hover/completion/goto、require 解析、project 目录、全局优先级排序、**upsert 后 require_map 不丢失** |
-| `test_workspace_library.rs` | 5 | `workspace.library` 路径贡献 stdlib globals（`print` / `string` / `table` / `math` / `io` / `os` 进 `global_shard`）、`require("string")` / `require("table")` 解析到库文件 URI、库文件 Summary 强制 `is_meta=true`、用户文件不被误标为 meta |
+> 详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)
 
-内嵌单元测试（`src/*.rs` 中的 `#[cfg(test)] mod tests`）：`util.rs` 覆盖 UTF-8 ↔ UTF-16 列转换、LSP Position 转字节偏移、`apply_text_edit` 单行/跨行编辑的 `InputEdit` 构造；`lib.rs` 覆盖 `percent_decode` 的 UTF-8 多字节解码（中文路径）；`rename.rs` 覆盖 Lua 标识符校验；`signature_help.rs` 覆盖 `count_top_level_commas` 的嵌套 `{}`、未终止 `--[[` 不误计 trailing `,`、正确闭合的块注释等场景；`folding_range.rs` 覆盖长括号块注释前缀识别；`lua_builtins.rs` 覆盖 5.1/5.2/5.3/5.4/luajit 版本差异 builtin 列表；`workspace_scanner.rs` 含 `resolve_library_roots` 的空值/missing 路径剔除、canonical 去重、相对路径锚定首个 workspace root、无 workspace root 时的 bare relative drop 等单元测试；`workspace_scanner.rs`、`emmy.rs` 含大量单元测试覆盖模块路径推导、注解解析等。合计 **434 条测试**（cargo test --tests）全绿。
+**核心功能**：LSP 客户端 + TextMate 语法着色 + 索引状态 StatusBar + 内置 stdlib stubs
 
-测试工具模块 `test_helpers.rs` 提供：`parse_doc()`、`setup_single_file()`、`setup_workspace_from_dir()` 等函数，可从 `tests/` 下的 Lua fixture 目录构建完整工作区上下文。
-
-> **注意**：如果 VS Code 扩展正在运行会锁住 `mylua-lsp.exe`，可用独立 target 目录避免冲突：
-> `$env:CARGO_TARGET_DIR="target-test"; cargo test --tests`
-
-### VS Code Extension（已实现）
-
-| 文件 | 说明 |
-|------|------|
-| [`vscode-extension/package.json`](vscode-extension/package.json) | 扩展清单：语言注册、TextMate grammar、配置项；`scripts.package` 串 `compile → prepackage → vsce package`（见下） |
-| [`vscode-extension/syntaxes/lua.tmLanguage.json`](vscode-extension/syntaxes/lua.tmLanguage.json) | TextMate grammar：Lua 基础语法（关键字、字符串、数字、注释）+ 完整 EmmyLua 注解着色（16 种 `@tag` 结构化匹配、`fun()`/`{}`/`()` 嵌套类型表达式、内置类型 vs 用户类型区分、点号类型名） |
-| [`vscode-extension/assets/lua5.4/`](vscode-extension/assets/lua5.4/) | 打包随扩展的 Lua 5.4 stdlib EmmyLua 注解 stubs（11 个文件）；`<extensionPath>/assets/lua5.4/` 在 dev 与 `.vsix` 布局**同构**，扩展 `resolveBundledLibrary` 单路径查找 |
-| [`vscode-extension/scripts/prepackage.mjs`](vscode-extension/scripts/prepackage.mjs) | **host 模式**（无 `MYLUA_TARGET`）：拷 `lsp/target/release/mylua-lsp(.exe)` → `<extension>/server/`；**target 模式**（设置 `MYLUA_TARGET`）：按内置 `TARGET_MAP` 把 VS Code target 字符串（`darwin-arm64` / `win32-x64` / `linux-x64` / `linux-arm64` 等 9 个）映射到 Rust triple，拷 `lsp/target/<triple>/release/<bin>`。每次拷贝前 `rmSync(server/)` 清空避免跨平台二进制遗留；Unix 下 `chmod 0o755`；源文件缺失时 exit 1 附带构建提示 |
-| [`vscode-extension/scripts/package.mjs`](vscode-extension/scripts/package.mjs) | `npm run package` orchestrator：依次跑 `tsc -p ./` → `node scripts/prepackage.mjs` → `npx @vscode/vsce package [--target $MYLUA_TARGET]`。`shellQuote` 单命令行拼接避免 Node `DEP0190` 警告；`shell: true` 保证 Windows 下 `npx.cmd` 解析 |
-| [`vscode-extension/scripts/lib/host-target.mjs`](vscode-extension/scripts/lib/host-target.mjs) | 共享 helper：`detectHostTarget()` 按 `(process.platform, process.arch)` 在 6-key `HOST_TARGET_MAP` 里查出 VS Code target + Rust triple；`ensureRustTarget` / `buildLspRelease` / `packageVsix` 是带 `cwd` 与 env 注入的 `spawnSync` 包装；不支持的 host 显式退出并列出可接受组合 |
-| [`vscode-extension/scripts/build-local.mjs`](vscode-extension/scripts/build-local.mjs) | `npm run build:local` 入口：检测 host → `rustup target add` → `cargo build --release --target <triple>` → `MYLUA_TARGET=<target> npm run package` → 打印 `code --install-extension` 提示。**一键给自己或内部团队打 .vsix** 的首选脚本 |
-| [`vscode-extension/scripts/publish.mjs`](vscode-extension/scripts/publish.mjs) | `npm run release` 入口：全量复用 build-local 的流程，额外跑 `npx @vscode/vsce publish --packagePath <vsix>`。`VSCE_PAT` 未设置时打 warning 但不退出（允许 `vsce login` 缓存凭证）；只推送当前 host 对应的 .vsix，跨 OS 推送请上 GitHub Actions 矩阵 |
-| [`.github/workflows/release.yml`](.github/workflows/release.yml) | 矩阵打包 workflow：4 个 target（`darwin-arm64` / `win32-x64` / `linux-x64` / `linux-arm64`）分别在对应 runner（`macos-latest` / `windows-latest` / `ubuntu-latest` / `ubuntu-24.04-arm`）上并行 `cargo build --release --target <triple>` → `npm run package`；`Swatinem/rust-cache` 缓存 cargo；`actions/upload-artifact` 产出 `vsix-<target>`；`v*` tag 推送时 `softprops/action-gh-release` 自动附加到 GitHub Release；底部注释掉的 `vsce publish` 步骤在配置 `VSCE_PAT` secret 后启用 Marketplace 发布 |
-| [`vscode-extension/.vscodeignore`](vscode-extension/.vscodeignore) | 打包排除：`src/`、`scripts/`、`tsconfig*.json`、`node_modules/`、`.gitignore` 等；默认包含 `out/`、`server/`、`assets/`、`syntaxes/` 等运行时产物 |
-| [`vscode-extension/src/extension.ts`](vscode-extension/src/extension.ts) | LSP 客户端：启动 `mylua-lsp` 二进制。**Server path 解析优先级**：①`mylua.server.path` 用户配置（支持 string 形式对所有平台生效 / object 形式 `{darwin,linux,win32}` 按 `process.platform` 取） → ②`context.extensionMode === Development`（F5 Extension Development Host）→ 直接用 `<extensionPath>/../lsp/target/debug/<bin>`，**绕过** `server/` 目录避免被 `npm run prepackage` 的陈旧拷贝掩盖 → ③Production → `<extensionPath>/server/<bin>`，`server/` 缺失时兜底也回到 dev target；二进制名按平台计算（`win32 → mylua-lsp.exe`，其他 `mylua-lsp`）。`collectLspConfig(context)` 读所有 `mylua.*` 配置并合成 library 列表：`useBundledStdlib=true` 时把 `<extensionPath>/assets/lua<runtime.version>/` 预置到 `workspace.library` 最前、用户自定义路径 append 其后（保序交给服务器做 scan root 合并）；无 bundled 目录时（例如 `runtime.version=5.1`）`resolveBundledLibrary` 沿 `BUNDLED_LIBRARY_FALLBACKS = ['5.4']` 链回落到最新可用版本，找不到时静默返回 undefined 不产生错误。创建 `MyLua` StatusBarItem 并订阅自定义通知 `mylua/indexStatus` —— **索引进行中显示 `💛X/Y`**（`X` 已索引、`Y` 总文件数；`total=0` 时回退为 `💛mylua`），**索引完成显示 `💚mylua`**；激活时先以 `💛mylua` 展示再等首个通知到达；`state=ready` 且携带 `elapsedMs` 时用 `withProgress({location: Notification})` 渲染 4 秒自动消失的 toast "MyLua 索引完成，耗时 X.X 秒（N 个文件）"（session 内幂等：`readyNotified` 模块变量防止重复弹出）。**点击 StatusBar** → 直接打开 Settings 且 `@ext:onemore.mylua-lsp` 过滤到本扩展所有 `mylua.*` 配置项（publisher=`onemore`、extension name=`mylua-lsp`；注意 **配置键前缀仍是 `mylua.*`**，只有扩展标识名改成了 `mylua-lsp`）（未注册额外 command，直接用 VS Code 内置 `workbench.action.openSettings` 透参） |
-
-**自定义 LSP 通知**：
-- `mylua/indexStatus`（server → client，单向）：payload `{ state: "indexing" \| "ready", indexed: number, total: number, elapsedMs?: number }`。由 `lib.rs::run_workspace_scan` 在扫描开始、每批（50 文件）结束、以及 `IndexState::Ready` 后发出；扩展侧驱动 StatusBarItem。`elapsedMs` **仅**在终态 `ready` 时出现，表示从 `initialized` handler 进入到 `IndexState::Ready` 的 wall-clock 毫秒数（起点 `started_at: Instant` 在 `initialized` 第一行取、经 `run_workspace_scan` 参数透传）。Rust 定义：`lib.rs::IndexStatusNotification` / `IndexStatusParams`。
-
+命令：
 - 构建：`cd vscode-extension && npm install && npm run compile`
 - 调试：F5 启动 Extension Development Host
+- 打包：`cd vscode-extension && npm run build:local`
 
-### 索引生命周期与性能（步骤 7 已完成）
+## 测试
 
-- **索引状态机**：`Initializing` → `Ready` 两状态；`Initializing` 阶段跳过语义诊断，`Ready` 后自动补发已打开文件的完整诊断
-- **进度通知**：冷启动通过 `window/workDoneProgress`（`$/progress`）向客户端报告索引进度百分比
-- **并行冷启动**：使用 `rayon` 并行解析 + 生成 Summary，按 **50 文件**一批流式 merge 到聚合层（每批结束后通过 `mylua/indexStatus` 通知客户端更新 status-bar 进度）。**scan 在 `initialized` 里通过 `tokio::spawn` 异步后台执行**（`run_workspace_scan`），`initialized` 立刻返回，让 tower-lsp 能并行处理后续 `did_open` / `hover` / `completion` / `semanticTokens`；`IndexState::Initializing` 期间 `consumer_loop` 本就 gate 住语义诊断，跨文件 `goto`/`hover`/`references` 返回"当前索引快照下的部分结果"（仍然不会误报）。每个 batch 的 merge 临界区按 canonical `open_uris → documents → index` 嵌套锁序**整段持有 `open_uris`**，对已在 `open_uris` 内的 URI 同时跳过 `upsert_summary` 与 `docs.insert`——强制 scan 与 `did_open` 对同一 URI 严格前后排序，避免把用户未保存的 buffer 被 disk 版本覆盖（`parse_and_store_with_old_tree` 内部的两段独立 `documents` 锁 + 独立 `index` 锁在此窗口内无法与 scan 交错）。scheduler 的 `seed_bulk(hot, Hot)` + 条件 `seed_bulk(cold, Cold)` 已从 `initialized` 末尾迁到 `run_workspace_scan` 末尾（`IndexState::Ready` 之后），因为只有 scan 完成后 `documents` 才完整填充
-- **增量解析**：编辑时 `textDocument/sync = Incremental`；对每个 content change 先 `apply_text_edit`（把 UTF-16 Range 转成字节偏移并 splice 文本；越界 Position 会 clamp 到 EOF 以 append 而非损坏文档，并写入日志告警），再 `tree.edit(&InputEdit)` 通知 tree-sitter，最后 `parser.parse(new_text, Some(&old_tree))`——未变区域的子树原地复用；解析失败时先尝试 fresh parse，仍失败则保留旧 Document 而不是让文件 "消失"
-- **并发安全**：每个 URI 一把 `Arc<tokio::sync::Mutex<()>>`（`Backend::edit_locks`），`did_open` / `did_change` / `did_close` 在处理前 `.await.lock()`（`did_close` 在锁内做磁盘读，防御性关闭 TOCTOU），防止同一文件的两次编辑在 `remove → process → insert` 的两阶段之间交错；不同 URI 并行不受影响。`edit_locks` 仅在 `did_change_watched_files` 的 DELETED 事件里清理（`did_close` 不清，方便下次 `did_open` 直接复用），工作区规模内容量可控；`scheduler` / `open_uris` 的 `Arc<Mutex>` 和 `edit_locks` 互不阻塞（锁顺序：`edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`）
-- **诊断调度**：统一的 `DiagnosticScheduler`（`src/diagnostic_scheduler.rs`）接管**全部**诊断发布路径（syntax + semantic）——生产者侧 `schedule(uri, priority)` 沿用 300ms debounce（`diag_gen` 过滤过期 spawn），冷启动走 `seed_bulk` 绕过 debounce；hot/cold 双 `VecDeque` + 共享 `enqueued: HashMap<Uri, Priority>` 去重；Cold→Hot 升级走 tombstone 方案（cold 队列里那份打 tombstone，pop 时 skip）。单消费者 task 通过 supervisor `start_diagnostic_consumer` 管理，panic 时日志 + 100ms 退避 + 重启；内部状态靠 `Arc` 共享，重启不丢 queue。消费者 `consumer_loop` 的 Ready 门槛放在 pop 之前（避免把 Hot URI 降级为 Cold 推回队列），pop 后 snapshot text → 从 tree 重算 `syntax` + `semantic` 诊断并 merge 成一份 `publishDiagnostics` → 发布前二次 check text 未变再 publish。稳态下 `parse_and_store` 不做"立即发 syntax-only"的 spawn（历史上无条件发送造成 `did_change` / `did_open` 时 `[syntax] → [syntax+semantic]` 两步 publish 的视觉闪烁，已移除）——代价是 `did_change` 的 syntax 错误从 ~10ms 推迟到 300ms debounce 后出现，与主流 LSP 实现一致。**冷启动窗口例外**：`did_open` / `did_change` 在 `IndexState != Ready` 且 `open_uris.contains(uri)` 两个条件同时成立时，`await publish_syntax_only_during_indexing(&uri)` 立即发一次 syntax-only 快照（tree-sitter ERROR/MISSING 节点：括号错、缺 `end` 等），让用户在 scan 跑完前就能看到语法红波浪线；`Ready` 之后该方法整体 no-op，后续合并 publish 由 `consumer_loop` 接管（严格 superset，无 9→3→9 回退，因为 Ready 前 consumer_loop 从未发过此 URI）。`apply_diagnostic_suppressions` 在 early-publish 与 consumer 两个路径上一致，`---@diagnostic disable-line syntax` 语义不跳变。`mylua.diagnostics.scope`（`"full"` / `"openOnly"`，默认 `"full"`）控制冷启动 seed 范围和级联惠及范围：OpenOnly 时未打开的依赖方不入队。`did_open` 里 `open_uris.insert` 发生在 `parse_and_store` 之前，保证首次打开走 Hot 优先级
-- **关闭文件保留诊断**：全工作区索引型 LSP，`did_close` 不清空 diagnostics，而是从磁盘重读文件。**快速路径**：若磁盘内容与当前索引的 `documents[uri].text` 相等（最常见的干净 tab 切换场景），直接 return，不重 parse 也不 republish——避免问题面板、Explorer 徽章、波浪线每次切 tab 都抖动；只有在 buffer 与磁盘不一致（用户改了又 Discard）时才调 `parse_and_store` 把索引刷回磁盘状态并 republish。否则 VS Code 的 preview tab 单击切换会逐个 `didClose` 清空每个曾聚焦文件的诊断，最终问题面板只剩当前文件。非 file 协议 URI（如 `untitled:`）或文件已被删时 fallback 到清空
-- **`did_open` 快速路径**（对称于 `did_close`）：若 `documents[uri].text` 与客户端传入 buffer **字节相等**，直接跳过 reparse / 重建 summary / 重建 scope_tree，**仅** `open_uris.insert(uri)` + `scheduler.schedule(uri, Hot)` 后 return。之前的 `is_tracked_open` 门槛已移除——那是为历史上的 "`parse_and_store` 立即 spawn syntax-only publish" 设计的保护栏（防止冷启动后首次 did_open 命中 fast path 导致 client 永远收不到 syntax 诊断）；现在所有诊断都由 `consumer_loop` 统一发布、`scheduler.schedule(Hot)` 能保证 consumer 至少处理一次（包括 `scope=openOnly` 下 cold 队列从未 seed、以及 `scope=Full` 下 cold 队列中未 pop 的场景），所以 fast path 仅需 `text == buffer` 即可安全跳过。`did_close` → `did_open`（文本未变）**不再产生额外 publish**，消除了问题面板上诊断数量的视觉闪烁。**只比 text 不比 version**（LSP version 在 reopen 时会被 client 重置为 1 但内容没变；不同 version 也可能内容一致，byte-equality 才是唯一安全信号）。若 consumer 已对同 URI 处理过，再一次 `schedule(Hot)` 经 300ms debounce 后会产生一次内容上幂等（通常 identical，但若期间 close 导致级联 aggregation 更新也可能产生新诊断——这仍是正确行为）的 `publishDiagnostics`，client 渲染为 no-op。详见 [`docs/performance-analysis.md`](docs/performance-analysis.md) §1 架构亮点 / §5 变更简史
-- **磁盘持久化缓存**：`mylua.index.cacheMode = "summary"` 时，`DocumentSummary` 序列化到 `<workspace_root>/.vscode/.cache-mylua-lsp/`（与 `mylua-lsp.log` 同驻 `.vscode/` 下，统一编辑器状态目录；随项目搬家/删除自动清理；首次 `save_all` 会自动写入 `.gitignore` 防止误提交）；`CacheMeta` 四维失效（`schema_version` 手动 bump / `exe_mtime_ns` 开发者 `cargo build` 或发版升级 binary 自动失效 / `config_fingerprint` `require` 配置变化 / 每文件 `content_hash` 二级门槛），任一不匹配整盘 wipe 重建；缓存命中跳过 Summary 重建；双层自索引防护（默认 `workspace.exclude` 的 `**/.*` 覆盖 `.vscode/` 整棵子树，外加 `workspace_scanner` 内置硬编码 `.vscode/.cache-mylua-lsp` 路径 exclude，即便用户完全 override 配置也绕不过）
-- **文件过滤**：`workspace.include` / `workspace.exclude` glob 配置在冷启动扫描和增量文件变更中均生效
-- **依赖**：`rayon` 1.x（并行处理）、`globset` 0.4（glob 模式匹配）
+> 完整测试清单见 [`docs/testing.md`](docs/testing.md)
+
+- **集成测试**：28 个测试文件，434 条测试，覆盖所有 LSP 能力
+- **手工端到端**：`tests/lua-root/` + `tests/lua-root2/`（多 workspace 场景）
+- **启动方式**：`.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows）
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| [`docs/README.md`](docs/README.md) | 文档中心索引 |
+| [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md) | **LSP 能力详细实现**：每个能力的内部机制、边界处理、配置项 |
+| [`docs/testing.md`](docs/testing.md) | **测试体系**：测试框架、测试资源、完整测试清单 |
+| [`docs/vscode-extension.md`](docs/vscode-extension.md) | **VS Code 扩展**：文件结构、构建打包、运行时行为 |
+| [`docs/requirements.md`](docs/requirements.md) | 功能/非功能需求 |
+| [`docs/architecture.md`](docs/architecture.md) | Extension / LSP / Grammar 三分解、数据流 |
+| [`docs/index-architecture.md`](docs/index-architecture.md) | 索引内部架构：数据模型、推断、类型、构建与维护 |
+| [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md) | LSP 语义能力：语义约定、消费规则 |
+| [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md) | 阶段门禁、Monorepo 布局、技术栈 |
+| [`docs/performance-analysis.md`](docs/performance-analysis.md) | 性能现状、瓶颈分析、优化路线图 |
+| [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md) | 索引架构落地实施步骤（历史归档） |
+| [`docs/future-work.md`](docs/future-work.md) | 后续待办与优化方向（索引坑点 + 泛型缺口 + 维护清单） |
+| [`docs/col0-block-end-redesign.md`](docs/col0-block-end-redesign.md) | Column-0 块边界重设计讨论（WIP） |
