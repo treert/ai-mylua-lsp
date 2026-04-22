@@ -34,6 +34,41 @@ module.exports = grammar({
     $.short_string_content_single,
     $.comment,
     $.emmy_line,
+    // top-level keywords (column 0 only)
+    $.top_word_if,
+    $.top_word_while,
+    $.top_word_repeat,
+    $.top_word_for,
+    $.top_word_function,
+    $.top_word_goto,
+    $.top_word_do,
+    $.top_word_local,
+    // normal keywords (any column)
+    $.word_end,
+    $.word_local,
+    $.word_if,
+    $.word_then,
+    $.word_elseif,
+    $.word_else,
+    $.word_while,
+    $.word_do,
+    $.word_repeat,
+    $.word_until,
+    $.word_for,
+    $.word_in,
+    $.word_function,
+    $.word_goto,
+    $.word_return,
+    $.word_break,
+    // expression-level keywords
+    $.word_and,
+    $.word_or,
+    $.word_not,
+    $.word_nil,
+    $.word_true,
+    $.word_false,
+    // identifier (non-keyword)
+    $.identifier,
   ],
 
   extras: $ => [
@@ -60,7 +95,12 @@ module.exports = grammar({
 
     source_file: $ => seq(
       optional($.shebang),
-      optional($._block),
+      optional($._top_block),
+    ),
+
+    _top_block: $ => choice(
+      seq(repeat1(choice($._top_statement, $._statement)), optional($.return_statement)),
+      $.return_statement,
     ),
 
     _block: $ => choice(
@@ -72,22 +112,35 @@ module.exports = grammar({
     // 2.2  Statements
     // ========================================================================
 
+    _top_statement: $ => choice(
+      alias($._top_goto_statement, $.goto_statement),
+      alias($._top_do_statement, $.do_statement),
+      alias($._top_while_statement, $.while_statement),
+      alias($._top_repeat_statement, $.repeat_statement),
+      alias($._top_if_statement, $.if_statement),
+      alias($._top_for_numeric_statement, $.for_numeric_statement),
+      alias($._top_for_generic_statement, $.for_generic_statement),
+      alias($._top_function_declaration, $.function_declaration),
+      alias($._top_local_function_declaration, $.local_function_declaration),
+      alias($._top_local_declaration, $.local_declaration),
+    ),
+
     _statement: $ => choice(
       ';',
       $.assignment_statement,
       $.function_call_statement,
       $.label_statement,
       $.break_statement,
-      $.goto_statement,
-      $.do_statement,
-      $.while_statement,
-      $.repeat_statement,
-      $.if_statement,
-      $.for_numeric_statement,
-      $.for_generic_statement,
-      $.function_declaration,
-      $.local_function_declaration,
-      $.local_declaration,
+      alias($._goto_statement, $.goto_statement),
+      alias($._do_statement, $.do_statement),
+      alias($._while_statement, $.while_statement),
+      alias($._repeat_statement, $.repeat_statement),
+      alias($._if_statement, $.if_statement),
+      alias($._for_numeric_statement, $.for_numeric_statement),
+      alias($._for_generic_statement, $.for_generic_statement),
+      alias($._function_declaration, $.function_declaration),
+      alias($._local_function_declaration, $.local_function_declaration),
+      alias($._local_declaration, $.local_declaration),
       $.emmy_comment,
     ),
 
@@ -103,66 +156,112 @@ module.exports = grammar({
 
     label_statement: $ => seq('::', field('name', $.identifier), '::'),
 
-    break_statement: _ => 'break',
+    break_statement: $ => $.word_break,
 
-    goto_statement: $ => seq('goto', field('name', $.identifier)),
+    // -- goto (top / nested) --
+    _top_goto_statement: $ => seq($.top_word_goto, field('name', $.identifier)),
+    _goto_statement: $ => seq($.word_goto, field('name', $.identifier)),
 
-    _block_end: _ => 'end',
+    // -- do (top / nested) --
+    _top_do_statement: $ => seq($.top_word_do, optional($._block), $.word_end),
+    _do_statement: $ => seq($.word_do, optional($._block), $.word_end),
 
-    do_statement: $ => seq('do', optional($._block), $._block_end),
-
-    while_statement: $ => seq(
-      'while', field('condition', $._expression),
-      'do', optional($._block), $._block_end,
+    // -- while (top / nested) --
+    _top_while_statement: $ => seq(
+      $.top_word_while, field('condition', $._expression),
+      $.word_do, optional($._block), $.word_end,
+    ),
+    _while_statement: $ => seq(
+      $.word_while, field('condition', $._expression),
+      $.word_do, optional($._block), $.word_end,
     ),
 
-    repeat_statement: $ => seq(
-      'repeat', optional($._block),
-      'until', field('condition', $._expression),
+    // -- repeat (top / nested) --
+    _top_repeat_statement: $ => seq(
+      $.top_word_repeat, optional($._block),
+      $.word_until, field('condition', $._expression),
+    ),
+    _repeat_statement: $ => seq(
+      $.word_repeat, optional($._block),
+      $.word_until, field('condition', $._expression),
     ),
 
-    if_statement: $ => seq(
-      'if', field('condition', $._expression), 'then', optional($._block),
+    // -- if (top / nested) --
+    _top_if_statement: $ => seq(
+      $.top_word_if, field('condition', $._expression), $.word_then, optional($._block),
       repeat($.elseif_clause),
       optional($.else_clause),
-      $._block_end,
+      $.word_end,
+    ),
+    _if_statement: $ => seq(
+      $.word_if, field('condition', $._expression), $.word_then, optional($._block),
+      repeat($.elseif_clause),
+      optional($.else_clause),
+      $.word_end,
     ),
 
     elseif_clause: $ => seq(
-      'elseif', field('condition', $._expression), 'then', optional($._block),
+      $.word_elseif, field('condition', $._expression), $.word_then, optional($._block),
     ),
 
-    else_clause: $ => seq('else', optional($._block)),
+    else_clause: $ => seq($.word_else, optional($._block)),
 
-    for_numeric_statement: $ => seq(
-      'for', field('name', $.identifier), '=',
+    // -- for numeric (top / nested) --
+    _top_for_numeric_statement: $ => seq(
+      $.top_word_for, field('name', $.identifier), '=',
       field('start', $._expression), ',',
       field('stop', $._expression),
       optional(seq(',', field('step', $._expression))),
-      'do', optional($._block), $._block_end,
+      $.word_do, optional($._block), $.word_end,
+    ),
+    _for_numeric_statement: $ => seq(
+      $.word_for, field('name', $.identifier), '=',
+      field('start', $._expression), ',',
+      field('stop', $._expression),
+      optional(seq(',', field('step', $._expression))),
+      $.word_do, optional($._block), $.word_end,
     ),
 
-    for_generic_statement: $ => seq(
-      'for', field('names', $.name_list),
-      'in', field('values', $.expression_list),
-      'do', optional($._block), $._block_end,
+    // -- for generic (top / nested) --
+    _top_for_generic_statement: $ => seq(
+      $.top_word_for, field('names', $.name_list),
+      $.word_in, field('values', $.expression_list),
+      $.word_do, optional($._block), $.word_end,
+    ),
+    _for_generic_statement: $ => seq(
+      $.word_for, field('names', $.name_list),
+      $.word_in, field('values', $.expression_list),
+      $.word_do, optional($._block), $.word_end,
     ),
 
-    function_declaration: $ => seq(
-      'function', field('name', $.function_name), field('body', $.function_body),
+    // -- function declaration (top / nested) --
+    _top_function_declaration: $ => seq(
+      $.top_word_function, field('name', $.function_name), field('body', $.function_body),
+    ),
+    _function_declaration: $ => seq(
+      $.word_function, field('name', $.function_name), field('body', $.function_body),
     ),
 
-    local_function_declaration: $ => seq(
-      'local', 'function', field('name', $.identifier), field('body', $.function_body),
+    // -- local function declaration (top / nested) --
+    _top_local_function_declaration: $ => seq(
+      $.top_word_local, $.word_function, field('name', $.identifier), field('body', $.function_body),
+    ),
+    _local_function_declaration: $ => seq(
+      $.word_local, $.word_function, field('name', $.identifier), field('body', $.function_body),
     ),
 
-    local_declaration: $ => seq(
-      'local', field('names', $.attribute_name_list),
+    // -- local declaration (top / nested) --
+    _top_local_declaration: $ => seq(
+      $.top_word_local, field('names', $.attribute_name_list),
+      optional(seq('=', field('values', $.expression_list))),
+    ),
+    _local_declaration: $ => seq(
+      $.word_local, field('names', $.attribute_name_list),
       optional(seq('=', field('values', $.expression_list))),
     ),
 
     return_statement: $ => seq(
-      'return',
+      $.word_return,
       optional($.expression_list),
       optional(';'),
     ),
@@ -216,8 +315,8 @@ module.exports = grammar({
     ),
 
     binary_expression: $ => choice(
-      prec.left(PREC.OR,      seq(field('left', $._expression), field('operator', 'or'),  field('right', $._expression))),
-      prec.left(PREC.AND,     seq(field('left', $._expression), field('operator', 'and'), field('right', $._expression))),
+      prec.left(PREC.OR,      seq(field('left', $._expression), field('operator', $.word_or),  field('right', $._expression))),
+      prec.left(PREC.AND,     seq(field('left', $._expression), field('operator', $.word_and), field('right', $._expression))),
       prec.left(PREC.COMPARE, seq(field('left', $._expression), field('operator', choice('<', '<=', '>', '>=', '==', '~=')), field('right', $._expression))),
       prec.left(PREC.BIT_OR,  seq(field('left', $._expression), field('operator', '|'),   field('right', $._expression))),
       prec.left(PREC.BIT_XOR, seq(field('left', $._expression), field('operator', '~'),   field('right', $._expression))),
@@ -230,7 +329,7 @@ module.exports = grammar({
     ),
 
     unary_expression: $ => prec.left(PREC.UNARY, seq(
-      field('operator', choice('not', '#', '-', '~')),
+      field('operator', choice($.word_not, '#', '-', '~')),
       field('operand', $._expression),
     )),
 
@@ -246,9 +345,9 @@ module.exports = grammar({
       $.table_constructor,
     ),
 
-    nil: _ => 'nil',
-    false: _ => 'false',
-    true: _ => 'true',
+    nil: $ => $.word_nil,
+    false: $ => $.word_false,
+    true: $ => $.word_true,
     vararg_expression: _ => '...',
 
     // ========================================================================
@@ -286,12 +385,12 @@ module.exports = grammar({
     // 2.6  Function definitions
     // ========================================================================
 
-    function_definition: $ => seq('function', field('body', $.function_body)),
+    function_definition: $ => seq($.word_function, field('body', $.function_body)),
 
     function_body: $ => seq(
       field('parameters', $.parameter_list),
       optional($._block),
-      $._block_end,
+      $.word_end,
     ),
 
     parameter_list: $ => seq(
@@ -370,9 +469,7 @@ module.exports = grammar({
     ),
 
     // ========================================================================
-    // Identifiers
+    // Identifiers — handled by external scanner
     // ========================================================================
-
-    identifier: _ => /[a-zA-Z_][a-zA-Z0-9_]*/,
   },
 });

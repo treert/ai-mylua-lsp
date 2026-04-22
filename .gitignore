@@ -32,6 +32,8 @@ Thumbs.db
 .claude/todos.json
 .claude/*.output
 
+.codebuddy/plan/
+
 # Logs & temp
 *.log
 .tmp/

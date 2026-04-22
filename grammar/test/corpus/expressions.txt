@@ -8,10 +8,14 @@ return nil, true, false
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
-      (nil)
-      (true)
-      (false))))
+      (nil
+        (word_nil))
+      (true
+        (word_true))
+      (false
+        (word_false)))))
 
 ================================================================================
 Numbers
@@ -23,6 +27,7 @@ return 42, 0xFF
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (number)
       (number))))
@@ -37,6 +42,7 @@ return ...
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (vararg_expression))))
 
@@ -50,12 +56,16 @@ return a .. b .. c
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (binary_expression
-        left: (variable (identifier))
+        left: (variable
+          (identifier))
         right: (binary_expression
-          left: (variable (identifier))
-          right: (variable (identifier)))))))
+          left: (variable
+            (identifier))
+          right: (variable
+            (identifier)))))))
 
 ================================================================================
 Power right associativity
@@ -67,6 +77,7 @@ return 2 ^ 3 ^ 4
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (binary_expression
         left: (number)
@@ -84,9 +95,11 @@ return -x
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (unary_expression
-        operand: (variable (identifier))))))
+        operand: (variable
+          (identifier))))))
 
 ================================================================================
 Table constructor
@@ -98,6 +111,7 @@ return {1, x = 2}
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (table_constructor
         (field_list
@@ -117,10 +131,13 @@ return function() end
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (function_definition
+        (word_function)
         body: (function_body
-          parameters: (parameter_list))))))
+          parameters: (parameter_list)
+          (word_end))))))
 
 ================================================================================
 Field access
@@ -132,9 +149,11 @@ return a.b
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (variable
-        object: (variable (identifier))
+        object: (variable
+          (identifier))
         field: (identifier)))))
 
 ================================================================================
@@ -147,9 +166,11 @@ return t[1]
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (variable
-        object: (variable (identifier))
+        object: (variable
+          (identifier))
         index: (number)))))
 
 ================================================================================
@@ -163,7 +184,8 @@ obj:method()
 (source_file
   (function_call_statement
     (function_call
-      callee: (variable (identifier))
+      callee: (variable
+        (identifier))
       method: (identifier)
       arguments: (arguments))))
 
@@ -177,6 +199,7 @@ return (1)
 
 (source_file
   (return_statement
+    (word_return)
     (expression_list
       (parenthesized_expression
         (number)))))

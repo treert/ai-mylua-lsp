@@ -1,0 +1,395 @@
+================================================================================
+Top-level: all 8 keywords at column 0 (regression: no top_* leaks in AST)
+================================================================================
+
+if a then
+  b()
+end
+do
+  c()
+end
+while true do
+  d()
+end
+repeat
+  e()
+until false
+for i = 1, 10 do
+end
+for k, v in pairs(t) do
+end
+function foo()
+end
+local function bar()
+end
+local x = 1
+goto done
+::done::
+
+---
+
+(source_file
+  (if_statement
+    (top_word_if)
+    condition: (variable
+      (identifier))
+    (word_then)
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments)))
+    (word_end))
+  (do_statement
+    (top_word_do)
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments)))
+    (word_end))
+  (while_statement
+    (top_word_while)
+    condition: (true
+      (word_true))
+    (word_do)
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments)))
+    (word_end))
+  (repeat_statement
+    (top_word_repeat)
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments)))
+    (word_until)
+    condition: (false
+      (word_false)))
+  (for_numeric_statement
+    (top_word_for)
+    name: (identifier)
+    start: (number)
+    stop: (number)
+    (word_do)
+    (word_end))
+  (for_generic_statement
+    (top_word_for)
+    names: (name_list
+      (identifier)
+      (identifier))
+    (word_in)
+    values: (expression_list
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments
+          (expression_list
+            (variable
+              (identifier))))))
+    (word_do)
+    (word_end))
+  (function_declaration
+    (top_word_function)
+    name: (function_name
+      (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (word_end)))
+  (local_function_declaration
+    (top_word_local)
+    (word_function)
+    name: (identifier)
+    body: (function_body
+      parameters: (parameter_list)
+      (word_end)))
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (number)))
+  (goto_statement
+    (top_word_goto)
+    name: (identifier))
+  (label_statement
+    name: (identifier)))
+
+================================================================================
+Nested: all keywords indented inside a function (no top token interference)
+================================================================================
+
+function outer()
+  if a then
+    while true do
+      for i = 1, 10 do
+        local x = 1
+        do
+          repeat
+            goto done
+          until false
+        end
+      end
+    end
+  end
+end
+
+---
+
+(source_file
+  (function_declaration
+    (top_word_function)
+    name: (function_name
+      (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        (word_if)
+        condition: (variable
+          (identifier))
+        (word_then)
+        (while_statement
+          (word_while)
+          condition: (true
+            (word_true))
+          (word_do)
+          (for_numeric_statement
+            (word_for)
+            name: (identifier)
+            start: (number)
+            stop: (number)
+            (word_do)
+            (local_declaration
+              (word_local)
+              names: (attribute_name_list
+                (identifier))
+              values: (expression_list
+                (number)))
+            (do_statement
+              (word_do)
+              (repeat_statement
+                (word_repeat)
+                (goto_statement
+                  (word_goto)
+                  name: (identifier))
+                (word_until)
+                condition: (false
+                  (word_false)))
+              (word_end))
+            (word_end))
+          (word_end))
+        (word_end))
+      (word_end))))
+
+================================================================================
+Expression-level function_definition is unaffected
+================================================================================
+
+local f = function(x)
+  return x + 1
+end
+local t = { fn = function() end }
+
+---
+
+(source_file
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (function_definition
+        (word_function)
+        body: (function_body
+          parameters: (parameter_list
+            (identifier))
+          (return_statement
+            (word_return)
+            (expression_list
+              (binary_expression
+                left: (variable
+                  (identifier))
+                right: (number))))
+          (word_end)))))
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (table_constructor
+        (field_list
+          (field
+            key: (identifier)
+            value: (function_definition
+              (word_function)
+              body: (function_body
+                parameters: (parameter_list)
+                (word_end)))))))))
+
+================================================================================
+Error front-load: if missing end, then top-level if
+================================================================================
+
+if a then
+  b()
+if c then
+end
+
+---
+
+(source_file
+  (ERROR
+    (top_word_if)
+    (variable
+      (identifier))
+    (word_then)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (if_statement
+    (top_word_if)
+    condition: (variable
+      (identifier))
+    (word_then)
+    (word_end)))
+
+================================================================================
+Error front-load: if missing end, then top-level do
+================================================================================
+
+if a then
+  b()
+do
+  c()
+end
+
+---
+
+(source_file
+  (ERROR
+    (top_word_if)
+    (variable
+      (identifier))
+    (word_then)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (do_statement
+    (top_word_do)
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments)))
+    (word_end)))
+
+================================================================================
+Error front-load: while missing end, then top-level function
+================================================================================
+
+while true do
+  x()
+function foo()
+end
+
+---
+
+(source_file
+  (ERROR
+    (top_word_while)
+    (true
+      (word_true))
+    (word_do)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (function_declaration
+    (top_word_function)
+    name: (function_name
+      (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (word_end))))
+
+================================================================================
+Error front-load: for missing end, then top-level local
+================================================================================
+
+for i = 1, 10 do
+  x()
+local y = 2
+
+---
+
+(source_file
+  (ERROR
+    (top_word_for)
+    (identifier)
+    (number)
+    (number)
+    (word_do)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (number))))
+
+================================================================================
+Error front-load: repeat missing until, then top-level goto
+================================================================================
+
+repeat
+  x()
+goto done
+::done::
+
+---
+
+(source_file
+  (ERROR
+    (top_word_repeat)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (goto_statement
+    (top_word_goto)
+    name: (identifier))
+  (label_statement
+    name: (identifier)))
+
+================================================================================
+Error front-load: do missing end, then top-level if
+================================================================================
+
+do
+  x()
+if a then
+end
+
+---
+
+(source_file
+  (ERROR
+    (top_word_do)
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (if_statement
+    (top_word_if)
+    condition: (variable
+      (identifier))
+    (word_then)
+    (word_end)))

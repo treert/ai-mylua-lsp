@@ -183,15 +183,41 @@ shebang          ::= '#!' <any chars> EOL           (* [external], first line on
 # 2.1  Program structure
 # ----------------------------------------------------------------------------
 
-chunk          ::= [ shebang ] block
+chunk          ::= [ shebang ] top_block
+
+top_block      ::= { top_statement | statement } [ return_statement ]
 
 block          ::= { statement } [ return_statement ]
 
 _block_end     ::= 'end'
 
+# top_block is used only at the source_file level.
+# block is used in all nested positions (do, while, if, for, repeat, function body).
+# top_block accepts both top_statement (column-0 keyword tokens) and
+# regular statement (non-column-0 keywords and other statements).
+
 # ----------------------------------------------------------------------------
 # 2.2  Statements
 # ----------------------------------------------------------------------------
+
+# top_statement contains only the top-level (column-0) keyword variants.
+# These use external scanner tokens (top_if, top_while, etc.) that are
+# emitted only when the keyword starts at column 0.  Each variant is
+# aliased back to the standard node name in the final CST.
+#
+# The top_* tokens are hidden (_top_if, _top_while, etc.) and do NOT
+# appear in the final syntax tree.
+
+top_statement  ::= goto_statement       (* via top_goto *)
+                 | do_statement         (* via top_do *)
+                 | while_statement      (* via top_while *)
+                 | repeat_statement     (* via top_repeat *)
+                 | if_statement         (* via top_if *)
+                 | for_numeric_statement  (* via top_for *)
+                 | for_generic_statement  (* via top_for *)
+                 | function_declaration   (* via top_function *)
+                 | local_function_declaration  (* via top_local *)
+                 | local_declaration     (* via top_local *)
 
 statement      ::= ';'
                  | assignment_statement
@@ -391,6 +417,16 @@ field_separator   ::= ',' | ';'
 #       token.  Internal annotation parsing is done in the LSP
 #       (Rust side), not by Tree-sitter.  See `emmy.bnf`.
 #
+#   - Top-level keyword tokens (top_if, top_while, top_repeat, top_for,
+#     top_function, top_goto, top_do, top_local)  [external]
+#       The scanner UNCONDITIONALLY emits these tokens when a keyword
+#       starts at column 0, regardless of the parser state.  This means
+#       column-0 keywords are always treated as top-level, even inside
+#       nested blocks — forcing a parse error if nested code is not
+#       indented ("must indent" convention).
+#       These tokens are hidden (prefixed with _) in the grammar and
+#       do NOT appear in the final CST.
+#
 # 3.2  extras (Whitespace & Comments)
 # -----------------------------------
 # In grammar.js, the extras array should include:
@@ -491,3 +527,29 @@ field_separator   ::= ',' | ';'
 #   | table_constructor           | table_constructor                  |
 #   | emmy_comment                | emmy_comment                       |
 #   | emmy_line                   | emmy_line (opaque external token)  |
+#
+# 3.8  Top-Level Keyword Split
+# ----------------------------
+# To improve error localisation when 'end' is missing, the grammar
+# distinguishes top-level (column-0) keyword statements from nested ones.
+#
+# Mechanism:
+#   - The external scanner UNCONDITIONALLY emits hidden top_* tokens
+#     (e.g. _top_if) when a keyword starts at column 0, regardless of
+#     the parser state.  This means column-0 keywords are always
+#     treated as top-level tokens.
+#   - grammar.js defines _top_block (for source_file) and _block
+#     (for nested positions).  _top_block accepts both _top_statement
+#     and _statement; _block accepts only _statement.
+#   - Each affected keyword has two internal rules (e.g. _top_if_statement
+#     and _if_statement), both aliased to the same final node name
+#     (e.g. if_statement).
+#   - The top_* tokens are hidden and never appear in the final CST.
+#   - Because top_* tokens are emitted unconditionally at column 0,
+#     nested code MUST be indented.  A column-0 keyword inside a
+#     nested block will trigger a parse error ("must indent" convention).
+#
+# Affected keywords: function, goto, do, while, repeat, if, for, local
+# Not affected: return, assignment, function_call, function_definition
+#
+# See docs/top-level-keyword-split-plan.md for the full design rationale.

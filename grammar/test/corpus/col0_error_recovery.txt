@@ -1,5 +1,5 @@
 ================================================================================
-Missing inner 'end' keeps following top-level function inside the broken outer function
+Missing inner 'end' — func2 is now a separate top-level declaration
 ================================================================================
 
 function func1()
@@ -16,25 +16,34 @@ end
 
 (source_file
   (function_declaration
+    (top_word_function)
     name: (function_name (identifier))
     body: (function_body
       parameters: (parameter_list)
       (if_statement
+        (word_if)
         condition: (binary_expression
           left: (variable (identifier))
-          right: (number)))
-      (function_declaration
-        name: (function_name (identifier))
-        body: (function_body
-          parameters: (parameter_list)
-          (if_statement
-            condition: (binary_expression
-              left: (variable (identifier))
-              right: (number)))))
-      (MISSING "end"))))
+          right: (number))
+        (word_then)
+        (word_end))
+      (MISSING word_end)))
+  (function_declaration
+    (top_word_function)
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        (word_if)
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number))
+        (word_then)
+        (word_end))
+      (word_end))))
 
 ================================================================================
-Missing 'end' before a top-level local leaves the local inside the broken function
+Missing 'end' before a top-level local — local is now a separate top-level declaration
 ================================================================================
 
 function foo()
@@ -45,26 +54,25 @@ local x = 1
 ---
 
 (source_file
-  (function_declaration
-    name: (function_name (identifier))
-    body: (function_body
-      parameters: (parameter_list)
-      (if_statement
-        condition: (binary_expression
-          left: (variable (identifier))
-          right: (number))
-        (function_call_statement
-          (function_call
-            callee: (variable (identifier))
-            arguments: (arguments)))
-        (local_declaration
-          names: (attribute_name_list (identifier))
-          values: (expression_list (number)))
-        (MISSING "end"))
-      (MISSING "end"))))
+  (ERROR
+    (top_word_function)
+    (function_name (identifier))
+    (parameter_list)
+    (word_if)
+    (binary_expression
+      left: (variable (identifier))
+      right: (number))
+    (word_then)
+    (function_call
+      callee: (variable (identifier))
+      arguments: (arguments)))
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list (identifier))
+    values: (expression_list (number))))
 
 ================================================================================
-Missing multiple block terminators keeps the next function nested in the broken one
+Missing multiple block terminators — other() is now a separate top-level declaration
 ================================================================================
 
 function foo()
@@ -76,25 +84,25 @@ function other() end
 ---
 
 (source_file
+  (ERROR
+    (top_word_function)
+    (function_name (identifier))
+    (parameter_list)
+    (word_if)
+    (variable (identifier))
+    (word_then)
+    (word_while)
+    (variable (identifier))
+    (word_do)
+    (function_call
+      callee: (variable (identifier))
+      arguments: (arguments)))
   (function_declaration
+    (top_word_function)
     name: (function_name (identifier))
     body: (function_body
       parameters: (parameter_list)
-      (if_statement
-        condition: (variable (identifier))
-        (while_statement
-          condition: (variable (identifier))
-          (function_call_statement
-            (function_call
-              callee: (variable (identifier))
-              arguments: (arguments)))
-          (function_declaration
-            name: (function_name (identifier))
-            body: (function_body
-              parameters: (parameter_list)))
-          (MISSING "end"))
-        (MISSING "end"))
-      (MISSING "end"))))
+      (word_end))))
 
 ================================================================================
 Top-level return still belongs to the enclosing broken function and error is deferred
@@ -111,13 +119,18 @@ return 123
 
 (source_file
   (function_declaration
+    (top_word_function)
     name: (function_name (identifier))
     body: (function_body
       parameters: (parameter_list)
       (if_statement
+        (word_if)
         condition: (binary_expression
           left: (variable (identifier))
-          right: (number)))
+          right: (number))
+        (word_then)
+        (word_end))
       (return_statement
+        (word_return)
         (expression_list (number)))
-      (MISSING "end"))))
+      (MISSING word_end))))

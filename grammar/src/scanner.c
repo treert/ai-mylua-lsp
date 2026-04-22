@@ -9,10 +9,139 @@ enum TokenType {
   SHORT_STRING_CONTENT_SINGLE,
   COMMENT,
   EMMY_LINE,
+  // top-level keywords (column 0 only)
+  TOP_WORD_IF,
+  TOP_WORD_WHILE,
+  TOP_WORD_REPEAT,
+  TOP_WORD_FOR,
+  TOP_WORD_FUNCTION,
+  TOP_WORD_GOTO,
+  TOP_WORD_DO,
+  TOP_WORD_LOCAL,
+  // normal keywords (any column)
+  WORD_END,
+  WORD_LOCAL,
+  WORD_IF,
+  WORD_THEN,
+  WORD_ELSEIF,
+  WORD_ELSE,
+  WORD_WHILE,
+  WORD_DO,
+  WORD_REPEAT,
+  WORD_UNTIL,
+  WORD_FOR,
+  WORD_IN,
+  WORD_FUNCTION,
+  WORD_GOTO,
+  WORD_RETURN,
+  WORD_BREAK,
+  // expression-level keywords
+  WORD_AND,
+  WORD_OR,
+  WORD_NOT,
+  WORD_NIL,
+  WORD_TRUE,
+  WORD_FALSE,
+  // identifier (non-keyword)
+  IDENTIFIER,
 };
 
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip_ws(TSLexer *lexer) { lexer->advance(lexer, true); }
+
+static bool is_identifier_char(int32_t c) {
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+         (c >= '0' && c <= '9') || c == '_';
+}
+
+/* Keyword entry: maps a keyword string to its normal and top-level token types.
+   top_token == -1 means this keyword has no top-level variant. */
+typedef struct {
+  const char *keyword;
+  int normal_token;
+  int top_token;
+} KeywordEntry;
+
+static const KeywordEntry keyword_table[] = {
+  {"and",      WORD_AND,      -1},
+  {"break",    WORD_BREAK,    -1},
+  {"do",       WORD_DO,       TOP_WORD_DO},
+  {"else",     WORD_ELSE,     -1},
+  {"elseif",   WORD_ELSEIF,   -1},
+  {"end",      WORD_END,      -1},
+  {"false",    WORD_FALSE,    -1},
+  {"for",      WORD_FOR,      TOP_WORD_FOR},
+  {"function", WORD_FUNCTION, TOP_WORD_FUNCTION},
+  {"goto",     WORD_GOTO,     TOP_WORD_GOTO},
+  {"if",       WORD_IF,       TOP_WORD_IF},
+  {"in",       WORD_IN,       -1},
+  {"local",    WORD_LOCAL,    TOP_WORD_LOCAL},
+  {"nil",      WORD_NIL,      -1},
+  {"not",      WORD_NOT,      -1},
+  {"or",       WORD_OR,       -1},
+  {"repeat",   WORD_REPEAT,   TOP_WORD_REPEAT},
+  {"return",   WORD_RETURN,   -1},
+  {"then",     WORD_THEN,     -1},
+  {"true",     WORD_TRUE,     -1},
+  {"until",    WORD_UNTIL,    -1},
+  {"while",    WORD_WHILE,    TOP_WORD_WHILE},
+};
+
+static const int keyword_table_size = sizeof(keyword_table) / sizeof(keyword_table[0]);
+
+/* Unified word scanner: handles ALL tokens starting with [a-zA-Z_].
+   Reads the full identifier at the current position into a buffer,
+   then matches it against the keyword table.
+
+   - If it matches a keyword at column 0 with a top variant: emit TOP_WORD_*.
+   - If it matches a keyword at other columns (or no top variant): emit WORD_*.
+   - If it does not match any keyword: emit IDENTIFIER.
+
+   This ensures the external scanner fully owns all identifier-like tokens,
+   so tree-sitter never falls back to the grammar's built-in identifier regex
+   or inline keyword strings. */
+static bool scan_word(TSLexer *lexer) {
+  if (lexer->eof(lexer)) return false;
+  int32_t first = lexer->lookahead;
+  if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_')) return false;
+
+  lexer->mark_end(lexer);
+
+  /* Read the full identifier into a buffer.
+     We use a fixed-size buffer; identifiers longer than the buffer
+     are definitely not keywords and will be emitted as IDENTIFIER.
+     The buffer is large enough for any Lua keyword (max 8 chars). */
+  char buf[64];
+  int len = 0;
+  while (!lexer->eof(lexer) && is_identifier_char(lexer->lookahead)) {
+    if (len < 63) {
+      buf[len++] = (char)lexer->lookahead;
+    }
+    advance(lexer);
+  }
+  buf[len] = '\0';
+
+  lexer->mark_end(lexer);
+
+  /* Look up in keyword table (only lowercase-starting words can be keywords) */
+  if (first >= 'a' && first <= 'z') {
+    bool at_col0 = (lexer->get_column(lexer) == len); /* column after reading == len means started at col 0 */
+    for (int i = 0; i < keyword_table_size; i++) {
+      if (strcmp(buf, keyword_table[i].keyword) == 0) {
+        if (at_col0 && keyword_table[i].top_token >= 0) {
+          lexer->result_symbol = keyword_table[i].top_token;
+        } else {
+          lexer->result_symbol = keyword_table[i].normal_token;
+        }
+        return true;
+      }
+    }
+  }
+
+  /* Not a keyword — emit as IDENTIFIER */
+  lexer->result_symbol = IDENTIFIER;
+  return true;
+}
 
 static bool scan_long_bracket_content(TSLexer *lexer) {
   uint8_t level = 0;
@@ -150,22 +279,6 @@ static bool scan_short_string_content(TSLexer *lexer, char quote) {
   }
 }
 
-/* Scan a --- line. Returns true if this is an emmy doc comment (---...).
-   Consumes '---' + rest of line. */
-static bool scan_emmy_line(TSLexer *lexer) {
-  /* We're positioned at the first '-'. Consume '---'. */
-  advance(lexer); /* - */
-  advance(lexer); /* - */
-  advance(lexer); /* - */
-  /* Consume rest of line */
-  while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
-    advance(lexer);
-  }
-  lexer->result_symbol = EMMY_LINE;
-  lexer->mark_end(lexer);
-  return true;
-}
-
 /* Try to scan a comment. If it's a --- line AND EMMY_LINE is valid, returns false
    so the caller can try emmy_line instead. */
 static bool scan_comment(TSLexer *lexer, bool emmy_valid) {
@@ -252,20 +365,26 @@ bool tree_sitter_lua_external_scanner_scan(
 
   /* Short string content (check BEFORE the comment/emmy `-` branch):
      inside a `"..."` / `'...'` string literal, a leading `-` is just
-     a string character. The comment/emmy branch below would otherwise
-     consume it as a short-form comment or return false, producing a
-     spurious "syntax error near '-'" on strings like `"-"` or `"-foo"`
-     (and any concat expression like `.. "-" ..`).
-     Because `$.comment` sits in `extras`, `valid_symbols[COMMENT]` is
-     true almost everywhere — including inside short strings — so we
-     can't rely on valid_symbols alone to tell the contexts apart.
-     The short-string-content symbols are the unambiguous signal that
-     we're mid-string and must scan content. */
+     a string character. */
   if (valid_symbols[SHORT_STRING_CONTENT_DOUBLE] && lexer->lookahead != '"') {
     return scan_short_string_content(lexer, '"');
   }
   if (valid_symbols[SHORT_STRING_CONTENT_SINGLE] && lexer->lookahead != '\'') {
     return scan_short_string_content(lexer, '\'');
+  }
+
+  /* Word scanning (keywords + identifiers, unconditional).
+     All tokens starting with [a-zA-Z_] are owned by the external scanner.
+     Keywords emit WORD_* or TOP_WORD_*, non-keywords emit IDENTIFIER.
+     Must come after short-string content to avoid scanning keywords
+     inside strings. */
+  {
+    int32_t c = lexer->lookahead;
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
+      if (scan_word(lexer)) {
+        return true;
+      }
+    }
   }
 
   /* EmmyLua line or Comment.
