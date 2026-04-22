@@ -100,6 +100,9 @@ static const int keyword_table_size = sizeof(keyword_table) / sizeof(keyword_tab
    This ensures the external scanner fully owns all identifier-like tokens,
    so tree-sitter never falls back to the grammar's built-in identifier regex
    or inline keyword strings. */
+/* Max length of any Lua keyword ("function" = 8 chars) */
+#define MAX_KEYWORD_LEN 8
+
 static bool scan_word(TSLexer *lexer) {
   if (lexer->eof(lexer)) return false;
   int32_t first = lexer->lookahead;
@@ -107,27 +110,27 @@ static bool scan_word(TSLexer *lexer) {
 
   lexer->mark_end(lexer);
 
-  /* Read the full identifier into a buffer.
-     We use a fixed-size buffer; identifiers longer than the buffer
-     are definitely not keywords and will be emitted as IDENTIFIER.
-     The buffer is large enough for any Lua keyword (max 8 chars). */
-  char buf[64];
+  /* Phase 1: Read up to MAX_KEYWORD_LEN characters into buf.
+     This is enough to determine if the token is a keyword. */
+  char buf[MAX_KEYWORD_LEN + 1];
   int len = 0;
-  while (!lexer->eof(lexer) && is_identifier_char(lexer->lookahead)) {
-    if (len < 63) {
-      buf[len++] = (char)lexer->lookahead;
-    }
+  while (!lexer->eof(lexer) && is_identifier_char(lexer->lookahead) && len < MAX_KEYWORD_LEN) {
+    buf[len++] = (char)lexer->lookahead;
     advance(lexer);
   }
   buf[len] = '\0';
 
-  lexer->mark_end(lexer);
+  /* Check if the word continues beyond MAX_KEYWORD_LEN chars.
+     If so, it's definitely not a keyword — skip to IDENTIFIER path. */
+  bool word_complete = lexer->eof(lexer) || !is_identifier_char(lexer->lookahead);
 
-  /* Look up in keyword table (only lowercase-starting words can be keywords) */
-  if (first >= 'a' && first <= 'z') {
+  /* Phase 2: If the word is complete (≤ MAX_KEYWORD_LEN) and starts with
+     a lowercase letter, try matching it against the keyword table. */
+  if (word_complete && first >= 'a' && first <= 'z') {
     bool at_col0 = (lexer->get_column(lexer) == len); /* column after reading == len means started at col 0 */
     for (int i = 0; i < keyword_table_size; i++) {
       if (strcmp(buf, keyword_table[i].keyword) == 0) {
+        lexer->mark_end(lexer);
         if (at_col0 && keyword_table[i].top_token >= 0) {
           lexer->result_symbol = keyword_table[i].top_token;
         } else {
@@ -138,7 +141,14 @@ static bool scan_word(TSLexer *lexer) {
     }
   }
 
-  /* Not a keyword — emit as IDENTIFIER */
+  /* Phase 3: Not a keyword — consume remaining identifier characters
+     and emit as IDENTIFIER. This handles arbitrarily long identifiers
+     without needing a large buffer. */
+  while (!lexer->eof(lexer) && is_identifier_char(lexer->lookahead)) {
+    advance(lexer);
+  }
+
+  lexer->mark_end(lexer);
   lexer->result_symbol = IDENTIFIER;
   return true;
 }
