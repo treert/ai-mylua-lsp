@@ -1,81 +1,32 @@
-# Column-0 Block-End 重设计讨论
+# Column-0 Block-End 方案问题说明
 
-> **状态**：讨论中（WIP）
-> **创建日期**：2026-04-22
-> **相关文件**：`grammar/grammar.js`、`grammar/src/scanner.c`、`grammar/lua.bnf`、`grammar/test/corpus/col0_error_recovery.txt`
-
----
-
-## 1. 背景：当前 `_col0_block_end` 设计
-
-### 1.1 设计目标
-
-mylua-lsp 把**顶行（column 0）的关键字开头的语句**设计成顶层语句，强化了 Lua 的语法限制，方便快速定位缺少 `end` 的错误。
-
-### 1.2 实现方式
-
-- **外部 scanner**（`scanner.c`）：当 `valid_symbols[COL0_BLOCK_END]` 为真、且 `column == 0`、且 lookahead 是 `[a-zA-Z_:]` 时，发射一个零宽度的 `_col0_block_end` token。
-- **语法层**（`grammar.js`）：`_block_end` 定义为 `choice('end', $._col0_block_end)`，所有需要 `end` 的语句（`do_statement`、`while_statement`、`if_statement`、`for_numeric_statement`、`for_generic_statement`、`function_body`）都使用 `_block_end`。`repeat_statement` 则用 `choice(seq('until', expr), $._col0_block_end)`。
-
-### 1.3 效果
-
-- 正确缩进的代码正常解析（`end` 照常匹配）。
-- 缺少 `end` 的错误在**下一个顶层语句**处就能报出，而非传播到 EOF。
-- **代价**：嵌套代码必须缩进（至少 1 空白），否则会报错。
-
-### 1.4 已知问题
-
-当前设计存在 bug，之前尝试过修复但方案过于 trick。具体问题有待进一步记录。
+> **结论**：`_col0_block_end` 不应继续保留。
+> **原因**：它不是单纯的错误恢复技巧，而是把一部分本应报错的 Lua 代码改写成了 grammar 内的合法闭合路径。
 
 ---
 
-## 2. 提议的新方案：`top_empty_statement`
+## 1. 当前方案在做什么
 
-### 2.1 核心思路
+当前实现包含两部分：
 
-修改 `chunk` 的语法定义：
+- **scanner**：在 column 0 遇到像语句开头的字符时，发射零宽 `_col0_block_end`
+- **grammar**：把 `_col0_block_end` 直接接入 `_block_end`
+
+也就是说，对 parser 来说：
 
 ```bnf
-chunk ::= [ shebang ] { statement | top_empty_statement } [ return_statement ]
+block_end ::= 'end' | _col0_block_end
 ```
 
-- `top_empty_statement` 是顶层关键字前由 scanner 生成的**零宽度 token** 对应的 statement。
-- scanner 遇到顶层关键字时**必定生成**一个 `top_empty_statement`。
-- 防止无限生成的机制：类似"上一次已经生成过了，这次就不生成"。
-- LSP 层不理会 `top_empty_statement`。
-
-### 2.2 期望效果
-
-通过在顶层关键字前插入一个特殊 statement，迫使之前的语句强制规约，从而把解析从嵌套块拉回顶层 `chunk`。
+这意味着 `_col0_block_end` 不是一个“诊断提示”，而是一个**真正参与语法归约的合法 token**。
 
 ---
 
-## 3. 可行性分析：**方案不可行**（按字面设计）
+## 2. 这个方案为什么设计上有问题
 
-### 3.1 核心结论
+### 2.1 它会把“缺少 `end`”变成“合法闭合”
 
-**`top_empty_statement` 如果只挂在 `chunk` 层，无法实现"遇到顶层关键字就收束未闭合嵌套块"的效果。**
-
-### 3.2 原因：LR/Tree-sitter 的 lookahead 机制
-
-#### 关键原理
-
-在 LR parser（Tree-sitter 基于此）中：
-
-- **lookahead token 只是"查表依据"，不是主动控制器**
-- 能不能规约，取决于 `ACTION[当前状态, lookahead token]` 表里是否有对应动作
-- **不是**"我发明了一个新 token，所以它能一路把前面的东西规约掉"
-- **而是**"只有当这个 token 在当前状态可见时，它才可能参与规约"
-
-#### 为什么 `top_empty_statement` 在嵌套块里不可见
-
-- `source_file` 在最外层接一个可选的 `_block`
-- `_block` 本质上是 `repeat1($._statement)` 加可选 `return_statement`
-- `if_statement`、`while_statement`、`function_body` 都包含**嵌套 block**
-
-当 parser 还在内层 `_block` 里时，`top_empty_statement` 只存在于 `chunk`（即 `source_file`）层的语法定义中，**当前 state 根本看不见它**。
-
-#### 具体例子
+原本标准 Lua 中，下面代码应该报错：
 
 ```lua
 function foo()
@@ -84,76 +35,92 @@ function foo()
 function other() end
 ```
 
-parser 读到 `function other` 时：
-1. 它还在内层 `_block` 里
-2. `function` 是合法的 `_statement` 开头（`function_declaration`）
-3. **没有出错** → parser 把 `function other() end` 当成嵌套 block 内的下一个 statement
-4. `top_empty_statement` 根本没有机会介入
+但在当前设计里，column 0 的 `function other` 可能先触发 `_col0_block_end`，把前面的未闭合块直接收掉。
 
-### 3.3 与现有 `_col0_block_end` 的对比
+结果不是“这里缺少 `end`”，而是“这里存在一种 grammar 允许的闭合方式”。
 
-`_col0_block_end` 能工作的原因**不是**因为它"零宽"，**而是**因为它被接到了所有需要同步的闭合位上：
+这会直接带来一个后果：
 
-| 方案 | token 出现位置 | 嵌套块内是否可见 | 能否收束未闭合块 |
-|------|---------------|-----------------|----------------|
-| `_col0_block_end` | 所有 `_block_end` 位置 + `repeat_statement` 闭合位 | ✅ 是 | ✅ 能 |
-| `top_empty_statement`（只在 chunk） | 仅 `source_file` 层 | ❌ 否 | ❌ 不能 |
+- **有些本该报出的缺少 `end` 错误，会被吞掉**
 
-### 3.4 如果把 `top_empty_statement` 也塞进嵌套块闭合位？
+### 2.2 它污染了语法树的语义
 
-技术上可行，但**语义上已经退化回现有 `_col0_block_end` 的同类方案**，不再是"纯顶层 empty statement"。
+如果 `_col0_block_end` 只是错误恢复痕迹，还可以在后续层面识别它、特殊处理它。
 
----
+但当前不是这样。当前 grammar 允许它与真实 `end` 一样完成闭合，因此语法树会表现得像“代码已经正确闭合”。
 
-## 4. Tree-sitter 错误恢复机制（知识积累）
+这会导致：
 
-### 4.1 正常解析流程
+- 解析树不再纯粹表示“合法 Lua”
+- 一部分错误输入被包装成近似合法结构
+- 后续诊断、作用域分析、语义分析都可能建立在这个伪闭合结构之上
 
-LR parser 对每个 lookahead token 查动作表 `ACTION[state, token]`：
+### 2.3 它会削弱语法诊断的可靠性
 
-| 动作 | 含义 |
-|------|------|
-| **shift** | 吃掉 token，进入新状态 |
-| **reduce** | 按产生式规约，弹栈再 goto |
-| **accept** | 解析成功 |
-| **error** | 当前 token 在当前状态下不合法 |
+当前 LSP 语法诊断依赖 Tree-sitter 产出的 `ERROR` 和 `missing` 节点。
 
-### 4.2 Tree-sitter 遇到意外 token 时的处理
+但 `_col0_block_end` 一旦作为合法闭合参与归约，就可能让 parser：
 
-Tree-sitter 不会"一报错就停"，而是做**代价驱动的错误恢复**：
+- 不再产生 `missing 'end'`
+- 也不再留下对应的 `ERROR`
 
-1. **先看当前有没有合法正常解析路径**（可能同时保留多个解析栈版本）
-2. **如果有多条路径，保留能继续的**
-3. **如果都不行，再做恢复**：
-   - **插入缺失 token**：比如假装这里有个 `end`（树中表现为 `missing` 节点）
-   - **跳过不合法输入**：把这段内容吞进 `ERROR` 节点
-   - **局部收缩后继续**：通过代价更低的恢复动作保持树结构稳定
-4. **恢复时优先选代价最低的方案**
+于是诊断层看到的就是：
 
-### 4.3 关键认知
+- “树里没有这个错误”
 
-- **Tree-sitter 不会因为看到"可疑顶层 token"就主动弹栈回 `chunk`**
-- **外部 scanner 受 `valid_symbols` 约束**：当前 parser state 只接受特定候选 token，scanner 不能靠一己之力改变全局解析方向
-- **"强制规约"只在当前 state 对该 token 有动作时才会发生**
+问题不是诊断器漏判，而是 grammar 已经提前把错误改写掉了。
+
+### 2.4 它引入了额外的非 Lua 约束
+
+当前方案还有一个明显副作用：
+
+- **嵌套代码必须缩进**
+
+也就是说，它不只是帮助定位错误，还改变了代码可接受形式。这种约束不是标准 Lua 语法的一部分，却被放进了解析主路径。
+
+这会让 parser 的行为越来越像“带布局规则的 Lua 方言”，而不是 Lua 本身。
 
 ---
 
-## 5. 后续讨论方向
+## 3. 为什么这不是一个适合继续修补的问题
 
-> 以下为待讨论的开放问题，后续对话中继续补充。
+`_col0_block_end` 的问题不只是“实现细节有 bug”，而是**职责放错了层**。
 
-- [ ] 当前 `_col0_block_end` 设计的具体 bug 是什么？复现场景？
-- [ ] 是否有更好的替代方案？
-- [ ] 是否可以通过调整 Tree-sitter 的 `conflicts` 或 `precedence` 来改善错误恢复？
-- [ ] 是否考虑在 LSP 层（而非语法层）做更智能的错误定位？
-- [ ] 对"嵌套代码必须缩进"这个限制，是否有办法放松？
+grammar 本来应该回答的是：
+
+- **这段代码是否符合 Lua 语法**
+
+但 `_col0_block_end` 实际上还在做另一件事：
+
+- **如果用户少写了 `end`，就在下一个顶层语句前替他补一个闭合点**
+
+一旦这件事发生在 grammar 层，就会天然带来下面这些副作用：
+
+- **错误被合法化**
+- **语法树被污染**
+- **诊断不再可靠**
+- **后续语义分析可能建立在错误结构之上**
+
+因此这个方案的问题不是“继续打补丁能不能修好”，而是**设计目标本身就不应该由 grammar 直接承担**。
 
 ---
 
-## 6. 参考
+## 4. 当前结论
 
-- `grammar/lua.bnf` §2.1.1 — Column-0 block boundary 设计说明
-- `grammar/grammar.js` — `_block_end`、`source_file` 定义
-- `grammar/src/scanner.c` — `COL0_BLOCK_END` 扫描逻辑
-- `grammar/test/corpus/col0_error_recovery.txt` — 错误恢复测试用例
-- `grammar/test/corpus/col0_boundary.txt` — 正常边界测试用例
+当前不再继续保留 `_col0_block_end` 方案，原因如下：
+
+- **它会把部分本应报错的缺少 `end` 输入改写成合法闭合路径**
+- **它让语法树不再只表示合法 Lua 结构**
+- **它会削弱基于 `ERROR` / `missing` 的语法诊断可靠性**
+- **它额外引入了“嵌套代码必须缩进”的非标准约束**
+- **它属于设计层面的职责错位，不适合继续在现有方向上修补**
+
+后续如果要继续优化“缺少 `end` 时尽早定位”的体验，应考虑在**诊断层**或其他恢复层处理，而不是继续让 grammar 用 `_col0_block_end` 冒充真实的块闭合。
+
+---
+
+## 5. 参考
+
+- `grammar/grammar.js`
+- `grammar/src/scanner.c`
+- `grammar/test/corpus/col0_error_recovery.txt`

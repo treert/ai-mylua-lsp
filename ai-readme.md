@@ -38,7 +38,7 @@ ai-mylua-lsp/
 
 | 阶段 | 状态 | 说明 |
 |------|------|------|
-| A — Grammar | ✅ 完成 | Tree-sitter 文法 + 外部扫描器 + Column-0 块边界 |
+| A — Grammar | ✅ 完成 | Tree-sitter 文法 + 外部扫描器 |
 | B — LSP 骨架 | ✅ 完成 | Rust + tower-lsp-server + 增量解析 |
 | C — 全功能 LSP | ✅ 完成 | 30+ LSP 能力，全工作区索引 |
 | D — VS Code Extension | ✅ 完成 | TextMate 着色 + LSP 客户端 + 打包发布 |
@@ -70,12 +70,10 @@ ai-mylua-lsp/
 | 文件 | 说明 |
 |------|------|
 | [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式 |
-| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短/长字符串、注释、shebang、column-0 块边界 |
-| [`grammar/test/corpus/`](grammar/test/corpus/) | 37 个回归测试 |
+| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短/长字符串、注释、shebang |
+| [`grammar/test/corpus/`](grammar/test/corpus/) | 36 个回归测试 |
 | [`grammar/lua.bnf`](grammar/lua.bnf) | Lua 5.3+/5.4 EBNF |
 | [`grammar/emmy.bnf`](grammar/emmy.bnf) | EmmyLua 注解子语法 |
-
-**定制扩展 — Column-0 块边界**：行首 column 0 处的关键字/标识符强制关闭未配对的嵌套块，让缺少 `end` 的错误在下一个顶层语句处即时报出。嵌套代码必须缩进。详见 BNF §2.1.1。
 
 命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
 

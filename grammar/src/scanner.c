@@ -8,7 +8,6 @@ enum TokenType {
   SHORT_STRING_CONTENT_DOUBLE,
   SHORT_STRING_CONTENT_SINGLE,
   COMMENT,
-  COL0_BLOCK_END,
   EMMY_LINE,
 };
 
@@ -242,19 +241,6 @@ bool tree_sitter_lua_external_scanner_scan(
         return true;
       }
       return false;
-    }
-  }
-
-  /* Column-0 block end */
-  if (valid_symbols[COL0_BLOCK_END] && lexer->get_column(lexer) == 0) {
-    int32_t c = lexer->lookahead;
-    bool is_stmt_start = (c >= 'a' && c <= 'z')
-                      || (c >= 'A' && c <= 'Z')
-                      || c == '_'
-                      || c == ':';
-    if (is_stmt_start) {
-      lexer->result_symbol = COL0_BLOCK_END;
-      return true;
     }
   }
 

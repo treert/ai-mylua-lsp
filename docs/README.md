@@ -19,7 +19,7 @@
 | [`index-implementation-plan.md`](index-implementation-plan.md) | **索引架构落地实施步骤（历史归档）**：步骤 1–7 全部完成，作为类似量级改造的参考模板保留 |
 | [`performance-analysis.md`](performance-analysis.md) | **性能现状评估**：架构亮点 + 5 万文件目标下的瓶颈分析 + 规模分级表 + 三档优化路线图 + 已落地变更简史 |
 | [`future-work.md`](future-work.md) | **后续待办与优化方向**：`WorkspaceAggregation` 已知坑点（7 项）+ 泛型支持缺口（6 项）+ 推荐落地顺序 + 新增能力时的维护清单 |
-| [`col0-block-end-redesign.md`](col0-block-end-redesign.md) | **Column-0 块边界重设计讨论（WIP）**：当前 `_col0_block_end` 设计分析、替代方案可行性、Tree-sitter 错误恢复机制知识积累 |
+| [`col0-block-end-redesign.md`](col0-block-end-redesign.md) | **Column-0 块边界方案问题说明**：解释为什么 `_col0_block_end` 不适合继续保留，以及为什么不应由 grammar 冒充真实块闭合 |
 
 **测试**：LSP 具备独立测试能力（无需 VS Code 联调），集成测试覆盖所有核心功能。详见 [`testing.md`](testing.md)。
 

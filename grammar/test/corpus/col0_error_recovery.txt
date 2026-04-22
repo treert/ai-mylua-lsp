@@ -1,5 +1,5 @@
 ================================================================================
-Col-0 'function' terminates an unclosed function — error recovery
+Missing inner 'end' keeps following top-level function inside the broken outer function
 ================================================================================
 
 function func1()
@@ -22,18 +22,19 @@ end
       (if_statement
         condition: (binary_expression
           left: (variable (identifier))
-          right: (number)))))
-  (function_declaration
-    name: (function_name (identifier))
-    body: (function_body
-      parameters: (parameter_list)
-      (if_statement
-        condition: (binary_expression
-          left: (variable (identifier))
-          right: (number))))))
+          right: (number)))
+      (function_declaration
+        name: (function_name (identifier))
+        body: (function_body
+          parameters: (parameter_list)
+          (if_statement
+            condition: (binary_expression
+              left: (variable (identifier))
+              right: (number)))))
+      (MISSING "end"))))
 
 ================================================================================
-Col-0 'local' terminates a function whose 'if' is missing 'end'
+Missing 'end' before a top-level local leaves the local inside the broken function
 ================================================================================
 
 function foo()
@@ -44,23 +45,26 @@ local x = 1
 ---
 
 (source_file
-  (ERROR
-    (function_name (identifier))
-    (parameter_list)
-    (if_statement
-      condition: (binary_expression
-        left: (variable (identifier))
-        right: (number))
-      (function_call_statement
-        (function_call
-          callee: (variable (identifier))
-          arguments: (arguments)))))
-  (local_declaration
-    names: (attribute_name_list (identifier))
-    values: (expression_list (number))))
+  (function_declaration
+    name: (function_name (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (if_statement
+        condition: (binary_expression
+          left: (variable (identifier))
+          right: (number))
+        (function_call_statement
+          (function_call
+            callee: (variable (identifier))
+            arguments: (arguments)))
+        (local_declaration
+          names: (attribute_name_list (identifier))
+          values: (expression_list (number)))
+        (MISSING "end"))
+      (MISSING "end"))))
 
 ================================================================================
-Col-0 keyword chain-closes multiple unclosed blocks at once
+Missing multiple block terminators keeps the next function nested in the broken one
 ================================================================================
 
 function foo()
@@ -72,24 +76,28 @@ function other() end
 ---
 
 (source_file
-  (ERROR
-    (function_name (identifier))
-    (parameter_list)
-    (variable (identifier))
-    (while_statement
-      condition: (variable (identifier))
-      (function_call_statement
-        (function_call
-          callee: (variable (identifier))
-          arguments: (arguments)))))
   (function_declaration
     name: (function_name (identifier))
     body: (function_body
-      parameters: (parameter_list))))
+      parameters: (parameter_list)
+      (if_statement
+        condition: (variable (identifier))
+        (while_statement
+          condition: (variable (identifier))
+          (function_call_statement
+            (function_call
+              callee: (variable (identifier))
+              arguments: (arguments)))
+          (function_declaration
+            name: (function_name (identifier))
+            body: (function_body
+              parameters: (parameter_list)))
+          (MISSING "end"))
+        (MISSING "end"))
+      (MISSING "end"))))
 
 ================================================================================
-Col-0 'return' stays inside the enclosing function (Lua semantic: return must
-be the last statement of its block). Missing 'end' is reported at EOF.
+Top-level return still belongs to the enclosing broken function and error is deferred
 ================================================================================
 
 function foo()
@@ -111,4 +119,5 @@ return 123
           left: (variable (identifier))
           right: (number)))
       (return_statement
-        (expression_list (number))))))
+        (expression_list (number)))
+      (MISSING "end"))))

@@ -33,7 +33,6 @@ module.exports = grammar({
     $.short_string_content_double,
     $.short_string_content_single,
     $.comment,
-    $._col0_block_end,
     $.emmy_line,
   ],
 
@@ -108,7 +107,7 @@ module.exports = grammar({
 
     goto_statement: $ => seq('goto', field('name', $.identifier)),
 
-    _block_end: $ => choice('end', $._col0_block_end),
+    _block_end: _ => 'end',
 
     do_statement: $ => seq('do', optional($._block), $._block_end),
 
@@ -119,10 +118,7 @@ module.exports = grammar({
 
     repeat_statement: $ => seq(
       'repeat', optional($._block),
-      choice(
-        seq('until', field('condition', $._expression)),
-        $._col0_block_end,
-      ),
+      'until', field('condition', $._expression),
     ),
 
     if_statement: $ => seq(
