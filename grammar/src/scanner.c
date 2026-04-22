@@ -1,6 +1,7 @@
 #include "tree_sitter/parser.h"
 #include <string.h>
 #include <stdbool.h>
+#include <assert.h>
 
 enum TokenType {
   LONG_STRING_CONTENT,
@@ -141,10 +142,12 @@ static const KeywordIndex keyword_index[26] = {
 /* Max length of any Lua keyword ("function" = 8 chars) */
 #define MAX_KEYWORD_LEN 8
 
+/* Precondition: lookahead is [a-zA-Z_] (caller has already checked).
+   Always returns true — emits a keyword or IDENTIFIER token. */
 static bool scan_word(TSLexer *lexer) {
-  if (lexer->eof(lexer)) return false;
   int32_t first = lexer->lookahead;
-  if (!((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_')) return false;
+  assert(!lexer->eof(lexer));
+  assert((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_');
 
   lexer->mark_end(lexer);
 
@@ -434,9 +437,8 @@ bool tree_sitter_lua_external_scanner_scan(
   {
     int32_t c = lexer->lookahead;
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
-      if (scan_word(lexer)) {
-        return true;
-      }
+      scan_word(lexer);
+      return true;
     }
   }
 
