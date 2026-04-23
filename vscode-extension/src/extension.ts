@@ -16,6 +16,10 @@ type IndexStatusParams = {
   indexed: number;
   total: number;
   elapsedMs?: number;
+  /** Current indexing phase: 'scanning' | 'parsing' | 'merging'. */
+  phase?: 'scanning' | 'parsing' | 'merging';
+  /** Human-readable message for the current phase. */
+  message?: string;
 };
 
 /// Bundled stdlib fallback chain. Ordered newest→oldest so the most
@@ -137,12 +141,20 @@ function renderStatus(status: IndexStatusParams): void {
     }
   } else {
     const total = status.total;
-    if (total > 0) {
+    const phase = status.phase;
+    if (phase === 'scanning') {
+      statusBarItem.text = '💛scanning…';
+      statusBarItem.tooltip = 'MyLua: scanning workspace for Lua files… — click to open settings';
+    } else if (phase === 'merging') {
+      statusBarItem.text = `💛merging ${total}`;
+      statusBarItem.tooltip = `MyLua: building global index (${total} files)… — click to open settings`;
+    } else if (total > 0) {
       statusBarItem.text = `💛${status.indexed}/${total}`;
+      statusBarItem.tooltip = `MyLua: parsing files (${status.indexed}/${total}) — click to open settings`;
     } else {
       statusBarItem.text = '💛mylua';
+      statusBarItem.tooltip = 'MyLua: indexing workspace… — click to open settings';
     }
-    statusBarItem.tooltip = `MyLua: indexing workspace (${status.indexed}/${total}) — click to open settings`;
   }
   statusBarItem.show();
 }

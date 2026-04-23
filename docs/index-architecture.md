@@ -308,21 +308,41 @@ hover 在 p.name 上
 
 ## 6. 索引构建与维护
 
-### 6.1 冷启动策略
+### 6.1 冷启动策略：4 阶段流水线
 
-采用 **摘要驱动的混合式渐进索引**：
+冷启动采用 **4 阶段流水线**，在 `initialized` 中 `tokio::spawn` 后台执行，不阻塞后续 LSP 请求：
 
-1. **并行**扫描工作区文件，生成每文件 `DocumentSummary`。
-2. 每份 `DocumentSummary` 产出后，**流式 merge** 到工作区聚合层。
-3. 查询层显式感知 **indexing state**；首轮全库完成前允许渐进可用但可能不完整，完成后进入稳定工作区语义。
-4. 热路径以摘要查询优先，避免在查询时做整库级即时分析。
+```
+Phase 1: Scan          Phase 2: Parse           Phase 3: Merge          Phase 4: Ready
+┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐    ┌──────────┐
+│ discover     │      │ rayon 全量并行    │      │ 原子 build_initial│    │ flip     │
+│ .lua files   │─────▶│ read + parse +   │─────▶│ 构建全局索引      │───▶│ IndexState│
+│ + build      │      │ build_summary    │      │ (单次临界区)      │    │ = Ready  │
+│ require_map  │      │ (不持任何锁)     │      │                  │    │ + seed   │
+└──────────────┘      └──────────────────┘      └──────────────────┘    │ diag     │
+                                                                        └──────────┘
+```
+
+| 阶段 | 做什么 | 持锁 | 复杂度 |
+|------|--------|------|--------|
+| **Phase 1: Scan** | `collect_lua_files` 发现文件列表 + `scan_workspace_lua_files` 建 `require_map` | 短暂持 `index` 锁写入 `require_map`（已移到 Phase 3） | O(文件数) |
+| **Phase 2: Parse** | `rayon` 全量并行：`read_to_string` → `tree-sitter parse` → `build_summary` → `build_scope_tree`。`AtomicUsize` 计数器驱动进度上报 | **不持任何锁** | O(文件数 / 核数) |
+| **Phase 3: Merge** | 单次临界区持 `open_uris → documents → index` 三锁：写入 `require_map` + `require_aliases`，收集所有 summaries（跳过 `open_uris` 中已有的，改用其 buffer 版本），调用 `build_initial` 一次性构建全局索引 | 持 `open_uris → documents → index` | O(总贡献数)，20k 文件 ~几十 ms |
+| **Phase 4: Ready** | `IndexState::Ready` + `seed_bulk` 诊断队列 + 保存磁盘缓存（如启用） | 各锁短暂独立持有 | O(1) |
+
+**关键设计**：
+
+- **Phase 2 不持锁**：并行 parse 期间，`did_open` / `did_change` 正常执行 `upsert_summary`（增量路径），不会被阻塞。
+- **Phase 3 原子重建**：`build_initial` 先清空所有 shard，再一次性重建。冷启动期间 `did_open` 写入的 summary 从 `idx.summaries` 收集后一并传入，确保不丢失。
+- **消除时序依赖**：`build_initial` 先插入所有 summaries 到 `self.summaries`，再构建 shard。`resolve_module_to_uri` 在完整的 `require_map` + `summaries` 上运行，不存在"早期文件无法 resolve 后期文件"的问题。
+- **进度上报**：`mylua/indexStatus` 通知携带 `phase` 字段（`scanning` / `parsing` / `merging`），VS Code 状态栏分阶段显示。
 
 查询层状态分为：
 
-- **`Initializing`**：摘要与聚合层正在构建；`goto`/`hover` 可返回部分结果（接受漏报），`workspace/symbol` 提供渐进结果，`references` 应向用户标明结果可能不完整。
-- **`Ready`**：首轮摘要与一致性 merge 完成；查询结果视为完整工作区语义。
+- **`Initializing`**：摘要与聚合层正在构建；`goto`/`hover` 可返回部分结果（接受漏报），`workspace/symbol` 提供渐进结果，`references` 应向用户标明结果可能不完整。冷启动期间 `did_open` / `did_change` 通过 `publish_syntax_only_during_indexing` 抢跑 syntax-only 诊断。
+- **`Ready`**：Phase 3 merge 完成后进入；查询结果视为完整工作区语义。
 
-冷启动与编辑期增量保持同一心智模型：冷启动 = 从空状态对全部文件做大批量差量导入；编辑期 = 基于已有索引对少量文件做小批量差量更新。
+冷启动与编辑期增量保持同一心智模型：冷启动 = 从空状态对全部文件做一次性原子导入；编辑期 = 基于已有索引对少量文件做 `upsert_summary` 增量更新。
 
 ### 6.2 编辑期增量更新
 
@@ -389,11 +409,11 @@ hover 在 p.name 上
 
 ### 6.6 持久化缓存
 
-第一阶段将磁盘持久化缓存做成配置项控制：
+磁盘持久化缓存做成配置项控制：
 
-- 默认启用 `DocumentSummary` 级别缓存（`summary` 模式）。
-- 用户可关闭为纯内存索引（`memory` 模式）。
-- 第一阶段不默认缓存聚合分片；聚合层启动时重建或渐进 merge。
+- 默认纯内存索引（`memory` 模式）。
+- 用户可启用 `DocumentSummary` 级别缓存（`summary` 模式）。
+- 聚合层（`GlobalShard` / `TypeShard` / `RequireByReturn` / `TypeDependants`）**不缓存**；冷启动 Phase 3 通过 `build_initial` 从所有 file summaries 原子重建。
 
 #### 缓存失效规则
 
@@ -401,16 +421,16 @@ hover 在 p.name 上
 
 | 维度 | 失效处理 |
 |------|---------|
-| **文件内容哈希** | 对应文件 `DocumentSummary` 失效，重建该摘要并差量更新聚合层 |
+| **文件内容哈希** | 对应文件 `DocumentSummary` 失效，重建该摘要 |
 | **grammar / LSP schema 版本** | 强失效，放弃旧缓存批次，整体重建 |
-| **关键配置指纹** | 按强失效处理；第一阶段直接清空受影响缓存并重建 |
+| **可执行文件 mtime** | `cargo build` 重链接或 extension 升级替换 binary 时自动失效 |
 
-关键配置指纹仅纳入会影响语义结果的配置（`require` 解析规则、包含/排除模式、语义功能开关）；纯 UI 展示配置不进入该指纹。
+file summary 仅依赖文件内容本身，与 require 配置无关；require 解析在全局聚合层（Phase 3 `build_initial`）处理。
 
 #### 磁盘格式与缓存目录
 
-- 每文件一个 `DocumentSummary` 缓存单元 + 独立元信息文件（schema 版本、配置指纹、URI 映射等）。
-- 默认放在用户缓存目录（避免污染仓库）；可选放在工作区内。
+- 每文件一个 `DocumentSummary` 缓存单元 + 独立元信息文件（schema 版本、exe mtime、URI 映射等）。
+- 默认放在 `<workspace_root>/.vscode/.cache-mylua-lsp/`。
 
 ### 6.7 多根工作区与 `exclude`
 

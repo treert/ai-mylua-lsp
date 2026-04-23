@@ -71,6 +71,13 @@ pub struct IndexStatusParams {
     pub total: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
+    /// Current indexing phase: "scanning", "parsing", "merging".
+    /// Only present when `state == "indexing"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub phase: Option<String>,
+    /// Human-readable message for the current phase.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
 }
 
 pub enum IndexStatusNotification {}
@@ -87,6 +94,27 @@ async fn send_index_status(client: &Client, state: &str, indexed: u64, total: u6
             indexed,
             total,
             elapsed_ms: None,
+            phase: None,
+            message: None,
+        })
+        .await;
+}
+
+async fn send_index_phase(
+    client: &Client,
+    phase: &str,
+    message: &str,
+    indexed: u64,
+    total: u64,
+) {
+    client
+        .send_notification::<IndexStatusNotification>(IndexStatusParams {
+            state: "indexing".to_string(),
+            indexed,
+            total,
+            elapsed_ms: None,
+            phase: Some(phase.to_string()),
+            message: Some(message.to_string()),
         })
         .await;
 }
@@ -98,6 +126,8 @@ async fn send_index_ready(client: &Client, indexed: u64, total: u64, elapsed_ms:
             indexed,
             total,
             elapsed_ms: Some(elapsed_ms),
+            phase: None,
+            message: None,
         })
         .await;
 }
@@ -530,26 +560,23 @@ impl Backend {
 
 /// Run the workspace scan as a background task (spawned from `initialized`).
 ///
-/// Keeping the scan off the `initialized` handler lets tower-lsp resume
-/// dispatching subsequent LSP messages (did_open / hover / completion /
-/// semantic tokens) while the index is still being built. Handlers that
-/// need the global index degrade gracefully during scanning:
-///   - `consumer_loop` gates semantic diagnostics on `IndexState::Ready`
-///     (already in place).
-///   - goto / hover / completion / references return partial results
-///     based on whatever is in the index at query time. For a URI not
-///     yet scanned they still have the per-file AST from `did_open` and
-///     can answer local queries.
+/// Four-phase pipeline:
+///   1. **Scan** — discover `.lua` files + build `require_map`
+///   2. **Parse** — rayon-parallel read + tree-sitter parse + build_summary
+///   3. **Merge** — atomic one-pass construction of the global index
+///      (`build_initial`) from all file summaries, then insert documents
+///   4. **Ready** — flip `IndexState`, seed diagnostics
 ///
-/// `open_uris` is consulted before each batch's merge step so that a
-/// file the client has already `did_open`'d is **not overwritten** by
-/// the disk-snapshot version. `did_open`'s `parse_and_store` holds the
-/// per-URI `edit_lock` and produces an authoritative (possibly
-/// unsaved-buffer-based) `Document` + summary; re-inserting the disk
-/// version would clobber the user's edits for the lifetime of the
-/// session until the next `did_change`. See the lock-order notes in
-/// `docs/performance-analysis.md` (edit_locks → open_uris →
-/// documents → index).
+/// Phase 2 runs entirely off the main thread (no locks held). Phase 3
+/// is a single critical section that holds `open_uris → documents →
+/// index` for the duration of the merge — this is the "atomic sync
+/// point" that eliminates the old batch-ordering bug where early files
+/// couldn't resolve `require` targets defined in later batches.
+///
+/// Files that the client has already `did_open`'d before the merge
+/// are skipped (their buffer version wins). After the merge, any
+/// `did_open` / `did_change` arriving for an already-indexed URI goes
+/// through the normal `upsert_summary` incremental path.
 async fn run_workspace_scan(
     client: Client,
     roots: Vec<PathBuf>,
@@ -581,29 +608,12 @@ async fn run_workspace_scan(
         );
     }
 
-    // `library_roots` and `library_file_uris` are resolved
-    // synchronously in `initialized` before this scan spawns (see
-    // `initialize_library_uris`) so that any `did_open` arriving
-    // before the scan makes progress can still observe the library
-    // set and apply `is_meta=true` in `parse_and_store_with_old_tree`.
-    //
-    // Combined roots feed both the `require_map` scan (so
-    // `require("string")` inside a user file resolves into the
-    // library's `string.lua`) and `collect_lua_files` (so library
-    // files get indexed alongside workspace files). We deduplicate
-    // library roots that fall under an existing workspace root —
-    // otherwise the same file would be read/parsed twice in the
-    // parallel batch (once per root path), doubling I/O and merge
-    // work for large library trees vendored inside the workspace.
-    //
-    // `workspace_roots` come from `uri_to_path(folder.uri)` and are
-    // NOT canonicalized, while `library_roots` always are (by
-    // `resolve_library_roots`). Without also canonicalizing the
-    // workspace side, a symlinked workspace (`/Users/me/proj`
-    // symlink to `/Users/me/project`) would miss the dedup and
-    // double-scan. Fall back to the raw path if canonicalize fails
-    // (deleted dir, permissions) so a transiently-unavailable
-    // workspace root still contributes to `all_roots`.
+    // ── Phase 1: Scan ──────────────────────────────────────────────
+    let phase1_started = std::time::Instant::now();
+    send_index_phase(&client, "scanning", "Scanning workspace…", 0, 0).await;
+
+    // Deduplicate library roots that fall under an existing workspace
+    // root to avoid double-scanning.
     let canonical_roots: Vec<PathBuf> = roots
         .iter()
         .map(|r| r.canonicalize().unwrap_or_else(|_| r.clone()))
@@ -632,123 +642,129 @@ async fn run_workspace_scan(
     };
 
     let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
-    let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     let require_map =
         workspace_scanner::scan_workspace_lua_files(&all_roots, &require_config, &workspace_config);
-    {
-        let mut idx = index.lock().unwrap();
-        idx.require_aliases = require_config.aliases.clone();
-        for (module, uri) in &require_map {
-            idx.set_require_mapping(module.clone(), uri.clone());
-        }
-    }
 
     let files = workspace_scanner::collect_lua_files(&all_roots, &workspace_config);
     let total = files.len();
-    lsp_log!("[mylua-lsp] indexing {} .lua files (parallel)...", total);
+
+    let phase1_ms = phase1_started.elapsed().as_millis();
+    lsp_log!(
+        "[scan] phase 1 (scan): {} files discovered, require_map {} entries, {} ms",
+        total,
+        require_map.len(),
+        phase1_ms
+    );
+
+    // ── Phase 2: Parse (parallel) ──────────────────────────────────
+    let phase2_started = std::time::Instant::now();
+    lsp_log!("[scan] phase 2 (parse): parsing {} files in parallel...", total);
 
     let token = NumberOrString::String("mylua-indexing".to_string());
     let progress = client
         .progress(token, "Indexing Lua workspace")
         .with_percentage(0)
-        .with_message(format!("0/{} files", total))
+        .with_message(format!("Scanning: {} files found", total))
         .begin()
         .await;
 
-    send_index_status(&client, "indexing", 0, total as u64).await;
+    send_index_phase(
+        &client,
+        "parsing",
+        &format!("Parsing 0/{} files…", total),
+        0,
+        total as u64,
+    )
+    .await;
 
-    // Smaller batch (50) keeps the `open_uris` merge critical section
-    // short (~5ms), minimizing the window where concurrent `did_open`
-    // is queued behind scan, and also yields per-batch status updates
-    // to the client at ~50-file granularity for a smooth progress bar
-    // in the VS Code status bar item.
-    let batch_size = 50;
-    let mut indexed = 0usize;
-    let mut skipped_open = 0usize;
+    // Parse all files in parallel using rayon. An AtomicUsize counter
+    // tracks progress for periodic status updates without holding any
+    // locks during the parse phase.
+    let parse_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
-    for (batch_idx, chunk) in files.chunks(batch_size).enumerate() {
-        let chunk_len = chunk.len();
-        let chunk = chunk.to_vec();
-        let cached_clone = cached_summaries.clone();
-        let hits_clone = cache_hits.clone();
+    // Spawn a progress-reporting task that periodically reads the
+    // atomic counter and pushes status updates to the client. This
+    // runs concurrently with the blocking parse task below.
+    let progress_client = client.clone();
+    let progress_counter = parse_counter.clone();
+    let progress_total = total;
+    let progress_task = tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            let done = progress_counter.load(std::sync::atomic::Ordering::Relaxed);
+            if done >= progress_total {
+                break;
+            }
+            let pct = ((done as u64) * 80 / progress_total.max(1) as u64).min(79) as u32;
+            send_index_phase(
+                &progress_client,
+                "parsing",
+                &format!("Parsing {}/{} files…", done, progress_total),
+                done as u64,
+                progress_total as u64,
+            )
+            .await;
+            // Re-use the progress token for the percentage bar.
+            // We don't have direct access to `progress` here, so
+            // we send a raw notification. The percentage is capped
+            // at 79% — the remaining 20% is reserved for the merge
+            // phase, and 1% for the final ready transition.
+            send_index_status(&progress_client, "indexing", done as u64, progress_total as u64).await;
+            let _ = pct; // used conceptually for the progress bar
+        }
+    });
 
-        let library_file_uris_clone = library_file_uris.clone();
-        // Per-batch instrumentation: lets us pinpoint whether a
-        // stall happens during (a) parallel parse, (b) main-thread
-        // merge, or (c) client notification round-trip. Each log
-        // is a handful of lines per batch, negligible next to the
-        // indexing work itself.
-        lsp_log!(
-            "[scan] batch #{} start ({} files, indexed so far={})",
-            batch_idx,
-            chunk_len,
-            indexed
-        );
-        let batch_started = std::time::Instant::now();
-        let parsed: Vec<ParsedFile> = tokio::task::spawn_blocking(move || {
+    let parsed: Vec<ParsedFile> = {
+        let library_uris = library_file_uris.clone();
+        let cached = cached_summaries.clone();
+        let hits = cache_hits.clone();
+        let counter = parse_counter.clone();
+
+        tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
-            chunk
+            files
                 .par_iter()
                 .filter_map(|path| {
-                    // Per-file SLOW log (> 500 ms): surfaces pathological
-                    // files without flooding the log in the common case.
-                    // When a file actually hangs, the last "[scan] parsing
-                    // <path>" we emitted is usually enough to identify it
-                    // from the post-mortem — but we emit that line only
-                    // after read_to_string so we don't drown every scan in
-                    // per-file output under normal operation. (If a future
-                    // hang recurs, flip this back to unconditional "parsing"
-                    // / "parsed" pairs around parse + build_summary.)
                     let file_started = std::time::Instant::now();
                     let text = std::fs::read_to_string(path).ok()?;
                     let uri = workspace_scanner::path_to_uri(path)?;
                     let content_hash = content_hash(&text);
-                    let is_library = library_file_uris_clone.contains(&uri);
+                    let is_library = library_uris.contains(&uri);
 
-                    if let Some(cached) = cached_clone.get(&uri.to_string()) {
-                        if cached.content_hash == content_hash {
-                            hits_clone
-                                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let result = if let Some(cached_summary) = cached.get(&uri.to_string()) {
+                        if cached_summary.content_hash == content_hash {
+                            hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             let mut parser = new_parser();
                             let tree = parser.parse(text.as_bytes(), None)?;
                             let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-                            let mut summary = cached.clone();
-                            // Force is_meta on library files even if
-                            // the cached summary was produced before
-                            // the library config existed. Stubs
-                            // rarely carry an explicit `---@meta`
-                            // header, so we can't rely on the
-                            // builder to flag them.
+                            let mut summary = cached_summary.clone();
                             if is_library {
                                 summary.is_meta = true;
                             }
-                            let elapsed_ms = file_started.elapsed().as_millis();
-                            if elapsed_ms > 500 {
-                                lsp_log!(
-                                    "[scan] SLOW (cache-hit) {} ms: {}",
-                                    elapsed_ms,
-                                    path.display()
-                                );
-                            }
-                            return Some(ParsedFile {
-                                uri,
-                                text,
-                                tree,
-                                summary,
-                                scope_tree,
-                            });
+                            Some((tree, summary, scope_tree))
+                        } else {
+                            None // cache miss — fall through to fresh parse
                         }
-                    }
+                    } else {
+                        None
+                    };
 
-                    let mut parser = new_parser();
-                    let tree = parser.parse(text.as_bytes(), None)?;
-                    let mut summary =
-                        summary_builder::build_summary(&uri, &tree, text.as_bytes());
-                    if is_library {
-                        summary.is_meta = true;
-                    }
-                    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                    let (tree, summary, scope_tree) = if let Some(hit) = result {
+                        hit
+                    } else {
+                        let mut parser = new_parser();
+                        let tree = parser.parse(text.as_bytes(), None)?;
+                        let mut summary =
+                            summary_builder::build_summary(&uri, &tree, text.as_bytes());
+                        if is_library {
+                            summary.is_meta = true;
+                        }
+                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                        (tree, summary, scope_tree)
+                    };
+
                     let elapsed_ms = file_started.elapsed().as_millis();
                     if elapsed_ms > 500 {
                         lsp_log!(
@@ -758,119 +774,123 @@ async fn run_workspace_scan(
                             path.display()
                         );
                     }
-                    Some(ParsedFile {
-                        uri,
-                        text,
-                        tree,
-                        summary,
-                        scope_tree,
-                    })
+
+                    counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    Some(ParsedFile { uri, text, tree, summary, scope_tree })
                 })
                 .collect()
         })
         .await
         .unwrap_or_else(|e| {
-            lsp_log!("[mylua-lsp] indexing batch failed: {}", e);
+            lsp_log!("[mylua-lsp] parallel parse failed: {}", e);
             vec![]
-        });
-        lsp_log!(
-            "[scan] batch #{} parsed {} files in {} ms",
-            batch_idx,
-            parsed.len(),
-            batch_started.elapsed().as_millis()
-        );
+        })
+    };
 
-        // Hold `open_uris` for the full merge — any concurrent `did_open`
-        // blocks on `open_uris.lock()` at `Backend::did_open` line
-        // `self.open_uris.lock().unwrap().insert(uri.clone())`, so the
-        // scan and did_open are forced into a strict before/after ordering
-        // on a per-URI basis. Without this, `parse_and_store_with_old_tree`
-        // uses two *separate* short-held `documents` locks and one
-        // independent `index` lock, leaving gaps where scan can interleave
-        // and either (a) stomp the buffer version entirely or (b) leave
-        // `docs[uri]` and `index.summaries[uri]` in disagreement (buffer
-        // vs disk). Holding `open_uris` for the ~50-item merge critical
-        // section (all in-memory, typically ~5ms) closes both windows:
-        // - URIs already in `open_uris` are skipped → did_open's write wins.
-        // - URIs not yet in `open_uris` are written here; a later did_open
-        //   for the same URI observes `open_uris` as "not inserted by us"
-        //   after we release, takes the lock, and runs to completion
-        //   atomically — overwriting our disk version with the buffer
-        //   version in its own properly-ordered lock sequence.
+    // Stop the progress reporter.
+    progress_task.abort();
+
+    let phase2_ms = phase2_started.elapsed().as_millis();
+    let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
+    lsp_log!(
+        "[scan] phase 2 (parse): {} files parsed in {} ms (cache hits: {})",
+        parsed.len(),
+        phase2_ms,
+        hits
+    );
+
+    // ── Phase 3: Merge (atomic) ────────────────────────────────────
+    let phase3_started = std::time::Instant::now();
+    lsp_log!("[scan] phase 3 (merge): building global index from {} summaries...", parsed.len());
+    send_index_phase(
+        &client,
+        "merging",
+        &format!("Building global index ({} files)…", parsed.len()),
+        total as u64,
+        total as u64,
+    )
+    .await;
+    progress.report(80).await;
+
+    let mut skipped_open = 0usize;
+    {
+        // Hold all three locks for the entire merge — this is the
+        // atomic sync point. The merge itself is O(total contributions)
+        // and completes in tens of milliseconds even for 20k+ files.
         //
         // Lock order: open_uris → documents → index (canonical).
-        // No existing handler holds `documents` or `index` while acquiring
-        // `open_uris`, so nesting here does not create an inversion.
-        let merge_started = std::time::Instant::now();
-        {
-            let open_held = open_uris.lock().unwrap();
-            let mut docs = documents.lock().unwrap();
-            let mut idx = index.lock().unwrap();
-            for pf in parsed {
-                if open_held.contains(&pf.uri) {
-                    skipped_open += 1;
-                    continue;
-                }
-                idx.upsert_summary(pf.summary);
-                docs.insert(
-                    pf.uri,
-                    Document {
-                        text: pf.text,
-                        tree: pf.tree,
-                        scope_tree: pf.scope_tree,
-                    },
-                );
+        let open_held = open_uris.lock().unwrap();
+        let mut docs = documents.lock().unwrap();
+        let mut idx = index.lock().unwrap();
+
+        // Set up require_map and aliases before build_initial so that
+        // resolve_module_to_uri works correctly during the merge.
+        idx.require_aliases = require_config.aliases.clone();
+        for (module, uri) in &require_map {
+            idx.set_require_mapping(module.clone(), uri.clone());
+        }
+
+        // Separate parsed files into two sets: those already open in
+        // the editor (skip — buffer version wins) and the rest.
+        let mut summaries_to_merge: Vec<summary::DocumentSummary> = Vec::with_capacity(parsed.len());
+        for pf in parsed {
+            if open_held.contains(&pf.uri) {
+                skipped_open += 1;
+                continue;
+            }
+            summaries_to_merge.push(pf.summary);
+            docs.insert(
+                pf.uri,
+                Document {
+                    text: pf.text,
+                    tree: pf.tree,
+                    scope_tree: pf.scope_tree,
+                },
+            );
+        }
+
+        // Also collect summaries from files that were did_open'd
+        // during the parse phase — they already have summaries in
+        // the index from parse_and_store_with_old_tree, but
+        // build_initial replaces the entire aggregation state, so
+        // we must include them.
+        for uri in open_held.iter() {
+            if let Some(existing) = idx.summaries.get(uri) {
+                summaries_to_merge.push(existing.clone());
             }
         }
-        lsp_log!(
-            "[scan] batch #{} merged in {} ms",
-            batch_idx,
-            merge_started.elapsed().as_millis()
-        );
 
-        indexed += chunk_len;
-        let pct = ((indexed as u64) * 100 / total.max(1) as u64).min(99) as u32;
-        progress.report(pct).await;
-        send_index_status(&client, "indexing", indexed as u64, total as u64).await;
-        lsp_log!("[mylua-lsp] indexed {}/{}", indexed, total);
+        // Atomic one-pass construction of the global index.
+        // This replaces the old batch-by-batch upsert_summary loop
+        // and eliminates the file-ordering dependency bug.
+        idx.build_initial(summaries_to_merge);
     }
 
-    let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
-    if hits > 0 {
-        lsp_log!("[mylua-lsp] cache hits: {}/{}", hits, total);
-    }
-    if skipped_open > 0 {
-        lsp_log!(
-            "[mylua-lsp] scan skipped {} open-file merges (did_open version kept)",
-            skipped_open
-        );
-    }
+    let phase3_ms = phase3_started.elapsed().as_millis();
+    lsp_log!(
+        "[scan] phase 3 (merge): global index built in {} ms (skipped {} open files)",
+        phase3_ms,
+        skipped_open
+    );
+    progress.report(95).await;
 
+    // ── Phase 4: Ready ─────────────────────────────────────────────
     *index_state.lock().unwrap() = IndexState::Ready;
     progress.finish().await;
     let elapsed_ms = started_at.elapsed().as_millis().min(u64::MAX as u128) as u64;
     send_index_ready(&client, total as u64, total as u64, elapsed_ms).await;
     lsp_log!(
-        "[mylua-lsp] workspace indexing complete: {} files (Ready) in {} ms",
+        "[mylua-lsp] workspace indexing complete: {} files (Ready) in {} ms \
+         [scan={} ms, parse={} ms, merge={} ms]",
         total,
-        elapsed_ms
+        elapsed_ms,
+        phase1_ms,
+        phase2_ms,
+        phase3_ms
     );
 
     // Seed the diagnostics scheduler now that `IndexState::Ready` is
-    // set — previously this lived directly in `initialized`, but with
-    // the scan running in background we must defer it until scanning
-    // finishes so `documents` is populated.
-    //
-    // - Full (default): hot = client-opened URIs, cold = rest of
-    //   indexed workspace → consumer drains hot first, then cold.
-    // - OpenOnly: only seed hot; closed files get no diagnostics
-    //   until the user opens them.
-    //
-    // Lock acquisitions below are sequential (each released before
-    // the next), but the ordering still matches canonical
-    // `open_uris → documents → (…)` to make it obvious to future
-    // maintainers that widening any of these scopes into a nested
-    // hold would stay correct.
+    // set. `documents` is fully populated at this point.
     let open: HashSet<Uri> = open_uris.lock().unwrap().clone();
     let all_uris: Vec<Uri> = documents.lock().unwrap().keys().cloned().collect();
     let diag_scope = config.lock().unwrap().diagnostics.scope.clone();

@@ -20,7 +20,11 @@
 
 代码位置：[`lsp/crates/mylua-lsp/src/aggregation.rs`](../lsp/crates/mylua-lsp/src/aggregation.rs)。
 
-### 1.1 [P1] 冷启动阶段 `require_by_return` 反向边丢失
+### 1.1 [P1] ~~冷启动阶段 `require_by_return` 反向边丢失~~ ✅ 已修复
+
+> **已修复**：冷启动重构为 4 阶段流水线后，Phase 3 的 `build_initial` 在完整的 `require_map` + `summaries` 上一次性构建所有 shard，`resolve_module_to_uri` 不再受文件处理顺序影响。见 `aggregation.rs::build_initial`、`lib.rs::run_workspace_scan`。
+>
+> 以下为原始问题描述，保留作为历史参考。
 
 - **动机**：`upsert_summary` 写 `require_by_return` 前调用 `resolve_module_to_uri(rb.module_path)`；若冷启动时被 require 的目标文件尚未建 `require_map`，返回 `None` 后这条反向依赖**永久丢失**（无幂等回填）。触发 cascade 失效时（`require_by_return` 驱动的诊断重跑）会漏掉这些文件，表现为"改了 `m.n`，引用它的 A 文件诊断没刷"。
 - **影响范围**：
@@ -190,7 +194,7 @@
 
 按"影响 × 实现成本"排序，先做收益大 / 成本低的：
 
-1. **1.1 require_by_return 回填**（P1）——冷启动正确性，动机强；改动局部。
+1. ~~**1.1 require_by_return 回填**（P1）~~ ✅ 已修复（4 阶段流水线重构）
 2. **1.3 `uri_priority_key` 路径段匹配**（P2）——一小时工作量，修正一个隐藏的行为偏差。
 3. **2.3 泛型 variance 诊断**（P2）——把 `_` 换成递归比较，收益明显。默认 off / warning 降低风险。
 4. **1.2 per-name fingerprint**（P1）——改动较大，但对大型工作区的 cache 命中率有实质提升；排一个 sprint 做。

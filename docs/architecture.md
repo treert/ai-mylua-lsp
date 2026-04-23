@@ -82,7 +82,7 @@ flowchart TB
 
 - **文件发现**：`.gitignore`、用户 exclude、globs；支持 5 万级路径。
 - **符号与引用索引**：为 **definition / references / workspace/symbol** 维护可增量更新的结构（例如 **工作区全局符号合并表**、`local = require` **绑定边**、引用发生列表）；**不**依赖「未 require 则不可见」的模块隔离模型，见 §3.4。
-- **AST 驻留策略**：**全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse**（设计契约，见 [`performance-analysis.md`](performance-analysis.md) §3.1）。理由：goto / hover / references / 级联诊断都需要任意文件的语法树，驱逐未打开文件会导致首次跨文件跳转触发 on-demand parse 的可感知卡顿。代价是 5 万文件级别峰值 RSS ~1.5–3GB、冷启动必须全量 parse 一遍（`tree_sitter::Tree` 不可序列化）；冷启动已完全后台化，用户侧不存在"等 Ready"的阻塞窗口。**查询语义**覆盖全工作区，与 [`requirements.md`](requirements.md) 一致。
+- **AST 驻留策略**：**全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse**（设计契约，见 [`performance-analysis.md`](performance-analysis.md) §3.1）。理由：goto / hover / references / 级联诊断都需要任意文件的语法树，驱逐未打开文件会导致首次跨文件跳转触发 on-demand parse 的可感知卡顿。代价是 5 万文件级别峰值 RSS ~1.5–3GB、冷启动必须全量 parse 一遍（`tree_sitter::Tree` 不可序列化）；冷启动已完全后台化（4 阶段流水线：scan → rayon 全量并行 parse → 原子 `build_initial` → Ready），用户侧不存在"等 Ready"的阻塞窗口。**查询语义**覆盖全工作区，与 [`requirements.md`](requirements.md) 一致。
 - **监听与批量变更**：`didChangeWatchedFiles`、去抖、合并重索引；**可取消**长任务。
 
 ### 3.3 语义模型与查询
@@ -96,8 +96,7 @@ flowchart TB
 
 **语义**：全局已见 + `local xxx = require("…")` 绑定到目标文件 **`return`**；类型名工作区合并；与真实 `package.loaded` 无关。
 
-**索引策略**：采用 **摘要驱动的混合式渐进索引**。单文件 **`DocumentSummary`** 可并行生成，并流式 merge 到 **工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、引用结构）。查询层显式区分索引状态，允许首轮扫描期间“渐进可用但可能不完整”，见 [`index-architecture.md`](index-architecture.md) §6.1。
-
+**索引策略**：采用 **摘要驱动的 4 阶段流水线索引**。冷启动时 `rayon` 全量并行生成所有 `DocumentSummary`（Phase 2，不持锁），然后通过 `build_initial` 原子一次性构建 **工作区聚合层**（`GlobalShard`、`TypeShard`、`RequireByReturn`、`TypeDependants`）（Phase 3，单次临界区）。编辑期通过 `upsert_summary` 增量更新。查询层显式区分索引状态（`Initializing` / `Ready`），冷启动期间允许部分结果，见 [`index-architecture.md`](index-architecture.md) §6.1。
 **Lua table 与 Emmy**：链式字段 Hover / Goto / References 依赖 **函数摘要 + 局部类型事实 + table shape**。每个 Lua table 字面值按节点 identity 建模，单文件内可持续更新 shape；但一旦命中 **明确 Emmy 类型**，就完全切换到 Emmy 语义，不再混用 table shape，见 [`index-architecture.md`](index-architecture.md) §4.3–§4.4。
 
 **全局 table**：跨文件允许对同一全局路径做结构合并，并保留逐段节点树、完整路径索引与来源候选；当候选歧义较高时，`goto`、`hover`、`references` 采用不同程度的保守回退，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §3.1 与 §2.2。

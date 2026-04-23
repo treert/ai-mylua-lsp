@@ -86,7 +86,7 @@ ai-mylua-lsp/
 > 性能分析见 [`docs/performance-analysis.md`](docs/performance-analysis.md)
 
 **关键架构特性**：
-- **索引状态机**：`Initializing` → `Ready`，冷启动 `rayon` 并行解析，50 文件一批流式 merge
+- **索引状态机**：`Initializing` → `Ready`，4 阶段冷启动流水线：scan → rayon 全量并行 parse → 原子 `build_initial` 构建全局索引 → Ready；`mylua/indexStatus` 通知携带 `phase` 字段（scanning / parsing / merging）
 - **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
 - **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
 - **诊断调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双队列

@@ -148,6 +148,95 @@ impl WorkspaceAggregation {
         }
     }
 
+    /// Build the initial global index atomically from a complete set of
+    /// file summaries. This is the cold-start path: all summaries are
+    /// available at once, so we skip `remove_contributions` (nothing to
+    /// remove) and `resolve_module_to_uri` benefits from a fully
+    /// populated `require_map` + `summaries` — eliminating the
+    /// batch-ordering bug where early files couldn't resolve modules
+    /// defined in later batches.
+    ///
+    /// After this call, `upsert_summary` handles incremental updates.
+    pub fn build_initial(&mut self, summaries: Vec<DocumentSummary>) {
+        // Clear all shards — build_initial is a full rebuild. Any
+        // contributions from did_open's upsert_summary during the
+        // cold-start window are included in `summaries` (the caller
+        // collects them from `idx.summaries` for open URIs), so we
+        // must wipe the shards to avoid duplicates.
+        self.summaries.clear();
+        self.global_shard.clear();
+        self.type_shard.clear();
+        self.require_by_return.clear();
+        self.type_dependants.clear();
+        self.resolution_cache.clear();
+
+        // 1. Insert all summaries first so `resolve_module_to_uri`
+        //    fallback path (scanning `self.summaries.keys()`) works
+        //    for every file.
+        for s in &summaries {
+            self.summaries.insert(s.uri.clone(), s.clone());
+        }
+
+        // 2. Build all shards in a single pass.
+        for summary in &summaries {
+            let uri = &summary.uri;
+
+            for gc in &summary.global_contributions {
+                let candidates = self.global_shard
+                    .entry(gc.name.clone())
+                    .or_default();
+                candidates.push(GlobalCandidate {
+                    name: gc.name.clone(),
+                    kind: gc.kind.clone(),
+                    type_fact: gc.type_fact.clone(),
+                    range: gc.range,
+                    selection_range: gc.selection_range,
+                    source_uri: uri.clone(),
+                });
+            }
+
+            for td in &summary.type_definitions {
+                let candidates = self.type_shard
+                    .entry(td.name.clone())
+                    .or_default();
+                candidates.push(TypeCandidate {
+                    name: td.name.clone(),
+                    kind: td.kind.clone(),
+                    source_uri: uri.clone(),
+                    range: td.range,
+                });
+            }
+
+            for rb in &summary.require_bindings {
+                if let Some(target_uri) = self.resolve_module_to_uri(&rb.module_path) {
+                    self.require_by_return
+                        .entry(target_uri)
+                        .or_default()
+                        .push(RequireDependant {
+                            source_uri: uri.clone(),
+                            local_name: rb.local_name.clone(),
+                        });
+                }
+            }
+
+            let referenced_types = collect_referenced_type_names(summary);
+            for type_name in referenced_types {
+                let uris = self.type_dependants.entry(type_name).or_default();
+                if !uris.iter().any(|u| u == uri) {
+                    uris.push(uri.clone());
+                }
+            }
+        }
+
+        // 3. Sort candidate lists once (not per-insert like upsert_summary).
+        for candidates in self.global_shard.values_mut() {
+            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
+        }
+        for candidates in self.type_shard.values_mut() {
+            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
+        }
+    }
+
     /// Integrate a new or updated file summary into the aggregation layer.
     ///
     /// Performs a name-level diff: removes old contributions from this URI,
