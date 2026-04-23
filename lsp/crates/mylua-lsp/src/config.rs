@@ -119,7 +119,7 @@ pub struct IndexConfig {
 impl Default for IndexConfig {
     fn default() -> Self {
         Self {
-            cache_mode: CacheMode::Summary,
+            cache_mode: CacheMode::Memory,
         }
     }
 }

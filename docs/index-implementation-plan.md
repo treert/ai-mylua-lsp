@@ -323,8 +323,8 @@ pub struct WorkspaceAggregation {
 - 缓存失效维度（`CacheMeta` 任一字段不匹配 → 整盘 wipe 重建）：
   - `schema_version`：常量，破坏性 `DocumentSummary` 结构变化时手动 bump。
   - `exe_mtime_ns`：当前 `mylua-lsp` 可执行文件 mtime（纳秒）。`cargo build` 重链接、extension 升级替换 binary 都会更新，开发与发版场景统一覆盖，无需手动 bump schema。
-  - `config_fingerprint`：`require.paths` + `require.aliases` 的哈希。
   - 每文件另有 `content_hash` 二级门槛：meta 全匹配但单个 Lua 文件内容变了也会重建该文件 summary。
+- **注**：`config_fingerprint` 已移除——file summary 仅依赖文件内容本身，与 require 配置无关；require 解析在全局聚合层处理。默认 `cacheMode = "memory"`（纯内存，不写磁盘）。
 - **缓存位置**：`<workspace_root>/.vscode/.cache-mylua-lsp/`（与 `mylua-lsp.log` 同驻 `.vscode/`，统一编辑器状态目录）。
   - 随项目搬家/删除自动清理，避免 `~/.cache/` 下孤儿目录累积。
   - 首次 `save_all` 会在缓存目录内自动写入 `.gitignore`（内容 `*` + `!.gitignore`）防止误提交。

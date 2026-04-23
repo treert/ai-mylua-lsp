@@ -52,6 +52,82 @@ pub fn init(workspace_root: &Path, enable_file_log: bool) {
         "=== mylua-lsp started, log at {} ===",
         log_path.display()
     ));
+
+    // Print executable path and its last-modified time so we can
+    // quickly verify the correct binary is running and up-to-date.
+    match std::env::current_exe() {
+        Ok(exe) => {
+            let mtime_str = std::fs::metadata(&exe)
+                .and_then(|m| m.modified())
+                .map(|t| {
+                    // Format as seconds since UNIX epoch — unambiguous and
+                    // timezone-independent. A full human-readable local
+                    // timestamp would require the `chrono` crate which we
+                    // don't want to pull in just for one log line.
+                    match t.duration_since(std::time::UNIX_EPOCH) {
+                        Ok(d) => {
+                            // Rough UTC breakdown without pulling in chrono.
+                            let secs = d.as_secs();
+                            let (y, m, day, h, min, s) = epoch_to_utc(secs);
+                            format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC", y, m, day, h, min, s)
+                        }
+                        Err(_) => "unknown".to_string(),
+                    }
+                })
+                .unwrap_or_else(|_| "unknown".to_string());
+            log(&format!(
+                "[mylua-lsp] executable: {} (modified: {})",
+                exe.display(),
+                mtime_str
+            ));
+        }
+        Err(e) => {
+            log(&format!("[mylua-lsp] executable: <unknown> ({})", e));
+        }
+    }
+}
+
+/// Convert seconds since UNIX epoch to (year, month, day, hour, minute, second) in UTC.
+/// Minimal implementation — no leap-second handling, good enough for log display.
+fn epoch_to_utc(epoch_secs: u64) -> (u64, u64, u64, u64, u64, u64) {
+    let s = epoch_secs % 60;
+    let total_min = epoch_secs / 60;
+    let min = total_min % 60;
+    let total_hours = total_min / 60;
+    let h = total_hours % 24;
+    let mut days = total_hours / 24;
+
+    // Walk years from 1970
+    let mut year = 1970u64;
+    loop {
+        let days_in_year = if is_leap(year) { 366 } else { 365 };
+        if days < days_in_year {
+            break;
+        }
+        days -= days_in_year;
+        year += 1;
+    }
+
+    let leap = is_leap(year);
+    let month_days: [u64; 12] = [
+        31,
+        if leap { 29 } else { 28 },
+        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
+    ];
+    let mut month = 0u64;
+    for &md in &month_days {
+        if days < md {
+            break;
+        }
+        days -= md;
+        month += 1;
+    }
+
+    (year, month + 1, days + 1, h, min, s)
+}
+
+fn is_leap(y: u64) -> bool {
+    y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
 }
 
 pub fn log(msg: &str) {

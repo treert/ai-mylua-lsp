@@ -90,7 +90,7 @@ ai-mylua-lsp/
 - **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
 - **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
 - **诊断调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双队列
-- **磁盘持久化缓存**：`CacheMeta` 四维失效
+- **磁盘持久化缓存**：`CacheMeta` 三维失效（默认纯内存模式）
 - **文件过滤**：`workspace.include` / `workspace.exclude` glob
 
 命令：

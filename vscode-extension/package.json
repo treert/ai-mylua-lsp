@@ -128,7 +128,7 @@
         "mylua.index.cacheMode": {
           "type": "string",
           "enum": ["summary", "memory"],
-          "default": "summary",
+          "default": "memory",
           "description": "Index persistence: 'summary' caches DocumentSummary to disk, 'memory' is in-process only."
         },
         "mylua.diagnostics.enable": {

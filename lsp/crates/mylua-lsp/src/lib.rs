@@ -563,13 +563,12 @@ async fn run_workspace_scan(
     index_state: Arc<Mutex<IndexState>>,
     started_at: std::time::Instant,
 ) {
-    let (require_config, workspace_config, cache_mode, config_fingerprint, index_mode) = {
+    let (require_config, workspace_config, cache_mode, index_mode) = {
         let cfg = config.lock().unwrap();
         (
             cfg.require.clone(),
             cfg.workspace.clone(),
             cfg.index.cache_mode.clone(),
-            summary_cache::compute_config_fingerprint(&cfg),
             cfg.workspace.index_mode.clone(),
         )
     };
@@ -627,7 +626,7 @@ async fn run_workspace_scan(
     let cache = if use_disk_cache {
         roots
             .first()
-            .map(|r| summary_cache::SummaryCache::new(r, config_fingerprint))
+            .map(|r| summary_cache::SummaryCache::new(r))
     } else {
         None
     };
@@ -889,9 +888,8 @@ async fn run_workspace_scan(
         let summaries = index.lock().unwrap().summaries.clone();
         tokio::task::spawn_blocking({
             let cache_dir = cache.cache_dir().to_path_buf();
-            let config_fp = config_fingerprint;
             move || {
-                let c = summary_cache::SummaryCache::new_from_dir(cache_dir, config_fp);
+                let c = summary_cache::SummaryCache::new_from_dir(cache_dir);
                 c.save_all(&summaries);
                 lsp_log!("[mylua-lsp] saved {} summaries to cache", summaries.len());
             }

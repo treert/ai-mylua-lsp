@@ -16,7 +16,7 @@
 |------|------|----------|
 | **并行冷启动** | `rayon` + 50 文件/批，真·多核并行解析 + 生成 summary；**scan 整体在 `initialized` 里 `tokio::spawn` 后台执行**，`initialized` 立即返回，不阻塞后续 `did_open` / `hover` 等请求；每批结束后通过 `mylua/indexStatus` 通知 VS Code 扩展驱动 status-bar 进度 | `lib.rs::run_workspace_scan`（由 `initialized` 后台 spawn） |
 | **并发安全的 scan/did_open 交错** | scan batch 的 merge 阶段按 canonical `open_uris → documents → index` **整段持 `open_uris`** 锁；命中 `open_uris` 的 URI 同时跳过 `upsert_summary` 与 `docs.insert`，避免把 `parse_and_store_with_old_tree` 内部两段独立临界区写入的 buffer 版本被 scan 的 disk 版本覆盖。批量单位 50 文件：既缩短 `open_uris` 锁持有窗口（单批 merge ~5ms），也让 status-bar 进度更新粒度更细 | `lib.rs::run_workspace_scan`（merge block） |
-| **磁盘 Summary 缓存** | 四维失效：`schema_version` / `exe_mtime_ns` / `config_fingerprint` / 每文件 `content_hash`；热缓存下跳过 summary 重建 | `summary_cache.rs` |
+| **磁盘 Summary 缓存** | 三维失效：`schema_version` / `exe_mtime_ns` / 每文件 `content_hash`；热缓存下跳过 summary 重建；默认纯内存模式（`cacheMode = "memory"`） | `summary_cache.rs` |
 | **增量 reparse** | `tree.edit(&InputEdit)` + `parse(new, Some(old))`，未变区域子树原地复用 | `lib.rs::parse_and_store_with_old_tree` |
 | **诊断优先级调度** | 单一 `DiagnosticScheduler`：Hot / Cold 双 `VecDeque` + tombstone 升级 + 单消费者 + supervisor 自愈；300ms debounce + per-URI gen 去重；seed_bulk 冷启动批量入队（`mylua.diagnostics.scope` 控制 Full / OpenOnly） | `diagnostic_scheduler.rs`，`lib.rs::consumer_loop` |
 | **级联精细化** | 签名指纹不变不级联；`require_by_return` + `type_dependants` 双向反向索引覆盖 require 与 Emmy 类型依赖；级联扇出按 scope 过滤 | `aggregation.rs`，`lib.rs::parse_and_store_with_old_tree` |

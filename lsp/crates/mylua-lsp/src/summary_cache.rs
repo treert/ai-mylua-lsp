@@ -21,7 +21,13 @@ use crate::summary::DocumentSummary;
 //   (every new release writes a new binary with a new mtime). Kept
 //   `deny_unknown_fields` so any lingering v3 meta.json is rejected
 //   and wiped.
-const SCHEMA_VERSION: u32 = 4;
+// v5 (2025-04): dropped `config_fingerprint` — it only covered
+//   `require.paths` and `require.aliases`, which affect the global
+//   `require_map` / module resolution layer, not the per-file
+//   `DocumentSummary` that the cache stores. Since the global index
+//   is rebuilt from scratch on every session, the fingerprint was
+//   redundant.
+const SCHEMA_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,9 +41,8 @@ struct CacheMeta {
     /// avoids same-second collisions in tight rebuild-then-restart
     /// loops. Falls back to `0` if `current_exe()` / metadata is
     /// unavailable, in which case invalidation relies on
-    /// `schema_version` and `config_fingerprint`.
+    /// `schema_version` alone.
     exe_mtime_ns: u64,
-    config_fingerprint: u64,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -52,15 +57,15 @@ pub struct SummaryCache {
 }
 
 impl SummaryCache {
-    pub fn new(workspace_root: &Path, config_fingerprint: u64) -> Self {
-        Self::new_from_dir(resolve_cache_dir(workspace_root), config_fingerprint)
+    pub fn new(workspace_root: &Path) -> Self {
+        Self::new_from_dir(resolve_cache_dir(workspace_root))
     }
 
-    pub fn new_from_dir(cache_dir: PathBuf, config_fingerprint: u64) -> Self {
+    pub fn new_from_dir(cache_dir: PathBuf) -> Self {
         crate::lsp_log!("[mylua-lsp] summary cache dir: {}", cache_dir.display());
         Self {
             cache_dir,
-            expected_meta: build_expected_meta(config_fingerprint),
+            expected_meta: build_expected_meta(),
         }
     }
 
@@ -212,11 +217,10 @@ fn uri_to_cache_filename(uri: &str) -> String {
     format!("{:016x}", crate::util::hash_bytes(uri.as_bytes()))
 }
 
-fn build_expected_meta(config_fingerprint: u64) -> CacheMeta {
+fn build_expected_meta() -> CacheMeta {
     CacheMeta {
         schema_version: SCHEMA_VERSION,
         exe_mtime_ns: current_exe_mtime_ns().unwrap_or(0),
-        config_fingerprint,
     }
 }
 
@@ -233,12 +237,6 @@ fn meta_mismatch_reason(on_disk: &CacheMeta, expected: &CacheMeta) -> Option<Str
         return Some(format!(
             "exe_mtime_ns {} != {}",
             on_disk.exe_mtime_ns, expected.exe_mtime_ns
-        ));
-    }
-    if on_disk.config_fingerprint != expected.config_fingerprint {
-        return Some(format!(
-            "config_fingerprint {:016x} != {:016x}",
-            on_disk.config_fingerprint, expected.config_fingerprint
         ));
     }
     None
@@ -260,23 +258,6 @@ fn current_exe_mtime_ns() -> Option<u64> {
     let mtime = meta.modified().ok()?;
     let dur = mtime.duration_since(std::time::UNIX_EPOCH).ok()?;
     u64::try_from(dur.as_nanos()).ok()
-}
-
-pub fn compute_config_fingerprint(config: &crate::config::LspConfig) -> u64 {
-    let mut combined = String::new();
-    for path in &config.require.paths {
-        combined.push_str(path);
-        combined.push('\0');
-    }
-    let mut aliases: Vec<_> = config.require.aliases.iter().collect();
-    aliases.sort_by_key(|(k, _)| (*k).clone());
-    for (k, v) in aliases {
-        combined.push_str(k);
-        combined.push('=');
-        combined.push_str(v);
-        combined.push('\0');
-    }
-    crate::util::hash_bytes(combined.as_bytes())
 }
 
 #[cfg(test)]
@@ -327,7 +308,7 @@ mod tests {
     #[test]
     fn save_all_auto_writes_gitignore() {
         let root = TempRoot::new("gitignore-default");
-        let cache = SummaryCache::new(root.path(), 42);
+        let cache = SummaryCache::new(root.path());
 
         cache.save_all(&HashMap::new());
 
@@ -358,7 +339,7 @@ mod tests {
         let custom = "# user customized\n*.foo\n";
         std::fs::write(&gitignore, custom).unwrap();
 
-        let cache = SummaryCache::new(root.path(), 42);
+        let cache = SummaryCache::new(root.path());
         cache.save_all(&HashMap::new());
 
         let content = std::fs::read_to_string(&gitignore).expect("gitignore exists");
