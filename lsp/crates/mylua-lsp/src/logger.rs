@@ -4,6 +4,8 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
+use chrono::Local;
+
 /// Fast gate for `lsp_log!` consumers. Reading this `AtomicBool` is a
 /// single relaxed load, whereas grabbing the writer mutex is not
 /// free. The macro checks it *before* `format!`-ing the message so a
@@ -22,6 +24,11 @@ static WRITER: Mutex<Option<BufWriter<File>>> = Mutex::new(None);
 
 pub fn enabled() -> bool {
     ENABLED.load(Ordering::Relaxed)
+}
+
+/// Format current local time as `[HH:MM:SS.mmm]` for log line prefix.
+fn now_local_str() -> String {
+    Local::now().format("[%H:%M:%S%.3f]").to_string()
 }
 
 pub fn init(workspace_root: &Path, enable_file_log: bool) {
@@ -60,19 +67,8 @@ pub fn init(workspace_root: &Path, enable_file_log: bool) {
             let mtime_str = std::fs::metadata(&exe)
                 .and_then(|m| m.modified())
                 .map(|t| {
-                    // Format as seconds since UNIX epoch — unambiguous and
-                    // timezone-independent. A full human-readable local
-                    // timestamp would require the `chrono` crate which we
-                    // don't want to pull in just for one log line.
-                    match t.duration_since(std::time::UNIX_EPOCH) {
-                        Ok(d) => {
-                            // Rough UTC breakdown without pulling in chrono.
-                            let secs = d.as_secs();
-                            let (y, m, day, h, min, s) = epoch_to_utc(secs);
-                            format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02} UTC", y, m, day, h, min, s)
-                        }
-                        Err(_) => "unknown".to_string(),
-                    }
+                    let datetime: chrono::DateTime<Local> = t.into();
+                    datetime.format("%Y-%m-%d %H:%M:%S %Z").to_string()
                 })
                 .unwrap_or_else(|_| "unknown".to_string());
             log(&format!(
@@ -87,54 +83,13 @@ pub fn init(workspace_root: &Path, enable_file_log: bool) {
     }
 }
 
-/// Convert seconds since UNIX epoch to (year, month, day, hour, minute, second) in UTC.
-/// Minimal implementation — no leap-second handling, good enough for log display.
-fn epoch_to_utc(epoch_secs: u64) -> (u64, u64, u64, u64, u64, u64) {
-    let s = epoch_secs % 60;
-    let total_min = epoch_secs / 60;
-    let min = total_min % 60;
-    let total_hours = total_min / 60;
-    let h = total_hours % 24;
-    let mut days = total_hours / 24;
-
-    // Walk years from 1970
-    let mut year = 1970u64;
-    loop {
-        let days_in_year = if is_leap(year) { 366 } else { 365 };
-        if days < days_in_year {
-            break;
-        }
-        days -= days_in_year;
-        year += 1;
-    }
-
-    let leap = is_leap(year);
-    let month_days: [u64; 12] = [
-        31,
-        if leap { 29 } else { 28 },
-        31, 30, 31, 30, 31, 31, 30, 31, 30, 31,
-    ];
-    let mut month = 0u64;
-    for &md in &month_days {
-        if days < md {
-            break;
-        }
-        days -= md;
-        month += 1;
-    }
-
-    (year, month + 1, days + 1, h, min, s)
-}
-
-fn is_leap(y: u64) -> bool {
-    y % 4 == 0 && (y % 100 != 0 || y % 400 == 0)
-}
-
 pub fn log(msg: &str) {
     if !enabled() {
         return;
     }
-    eprintln!("{}", msg);
+    let ts = now_local_str();
+    let stamped = format!("{} {}", ts, msg);
+    eprintln!("{}", stamped);
     // `unwrap_or_else(|p| p.into_inner())` recovers from a poisoned
     // mutex — the logger has no invariants to maintain, so falling
     // back to the tainted state and continuing is strictly better
@@ -147,7 +102,7 @@ pub fn log(msg: &str) {
         // crash the LSP or wedge the caller. Flush each line so
         // `tail -f` style debugging keeps its live feel; the
         // cost is comparable to a `LineWriter`.
-        let _ = writeln!(w, "{}", msg);
+        let _ = writeln!(w, "{}", stamped);
         let _ = w.flush();
     }
 }
