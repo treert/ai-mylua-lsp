@@ -900,8 +900,8 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
 
 fn is_function_type(fact: &TypeFact) -> bool {
     match fact {
-        TypeFact::Known(KnownType::Function(_)) => true,
-        TypeFact::Stub(SymbolicStub::CallReturn { .. }) => true,
+        TypeFact::Known(KnownType::Function(_))
+        | TypeFact::Stub(SymbolicStub::CallReturn { .. }) => true,
         TypeFact::Union(types) => types.iter().any(is_function_type),
         _ => false,
     }

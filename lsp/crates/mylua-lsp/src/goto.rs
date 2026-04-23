@@ -194,8 +194,7 @@ fn type_definition_for_local(
 /// extra resolution step through the resolver).
 fn type_name_of(fact: &TypeFact) -> Option<String> {
     match fact {
-        TypeFact::Known(KnownType::EmmyType(n)) => Some(n.clone()),
-        TypeFact::Known(KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
+        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
         TypeFact::Stub(SymbolicStub::TypeRef { name }) => Some(name.clone()),
         _ => None,
     }

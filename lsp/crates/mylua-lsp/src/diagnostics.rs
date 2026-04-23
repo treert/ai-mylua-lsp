@@ -1246,10 +1246,7 @@ fn inspect_function_returns(
         return;
     }
 
-    let body = match fun.kind() {
-        "function_definition" => fun.child_by_field_name("body"),
-        _ => fun.child_by_field_name("body"),
-    };
+    let body = fun.child_by_field_name("body");
     let Some(body) = body else { return };
 
     let mut returns: Vec<tree_sitter::Node> = Vec::new();

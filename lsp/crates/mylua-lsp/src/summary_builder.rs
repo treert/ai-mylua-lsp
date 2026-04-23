@@ -305,7 +305,9 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
     loop {
         let child = cursor.node();
         match child.kind() {
-            "block" | "if_clause" | "elseif_clause" | "else_clause" => {
+            "block" | "if_clause" | "elseif_clause" | "else_clause"
+            | "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
+            | "for_numeric_statement" | "for_generic_statement" => {
                 visit_nested_block(ctx, child);
             }
             "function_declaration" => {
@@ -321,10 +323,6 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 visit_local_function(ctx, child);
             }
             "emmy_comment" => visit_emmy_comment(ctx, child),
-            "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
-            | "for_numeric_statement" | "for_generic_statement" => {
-                visit_nested_block(ctx, child);
-            }
             _ => {}
         }
         if !cursor.goto_next_sibling() {
