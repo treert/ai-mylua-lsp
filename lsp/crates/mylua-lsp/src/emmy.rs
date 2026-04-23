@@ -812,8 +812,18 @@ pub fn collect_preceding_comments<'a>(
 ) -> Vec<String> {
     let mut comments = Vec::new();
     let mut sibling = node.prev_sibling();
+    // Track the start row of the "next" node (initially the target node itself).
+    // If the previous comment's end row is not adjacent (i.e. there is a blank
+    // line in between), we stop collecting — the comment block is not contiguous.
+    let mut next_start_row = node.start_position().row;
 
     while let Some(prev) = sibling {
+        let prev_end_row = prev.end_position().row;
+        // If there is a blank line gap between this comment and the node/comment
+        // that follows it, the comment block is not contiguous — stop.
+        if next_start_row > prev_end_row + 1 {
+            break;
+        }
         match prev.kind() {
             "emmy_comment" => {
                 let mut lines = Vec::new();
@@ -825,6 +835,7 @@ pub fn collect_preceding_comments<'a>(
                     }
                 }
                 comments.extend(lines.into_iter().rev());
+                next_start_row = prev.start_position().row;
                 sibling = prev.prev_sibling();
                 continue;
             }
@@ -832,6 +843,7 @@ pub fn collect_preceding_comments<'a>(
                 let text = prev.utf8_text(source).unwrap_or("");
                 if text.starts_with("---") {
                     comments.push(text.to_string());
+                    next_start_row = prev.start_position().row;
                     sibling = prev.prev_sibling();
                     continue;
                 }
@@ -843,11 +855,13 @@ pub fn collect_preceding_comments<'a>(
                         .map(|l| format!("--- {}", l))
                         .collect();
                     comments.extend(block_lines.into_iter().rev());
+                    next_start_row = prev.start_position().row;
                     sibling = prev.prev_sibling();
                     continue;
                 }
                 if text.starts_with("--") {
                     comments.push(text.to_string());
+                    next_start_row = prev.start_position().row;
                     sibling = prev.prev_sibling();
                     continue;
                 }

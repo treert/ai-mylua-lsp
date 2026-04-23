@@ -875,3 +875,44 @@ print(p.x)
         text,
     );
 }
+
+#[test]
+fn hover_blank_line_separates_comment_blocks() {
+    // A blank line between two comment blocks must stop comment collection.
+    // Only the contiguous block immediately above the declaration should
+    // appear in hover — the earlier block (separated by a blank line)
+    // must NOT leak through.
+    let src = r#"-- FEATURE: unrelated header
+--   * bullet 1
+--   * bullet 2
+
+--- identity doc
+---@generic T
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+print(identity)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "blank_sep.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `identity` at the usage site (line 11, col 6)
+    let result = hover::hover(doc, &uri, pos(11, 6), &mut agg, &docs)
+        .expect("hover on identity should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("identity doc"),
+        "hover should include the contiguous doc comment, got:\n{}", text,
+    );
+    assert!(
+        !text.contains("FEATURE"),
+        "hover must NOT include the comment block separated by a blank line, got:\n{}", text,
+    );
+    assert!(
+        !text.contains("bullet"),
+        "hover must NOT include the comment block separated by a blank line, got:\n{}", text,
+    );
+}
