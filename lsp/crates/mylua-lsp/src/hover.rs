@@ -700,7 +700,8 @@ fn build_hover_for_definition(
 }
 
 /// Extract plain documentation text from collected comment lines.
-/// Strips `---` or `--` prefix, excludes `@`-prefixed annotation lines.
+/// Strips `---` or `--` prefix, excludes `@`-prefixed annotation lines
+/// and `#`-prefixed directive lines (e.g. `---#disable top_keyword`).
 fn extract_doc_lines(comment_lines: &[String]) -> String {
     let lines: Vec<&str> = comment_lines
         .iter()
@@ -712,7 +713,7 @@ fn extract_doc_lines(comment_lines: &[String]) -> String {
             } else {
                 return None;
             };
-            if stripped.starts_with('@') || stripped.is_empty() {
+            if stripped.starts_with('@') || stripped.starts_with('#') || stripped.is_empty() {
                 None
             } else {
                 Some(stripped)

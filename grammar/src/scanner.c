@@ -1,4 +1,5 @@
 #include "tree_sitter/parser.h"
+#include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
 #include <assert.h>
@@ -49,6 +50,13 @@ enum TokenType {
 
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip_ws(TSLexer *lexer) { lexer->advance(lexer, true); }
+
+/* Scanner state: persisted across incremental parses via serialize/deserialize.
+   Currently tracks whether top-level keyword emission is disabled via
+   the ---#disable top_keyword directive. */
+typedef struct {
+  bool top_keyword_disabled;
+} ScannerState;
 
 static bool is_identifier_char(int32_t c) {
   return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
@@ -144,7 +152,7 @@ static const KeywordIndex keyword_index[26] = {
 
 /* Precondition: lookahead is [a-zA-Z_] (caller has already checked).
    Always returns true — emits a keyword or IDENTIFIER token. */
-static bool scan_word(TSLexer *lexer) {
+static bool scan_word(TSLexer *lexer, ScannerState *state) {
   int32_t first = lexer->lookahead;
   assert(!lexer->eof(lexer));
   assert((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') || first == '_');
@@ -176,7 +184,8 @@ static bool scan_word(TSLexer *lexer) {
         /* Defer get_column to here: only called on keyword match,
            and only matters when the keyword has a top variant. */
         if (keyword_table[i].top_token >= 0 &&
-            lexer->get_column(lexer) == len) {
+            lexer->get_column(lexer) == len &&
+            !state->top_keyword_disabled) {
           lexer->result_symbol = keyword_table[i].top_token;
         } else {
           lexer->result_symbol = keyword_table[i].normal_token;
@@ -370,24 +379,90 @@ static bool scan_comment(TSLexer *lexer) {
   return true;
 }
 
+/* Check if the emmy line content (after ---) matches a directive.
+   Called with the lexer positioned right after the third dash.
+   Peeks ahead to detect #disable/#enable top_keyword directives.
+   Returns true if a directive was found and processed.
+   Note: The caller always consumes to EOL after calling this function,
+   so partial advances on non-matching directives are harmless. */
+static bool check_directive(TSLexer *lexer, ScannerState *state) {
+  /* Expected pattern: #disable top_keyword  or  #enable top_keyword
+     The lexer is positioned after '---', so we expect optional spaces
+     then '#disable' or '#enable', then ' top_keyword'. */
+
+  /* Skip optional spaces after --- */
+  while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+    advance(lexer);
+  }
+
+  if (lexer->lookahead != '#') return false;
+  advance(lexer); /* consume '#' */
+
+  /* Try to match 'disable' or 'enable' */
+  const char *disable_str = "disable";
+  const char *enable_str = "enable";
+  char cmd_buf[8]; /* max("disable","enable") = 7 chars + NUL */
+  int cmd_len = 0;
+
+  while (cmd_len < 7 && !lexer->eof(lexer) &&
+         lexer->lookahead >= 'a' && lexer->lookahead <= 'z') {
+    cmd_buf[cmd_len++] = (char)lexer->lookahead;
+    advance(lexer);
+  }
+  cmd_buf[cmd_len] = '\0';
+
+  bool is_disable = (strcmp(cmd_buf, disable_str) == 0);
+  bool is_enable  = (strcmp(cmd_buf, enable_str) == 0);
+  if (!is_disable && !is_enable) return false;
+
+  /* Expect at least one space */
+  if (lexer->lookahead != ' ' && lexer->lookahead != '\t') return false;
+  while (lexer->lookahead == ' ' || lexer->lookahead == '\t') {
+    advance(lexer);
+  }
+
+  /* Match 'top_keyword' */
+  const char *target = "top_keyword";
+  int target_len = 11;
+  for (int i = 0; i < target_len; i++) {
+    if (lexer->eof(lexer) || lexer->lookahead != target[i]) return false;
+    advance(lexer);
+  }
+
+  /* Ensure the token ends here (EOL, EOF, or whitespace) */
+  if (!lexer->eof(lexer) && lexer->lookahead != '\n' &&
+      lexer->lookahead != '\r' && lexer->lookahead != ' ' &&
+      lexer->lookahead != '\t') {
+    return false;
+  }
+
+  /* Apply the directive */
+  state->top_keyword_disabled = is_disable;
+  return true;
+}
+
 void *tree_sitter_lua_external_scanner_create(void) {
-  return NULL;
+  ScannerState *state = calloc(1, sizeof(ScannerState));
+  return state;
 }
 
 void tree_sitter_lua_external_scanner_destroy(void *payload) {
-  (void)payload;
+  free(payload);
 }
 
 unsigned tree_sitter_lua_external_scanner_serialize(void *payload, char *buffer) {
-  (void)payload;
-  (void)buffer;
-  return 0;
+  ScannerState *state = (ScannerState *)payload;
+  buffer[0] = state->top_keyword_disabled ? 1 : 0;
+  return 1;
 }
 
 void tree_sitter_lua_external_scanner_deserialize(void *payload, const char *buffer, unsigned length) {
-  (void)payload;
-  (void)buffer;
-  (void)length;
+  ScannerState *state = (ScannerState *)payload;
+  if (length >= 1) {
+    state->top_keyword_disabled = (buffer[0] != 0);
+  } else {
+    state->top_keyword_disabled = false;
+  }
 }
 
 bool tree_sitter_lua_external_scanner_scan(
@@ -395,7 +470,7 @@ bool tree_sitter_lua_external_scanner_scan(
   TSLexer *lexer,
   const bool *valid_symbols
 ) {
-  (void)payload;
+  ScannerState *state = (ScannerState *)payload;
 
   /* Shebang: only at the very start of the file */
   if (valid_symbols[SHEBANG] && lexer->get_column(lexer) == 0) {
@@ -437,7 +512,7 @@ bool tree_sitter_lua_external_scanner_scan(
   {
     int32_t c = lexer->lookahead;
     if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_') {
-      scan_word(lexer);
+      scan_word(lexer, state);
       return true;
     }
   }
@@ -462,6 +537,8 @@ bool tree_sitter_lua_external_scanner_scan(
           lexer->mark_end(lexer); /* back to after '--' */
           /* Actually let's just consume the rest as emmy */
           advance(lexer); /* consume third '-' */
+          /* Check for ---#disable/#enable top_keyword directive */
+          check_directive(lexer, state);
           while (!lexer->eof(lexer) && lexer->lookahead != '\n' && lexer->lookahead != '\r') {
             advance(lexer);
           }

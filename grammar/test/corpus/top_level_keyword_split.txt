@@ -393,3 +393,75 @@ end
       (identifier))
     (word_then)
     (word_end)))
+
+================================================================================
+Directive: ---#disable top_keyword suppresses top-level keywords
+================================================================================
+
+---#disable top_keyword
+local f = function()
+local x = 1
+end
+
+---
+
+(source_file
+  (emmy_comment
+    (emmy_line))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (function_definition
+        (word_function)
+        body: (function_body
+          parameters: (parameter_list)
+          (local_declaration
+            (word_local)
+            names: (attribute_name_list
+              (identifier))
+            values: (expression_list
+              (number)))
+          (word_end))))))
+
+================================================================================
+Directive: ---#enable top_keyword restores top-level keywords
+================================================================================
+
+---#disable top_keyword
+local f = function()
+local x = 1
+end
+---#enable top_keyword
+local y = 2
+
+---
+
+(source_file
+  (emmy_comment
+    (emmy_line))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (function_definition
+        (word_function)
+        body: (function_body
+          parameters: (parameter_list)
+          (local_declaration
+            (word_local)
+            names: (attribute_name_list
+              (identifier))
+            values: (expression_list
+              (number)))
+          (word_end)))))
+  (emmy_comment
+    (emmy_line))
+  (local_declaration
+    (top_word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (number))))

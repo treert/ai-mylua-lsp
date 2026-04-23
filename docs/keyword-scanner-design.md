@@ -225,7 +225,59 @@ Only statement-level `function_declaration` has a top variant. Expression-level 
 
 ---
 
-## 5. Future Possibilities
+## 5. Scanner Directives
+
+### 5.1 `---#disable top_keyword`
+
+Disables top-level keyword emission from the point of the directive to the end of the file (or until a corresponding `---#enable top_keyword` is encountered). When disabled, all keywords at column 0 emit their normal `WORD_*` tokens instead of `TOP_WORD_*`.
+
+**Syntax:**
+```lua
+---#disable top_keyword
+```
+
+**Effect:** After this directive, the scanner treats all column-0 keywords as if they were indented — they emit `WORD_*` instead of `TOP_WORD_*`. This means the parser will not force block closure at column-0 keywords.
+
+### 5.2 `---#enable top_keyword`
+
+Re-enables top-level keyword emission. This restores the default behavior where column-0 keywords emit `TOP_WORD_*`.
+
+**Syntax:**
+```lua
+---#enable top_keyword
+```
+
+### 5.3 Use Case
+
+Some Lua files have deeply nested code at column 0 (e.g., code inside a `function()` expression assigned to a local). In such files, the top-keyword mechanism incorrectly forces block closure. The directive allows these files to opt out:
+
+```lua
+---#disable top_keyword
+local createJson = function ()
+local math = require('math')    -- column 0, but no TOP_WORD_LOCAL
+local string = require("string")
+-- ... rest of file ...
+end
+return createJson()
+```
+
+### 5.4 Implementation Details
+
+- **Scanner state**: A `ScannerState` struct with a `top_keyword_disabled` boolean flag
+- **Serialization**: The flag is serialized/deserialized as 1 byte, ensuring correct behavior with tree-sitter's incremental parsing
+- **Detection**: The directive is detected during EmmyLua line scanning (`---` prefix). After consuming the third dash, the scanner checks for `#disable top_keyword` or `#enable top_keyword`
+- **Directive must be at column 0**: Since `---` comments are typically at column 0, and the directive is part of an EmmyLua line, it naturally requires column 0 placement
+- **The directive is still emitted as `EMMY_LINE`**: It is a valid EmmyLua comment that happens to have side effects on the scanner state
+
+### 5.5 Constraints
+
+- The directive only affects `TOP_WORD_*` emission. Normal `WORD_*` tokens and `IDENTIFIER` tokens are unaffected
+- The directive is file-scoped: it persists from the point of occurrence until overridden or until end of file
+- The directive format is strict: `---#disable top_keyword` or `---#enable top_keyword` (optional whitespace between `---` and `#`, and between the command and `top_keyword`)
+
+---
+
+## 6. Future Possibilities
 
 The scanner-owned keyword architecture enables several future extensions:
 
@@ -237,7 +289,7 @@ The scanner-owned keyword architecture enables several future extensions:
 
 ---
 
-## 6. File Reference
+## 7. File Reference
 
 | File | Role |
 |------|------|
