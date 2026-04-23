@@ -1148,4 +1148,13 @@ print(sum)
         text.contains("number"),
         "hover on cross-file `add` should show number return type, got:\n{}", text,
     );
+
+    // hover on `sum` — should show number type (call return resolved cross-file)
+    let result2 = hover::hover(main_doc, &main_uri, pos(2, 6), &mut agg, &docs);
+    assert!(result2.is_some(), "hover on `sum` should succeed");
+    let text2 = hover_content_string(result2.as_ref().unwrap());
+    assert!(
+        text2.contains("number"),
+        "hover on cross-file `sum` should show number type, got:\n{}", text2,
+    );
 }

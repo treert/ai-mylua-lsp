@@ -460,6 +460,31 @@ fn resolve_call_return(
         }
     }
 
+    // When the base resolves to a Table shape (e.g. `local M = {}` returned
+    // via `require()`), look up the function field directly in the shape.
+    if let TypeFact::Known(KnownType::Table(shape_id)) = &base_resolved.type_fact {
+        if let Some(ref uri) = base_resolved.def_uri {
+            let ret = {
+                let summary = match agg.summaries.get(uri) {
+                    Some(s) => s,
+                    None => return ResolvedType::unknown(),
+                };
+                summary.table_shapes.get(shape_id)
+                    .and_then(|shape| shape.fields.get(func_name))
+                    .and_then(|fi| {
+                        if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
+                            sig.returns.first().cloned()
+                        } else {
+                            None
+                        }
+                    })
+            };
+            if let Some(ret) = ret {
+                return resolve_recursive(&ret, agg, depth + 1, visited);
+            }
+        }
+    }
+
     // If base resolved to a known type, look for the function in its source
     if let Some(ref uri) = base_resolved.def_uri {
         let return_type = {
