@@ -1143,12 +1143,25 @@ fn unify_one(
                 }
             }
         }
-        // Array of generic: `@param xs T[]` → T = element type of actual
-        // In our type system, `T[]` is represented as `EmmyGeneric("T", [])`
-        // or as a Union containing the array. For now, if the formal is
-        // an EmmyType that we know is a generic param, we already handle it
-        // above. The `T[]` case in Emmy is parsed as an array type wrapping T.
-        // Let's handle the Union case (T | nil → T?) as well.
+        // Array of generic: `@param xs T[]` → T = element type of actual.
+        // `T[]` is represented as `EmmyGeneric("__array", [EmmyType("T")])`.
+        // When the actual is also `__array<X>`, extract the element type X
+        // and unify the inner generic param against X.
+        TypeFact::Known(KnownType::EmmyGeneric(name, inner_params))
+            if name == "__array" && inner_params.len() == 1 =>
+        {
+            // If actual is `__array<X>`, extract X and unify inner param against it.
+            if let TypeFact::Known(KnownType::EmmyGeneric(actual_name, actual_inner)) = actual {
+                if actual_name == "__array" && actual_inner.len() == 1 {
+                    unify_one(&inner_params[0], &actual_inner[0], generic_params, bindings);
+                    return;
+                }
+            }
+            // Fallback: unify inner param directly against the actual
+            // (e.g. when actual is a plain type like `number`).
+            unify_one(&inner_params[0], actual, generic_params, bindings);
+        }
+        // Handle Union case (T | nil → T?) as well.
         TypeFact::Union(parts) => {
             // For `T?` (= `T | nil`), try to unify the non-nil part
             for part in parts {

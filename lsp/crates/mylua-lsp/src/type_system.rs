@@ -238,7 +238,11 @@ impl fmt::Display for KnownType {
             Self::Function(_) => write!(f, "function"),
             Self::EmmyType(name) => write!(f, "{}", name),
             Self::EmmyGeneric(name, params) => {
-                write!(f, "{}<{}>", name, params.iter().map(|p| format!("{}", p)).collect::<Vec<_>>().join(", "))
+                if name == "__array" && params.len() == 1 {
+                    write!(f, "{}[]", params[0])
+                } else {
+                    write!(f, "{}<{}>", name, params.iter().map(|p| format!("{}", p)).collect::<Vec<_>>().join(", "))
+                }
             }
         }
     }

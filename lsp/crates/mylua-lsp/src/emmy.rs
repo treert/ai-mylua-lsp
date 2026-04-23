@@ -1047,8 +1047,12 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
                 TypeFact::Known(KnownType::Nil),
             ])
         }
-        EmmyType::Array(_) => {
-            TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX)))
+        EmmyType::Array(inner) => {
+            // Preserve element type information so that generic unification
+            // can match `T[]` against an actual array argument and infer `T`.
+            // We represent `T[]` as `EmmyGeneric("__array", [T_fact])`.
+            let elem_fact = emmy_type_to_fact(inner);
+            TypeFact::Known(KnownType::EmmyGeneric("__array".to_string(), vec![elem_fact]))
         }
         EmmyType::Function { params, returns } => {
             let param_infos: Vec<ParamInfo> = params.iter().map(|p| ParamInfo {

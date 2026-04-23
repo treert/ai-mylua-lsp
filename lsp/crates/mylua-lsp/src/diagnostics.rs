@@ -683,6 +683,8 @@ fn is_named_type_compatible(name: &str, actual: &KnownType) -> bool {
         ("boolean", KnownType::Boolean) => true,
         ("nil", KnownType::Nil) => true,
         ("table", KnownType::Table(_)) => true,
+        ("__array", KnownType::Table(_)) => true,
+        ("__array", KnownType::EmmyGeneric(n, _)) if n == "__array" => true,
         ("function", KnownType::Function(_)) => true,
         ("any", _) => true,
         (_, KnownType::Nil) => true,
@@ -701,6 +703,9 @@ fn known_types_compatible(declared: &KnownType, actual: &KnownType) -> bool {
         (KnownType::String, KnownType::String) => true,
         (KnownType::Boolean, KnownType::Boolean) => true,
         (KnownType::Table(_), KnownType::Table(_)) => true,
+        // __array<T> is compatible with table and vice versa
+        (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name == "__array" => true,
+        (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name == "__array" => true,
         (KnownType::Function(_), KnownType::Function(_)) => true,
         (KnownType::EmmyType(name), actual) | (KnownType::EmmyGeneric(name, _), actual) => {
             is_named_type_compatible(name, actual)

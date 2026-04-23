@@ -116,7 +116,54 @@ pub fn infer_node_type(
         "string" => TypeFact::Known(crate::type_system::KnownType::String),
         "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
         "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
+        "table_constructor" => {
+            // For array-like table literals `{ 1, 2, 3 }`, infer the
+            // element type so generic unification can bind `T` in `T[]`.
+            infer_table_array_element_type(node, source)
+        }
         _ => TypeFact::Unknown,
+    }
+}
+
+/// Infer the array element type of a table constructor for generic unification.
+/// Returns `__array<elem_type>` if the table has only positional (array) entries
+/// with a uniform literal type, otherwise returns `Unknown`.
+fn infer_table_array_element_type(
+    constructor: tree_sitter::Node,
+    _source: &[u8],
+) -> TypeFact {
+    let mut elem_type: Option<TypeFact> = None;
+    for i in 0..constructor.named_child_count() {
+        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        if field_list.kind() != "field_list" { continue; }
+        for j in 0..field_list.named_child_count() {
+            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            if field_node.kind() != "field" { continue; }
+            // Only handle positional entries (no key)
+            if field_node.child_by_field_name("key").is_some() {
+                return TypeFact::Unknown; // has named keys, not a pure array
+            }
+            if let Some(val) = field_node.child_by_field_name("value") {
+                let val_type = match val.kind() {
+                    "number" => TypeFact::Known(crate::type_system::KnownType::Number),
+                    "string" => TypeFact::Known(crate::type_system::KnownType::String),
+                    "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
+                    "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
+                    _ => continue,
+                };
+                elem_type = Some(match elem_type {
+                    Some(existing) if existing == val_type => existing,
+                    Some(_) => return TypeFact::Unknown, // mixed types
+                    None => val_type,
+                });
+            }
+        }
+    }
+    match elem_type {
+        Some(t) => TypeFact::Known(crate::type_system::KnownType::EmmyGeneric(
+            "__array".to_string(), vec![t],
+        )),
+        None => TypeFact::Unknown,
     }
 }
 
