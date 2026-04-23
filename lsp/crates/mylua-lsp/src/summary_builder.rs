@@ -1580,6 +1580,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 TypeFact::Known(KnownType::EmmyType(type_name)) => {
                     SymbolicStub::TypeRef { name: type_name.clone() }
                 }
+                TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
+                    SymbolicStub::TypeRef { name: type_name.clone() }
+                }
                 _ => SymbolicStub::GlobalRef { name: callee_text.to_string() },
             }
         } else {
@@ -1606,6 +1609,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                     match &fact.type_fact {
                         TypeFact::Stub(s) => s.clone(),
                         TypeFact::Known(KnownType::EmmyType(type_name)) => {
+                            SymbolicStub::TypeRef { name: type_name.clone() }
+                        }
+                        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
                             SymbolicStub::TypeRef { name: type_name.clone() }
                         }
                         _ => SymbolicStub::GlobalRef { name: base_text.to_string() },

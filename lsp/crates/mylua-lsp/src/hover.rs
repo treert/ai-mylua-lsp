@@ -68,6 +68,18 @@ pub fn hover(
                 return Some(hover_variable_field(p, doc, uri, index, all_docs));
             }
         }
+        // `obj:method(...)` — the `method` identifier on a `function_call`
+        // node. Infer the base type and resolve the method as a field so
+        // hover shows the method's declaration + type info.
+        if p.kind() == "function_call" {
+            let method_is_ident = p
+                .child_by_field_name("method")
+                .map(|m| m.id() == ident_node.id())
+                .unwrap_or(false);
+            if method_is_ident {
+                return Some(hover_method_call(p, doc, uri, index, all_docs));
+            }
+        }
         if p.kind() == "function_name" {
             if let Some(decl) = p.parent() {
                 if decl.kind() == "function_declaration"
@@ -317,6 +329,64 @@ fn hover_at_declaration(
     })
 }
 
+/// AST-driven hover for a method call: `obj:method(...)`. The clicked
+/// identifier is the `method` field of a `function_call` node. Infer
+/// the type of the callee (the base object) and resolve the method
+/// name as a field on that type, then build a hover popup.
+fn hover_method_call(
+    call_node: tree_sitter::Node,
+    doc: &Document,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    all_docs: &std::collections::HashMap<Uri, Document>,
+) -> Option<Hover> {
+    let source = doc.text.as_bytes();
+    let callee = call_node.child_by_field_name("callee")?;
+    let method = call_node.child_by_field_name("method")?;
+    let method_name = node_text(method, source).to_string();
+
+    let base_fact = infer_node_type(callee, source, uri, index);
+    lsp_log!(
+        "[hover_method_call] base='{}' base_fact={:?} method='{}'",
+        node_text(callee, source),
+        base_fact,
+        method_name,
+    );
+    let resolved = resolver::resolve_field_chain_in_file(
+        uri, &base_fact, &[method_name.clone()], index,
+    );
+    lsp_log!("[hover_method_call] resolved={:?}", resolved.type_fact);
+
+    let type_display = format_resolved_type(&resolved.type_fact);
+
+    if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
+        if all_docs.contains_key(def_uri) {
+            let synth_def = crate::types::Definition {
+                name: method_name.clone(),
+                kind: DefKind::GlobalVariable,
+                range: *def_range,
+                selection_range: *def_range,
+                uri: def_uri.clone(),
+            };
+            return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
+        }
+    }
+
+    let mut parts = Vec::new();
+    parts.push(format!("```lua\n(method) {}\n```", method_name));
+    if type_display != "unknown" {
+        parts.push(format!("Type: `{}`", type_display));
+    }
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range: Some(crate::util::ts_node_to_range(method, source)),
+    })
+}
+
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
 /// `variable` (or `field_expression`) whose `field` is the identifier
 /// the user clicked. Handles arbitrary bases via `infer_node_type` which
@@ -517,6 +587,32 @@ fn infer_call_return_fact(
     if let Some(method_node) = node.child_by_field_name("method") {
         let method_name = node_text(method_node, source).to_string();
         let base_fact = infer_node_type(callee, source, uri, index);
+
+        // When the base is a generic class instance (e.g. `Stack<string>`),
+        // resolve the method's return type eagerly and substitute generic
+        // parameters. A `CallReturn` stub would lose the actual type args.
+        if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_fact {
+            let field_result = resolver::resolve_field_chain_in_file(
+                uri, &base_fact, &[method_name.clone()], index,
+            );
+            // If the field resolved to a function, extract its first return
+            // type (already substituted by resolve_field_chain_in_file's
+            // EmmyGeneric branch).
+            if let TypeFact::Known(KnownType::Function(ref sig)) = field_result.type_fact {
+                if let Some(ret) = sig.returns.first() {
+                    return ret.clone();
+                }
+            }
+            // Fallback: look up the method in function_summaries and
+            // substitute generics on the raw return type.
+            let ret_fact = resolver::resolve_method_return_with_generics(
+                type_name, &method_name, actual_params, index,
+            );
+            if ret_fact != TypeFact::Unknown {
+                return ret_fact;
+            }
+        }
+
         let base_stub = type_fact_to_stub_for_call_base(&base_fact, callee, source);
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
@@ -572,6 +668,9 @@ fn type_fact_to_stub_for_call_base(
     match base_fact {
         TypeFact::Stub(s) => s.clone(),
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
+            SymbolicStub::TypeRef { name: type_name.clone() }
+        }
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
             SymbolicStub::TypeRef { name: type_name.clone() }
         }
         _ => SymbolicStub::GlobalRef {

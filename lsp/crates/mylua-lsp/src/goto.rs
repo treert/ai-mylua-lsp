@@ -49,6 +49,18 @@ pub fn goto_definition(
                 return Some(goto_variable_field(p, doc, uri, index));
             }
         }
+        // `obj:method(...)` — the `method` identifier on a `function_call`
+        // node. Infer the base type and resolve the method as a field so
+        // goto jumps to the method's definition site.
+        if p.kind() == "function_call" {
+            let method_is_ident = p
+                .child_by_field_name("method")
+                .map(|m| m.id() == ident_node.id())
+                .unwrap_or(false);
+            if method_is_ident {
+                return Some(goto_method_call(p, doc, uri, index));
+            }
+        }
         None
     }) {
         if result.is_some() {
@@ -227,6 +239,36 @@ fn goto_variable_field(
     // chains resolve to their definition site (shape ids are per-file).
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name], index,
+    );
+
+    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
+        return Some(GotoDefinitionResponse::Scalar(Location {
+            uri: def_uri,
+            range: def_range,
+        }));
+    }
+
+    None
+}
+
+/// AST-driven goto for a method call: `obj:method(...)`. The clicked
+/// identifier is the `method` field of a `function_call` node. Infer
+/// the type of the callee (the base object) and resolve the method
+/// name as a field on that type.
+fn goto_method_call(
+    call_node: tree_sitter::Node,
+    doc: &Document,
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> Option<GotoDefinitionResponse> {
+    let source = doc.text.as_bytes();
+    let callee = call_node.child_by_field_name("callee")?;
+    let method = call_node.child_by_field_name("method")?;
+    let method_name = node_text(method, source).to_string();
+
+    let base_fact = crate::hover::infer_node_type(callee, source, uri, index);
+    let resolved = resolver::resolve_field_chain_in_file(
+        uri, &base_fact, &[method_name], index,
     );
 
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {

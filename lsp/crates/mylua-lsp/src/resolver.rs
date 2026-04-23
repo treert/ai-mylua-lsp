@@ -441,6 +441,15 @@ fn resolve_call_return(
 ) -> ResolvedType {
     let base_resolved = resolve_stub(base, agg, depth + 1, visited);
 
+    // When the base resolves to a generic class instance (e.g. `Stack<string>`),
+    // look up the method's return type and substitute generic parameters.
+    if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_resolved.type_fact {
+        let ret = resolve_method_return_with_generics(type_name, func_name, actual_params, agg);
+        if ret != TypeFact::Unknown {
+            return resolve_recursive(&ret, agg, depth + 1, visited);
+        }
+    }
+
     // If base resolved to a known type, look for the function in its source
     if let Some(ref uri) = base_resolved.def_uri {
         let return_type = {
@@ -695,18 +704,23 @@ fn resolve_emmy_field_with_visited(
         );
     }
 
-    let qualified = format!("{}.{}", type_name, field);
-    if let Some(global_candidates) = agg.global_shard.get(&qualified) {
-        if let Some(c) = global_candidates.first() {
-            lsp_log!(
-                "[resolve_emmy_field] found '{}' via global_shard fallback",
-                qualified
-            );
-            return ResolvedType::with_location(
-                c.type_fact.clone(),
-                c.source_uri.clone(),
-                c.selection_range,
-            );
+    // Try both `Type.field` (dot) and `Type:field` (colon) in global_shard.
+    // `function Stack:push()` registers as `Stack:push` while
+    // `function Stack.new()` registers as `Stack.new`.
+    for sep in [".", ":"] {
+        let qualified = format!("{}{}{}", type_name, sep, field);
+        if let Some(global_candidates) = agg.global_shard.get(&qualified) {
+            if let Some(c) = global_candidates.first() {
+                lsp_log!(
+                    "[resolve_emmy_field] found '{}' via global_shard fallback",
+                    qualified
+                );
+                return ResolvedType::with_location(
+                    c.type_fact.clone(),
+                    c.source_uri.clone(),
+                    c.selection_range,
+                );
+            }
         }
     }
 
@@ -877,6 +891,57 @@ fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<S
         }
     }
     Vec::new()
+}
+
+/// Resolve a method's return type on a generic class instance, substituting
+/// the class's generic parameters with the actual type arguments.
+///
+/// E.g. for `Stack<string>:pop()` where `pop` is declared as `@return T?`,
+/// this returns `string?` by looking up `pop` in `Stack`'s source file's
+/// `function_summaries` and substituting `T` → `string`.
+pub fn resolve_method_return_with_generics(
+    type_name: &str,
+    method_name: &str,
+    actual_params: &[TypeFact],
+    agg: &mut WorkspaceAggregation,
+) -> TypeFact {
+    // Find the source URI for this type so we can look up function_summaries.
+    let source_uri = agg.type_shard.get(type_name)
+        .and_then(|candidates| candidates.first())
+        .map(|c| c.source_uri.clone());
+
+    if let Some(uri) = source_uri {
+        // Try qualified name `TypeName:method` or `TypeName.method` in
+        // function_summaries (the summary builder registers colon methods
+        // under `TypeName:method`).
+        let qualified_colon = format!("{}:{}", type_name, method_name);
+        let qualified_dot = format!("{}.{}", type_name, method_name);
+
+        let ret = agg.summaries.get(&uri).and_then(|summary| {
+            summary.function_summaries.get(&qualified_colon)
+                .or_else(|| summary.function_summaries.get(&qualified_dot))
+                .or_else(|| summary.function_summaries.get(method_name))
+                .and_then(|fs| fs.signature.returns.first().cloned())
+        });
+
+        if let Some(ret_fact) = ret {
+            return substitute_generics(&ret_fact, type_name, actual_params, agg);
+        }
+    }
+
+    // Also try global_shard qualified lookup for `TypeName.method`.
+    let qualified = format!("{}.{}", type_name, method_name);
+    if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
+        let mut visited = HashSet::new();
+        let resolved = resolve_recursive(&c.type_fact, agg, 0, &mut visited);
+        if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
+            if let Some(ret) = sig.returns.first() {
+                return substitute_generics(ret, type_name, actual_params, agg);
+            }
+        }
+    }
+
+    TypeFact::Unknown
 }
 
 /// Substitute generic type parameters in a TypeFact.
