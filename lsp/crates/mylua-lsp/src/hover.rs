@@ -564,25 +564,13 @@ fn collect_hover_call_arg_types(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> Vec<TypeFact> {
-    let mut arg_types = Vec::new();
-    if let Some(args) = call_node.child_by_field_name("arguments") {
-        // The `arguments` node may contain an `expression_list` child
-        // (paren form `f(a, b)`) or direct children (string/table form).
-        for i in 0..args.named_child_count() {
-            if let Some(child) = args.named_child(i as u32) {
-                if child.kind() == "expression_list" {
-                    for j in 0..child.named_child_count() {
-                        if let Some(e) = child.named_child(j as u32) {
-                            arg_types.push(infer_node_type(e, source, uri, index));
-                        }
-                    }
-                } else {
-                    arg_types.push(infer_node_type(child, source, uri, index));
-                }
-            }
-        }
-    }
-    arg_types
+    let Some(args) = call_node.child_by_field_name("arguments") else {
+        return Vec::new();
+    };
+    crate::util::extract_call_arg_nodes(args, source)
+        .into_iter()
+        .map(|e| infer_node_type(e, source, uri, index))
+        .collect()
 }
 
 /// Build a `TypeFact` for the return value of a `function_call` node.

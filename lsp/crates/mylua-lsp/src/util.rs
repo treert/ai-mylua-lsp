@@ -350,6 +350,46 @@ fn byte_offset_to_ts_point(source: &[u8], byte_offset: usize) -> tree_sitter::Po
     }
 }
 
+/// Extract individual argument-expression nodes from a `function_call`'s
+/// `arguments` node.
+///
+/// Handles the three grammar forms:
+/// - Paren form `f(a, b)` — the `arguments` node contains an
+///   `expression_list` child whose named children are the actual args.
+/// - Table form `f{...}` — the `arguments` node itself is the single arg.
+/// - String form `f "x"` — the `arguments` node itself is the single arg.
+///
+/// For the paren form, if the `expression_list` is absent (zero-arg call),
+/// returns an empty vector.
+pub fn extract_call_arg_nodes<'tree>(
+    args: tree_sitter::Node<'tree>,
+    source: &[u8],
+) -> Vec<tree_sitter::Node<'tree>> {
+    // Non-paren form: the `arguments` node IS the single argument.
+    if source.get(args.start_byte()).copied() != Some(b'(') {
+        return vec![args];
+    }
+    // Paren form: look for `expression_list` child.
+    let mut exprs = Vec::new();
+    for i in 0..args.named_child_count() {
+        if let Some(child) = args.named_child(i as u32) {
+            if child.kind() == "expression_list" {
+                for j in 0..child.named_child_count() {
+                    if let Some(e) = child.named_child(j as u32) {
+                        exprs.push(e);
+                    }
+                }
+            } else {
+                // Some grammars expose args directly without an
+                // `expression_list` wrapper; still count each named
+                // child as an arg.
+                exprs.push(child);
+            }
+        }
+    }
+    exprs
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

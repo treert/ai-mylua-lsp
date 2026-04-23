@@ -1090,30 +1090,7 @@ fn collect_call_arguments<'tree>(
     args: tree_sitter::Node<'tree>,
     source: &[u8],
 ) -> (u32, Vec<tree_sitter::Node<'tree>>) {
-    // Paren form only starts with '('; otherwise it's a single-arg
-    // form (table / string).
-    if source.get(args.start_byte()).copied() != Some(b'(') {
-        return (1, vec![args]);
-    }
-    // Find the `expression_list` named child (optional); if absent the
-    // call has zero args.
-    let mut exprs = Vec::new();
-    for i in 0..args.named_child_count() {
-        if let Some(child) = args.named_child(i as u32) {
-            if child.kind() == "expression_list" {
-                for j in 0..child.named_child_count() {
-                    if let Some(e) = child.named_child(j as u32) {
-                        exprs.push(e);
-                    }
-                }
-            } else {
-                // Some grammars expose args directly without an
-                // `expression_list` wrapper; still count each named
-                // child as an arg.
-                exprs.push(child);
-            }
-        }
-    }
+    let exprs = crate::util::extract_call_arg_nodes(args, source);
     (exprs.len() as u32, exprs)
 }
 

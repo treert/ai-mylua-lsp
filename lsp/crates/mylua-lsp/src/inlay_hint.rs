@@ -128,21 +128,9 @@ fn collect_parameter_name_hints(
         return;
     }
 
-    let mut arg_index = 0usize;
-    for i in 0..args.named_child_count() {
-        let Some(arg) = args.named_child(i as u32) else { continue };
-        // `expression_list` is the usual wrapper; unwrap each child.
-        if arg.kind() == "expression_list" {
-            for j in 0..arg.named_child_count() {
-                if let Some(expr) = arg.named_child(j as u32) {
-                    emit_param_hint(&params, arg_index, expr, source, out);
-                    arg_index += 1;
-                }
-            }
-            continue;
-        }
-        emit_param_hint(&params, arg_index, arg, source, out);
-        arg_index += 1;
+    let arg_exprs = crate::util::extract_call_arg_nodes(args, source);
+    for (arg_index, expr) in arg_exprs.iter().enumerate() {
+        emit_param_hint(&params, arg_index, *expr, source, out);
     }
 }
 

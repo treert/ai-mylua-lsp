@@ -1562,25 +1562,13 @@ fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth:
 /// Uses a lightweight inference that handles literals and local variable
 /// lookups without requiring `&mut BuildContext`.
 fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> Vec<TypeFact> {
-    let mut arg_types = Vec::new();
-    if let Some(args) = call_node.child_by_field_name("arguments") {
-        // The `arguments` node may contain an `expression_list` child
-        // (paren form `f(a, b)`) or direct children (string/table form).
-        for i in 0..args.named_child_count() {
-            if let Some(child) = args.named_child(i as u32) {
-                if child.kind() == "expression_list" {
-                    for j in 0..child.named_child_count() {
-                        if let Some(e) = child.named_child(j as u32) {
-                            arg_types.push(infer_arg_type_lightweight(ctx, e));
-                        }
-                    }
-                } else {
-                    arg_types.push(infer_arg_type_lightweight(ctx, child));
-                }
-            }
-        }
-    }
-    arg_types
+    let Some(args) = call_node.child_by_field_name("arguments") else {
+        return Vec::new();
+    };
+    crate::util::extract_call_arg_nodes(args, ctx.source)
+        .into_iter()
+        .map(|e| infer_arg_type_lightweight(ctx, e))
+        .collect()
 }
 
 /// Lightweight type inference for call arguments — only handles literals
