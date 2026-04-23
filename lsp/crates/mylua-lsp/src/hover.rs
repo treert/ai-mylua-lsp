@@ -341,50 +341,9 @@ fn hover_method_call(
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.text.as_bytes();
-    let callee = call_node.child_by_field_name("callee")?;
-    let method = call_node.child_by_field_name("method")?;
-    let method_name = node_text(method, source).to_string();
-
-    let base_fact = infer_node_type(callee, source, uri, index);
-    lsp_log!(
-        "[hover_method_call] base='{}' base_fact={:?} method='{}'",
-        node_text(callee, source),
-        base_fact,
-        method_name,
-    );
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[method_name.clone()], index,
-    );
-    lsp_log!("[hover_method_call] resolved={:?}", resolved.type_fact);
-
-    let type_display = format_resolved_type(&resolved.type_fact);
-
-    if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-        if all_docs.contains_key(def_uri) {
-            let synth_def = crate::types::Definition {
-                name: method_name.clone(),
-                kind: DefKind::GlobalVariable,
-                range: *def_range,
-                selection_range: *def_range,
-                uri: def_uri.clone(),
-            };
-            return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
-        }
-    }
-
-    let mut parts = Vec::new();
-    parts.push(format!("```lua\n(method) {}\n```", method_name));
-    if type_display != "unknown" {
-        parts.push(format!("Type: `{}`", type_display));
-    }
-
-    Some(Hover {
-        contents: HoverContents::Markup(MarkupContent {
-            kind: MarkupKind::Markdown,
-            value: parts.join("\n\n"),
-        }),
-        range: Some(crate::util::ts_node_to_range(method, source)),
-    })
+    let base_node = call_node.child_by_field_name("callee")?;
+    let name_node = call_node.child_by_field_name("method")?;
+    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs)
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -399,26 +358,41 @@ fn hover_variable_field(
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.text.as_bytes();
-    let object = var_node.child_by_field_name("object")?;
-    let field = var_node.child_by_field_name("field")?;
-    let field_name = node_text(field, source).to_string();
+    let base_node = var_node.child_by_field_name("object")?;
+    let name_node = var_node.child_by_field_name("field")?;
+    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs)
+}
 
-    let base_fact = infer_node_type(object, source, uri, index);
-    // Field-chain trace: fires only when hover touches `a.b` / `a:m().c`
-    // style expressions. Pairs a "what did we infer for the base" line
-    // with a "what did the resolver produce" line so a reader of the
-    // log can spot exactly which step broke a chain like
-    // `obj:build():meta().name` hovering wrong.
+/// Shared hover builder for dotted field access (`a.b`) and method calls
+/// (`obj:m()`). Both paths share the same resolve → type_display →
+/// synth_def → build_hover_for_definition → fallback pipeline; only the
+/// AST child names and the fallback label (`field` vs `method`) differ.
+///
+/// `kind_label` is `"field"` or `"method"` — used in the fallback hover
+/// when no definition site is available.
+fn build_field_hover(
+    base_node: tree_sitter::Node,
+    name_node: tree_sitter::Node,
+    kind_label: &str,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+    all_docs: &std::collections::HashMap<Uri, Document>,
+) -> Option<Hover> {
+    let field_name = node_text(name_node, source).to_string();
+
+    let base_fact = infer_node_type(base_node, source, uri, index);
     lsp_log!(
-        "[hover_var_field] base='{}' base_fact={:?} field='{}'",
-        node_text(object, source),
+        "[hover_{kind}] base='{}' base_fact={:?} {kind}='{}'",
+        node_text(base_node, source),
         base_fact,
         field_name,
+        kind = kind_label,
     );
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name.clone()], index,
     );
-    lsp_log!("[hover_var_field] resolved={:?}", resolved.type_fact);
+    lsp_log!("[hover_{kind}] resolved={:?}", resolved.type_fact, kind = kind_label);
 
     let type_display = format_resolved_type(&resolved.type_fact);
 
@@ -436,7 +410,7 @@ fn hover_variable_field(
     }
 
     let mut parts = Vec::new();
-    parts.push(format!("```lua\n(field) {}\n```", field_name));
+    parts.push(format!("```lua\n({}) {}\n```", kind_label, field_name));
     if type_display != "unknown" {
         parts.push(format!("Type: `{}`", type_display));
     }
@@ -446,7 +420,7 @@ fn hover_variable_field(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(crate::util::ts_node_to_range(field, source)),
+        range: Some(crate::util::ts_node_to_range(name_node, source)),
     })
 }
 

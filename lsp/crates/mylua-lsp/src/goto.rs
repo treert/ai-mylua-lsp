@@ -230,25 +230,9 @@ fn goto_variable_field(
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.text.as_bytes();
-    let object = var_node.child_by_field_name("object")?;
-    let field = var_node.child_by_field_name("field")?;
-    let field_name = node_text(field, source).to_string();
-
-    let base_fact = crate::hover::infer_node_type(object, source, uri, index);
-    // URI-aware resolve so per-file Table shapes from AST-driven `a.b.c`
-    // chains resolve to their definition site (shape ids are per-file).
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[field_name], index,
-    );
-
-    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
-        return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: def_uri,
-            range: def_range,
-        }));
-    }
-
-    None
+    let base_node = var_node.child_by_field_name("object")?;
+    let name_node = var_node.child_by_field_name("field")?;
+    goto_field_or_method(base_node, name_node, source, uri, index)
 }
 
 /// AST-driven goto for a method call: `obj:method(...)`. The clicked
@@ -262,13 +246,26 @@ fn goto_method_call(
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.text.as_bytes();
-    let callee = call_node.child_by_field_name("callee")?;
-    let method = call_node.child_by_field_name("method")?;
-    let method_name = node_text(method, source).to_string();
+    let base_node = call_node.child_by_field_name("callee")?;
+    let name_node = call_node.child_by_field_name("method")?;
+    goto_field_or_method(base_node, name_node, source, uri, index)
+}
 
-    let base_fact = crate::hover::infer_node_type(callee, source, uri, index);
+/// Shared goto helper for dotted field access (`a.b`) and method calls
+/// (`obj:m()`). Infers the base type, resolves the field/method name,
+/// and returns the definition location if available.
+fn goto_field_or_method(
+    base_node: tree_sitter::Node,
+    name_node: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> Option<GotoDefinitionResponse> {
+    let field_name = node_text(name_node, source).to_string();
+
+    let base_fact = crate::hover::infer_node_type(base_node, source, uri, index);
     let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[method_name], index,
+        uri, &base_fact, &[field_name], index,
     );
 
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {

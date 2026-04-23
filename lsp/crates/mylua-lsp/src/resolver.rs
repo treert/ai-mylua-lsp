@@ -955,10 +955,26 @@ pub fn resolve_method_return_with_generics(
         let qualified_dot = format!("{}.{}", type_name, method_name);
 
         let ret = agg.summaries.get(&uri).and_then(|summary| {
-            summary.function_summaries.get(&qualified_colon)
-                .or_else(|| summary.function_summaries.get(&qualified_dot))
-                .or_else(|| summary.function_summaries.get(method_name))
-                .and_then(|fs| fs.signature.returns.first().cloned())
+            let fs = summary.function_summaries.get(&qualified_colon)
+                .or_else(|| summary.function_summaries.get(&qualified_dot));
+            // Last-resort fallback: try the bare method name. This can
+            // theoretically match a same-named function in the same file
+            // that doesn't belong to `type_name`. The risk is low because
+            // `function_summaries` is per-file and we only search the
+            // type's own source file, but log a trace so mismatches are
+            // diagnosable.
+            let fs = fs.or_else(|| {
+                let hit = summary.function_summaries.get(method_name);
+                if hit.is_some() {
+                    lsp_log!(
+                        "[resolve_method_return_with_generics] bare-name fallback: \
+                         matched '{}' in file for type '{}' (qualified '{}' / '{}' not found)",
+                        method_name, type_name, qualified_colon, qualified_dot,
+                    );
+                }
+                hit
+            });
+            fs.and_then(|fs| fs.signature.returns.first().cloned())
         });
 
         if let Some(ret_fact) = ret {
