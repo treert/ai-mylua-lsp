@@ -1383,3 +1383,77 @@ local name = hero:getName()
         unknown,
     );
 }
+
+/// When a parent class is anchored by a local variable, methods defined
+/// via `function LocalClass:method()` live in the table shape, not in
+/// `global_shard`. Diagnostics must not flag these inherited methods as
+/// "Unknown field" when accessed through a child class instance.
+#[test]
+fn inherited_method_from_local_class_not_flagged() {
+    let mod_src = r#"
+---@class Entity
+---@field id integer
+local Entity = {}
+
+---@return string
+function Entity:describe()
+    return self.name
+end
+
+---@class Damageable
+---@field hp integer
+local Damageable = {}
+
+---@param dmg integer
+function Damageable:take_damage(dmg)
+    self.hp = self.hp - dmg
+end
+
+---@class Player: Entity, Damageable
+---@field level integer
+Player = {}
+
+---@param id integer
+---@param name string
+---@return Player
+function Player.new(id, name)
+    return setmetatable({}, { __index = Player })
+end
+
+---@param item string
+function Player:pick_up(item)
+end
+
+return Player
+"#;
+    let main_src = r#"local Player = require("player")
+local hero = Player.new(1, "Alice")
+hero:take_damage(5)
+hero:pick_up("sword")
+hero:describe()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("player.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let mod_uri = make_uri("player.lua");
+    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main.lua document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
+        &mut agg, &main_doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "inherited methods from local-anchored parent classes (Entity, Damageable) \
+         must NOT be flagged as Unknown field; got: {:?}",
+        unknown,
+    );
+}

@@ -1217,3 +1217,83 @@ local name = hero:getName()
         "hover on `hero` should show Player type, got:\n{}", text2,
     );
 }
+
+/// When a parent class in the inheritance chain is anchored by a *local*
+/// variable (`local Damageable = {}`), methods defined via
+/// `function Damageable:take_damage()` are stored in the table shape
+/// rather than `global_shard`. Hover on such inherited methods must
+/// still resolve correctly via the local-table-shape fallback.
+#[test]
+fn hover_inherited_method_from_local_class() {
+    let mod_src = r#"
+---@class Entity
+---@field id integer
+---@field name string
+local Entity = {}
+
+---@return string
+function Entity:describe()
+    return self.name
+end
+
+---@class Damageable
+---@field hp integer
+local Damageable = {}
+
+---@param dmg integer
+function Damageable:take_damage(dmg)
+    self.hp = self.hp - dmg
+end
+
+---@class Player: Entity, Damageable
+---@field level integer
+Player = {}
+
+---@param id integer
+---@param name string
+---@return Player
+function Player.new(id, name)
+    return setmetatable({}, { __index = Player })
+end
+
+---@param item string
+function Player:pick_up(item)
+    table.insert(self.inventory, item)
+end
+
+return Player
+"#;
+    let main_src = r#"local Player = require("player")
+local hero = Player.new(1, "Alice")
+hero:take_damage(5)
+hero:pick_up("sword")
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("player.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let mod_uri = make_uri("player.lua");
+    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).unwrap();
+
+    // hover on `take_damage` — line 2, col 7
+    let result = hover::hover(main_doc, &main_uri, pos(2, 7), &mut agg, &docs);
+    assert!(
+        result.is_some(),
+        "hover on `take_damage` (inherited from local Damageable class) should succeed"
+    );
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("dmg"),
+        "hover on `take_damage` should show parameter info, got:\n{}", text,
+    );
+
+    // hover on `pick_up` — line 3, col 7 (global Player, should still work)
+    let result2 = hover::hover(main_doc, &main_uri, pos(3, 7), &mut agg, &docs);
+    assert!(
+        result2.is_some(),
+        "hover on `pick_up` (defined on global Player) should succeed"
+    );
+}
