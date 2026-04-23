@@ -1158,3 +1158,62 @@ print(sum)
         "hover on cross-file `sum` should show number type, got:\n{}", text2,
     );
 }
+
+/// When a module does `return Player` (a global table), and the caller
+/// does `local Player = require("player")`, hover on `Player.new()`
+/// should resolve through the `resolve_require_global_name` helper to
+/// find the qualified function `Player.new` in the module's summaries.
+#[test]
+fn hover_require_returning_global_table_method() {
+    let mod_src = r#"
+Player = {}
+
+---@param name string
+---@return Player
+function Player.new(name)
+    return { name = name }
+end
+
+---@return string
+function Player:getName()
+    return self.name
+end
+
+return Player
+"#;
+    let main_src = r#"local Player = require("player")
+local hero = Player.new("Alice")
+local name = hero:getName()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("player.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let mod_uri = make_uri("player.lua");
+    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).unwrap();
+
+    // hover on `new` in `Player.new("Alice")` — line 1, col 20
+    let result = hover::hover(main_doc, &main_uri, pos(1, 20), &mut agg, &docs);
+    assert!(
+        result.is_some(),
+        "hover on `new` in cross-file `Player.new(\"Alice\")` should succeed \
+         (require returning global table)"
+    );
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("Player"),
+        "hover on `Player.new` should mention Player type, got:\n{}", text,
+    );
+
+    // hover on `hero` — should show Player type (resolved via module_return_type)
+    let result2 = hover::hover(main_doc, &main_uri, pos(1, 6), &mut agg, &docs);
+    assert!(result2.is_some(), "hover on `hero` should succeed");
+    let text2 = hover_content_string(result2.as_ref().unwrap());
+    assert!(
+        text2.contains("Player"),
+        "hover on `hero` should show Player type, got:\n{}", text2,
+    );
+}

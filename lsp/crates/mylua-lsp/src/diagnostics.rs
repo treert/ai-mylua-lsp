@@ -302,6 +302,9 @@ let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.u
 
             let global_prefix = match &base_fact {
                 TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+                TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
+                    resolver::resolve_require_global_name(module_path, ctx.index)
+                }
                 TypeFact::Known(KnownType::Table(_)) => {
                     let text = node_text(object, ctx.source);
                     if !text.is_empty()

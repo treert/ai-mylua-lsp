@@ -1335,3 +1335,51 @@ print(p.x, p.z)
         unknown,
     );
 }
+
+/// When a module does `return Player` (a global table with methods),
+/// `Player.new()` in the caller should NOT be flagged as "Unknown field".
+/// This exercises the `resolve_require_global_name` helper in diagnostics.
+#[test]
+fn require_returning_global_table_method_not_flagged() {
+    let mod_src = r#"
+Player = {}
+
+function Player.new(name)
+    return { name = name }
+end
+
+function Player:getName()
+    return self.name
+end
+
+return Player
+"#;
+    let main_src = r#"local Player = require("player")
+local hero = Player.new("Alice")
+local name = hero:getName()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("player.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let mod_uri = make_uri("player.lua");
+    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main.lua document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
+        &mut agg, &main_doc.scope_tree, &cfg,
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "cross-file `Player.new()` via require returning global table must NOT flag \
+         Unknown field; got: {:?}",
+        unknown,
+    );
+}

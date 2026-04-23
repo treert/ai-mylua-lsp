@@ -99,6 +99,9 @@ fn resolve_field_chain_inner(
 
     let mut global_prefix = match base_fact {
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
+            resolve_require_global_name(module_path, agg)
+        }
         _ => None,
     };
 
@@ -485,6 +488,23 @@ fn resolve_call_return(
         }
     }
 
+    // Collect candidate base names for qualified lookups.
+    // `base_type_name` gives the stub's own name (e.g. module_path for
+    // RequireRef), but when the module returns a global (e.g. `return Player`),
+    // the *real* qualified name lives under that global name, not the module
+    // path. Collect both so we try e.g. "player.new" AND "Player.new".
+    let mut candidate_names: Vec<String> = Vec::new();
+    if let Some(name) = base_type_name(base) {
+        candidate_names.push(name.to_string());
+    }
+    if let SymbolicStub::RequireRef { module_path } = base {
+        if let Some(global_name) = resolve_require_global_name(module_path, agg) {
+            if !candidate_names.contains(&global_name) {
+                candidate_names.push(global_name);
+            }
+        }
+    }
+
     // If base resolved to a known type, look for the function in its source
     if let Some(ref uri) = base_resolved.def_uri {
         let return_type = {
@@ -498,12 +518,12 @@ fn resolve_call_return(
                 .and_then(|fs| fs.signature.returns.first().cloned());
 
             if found.is_none() {
-                if let Some(type_name) = base_type_name(base) {
+                'outer_fs: for type_name in &candidate_names {
                     for sep in [":", "."] {
                         let qualified = format!("{}{}{}", type_name, sep, func_name);
                         if let Some(fs) = summary.function_summaries.get(&qualified) {
                             found = fs.signature.returns.first().cloned();
-                            if found.is_some() { break; }
+                            if found.is_some() { break 'outer_fs; }
                         }
                     }
                 }
@@ -521,7 +541,7 @@ fn resolve_call_return(
     // qualified global name. Function declarations like `function Foo.bar()`
     // or `function Foo:bar()` are registered in global_shard as "Foo.bar"
     // or "Foo:bar" by summary_builder.
-    if let Some(base_name) = base_type_name(base) {
+    for base_name in &candidate_names {
         for sep in [".", ":"] {
             let qualified = format!("{}{}{}", base_name, sep, func_name);
             if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
@@ -552,6 +572,10 @@ fn resolve_call_return(
 /// Works for `GlobalRef`, `RequireRef`, and `TypeRef` — the three stub
 /// variants that carry a meaningful name for `{name}.{field}` / `{name}:{field}`
 /// lookups in `function_summaries` and `global_shard`.
+///
+/// Note: for `RequireRef`, this returns the module_path (e.g. `"player"`),
+/// which may differ from the actual global name (e.g. `"Player"`). Callers
+/// that need the real global name should also check `module_return_type`.
 fn base_type_name(stub: &SymbolicStub) -> Option<&str> {
     match stub {
         SymbolicStub::GlobalRef { name } => Some(name.as_str()),
@@ -559,6 +583,29 @@ fn base_type_name(stub: &SymbolicStub) -> Option<&str> {
         SymbolicStub::TypeRef { name } => Some(name.as_str()),
         _ => None,
     }
+}
+
+/// Given a `RequireRef` module path, resolve the module's `module_return_type`
+/// and extract the global name if it is a `GlobalRef` stub.
+///
+/// This is the common pattern for `local Player = require("player")` where
+/// `player.lua` does `return Player` — the module_return_type is
+/// `GlobalRef { name: "Player" }`, and we need the real global name `"Player"`
+/// (not the module path `"player"`) for qualified name lookups like
+/// `"Player.new"` in `function_summaries` and `global_shard`.
+pub fn resolve_require_global_name(
+    module_path: &str,
+    agg: &WorkspaceAggregation,
+) -> Option<String> {
+    agg.resolve_module_to_uri(module_path)
+        .and_then(|target_uri| {
+            agg.summaries.get(&target_uri)
+                .and_then(|s| s.module_return_type.as_ref())
+                .and_then(|ret| match ret {
+                    TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+                    _ => None,
+                })
+        })
 }
 
 fn resolve_field_access(

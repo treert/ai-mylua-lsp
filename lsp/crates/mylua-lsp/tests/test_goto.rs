@@ -322,3 +322,66 @@ end"#;
         assert_eq!(loc.range.start.line, 0, "outer defined on line 0");
     }
 }
+
+/// When a module does `return Player` (a global table with methods),
+/// goto on `Player.new` in the caller should jump to the function
+/// definition in the module file via `resolve_require_global_name`.
+#[test]
+fn goto_require_returning_global_table_method() {
+    use mylua_lsp::{document::Document, summary_builder, scope};
+
+    let mut parser = new_parser();
+
+    // player.lua: global Player table with Player.new function
+    let mod_src = r#"Player = {}
+
+function Player.new(name)
+    return { name = name }
+end
+
+return Player"#;
+    let mod_uri = make_uri("player.lua");
+    let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
+    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_src.as_bytes());
+    let mod_scope = scope::build_scope_tree(&mod_tree, mod_src.as_bytes());
+    let _mod_doc = Document { text: mod_src.to_string(), tree: mod_tree, scope_tree: mod_scope };
+
+    // main.lua: require("player") and call Player.new("Alice")
+    let caller_src = r#"local Player = require("player")
+local hero = Player.new("Alice")"#;
+    let caller_uri = make_uri("main.lua");
+    let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
+    let caller_summary = summary_builder::build_summary(&caller_uri, &caller_tree, caller_src.as_bytes());
+    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes());
+    let caller_doc = Document {
+        text: caller_src.to_string(),
+        tree: caller_tree,
+        scope_tree: caller_scope,
+    };
+
+    let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
+    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+    agg.upsert_summary(mod_summary);
+    agg.upsert_summary(caller_summary);
+
+    // Click on `new` in `Player.new("Alice")` — line 1, col 20
+    let result = goto::goto_definition(
+        &caller_doc, &caller_uri, pos(1, 20), &mut agg, &GotoStrategy::Auto,
+    );
+    assert!(
+        result.is_some(),
+        "goto on `new` in `Player.new(\"Alice\")` should resolve \
+         (require returning global table)"
+    );
+    if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
+        assert_eq!(
+            loc.uri, mod_uri,
+            "should jump to player.lua"
+        );
+        assert_eq!(
+            loc.range.start.line, 2,
+            "should land on `function Player.new(name)` (line 2), got: {:?}",
+            loc.range,
+        );
+    }
+}
