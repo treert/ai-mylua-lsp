@@ -19,7 +19,7 @@
 use tower_lsp_server::ls_types::*;
 
 use crate::document::Document;
-use crate::util::{find_node_at_position, node_text, position_to_byte_offset, ts_node_to_range};
+use crate::util::{find_node_at_position, is_ancestor_or_equal, node_text, position_to_byte_offset, ts_node_to_range};
 
 pub fn document_highlight(
     doc: &Document,
@@ -185,15 +185,3 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
     DocumentHighlightKind::READ
 }
 
-fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter::Node) -> bool {
-    let mut n = descendant;
-    loop {
-        if n.id() == ancestor.id() {
-            return true;
-        }
-        match n.parent() {
-            Some(p) => n = p,
-            None => return false,
-        }
-    }
-}

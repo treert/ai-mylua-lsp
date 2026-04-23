@@ -88,6 +88,15 @@ pub fn builtins_for(version: &str) -> Vec<&'static str> {
     out
 }
 
+/// Lua language keywords — shared by completion (to offer keyword items)
+/// and rename (to reject renaming to a keyword).
+pub const LUA_KEYWORDS: &[&str] = &[
+    "and", "break", "do", "else", "elseif", "end",
+    "false", "for", "function", "goto", "if", "in",
+    "local", "nil", "not", "or", "repeat", "return",
+    "then", "true", "until", "while",
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;

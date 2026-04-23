@@ -181,6 +181,31 @@ pub fn byte_col_to_utf16_col(line_bytes: &[u8], byte_col: usize) -> u32 {
     units
 }
 
+/// Convert a byte offset into `source` to an LSP `Position` (row + UTF-16
+/// column). Walks the source once to count preceding newlines, then uses
+/// `byte_col_to_utf16_col` for the column.
+pub fn byte_offset_to_position(source: &[u8], byte_offset: usize) -> Option<Position> {
+    if byte_offset > source.len() {
+        return None;
+    }
+    let mut line: u32 = 0;
+    let mut line_start = 0usize;
+    for (i, &b) in source.iter().take(byte_offset).enumerate() {
+        if b == b'\n' {
+            line += 1;
+            line_start = i + 1;
+        }
+    }
+    let line_bytes_end = source[line_start..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(source.len(), |p| line_start + p);
+    let line_slice = &source[line_start..line_bytes_end];
+    let col_in_line_bytes = byte_offset - line_start;
+    let character = byte_col_to_utf16_col(line_slice, col_in_line_bytes);
+    Some(Position { line, character })
+}
+
 /// Convert a UTF-16 code-unit column within `line_bytes` (UTF-8) back to a
 /// byte column. Values past end-of-line are clamped to the line length.
 pub fn utf16_col_to_byte_col(line_bytes: &[u8], utf16_col: u32) -> usize {
@@ -348,6 +373,72 @@ fn byte_offset_to_ts_point(source: &[u8], byte_offset: usize) -> tree_sitter::Po
         row,
         column: clamped - line_start,
     }
+}
+
+/// Returns `true` when `ancestor` is, or contains, `descendant` in the
+/// tree-sitter AST. Walks from `descendant` upward comparing node IDs.
+pub fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter::Node) -> bool {
+    let mut n = descendant;
+    loop {
+        if n.id() == ancestor.id() {
+            return true;
+        }
+        match n.parent() {
+            Some(p) => n = p,
+            None => return false,
+        }
+    }
+}
+
+/// Extract the textual content of a string-literal AST node.
+///
+/// Supports two extraction strategies, tried in order:
+/// 1. **Recursive child search** — walk named children looking for a
+///    `short_string_content` node (the grammar's canonical inner-text
+///    node for `"..."` / `'...'` strings). This is the most reliable
+///    approach and matches what `goto.rs` / `summary_builder.rs` used.
+/// 2. **Quote stripping** — if no `short_string_content` child exists
+///    (e.g. the grammar version differs), fall back to stripping a
+///    matching pair of `"` or `'` from the raw node text. This was the
+///    original `hover.rs` strategy.
+///
+/// The node may be a `string` node directly, or any ancestor that
+/// contains one (the recursive walk handles both). If `node` is an
+/// `expression_list`, callers should unwrap it first.
+pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    // Strategy 1: recursive search for `short_string_content` child.
+    fn find_string_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
+        if n.kind().starts_with("short_string_content") {
+            return Some(node_text(n, source).to_string());
+        }
+        for i in 0..n.named_child_count() {
+            if let Some(child) = n.named_child(i as u32) {
+                if let Some(s) = find_string_content(child, source) {
+                    return Some(s);
+                }
+            }
+        }
+        None
+    }
+
+    if let Some(s) = find_string_content(node, source) {
+        return Some(s);
+    }
+
+    // Strategy 2: strip matching quotes from the raw text.
+    if node.kind() == "string" {
+        let text = node_text(node, source);
+        if text.len() >= 2 {
+            let bytes = text.as_bytes();
+            let first = bytes[0];
+            let last = bytes[text.len() - 1];
+            if (first == b'"' || first == b'\'') && first == last {
+                return Some(text[1..text.len() - 1].to_string());
+            }
+        }
+    }
+
+    None
 }
 
 /// Extract individual argument-expression nodes from a `function_call`'s

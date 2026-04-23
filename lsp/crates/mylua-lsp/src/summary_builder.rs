@@ -8,7 +8,7 @@ use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape, TableShapeId, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
-use crate::util::{node_text, ts_node_to_range};
+use crate::util::{node_text, ts_node_to_range, extract_string_literal};
 
 /// Build a `DocumentSummary` from a parsed AST.
 ///
@@ -542,7 +542,13 @@ fn try_extract_require<'a>(
     }
     let args = value_node.child_by_field_name("arguments")?;
     let first_arg = args.named_child(0)?;
-    let module_path = extract_string_literal(ctx, first_arg)?;
+    // Unwrap expression_list wrapper if present, then extract string content.
+    let string_node = if first_arg.kind() == "expression_list" {
+        first_arg.named_child(0)?
+    } else {
+        first_arg
+    };
+    let module_path = extract_string_literal(string_node, ctx.source)?;
 
     Some(RequireBinding {
         local_name: local_name.to_string(),
@@ -551,27 +557,15 @@ fn try_extract_require<'a>(
     })
 }
 
-fn extract_string_literal(ctx: &BuildContext, node: tree_sitter::Node) -> Option<String> {
-    fn find_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
-        if n.kind().starts_with("short_string_content") {
-            return Some(node_text(n, source).to_string());
-        }
-        for i in 0..n.named_child_count() {
-            if let Some(child) = n.named_child(i as u32) {
-                if let Some(s) = find_content(child, source) {
-                    return Some(s);
-                }
-            }
-        }
-        None
-    }
-
-    if node.kind() == "expression_list" {
-        if let Some(first) = node.named_child(0) {
-            return find_content(first, ctx.source);
-        }
-    }
-    find_content(node, ctx.source)
+/// Thin wrapper: unwrap `expression_list` then delegate to the shared
+/// `util::extract_string_literal`.
+fn extract_string_from_node(ctx: &BuildContext, node: tree_sitter::Node) -> Option<String> {
+    let inner = if node.kind() == "expression_list" {
+        node.named_child(0)?
+    } else {
+        node
+    };
+    extract_string_literal(inner, ctx.source)
 }
 
 // ---------------------------------------------------------------------------
@@ -1603,7 +1597,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
     if callee_text == "require" {
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
-                if let Some(module_path) = extract_string_literal(ctx, first_arg) {
+                if let Some(module_path) = extract_string_from_node(ctx, first_arg) {
                     return TypeFact::Stub(SymbolicStub::RequireRef { module_path });
                 }
             }
@@ -1856,7 +1850,7 @@ fn extract_single_field(
                 // Fall back to raw lexeme when the scanner produced an
                 // empty/exotic string that `extract_string_literal`
                 // can't reach.
-                extract_string_literal(ctx, k)
+                extract_string_from_node(ctx, k)
                     .unwrap_or_else(|| node_text(k, ctx.source).to_string())
             } else {
                 node_text(k, ctx.source).to_string()

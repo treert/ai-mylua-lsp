@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
-use crate::hover;
+use crate::type_inference;
 use crate::resolver;
 use crate::util::{node_text, position_to_byte_offset, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
+use crate::lua_builtins::LUA_KEYWORDS;
 
 /// Build the resolve-payload attached to a completion item so that
 /// `completion_resolve` can re-locate the symbol on demand.
@@ -17,13 +18,6 @@ fn resolve_data(kind: &str, uri: Option<&Uri>, name: &str) -> serde_json::Value 
     }
     serde_json::Value::Object(obj)
 }
-
-const LUA_KEYWORDS: &[&str] = &[
-    "and", "break", "do", "else", "elseif", "end",
-    "false", "for", "function", "goto", "if", "in",
-    "local", "nil", "not", "or", "repeat", "return",
-    "then", "true", "until", "while",
-];
 
 /// EmmyLua annotation tags that can appear after `---@`.
 const EMMY_TAGS: &[&str] = &[
@@ -223,7 +217,7 @@ fn try_dot_completion_ast(
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
     let base_node = find_base_expression_node(doc.tree.root_node(), base_end)?;
-    let base_fact = hover::infer_node_type(base_node, bytes, uri, index);
+let base_fact = type_inference::infer_node_type(base_node, bytes, uri, index);
 
     let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
     if fields.is_empty() {
@@ -266,7 +260,7 @@ fn try_dot_completion_ast(
 /// expression to the left of the dot/colon. Prefers the largest such node
 /// (e.g. the full `a.b.c` variable, not the trailing identifier `c`).
 /// `parenthesized_expression` is accepted so `(foo()).x` / `(x or y).name`
-/// style bases are resolved through `hover::infer_node_type`.
+/// style bases are resolved through `type_inference::infer_node_type`.
 fn find_base_expression_node(
     root: tree_sitter::Node,
     end_byte: usize,

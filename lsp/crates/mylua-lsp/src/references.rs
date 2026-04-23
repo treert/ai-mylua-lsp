@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
 use crate::document::Document;
-use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position};
+use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position, byte_offset_to_position};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn find_references(
@@ -327,8 +327,8 @@ fn emit_type_matches_in_node(
                 let abs_start = node_start_byte + i;
                 let abs_end = abs_start + pattern.len();
                 if let (Some(start), Some(end)) = (
-                    byte_offset_to_lsp_position(source, abs_start),
-                    byte_offset_to_lsp_position(source, abs_end),
+                    byte_offset_to_position(source, abs_start),
+                    byte_offset_to_position(source, abs_end),
                 ) {
                     locations.push(Location {
                         uri: uri.clone(),
@@ -373,29 +373,7 @@ pub fn extract_word_at(text: &str, byte_offset: usize) -> Option<String> {
     std::str::from_utf8(&bytes[start..end]).ok().map(String::from)
 }
 
-/// Convert a byte offset into `source` to an LSP `Position` (row + UTF-16
-/// column). Walks the source once to count preceding newlines.
-fn byte_offset_to_lsp_position(source: &[u8], byte_offset: usize) -> Option<Position> {
-    if byte_offset > source.len() {
-        return None;
-    }
-    let mut line: u32 = 0;
-    let mut line_start = 0usize;
-    for (i, &b) in source.iter().take(byte_offset).enumerate() {
-        if b == b'\n' {
-            line += 1;
-            line_start = i + 1;
-        }
-    }
-    let line_bytes_end = source[line_start..]
-        .iter()
-        .position(|&b| b == b'\n')
-        .map_or(source.len(), |p| line_start + p);
-    let line_slice = &source[line_start..line_bytes_end];
-    let col_in_line_bytes = byte_offset - line_start;
-    let character = crate::util::byte_col_to_utf16_col(line_slice, col_in_line_bytes);
-    Some(Position { line, character })
-}
+
 
 fn collect_global_name_occurrences(
     cursor: &mut tree_sitter::TreeCursor,

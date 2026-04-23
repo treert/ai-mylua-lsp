@@ -4,7 +4,7 @@ use crate::config::DiagnosticsConfig;
 use crate::resolver;
 use crate::scope::ScopeTree;
 use crate::type_system::{TypeFact, KnownType, SymbolicStub};
-use crate::util::{ts_node_to_range, node_text, truncate};
+use crate::util::{is_ancestor_or_equal, ts_node_to_range, node_text, truncate};
 use crate::aggregation::WorkspaceAggregation;
 
 // Built-in identifier set is now version-dependent and lives in
@@ -267,19 +267,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
     false
 }
 
-/// Returns true when `ancestor` is, or contains, `descendant`.
-fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter::Node) -> bool {
-    let mut n = descendant;
-    loop {
-        if n.id() == ancestor.id() {
-            return true;
-        }
-        match n.parent() {
-            Some(p) => n = p,
-            None => return false,
-        }
-    }
-}
+
 
 fn collect_field_diagnostics(
     cursor: &mut tree_sitter::TreeCursor,
@@ -302,7 +290,7 @@ fn collect_field_diagnostics(
             node.child_by_field_name("object"),
             node.child_by_field_name("field"),
         ) {
-            let base_fact = crate::hover::infer_node_type(object, source, uri, index);
+let base_fact = crate::type_inference::infer_node_type(object, source, uri, index);
             let field_name = node_text(field, source).to_string();
 
             // Hover's `resolve_field_chain_in_file` threads a

@@ -21,6 +21,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::config::InlayHintConfig;
 use crate::document::Document;
+use crate::signature_help;
 use crate::type_system::{KnownType, TypeFact};
 use crate::util::{node_text, position_to_byte_offset, ts_point_to_position};
 
@@ -28,7 +29,7 @@ pub fn inlay_hints(
     doc: &Document,
     uri: &Uri,
     range: Range,
-    index: &WorkspaceAggregation,
+    index: &mut WorkspaceAggregation,
     cfg: &InlayHintConfig,
 ) -> Vec<InlayHint> {
     if !cfg.enable {
@@ -58,7 +59,7 @@ fn walk(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     uri: &Uri,
-    index: &WorkspaceAggregation,
+    index: &mut WorkspaceAggregation,
     cfg: &InlayHintConfig,
     range_start: usize,
     range_end: usize,
@@ -95,17 +96,20 @@ fn collect_parameter_name_hints(
     call: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
-    index: &WorkspaceAggregation,
+    index: &mut WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
 ) {
-    let Some(callee) = call.child_by_field_name("callee") else { return };
-    let is_method = call.child_by_field_name("method").is_some();
     let Some(args) = call.child_by_field_name("arguments") else { return };
 
-    // Only look up signatures for simple identifier callees — `foo()`
-    // / `foo:m()`. Complex chains (`t.m().f()`) are out of scope for
-    // this conservative v1.
-    let Some(sig) = lookup_signature(callee, source, uri, index, is_method) else { return };
+    // Reuse the same resolution logic as signatureHelp so that
+    // method calls, dot calls, and simple identifier calls are all
+    // covered uniformly.
+    let Some((sigs, is_method, _name)) =
+        signature_help::resolve_call_signatures(call, source, uri, index)
+    else {
+        return;
+    };
+    let Some(sig) = sigs.first() else { return };
 
     // Drop leading self when it's a method call — the user never
     // writes it explicitly, and the client would render a stray
@@ -235,41 +239,4 @@ fn preceded_by_type_annotation(decl: tree_sitter::Node, source: &[u8]) -> bool {
         }
     }
     false
-}
-
-/// Resolve a call `callee` to its `FunctionSignature`, when possible.
-/// Handles both `foo()` (simple identifier) and `obj:m()` / `obj.m()`
-/// (method / dotted calls) by routing through the summary index.
-fn lookup_signature(
-    callee: tree_sitter::Node,
-    source: &[u8],
-    uri: &Uri,
-    index: &WorkspaceAggregation,
-    is_method: bool,
-) -> Option<crate::type_system::FunctionSignature> {
-    if is_method {
-        return None; // method call — deferred to future iteration
-    }
-    let text = node_text(callee, source);
-    // Simple identifier callee.
-    if !text.contains('.') && !text.contains(':') {
-        if let Some(summary) = index.summaries.get(uri) {
-            if let Some(fs) = summary.function_summaries.get(text) {
-                return Some(fs.signature.clone());
-            }
-        }
-        if let Some(candidates) = index.global_shard.get(text) {
-            for c in candidates {
-                if let TypeFact::Known(KnownType::Function(sig)) = &c.type_fact {
-                    return Some(sig.clone());
-                }
-                if let Some(summary) = index.summaries.get(&c.source_uri) {
-                    if let Some(fs) = summary.function_summaries.get(text) {
-                        return Some(fs.signature.clone());
-                    }
-                }
-            }
-        }
-    }
-    None
 }

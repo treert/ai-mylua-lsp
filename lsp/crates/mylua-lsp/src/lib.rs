@@ -26,6 +26,7 @@ pub mod summary;
 pub mod summary_builder;
 pub mod symbols;
 pub mod table_shape;
+pub mod type_inference;
 pub mod type_system;
 pub mod types;
 pub mod util;
@@ -1729,9 +1730,9 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let idx = self.index.lock().unwrap();
+        let mut idx = self.index.lock().unwrap();
         let cfg = self.config.lock().unwrap().inlay_hint.clone();
-        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &idx, &cfg)))
+        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &mut idx, &cfg)))
     }
 
     async fn selection_range(

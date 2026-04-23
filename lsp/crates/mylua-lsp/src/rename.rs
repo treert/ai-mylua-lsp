@@ -4,12 +4,7 @@ use crate::config::ReferencesStrategy;
 use crate::document::Document;
 use crate::references;
 use crate::aggregation::WorkspaceAggregation;
-
-const LUA_KEYWORDS: &[&str] = &[
-    "and", "break", "do", "else", "elseif", "end", "false", "for",
-    "function", "goto", "if", "in", "local", "nil", "not", "or",
-    "repeat", "return", "then", "true", "until", "while",
-];
+use crate::lua_builtins::LUA_KEYWORDS;
 
 pub fn prepare_rename(
     doc: &Document,

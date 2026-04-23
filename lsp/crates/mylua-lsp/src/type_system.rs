@@ -72,6 +72,81 @@ pub struct ParamInfo {
     pub type_fact: TypeFact,
 }
 
+impl FunctionSignature {
+    /// Format the signature as a human-readable label.
+    ///
+    /// * `name = None`  → prefix is `"fun"`:  `fun(a: T, b: U): R`
+    /// * `name = Some("foo")` → prefix is the name: `foo(a: T, b: U): R`
+    ///
+    /// When `skip_self` is true the leading `self` parameter is omitted
+    /// (used for `:` method-call display where `self` is implicit).
+    pub fn display_label(&self, name: Option<&str>, skip_self: bool) -> String {
+        let prefix = name.unwrap_or("fun");
+        let mut label = String::from(prefix);
+        label.push('(');
+        let mut first = true;
+        for p in &self.params {
+            if skip_self && p.name == "self" {
+                continue;
+            }
+            if !first {
+                label.push_str(", ");
+            }
+            first = false;
+            if p.type_fact == TypeFact::Unknown {
+                label.push_str(&p.name);
+            } else {
+                label.push_str(&format!("{}: {}", p.name, p.type_fact));
+            }
+        }
+        label.push(')');
+        if !self.returns.is_empty() {
+            label.push_str(": ");
+            let rs: Vec<String> = self.returns.iter().map(|r| format!("{}", r)).collect();
+            label.push_str(&rs.join(", "));
+        }
+        label
+    }
+
+    /// Like [`display_label`] but also returns byte-offset ranges for each
+    /// visible parameter inside the label string. Used by `signatureHelp`
+    /// to tell the client which substring to highlight for the active arg.
+    pub fn display_label_with_offsets(
+        &self,
+        name: &str,
+        skip_self: bool,
+    ) -> (String, Vec<[u32; 2]>) {
+        let mut label = String::from(name);
+        label.push('(');
+        let mut offsets = Vec::new();
+        let mut first = true;
+        for p in &self.params {
+            if skip_self && p.name == "self" {
+                continue;
+            }
+            if !first {
+                label.push_str(", ");
+            }
+            first = false;
+            let start = label.len() as u32;
+            if p.type_fact == TypeFact::Unknown {
+                label.push_str(&p.name);
+            } else {
+                label.push_str(&format!("{}: {}", p.name, p.type_fact));
+            }
+            let end = label.len() as u32;
+            offsets.push([start, end]);
+        }
+        label.push(')');
+        if !self.returns.is_empty() {
+            label.push_str(": ");
+            let rs: Vec<String> = self.returns.iter().map(|r| format!("{}", r)).collect();
+            label.push_str(&rs.join(", "));
+        }
+        (label, offsets)
+    }
+}
+
 /// Recursively replace `EmmyType("self")` / `EmmyGeneric("self", …)`
 /// references inside `fact` with the supplied `class_name`. Used by
 /// `summary_builder` when building method signatures so that

@@ -51,38 +51,7 @@ pub fn resolve_field_chain(
     fields: &[String],
     agg: &mut WorkspaceAggregation,
 ) -> ResolvedType {
-    let mut visited = HashSet::new();
-    let mut current = resolve_recursive(base_fact, agg, 0, &mut visited);
-
-    let mut global_prefix = match base_fact {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
-        _ => None,
-    };
-
-    for field in fields {
-        let result = resolve_field_access(&current.type_fact, field, agg, 0, &mut visited);
-
-        if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
-            if let Some(ref prefix) = global_prefix {
-                let qualified = format!("{}.{}", prefix, field);
-                let fallback = try_global_shard_qualified(&qualified, agg, 0, &mut visited);
-                if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
-                    current = fallback;
-                    global_prefix = Some(qualified);
-                    continue;
-                }
-            }
-        }
-
-        current = result;
-        if current.type_fact == TypeFact::Unknown {
-            global_prefix = None;
-        } else {
-            global_prefix = global_prefix.map(|p| format!("{}.{}", p, field));
-        }
-    }
-
-    current
+    resolve_field_chain_inner(base_fact, fields, agg, None)
 }
 
 /// URI-aware variant of `resolve_field_chain` for bases that are
@@ -97,11 +66,31 @@ pub fn resolve_field_chain_in_file(
     fields: &[String],
     agg: &mut WorkspaceAggregation,
 ) -> ResolvedType {
+    resolve_field_chain_inner(base_fact, fields, agg, Some(uri))
+}
+
+/// Shared core of `resolve_field_chain` and `resolve_field_chain_in_file`.
+///
+/// When `uri_hint` is `Some`, the resolver seeds the initial `def_uri` for
+/// `Known(Table)` bases and preserves it across intermediate table results,
+/// enabling per-file `TableShapeId` lookups. When `None`, the resolver
+/// behaves like the original `resolve_field_chain`.
+fn resolve_field_chain_inner(
+    base_fact: &TypeFact,
+    fields: &[String],
+    agg: &mut WorkspaceAggregation,
+    uri_hint: Option<&Uri>,
+) -> ResolvedType {
     let mut visited = HashSet::new();
-    let mut current = if matches!(base_fact, TypeFact::Known(KnownType::Table(_))) {
+
+    // When a URI hint is provided and the base is already a Table, seed
+    // the def_uri so that resolve_table_field can locate the shape.
+    let mut current = if uri_hint.is_some()
+        && matches!(base_fact, TypeFact::Known(KnownType::Table(_)))
+    {
         ResolvedType {
             type_fact: base_fact.clone(),
-            def_uri: Some(uri.clone()),
+            def_uri: uri_hint.cloned(),
             def_range: None,
         }
     } else {
@@ -114,11 +103,18 @@ pub fn resolve_field_chain_in_file(
     };
 
     for field in fields {
-        let result = match &current.type_fact {
-            TypeFact::Known(KnownType::Table(shape_id)) => {
-                resolve_table_field(*shape_id, field, &current.def_uri, agg)
+        // When a URI hint is present, resolve Table shapes directly via
+        // resolve_table_field (which needs the source_uri). Without the
+        // hint we always go through the generic resolve_field_access.
+        let result = if uri_hint.is_some() {
+            match &current.type_fact {
+                TypeFact::Known(KnownType::Table(shape_id)) => {
+                    resolve_table_field(*shape_id, field, &current.def_uri, agg)
+                }
+                _ => resolve_field_access(&current.type_fact, field, agg, 0, &mut visited),
             }
-            _ => resolve_field_access(&current.type_fact, field, agg, 0, &mut visited),
+        } else {
+            resolve_field_access(&current.type_fact, field, agg, 0, &mut visited)
         };
 
         if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
@@ -137,17 +133,18 @@ pub fn resolve_field_chain_in_file(
         //
         // Edge case: `resolve_field_access`'s Union branch may return a
         // `Known(Table)` with `def_uri: None` when no variant has a
-        // best-location. In that narrow case we'll re-stamp `caller_uri`
-        // here even though the shape may actually live in a different
+        // best-location. In that narrow case we'll re-stamp the caller's
+        // uri even though the shape may actually live in a different
         // file. Because `TableShapeId` is per-file, a mismatched uri
         // causes `resolve_table_field` to miss silently and return
         // `Unknown` — never wrong data, just a lost goto/hover hit.
         // Accepting that trade for simpler data flow.
-        let kept_uri = matches!(result.type_fact, TypeFact::Known(KnownType::Table(_)))
+        let kept_uri = uri_hint.is_some()
+            && matches!(result.type_fact, TypeFact::Known(KnownType::Table(_)))
             && result.def_uri.is_none();
         current = result;
         if kept_uri {
-            current.def_uri = Some(uri.clone());
+            current.def_uri = uri_hint.cloned();
         }
 
         if current.type_fact == TypeFact::Unknown {

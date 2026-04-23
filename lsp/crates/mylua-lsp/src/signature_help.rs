@@ -11,10 +11,10 @@ use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
-use crate::hover;
+use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
-use crate::type_system::{FunctionSignature, KnownType, ParamInfo, TypeFact};
+use crate::type_system::{FunctionSignature, KnownType, TypeFact};
 use crate::util::{node_text, position_to_byte_offset};
 
 pub fn signature_help(
@@ -84,7 +84,7 @@ pub(crate) fn resolve_call_signatures(
     // `obj:method(...)`
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
-        let base_fact = hover::infer_node_type(callee, source, uri, index);
+        let base_fact = type_inference::infer_node_type(callee, source, uri, index);
         let sigs = lookup_function_signatures_by_field(uri, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
@@ -97,7 +97,7 @@ pub(crate) fn resolve_call_signatures(
             callee.child_by_field_name("field"),
         ) {
             let field_name = node_text(field, source).to_string();
-            let base_fact = hover::infer_node_type(object, source, uri, index);
+            let base_fact = type_inference::infer_node_type(object, source, uri, index);
             let sigs = lookup_function_signatures_by_field(uri, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
@@ -118,7 +118,7 @@ pub(crate) fn resolve_call_signatures(
     // function(a, b) ... end` or cross-file `require` returning a
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
-    let base_fact = hover::infer_node_type(callee, source, uri, index);
+    let base_fact = type_inference::infer_node_type(callee, source, uri, index);
     let resolved = resolver::resolve_type(&base_fact, index);
     if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
         return Some((vec![sig.clone()], false, name));
@@ -443,39 +443,14 @@ fn format_signature_label(
     sig: &FunctionSignature,
     is_method: bool,
 ) -> (String, Vec<ParameterInformation>) {
-    let mut label = String::new();
-    label.push_str(name);
-    label.push('(');
-    let mut params = Vec::new();
-    // Skip leading `self` param if calling as method — client displays
-    // only user-visible parameters.
-    let visible_params: Vec<&ParamInfo> = sig
-        .params
-        .iter()
-        .filter(|p| !(is_method && p.name == "self"))
-        .collect();
-    for (i, p) in visible_params.iter().enumerate() {
-        if i > 0 {
-            label.push_str(", ");
-        }
-        let start = label.len();
-        if p.type_fact == TypeFact::Unknown {
-            label.push_str(&p.name);
-        } else {
-            label.push_str(&format!("{}: {}", p.name, p.type_fact));
-        }
-        let end = label.len();
-        params.push(ParameterInformation {
-            label: ParameterLabel::LabelOffsets([start as u32, end as u32]),
+    let (label, offsets) = sig.display_label_with_offsets(name, is_method);
+    let params = offsets
+        .into_iter()
+        .map(|[start, end]| ParameterInformation {
+            label: ParameterLabel::LabelOffsets([start, end]),
             documentation: None,
-        });
-    }
-    label.push(')');
-    if !sig.returns.is_empty() {
-        label.push_str(": ");
-        let rs: Vec<String> = sig.returns.iter().map(|r| format!("{}", r)).collect();
-        label.push_str(&rs.join(", "));
-    }
+        })
+        .collect();
     (label, params)
 }
 

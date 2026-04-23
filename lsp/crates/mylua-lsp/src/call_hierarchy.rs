@@ -31,7 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
-use crate::util::{node_text, position_to_byte_offset, ts_node_to_range};
+use crate::util::{is_ancestor_or_equal, node_text, position_to_byte_offset, ts_node_to_range};
 
 // ---------------------------------------------------------------------------
 // Prepare
@@ -134,19 +134,6 @@ fn item_from_enclosing_declaration(
         ts_node_to_range(decl, source),
         ts_node_to_range(name_node, source),
     ))
-}
-
-fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter::Node) -> bool {
-    let mut n = descendant;
-    loop {
-        if n.id() == ancestor.id() {
-            return true;
-        }
-        match n.parent() {
-            Some(p) => n = p,
-            None => return false,
-        }
-    }
 }
 
 fn identifier_at_offset(root: tree_sitter::Node, byte_offset: usize) -> Option<tree_sitter::Node> {
@@ -321,19 +308,22 @@ fn resolve_outgoing_target(
     fallback_uri: &Uri,
     fallback_range: Range,
 ) -> CallHierarchyItem {
-    for (uri, summary) in &index.summaries {
-        if let Some(fs) = summary.function_summaries.get(name) {
-            return build_item(
-                name.to_string(),
-                SymbolKind::FUNCTION,
-                uri.clone(),
-                fs.range,
-                fs.range,
-            );
-        }
-    }
+    // 1. O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
         if let Some(c) = candidates.first() {
+            // Try to refine with the precise FunctionSummary range from
+            // the candidate's source file.
+            if let Some(summary) = index.summaries.get(&c.source_uri) {
+                if let Some(fs) = summary.function_summaries.get(name) {
+                    return build_item(
+                        name.to_string(),
+                        SymbolKind::FUNCTION,
+                        c.source_uri.clone(),
+                        fs.range,
+                        fs.range,
+                    );
+                }
+            }
             let kind = if matches!(c.kind, GlobalContributionKind::Function) {
                 SymbolKind::FUNCTION
             } else {
@@ -348,7 +338,20 @@ fn resolve_outgoing_target(
             );
         }
     }
-    // Unknown callee — anchor at the call site itself.
+    // 2. Fallback: linear scan over all summaries (handles names not
+    //    registered in global_shard, e.g. local helpers).
+    for (uri, summary) in &index.summaries {
+        if let Some(fs) = summary.function_summaries.get(name) {
+            return build_item(
+                name.to_string(),
+                SymbolKind::FUNCTION,
+                uri.clone(),
+                fs.range,
+                fs.range,
+            );
+        }
+    }
+    // 3. Unknown callee — anchor at the call site itself.
     build_item(
         name.to_string(),
         SymbolKind::FUNCTION,
@@ -391,23 +394,15 @@ pub fn extract_call_site(
         (name, ts_node_to_range(m, source))
     } else if callee.kind() == "identifier" {
         (node_text(callee, source).to_string(), ts_node_to_range(callee, source))
-    } else if callee.kind() == "variable" {
-        // Dotted: `a.b.c()` — take the rightmost field's range and
-        // the whole dotted chain as the callee_name (caller can use
-        // `last_segment` if they only want the name).
+    } else if matches!(callee.kind(), "variable" | "field_expression") {
+        // Dotted: `a.b.c()` or field expression — take the rightmost
+        // field's range and the whole dotted chain as the callee_name
+        // (caller can use `last_segment` if they only want the name).
+        let text = node_text(callee, source).to_string();
         if let Some(field) = callee.child_by_field_name("field") {
-            let text = node_text(callee, source).to_string();
             (text, ts_node_to_range(field, source))
         } else {
-            let text = node_text(callee, source).to_string();
             (text, ts_node_to_range(callee, source))
-        }
-    } else if callee.kind() == "field_expression" {
-        if let Some(field) = callee.child_by_field_name("field") {
-            let text = node_text(callee, source).to_string();
-            (text, ts_node_to_range(field, source))
-        } else {
-            return None;
         }
     } else {
         return None;

@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors};
+use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors, extract_string_literal};
 
 pub fn goto_definition(
     doc: &Document,
@@ -263,7 +263,7 @@ fn goto_field_or_method(
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
-    let base_fact = crate::hover::infer_node_type(base_node, source, uri, index);
+let base_fact = crate::type_inference::infer_node_type(base_node, source, uri, index);
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name], index,
     );
@@ -318,7 +318,13 @@ fn try_require_goto(
     let args = first_val.child_by_field_name("arguments")?;
     let arg = args.named_child(0)?;
 
-    let module_path = extract_string_content(arg, doc.text.as_bytes())?;
+    // Unwrap expression_list wrapper if present, then extract string content.
+    let string_node = if arg.kind() == "expression_list" {
+        arg.named_child(0)?
+    } else {
+        arg
+    };
+    let module_path = extract_string_literal(string_node, doc.text.as_bytes())?;
 
     let target_uri = index.resolve_module_to_uri(&module_path)?;
 
@@ -336,29 +342,6 @@ fn try_require_goto(
         uri: target_uri,
         range: target_range,
     }))
-}
-
-fn extract_string_content(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
-    fn find_string_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
-        if n.kind().starts_with("short_string_content") {
-            return Some(node_text(n, source).to_string());
-        }
-        for i in 0..n.named_child_count() {
-            if let Some(child) = n.named_child(i as u32) {
-                if let Some(s) = find_string_content(child, source) {
-                    return Some(s);
-                }
-            }
-        }
-        None
-    }
-
-    if node.kind() == "expression_list" {
-        if let Some(first) = node.named_child(0) {
-            return find_string_content(first, source);
-        }
-    }
-    find_string_content(node, source)
 }
 
 /// Return `target`'s position among the `identifier` children of `list`
