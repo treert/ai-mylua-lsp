@@ -308,8 +308,8 @@ fn resolve_stub(
             resolve_emmy_type(name, agg)
         }
 
-        SymbolicStub::CallReturn { base, func_name } => {
-            resolve_call_return(base, func_name, agg, depth, visited)
+        SymbolicStub::CallReturn { base, func_name, generic_args } => {
+            resolve_call_return(base, func_name, generic_args, agg, depth, visited)
         }
 
         SymbolicStub::FieldOf { base, field } => {
@@ -435,6 +435,7 @@ fn resolve_emmy_type(
 fn resolve_call_return(
     base: &SymbolicStub,
     func_name: &str,
+    generic_args: &[TypeFact],
     agg: &mut WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
@@ -450,6 +451,18 @@ fn resolve_call_return(
         }
     }
 
+    // When the stub carried generic_args (e.g. `sstack:pop()` where sstack
+    // is `Stack<string>`), use them for substitution even if the resolved
+    // base lost the generic info (TypeRef -> EmmyType).
+    if !generic_args.is_empty() {
+        if let Some(type_name) = base_type_name(base) {
+            let ret = resolve_method_return_with_generics(type_name, func_name, generic_args, agg);
+            if ret != TypeFact::Unknown {
+                return resolve_recursive(&ret, agg, depth + 1, visited);
+            }
+        }
+    }
+
     // If base resolved to a known type, look for the function in its source
     if let Some(ref uri) = base_resolved.def_uri {
         let return_type = {
@@ -458,15 +471,23 @@ fn resolve_call_return(
                 None => return ResolvedType::unknown(),
             };
 
-            if let Some(fs) = summary.function_summaries.get(func_name) {
-                if let Some(ret) = fs.signature.returns.first() {
-                    Some(ret.clone())
-                } else {
-                    None
+            // Try bare name first, then qualified `Type:method` / `Type.method`.
+            let mut found = summary.function_summaries.get(func_name)
+                .and_then(|fs| fs.signature.returns.first().cloned());
+
+            if found.is_none() {
+                if let Some(type_name) = base_type_name(base) {
+                    for sep in [":", "."] {
+                        let qualified = format!("{}{}{}", type_name, sep, func_name);
+                        if let Some(fs) = summary.function_summaries.get(&qualified) {
+                            found = fs.signature.returns.first().cloned();
+                            if found.is_some() { break; }
+                        }
+                    }
                 }
-            } else {
-                None
             }
+
+            found
         };
 
         if let Some(ret) = return_type {
@@ -474,32 +495,48 @@ fn resolve_call_return(
         }
     }
 
-    // Try looking up `base_name.func_name` as a qualified global name.
-    // Function declarations like `function Foo.bar()` are registered in
-    // global_shard as "Foo.bar" by summary_builder, so O(1) lookup suffices.
-    if let SymbolicStub::GlobalRef { name: base_name } | SymbolicStub::RequireRef { module_path: base_name } = base {
-        let qualified = format!("{}.{}", base_name, func_name);
-        if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
-            let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
-            if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
-                if let Some(ret) = sig.returns.first() {
-                    let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
-                    if ret_resolved.def_uri.is_none() {
-                        ret_resolved.def_uri = Some(c.source_uri.clone());
-                        ret_resolved.def_range = Some(c.selection_range);
+    // Try looking up `base_name.func_name` / `base_name:func_name` as a
+    // qualified global name. Function declarations like `function Foo.bar()`
+    // or `function Foo:bar()` are registered in global_shard as "Foo.bar"
+    // or "Foo:bar" by summary_builder.
+    if let Some(base_name) = base_type_name(base) {
+        for sep in [".", ":"] {
+            let qualified = format!("{}{}{}", base_name, sep, func_name);
+            if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
+                let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
+                if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
+                    if let Some(ret) = sig.returns.first() {
+                        let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
+                        if ret_resolved.def_uri.is_none() {
+                            ret_resolved.def_uri = Some(c.source_uri.clone());
+                            ret_resolved.def_range = Some(c.selection_range);
+                        }
+                        return ret_resolved;
                     }
-                    return ret_resolved;
                 }
+                return ResolvedType::with_location(
+                    c.type_fact.clone(),
+                    c.source_uri.clone(),
+                    c.selection_range,
+                );
             }
-            return ResolvedType::with_location(
-                c.type_fact.clone(),
-                c.source_uri.clone(),
-                c.selection_range,
-            );
         }
     }
 
     ResolvedType::unknown()
+}
+
+/// Extract the base name from a `SymbolicStub` for qualified name lookups.
+/// Works for `GlobalRef`, `RequireRef`, and `TypeRef` — the three stub
+/// variants that carry a meaningful name for `{name}.{field}` / `{name}:{field}`
+/// lookups in `function_summaries` and `global_shard`.
+fn base_type_name(stub: &SymbolicStub) -> Option<&str> {
+    match stub {
+        SymbolicStub::GlobalRef { name } => Some(name.as_str()),
+        SymbolicStub::RequireRef { module_path } => Some(module_path.as_str()),
+        SymbolicStub::TypeRef { name } => Some(name.as_str()),
+        _ => None,
+    }
 }
 
 fn resolve_field_access(
@@ -855,7 +892,7 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
                 None
             }
         }
-        SymbolicStub::CallReturn { base, func_name } => {
+        SymbolicStub::CallReturn { base, func_name, .. } => {
             let base_key = stub_to_cache_key(base)?;
             Some(CacheKey::CallReturn {
                 base_key: Box::new(base_key),

@@ -613,10 +613,11 @@ fn infer_call_return_fact(
             }
         }
 
-        let base_stub = type_fact_to_stub_for_call_base(&base_fact, callee, source);
+        let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, callee, source);
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
             func_name: method_name,
+            generic_args,
         });
     }
 
@@ -628,10 +629,11 @@ fn infer_call_return_fact(
         ) {
             let func_name = node_text(field_node, source).to_string();
             let base_fact = infer_node_type(base_node, source, uri, index);
-            let base_stub = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
+            let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
             return TypeFact::Stub(SymbolicStub::CallReturn {
                 base: Box::new(base_stub),
                 func_name,
+                generic_args,
             });
         }
     }
@@ -663,19 +665,19 @@ fn type_fact_to_stub_for_call_base(
     base_fact: &TypeFact,
     base_node: tree_sitter::Node,
     source: &[u8],
-) -> crate::type_system::SymbolicStub {
+) -> (crate::type_system::SymbolicStub, Vec<TypeFact>) {
     use crate::type_system::{SymbolicStub, KnownType};
     match base_fact {
-        TypeFact::Stub(s) => s.clone(),
+        TypeFact::Stub(s) => (s.clone(), vec![]),
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
-            SymbolicStub::TypeRef { name: type_name.clone() }
+            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
         }
-        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
-            SymbolicStub::TypeRef { name: type_name.clone() }
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
         }
-        _ => SymbolicStub::GlobalRef {
+        _ => (SymbolicStub::GlobalRef {
             name: node_text(base_node, source).to_string(),
-        },
+        }, vec![]),
     }
 }
 

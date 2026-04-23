@@ -1574,24 +1574,25 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
         let method_name = node_text(method_node, ctx.source).to_string();
         let callee_text = node_text(callee, ctx.source);
 
-        let base_stub = if let Some(fact) = ctx.local_type_facts.get(callee_text) {
+        let (base_stub, generic_args) = if let Some(fact) = ctx.local_type_facts.get(callee_text) {
             match &fact.type_fact {
-                TypeFact::Stub(s) => s.clone(),
+                TypeFact::Stub(s) => (s.clone(), vec![]),
                 TypeFact::Known(KnownType::EmmyType(type_name)) => {
-                    SymbolicStub::TypeRef { name: type_name.clone() }
+                    (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
                 }
-                TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
-                    SymbolicStub::TypeRef { name: type_name.clone() }
+                TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+                    (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
                 }
-                _ => SymbolicStub::GlobalRef { name: callee_text.to_string() },
+                _ => (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![]),
             }
         } else {
-            SymbolicStub::GlobalRef { name: callee_text.to_string() }
+            (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![])
         };
 
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
             func_name: method_name,
+            generic_args,
         });
     }
 
@@ -1605,24 +1606,25 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 let base_text = node_text(base, ctx.source);
                 let func_name = node_text(field, ctx.source).to_string();
 
-                let base_stub = if let Some(fact) = ctx.local_type_facts.get(base_text) {
+                let (base_stub, generic_args) = if let Some(fact) = ctx.local_type_facts.get(base_text) {
                     match &fact.type_fact {
-                        TypeFact::Stub(s) => s.clone(),
+                        TypeFact::Stub(s) => (s.clone(), vec![]),
                         TypeFact::Known(KnownType::EmmyType(type_name)) => {
-                            SymbolicStub::TypeRef { name: type_name.clone() }
+                            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
                         }
-                        TypeFact::Known(KnownType::EmmyGeneric(type_name, _)) => {
-                            SymbolicStub::TypeRef { name: type_name.clone() }
+                        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+                            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
                         }
-                        _ => SymbolicStub::GlobalRef { name: base_text.to_string() },
+                        _ => (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![]),
                     }
                 } else {
-                    SymbolicStub::GlobalRef { name: base_text.to_string() }
+                    (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![])
                 };
 
                 return TypeFact::Stub(SymbolicStub::CallReturn {
                     base: Box::new(base_stub),
                     func_name,
+                    generic_args,
                 });
             }
         }

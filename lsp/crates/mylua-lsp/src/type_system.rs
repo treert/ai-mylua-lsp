@@ -39,6 +39,12 @@ pub enum SymbolicStub {
     CallReturn {
         base: Box<SymbolicStub>,
         func_name: std::string::String,
+        /// Actual generic type arguments from the base expression.
+        /// E.g. for `sstack:pop()` where `sstack` is `Stack<string>`,
+        /// this carries `[string]` so the resolver can substitute
+        /// generic params in the return type. Empty for non-generic bases.
+        #[serde(default)]
+        generic_args: Vec<TypeFact>,
     },
 
     /// Reference to a global name, resolved via GlobalShard.
@@ -167,7 +173,7 @@ impl fmt::Display for SymbolicStub {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RequireRef { module_path } => write!(f, "require(\"{}\")", module_path),
-            Self::CallReturn { base, func_name } => write!(f, "{}.{}()", base, func_name),
+            Self::CallReturn { base, func_name, .. } => write!(f, "{}.{}()", base, func_name),
             Self::GlobalRef { name } => write!(f, "global:{}", name),
             Self::TypeRef { name } => write!(f, "type:{}", name),
             Self::FieldOf { base, field } => write!(f, "{}.{}", base, field),
