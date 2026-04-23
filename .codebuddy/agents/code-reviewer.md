@@ -3,7 +3,7 @@ name: code-reviewer
 description: 代码审查员。在代码修改完成后自动调用，审查代码质量、正确性和性能。也可在用户提到 review、审查代码、检查 bug 时调用。
 model: hy3-preview-ioa
 readonly: true
-tools: list_dir, search_file, search_content, read_file, read_lints, replace_in_file, write_to_file, execute_command, delete_file, preview_url, web_fetch, use_skill, web_search, codebase_search, automation_update
+tools: list_dir, search_file, search_content, read_file, read_lints, web_search
 agentMode: agentic
 enabled: true
 enabledAutoRun: true
