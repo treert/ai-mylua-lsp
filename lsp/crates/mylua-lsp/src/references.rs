@@ -119,6 +119,18 @@ fn find_local_references(
     locations
 }
 
+/// Shared context for identifier-occurrence collection, avoiding
+/// long parameter lists in the recursive walker.
+struct RefSearchCtx<'a> {
+    name: &'a str,
+    source: &'a [u8],
+    uri: &'a Uri,
+    locations: &'a mut Vec<Location>,
+    def: &'a crate::types::Definition,
+    target_decl_byte: usize,
+    scope_tree: &'a crate::scope::ScopeTree,
+}
+
 fn collect_identifier_occurrences(
     scope: tree_sitter::Node,
     name: &str,
@@ -129,38 +141,29 @@ fn collect_identifier_occurrences(
     target_decl_byte: usize,
     scope_tree: &crate::scope::ScopeTree,
 ) {
+    let mut ctx = RefSearchCtx {
+        name, source, uri, locations, def, target_decl_byte, scope_tree,
+    };
     let mut cursor = scope.walk();
-    collect_idents_recursive(
-        &mut cursor, name, source, uri, locations, def, target_decl_byte, scope_tree,
-    );
+    collect_idents_recursive(&mut cursor, &mut ctx);
 }
 
 fn collect_idents_recursive(
     cursor: &mut tree_sitter::TreeCursor,
-    name: &str,
-    source: &[u8],
-    uri: &Uri,
-    locations: &mut Vec<Location>,
-    def: &crate::types::Definition,
-    target_decl_byte: usize,
-    scope_tree: &crate::scope::ScopeTree,
+    ctx: &mut RefSearchCtx,
 ) {
     let node = cursor.node();
 
-    if node.kind() == "identifier" && node_text(node, source) == name {
-        let range = ts_node_to_range(node, source);
-        if range != def.selection_range {
-            // Use the scope tree to confirm this occurrence actually refers
-            // to the same declaration as the click. This correctly handles
-            // `local x = x + 1` (the RHS `x` resolves to an outer `x`, not
-            // the newly declared one) and shadowing in nested scopes.
+    if node.kind() == "identifier" && node_text(node, ctx.source) == ctx.name {
+        let range = ts_node_to_range(node, ctx.source);
+        if range != ctx.def.selection_range {
             let ident_byte = node.start_byte();
-            let resolves_to_target = scope_tree
-                .resolve_decl(ident_byte, name)
-                .is_some_and(|d| d.decl_byte == target_decl_byte);
+            let resolves_to_target = ctx.scope_tree
+                .resolve_decl(ident_byte, ctx.name)
+                .is_some_and(|d| d.decl_byte == ctx.target_decl_byte);
             if resolves_to_target {
-                locations.push(Location {
-                    uri: uri.clone(),
+                ctx.locations.push(Location {
+                    uri: ctx.uri.clone(),
                     range,
                 });
             }
@@ -169,9 +172,7 @@ fn collect_idents_recursive(
 
     if cursor.goto_first_child() {
         loop {
-            collect_idents_recursive(
-                cursor, name, source, uri, locations, def, target_decl_byte, scope_tree,
-            );
+            collect_idents_recursive(cursor, ctx);
             if !cursor.goto_next_sibling() {
                 break;
             }

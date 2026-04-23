@@ -228,6 +228,18 @@ fn collect_errors_recursive(
     }
 }
 
+/// Shared context for field-access diagnostic collection, avoiding
+/// long parameter lists in the recursive walker.
+struct FieldDiagCtx<'a> {
+    source: &'a [u8],
+    uri: &'a Uri,
+    index: &'a mut WorkspaceAggregation,
+    diagnostics: &'a mut Vec<Diagnostic>,
+    emmy_severity: Option<DiagnosticSeverity>,
+    lua_error_severity: Option<DiagnosticSeverity>,
+    lua_warn_severity: Option<DiagnosticSeverity>,
+}
+
 fn check_field_access_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
@@ -238,11 +250,12 @@ fn check_field_access_diagnostics(
     lua_error_severity: Option<DiagnosticSeverity>,
     lua_warn_severity: Option<DiagnosticSeverity>,
 ) {
-    let mut cursor = root.walk();
-    collect_field_diagnostics(
-        &mut cursor, source, uri, index, diagnostics,
+    let mut ctx = FieldDiagCtx {
+        source, uri, index, diagnostics,
         emmy_severity, lua_error_severity, lua_warn_severity,
-    );
+    };
+    let mut cursor = root.walk();
+    collect_field_diagnostics(&mut cursor, &mut ctx);
 }
 
 /// Returns true if `node` is (or is any descendant of) the left-hand side
@@ -271,13 +284,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
 
 fn collect_field_diagnostics(
     cursor: &mut tree_sitter::TreeCursor,
-    source: &[u8],
-    uri: &Uri,
-    index: &mut WorkspaceAggregation,
-    diagnostics: &mut Vec<Diagnostic>,
-    emmy_severity: Option<DiagnosticSeverity>,
-    lua_error_severity: Option<DiagnosticSeverity>,
-    lua_warn_severity: Option<DiagnosticSeverity>,
+    ctx: &mut FieldDiagCtx,
 ) {
     let node = cursor.node();
 
@@ -290,33 +297,13 @@ fn collect_field_diagnostics(
             node.child_by_field_name("object"),
             node.child_by_field_name("field"),
         ) {
-let base_fact = crate::type_inference::infer_node_type(object, source, uri, index);
-            let field_name = node_text(field, source).to_string();
+let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.uri, ctx.index);
+            let field_name = node_text(field, ctx.source).to_string();
 
-            // Hover's `resolve_field_chain_in_file` threads a
-            // `global_prefix` through nested dotted lookups: on every
-            // unresolved step it tries `global_shard["<prefix>.<field>"]`,
-            // so `utils2.hello` and `utils2.sub.hello` alike find
-            // contributions that never land inside a table shape
-            // (e.g. `function utils2.hello()` → `utils2.hello`,
-            // `utils2.sub.bar = 1` → `utils2.sub.bar`). Diagnostics
-            // must mirror that fallback or hover succeeds while the
-            // same call site is flagged as an unknown field.
-            //
-            // Recovering the prefix post-resolution is tricky (the
-            // resolver collapses `GlobalRef` into `Known(Table)` and
-            // drops the name). Instead we reconstruct it from the AST:
-            //   - `Stub(GlobalRef { name })` — use `name` directly.
-            //   - `Known(Table(_))` base — use `node_text(object)` iff
-            //     it's a pure dotted path (bare identifiers joined by
-            //     `.`). This covers `utils2` as well as `utils2.sub`
-            //     without false-positive paths from subscripts, calls,
-            //     etc. The resolver itself never invents identifier
-            //     text, so this stays a read-only inspection.
             let global_prefix = match &base_fact {
                 TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
                 TypeFact::Known(KnownType::Table(_)) => {
-                    let text = node_text(object, source);
+                    let text = node_text(object, ctx.source);
                     if !text.is_empty()
                         && text.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
                         && !text.starts_with('.')
@@ -331,20 +318,20 @@ let base_fact = crate::type_inference::infer_node_type(object, source, uri, inde
                 _ => None,
             };
 
-            let resolved_base = resolver::resolve_type(&base_fact, index);
+            let resolved_base = resolver::resolve_type(&base_fact, ctx.index);
             match &resolved_base.type_fact {
                 TypeFact::Known(KnownType::EmmyType(type_name)) => {
-                    if let Some(severity) = emmy_severity {
+                    if let Some(severity) = ctx.emmy_severity {
                         let field_resolved = resolver::resolve_field_chain(
                             &resolved_base.type_fact,
                             std::slice::from_ref(&field_name),
-                            index,
+                            ctx.index,
                         );
                         if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none() {
                             let qualified = format!("{}.{}", type_name, field_name);
-                            if !index.global_shard.contains_key(&qualified) {
-                                diagnostics.push(Diagnostic {
-                                    range: ts_node_to_range(field, source),
+                            if !ctx.index.global_shard.contains_key(&qualified) {
+                                ctx.diagnostics.push(Diagnostic {
+                                    range: ts_node_to_range(field, ctx.source),
                                     severity: Some(severity),
                                     source: Some("mylua".to_string()),
                                     message: format!(
@@ -358,39 +345,27 @@ let base_fact = crate::type_inference::infer_node_type(object, source, uri, inde
                     }
                 }
                 TypeFact::Known(KnownType::Table(shape_id)) => {
-                    let table_uri = resolved_base.def_uri.as_ref().unwrap_or(uri);
-                    if let Some(summary) = index.summaries.get(table_uri) {
+                    let table_uri = resolved_base.def_uri.as_ref().unwrap_or(ctx.uri);
+                    if let Some(summary) = ctx.index.summaries.get(table_uri) {
                         if let Some(shape) = summary.table_shapes.get(shape_id) {
                             if !shape.fields.contains_key(&field_name) {
-                                // Global-prefix fallback: when the base
-                                // resolves to a global table, a
-                                // `global_shard["<prefix>.<field>"]`
-                                // hit means the field exists as a
-                                // separate global contribution (e.g.
-                                // `function utils2.hello()` or
-                                // `utils2.bar = 1` from any file in the
-                                // workspace), so the table shape's
-                                // emptiness is a red herring. Mirrors
-                                // the EmmyType branch above and hover's
-                                // `resolve_field_chain_in_file` fallback
-                                // so the two code paths stay in sync.
                                 let field_is_global = global_prefix
                                     .as_ref()
                                     .map(|prefix| {
-                                        index
+                                        ctx.index
                                             .global_shard
                                             .contains_key(&format!("{}.{}", prefix, field_name))
                                     })
                                     .unwrap_or(false);
                                 if !field_is_global {
                                     let severity = if shape.is_closed {
-                                        lua_error_severity
+                                        ctx.lua_error_severity
                                     } else {
-                                        lua_warn_severity
+                                        ctx.lua_warn_severity
                                     };
                                     if let Some(sev) = severity {
-                                        diagnostics.push(Diagnostic {
-                                            range: ts_node_to_range(field, source),
+                                        ctx.diagnostics.push(Diagnostic {
+                                            range: ts_node_to_range(field, ctx.source),
                                             severity: Some(sev),
                                             source: Some("mylua".to_string()),
                                             message: format!(
@@ -412,10 +387,7 @@ let base_fact = crate::type_inference::infer_node_type(object, source, uri, inde
 
     if cursor.goto_first_child() {
         loop {
-            collect_field_diagnostics(
-                cursor, source, uri, index, diagnostics,
-                emmy_severity, lua_error_severity, lua_warn_severity,
-            );
+            collect_field_diagnostics(cursor, ctx);
             if !cursor.goto_next_sibling() {
                 break;
             }

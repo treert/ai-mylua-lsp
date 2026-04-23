@@ -1,4 +1,5 @@
 use std::collections::HashSet;
+use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::type_inference;
@@ -442,7 +443,7 @@ fn resolve_global_item(
         if let Some(fs) = summary.function_summaries.get(name) {
             let mut md = String::new();
             md.push_str("```lua\n");
-            md.push_str(&format!("function {}(", name));
+            let _ = write!(md, "function {}(", name);
             let params: Vec<String> = fs
                 .signature
                 .params
@@ -452,7 +453,7 @@ fn resolve_global_item(
             md.push_str(&params.join(", "));
             md.push_str(")\n```");
             if !fs.overloads.is_empty() {
-                md.push_str(&format!("\n\n+{} overload(s)", fs.overloads.len()));
+                let _ = write!(md, "\n\n+{} overload(s)", fs.overloads.len());
             }
             item.documentation = Some(Documentation::MarkupContent(MarkupContent {
                 kind: MarkupKind::Markdown,

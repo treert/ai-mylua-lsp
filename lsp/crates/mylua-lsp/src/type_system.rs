@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 use serde::{Deserialize, Serialize};
 
@@ -96,7 +96,7 @@ impl FunctionSignature {
             if p.type_fact == TypeFact::Unknown {
                 label.push_str(&p.name);
             } else {
-                label.push_str(&format!("{}: {}", p.name, p.type_fact));
+                let _ = write!(label, "{}: {}", p.name, p.type_fact);
             }
         }
         label.push(')');
@@ -132,7 +132,7 @@ impl FunctionSignature {
             if p.type_fact == TypeFact::Unknown {
                 label.push_str(&p.name);
             } else {
-                label.push_str(&format!("{}: {}", p.name, p.type_fact));
+                let _ = write!(label, "{}: {}", p.name, p.type_fact);
             }
             let end = label.len() as u32;
             offsets.push([start, end]);

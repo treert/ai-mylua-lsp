@@ -1,3 +1,4 @@
+use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_emmy_comments, format_annotations_markdown};
@@ -219,14 +220,14 @@ pub fn hover(
         );
         let mut type_info = format_resolved_type(&resolved.type_fact);
         if entry_count > 1 {
-            type_info.push_str(&format!(" ({} definitions)", entry_count));
+            let _ = write!(type_info, " ({} definitions)", entry_count);
         }
         if let Some(summary) = index.summaries.get(&source_uri) {
             if let Some(fs) = summary.function_summaries.get(ident_text) {
                 if !fs.overloads.is_empty() {
                     type_info.push_str("\n\nOverloads:");
                     for overload in &fs.overloads {
-                        type_info.push_str(&format!("\n- `{}`", format_signature(overload)));
+                        let _ = write!(type_info, "\n- `{}`", format_signature(overload));
                     }
                 }
             }

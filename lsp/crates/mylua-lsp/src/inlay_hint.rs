@@ -25,6 +25,18 @@ use crate::signature_help;
 use crate::type_system::{KnownType, TypeFact};
 use crate::util::{node_text, position_to_byte_offset, ts_point_to_position};
 
+/// Shared context for the inlay-hint tree walk, avoiding a long
+/// parameter list on the recursive `walk` function.
+struct InlayCtx<'a> {
+    source: &'a [u8],
+    uri: &'a Uri,
+    index: &'a mut WorkspaceAggregation,
+    cfg: &'a InlayHintConfig,
+    range_start: usize,
+    range_end: usize,
+    out: &'a mut Vec<InlayHint>,
+}
+
 pub fn inlay_hints(
     doc: &Document,
     uri: &Uri,
@@ -41,49 +53,37 @@ pub fn inlay_hints(
     let range_end = position_to_byte_offset(&doc.text, range.end).unwrap_or(source.len());
 
     let mut out = Vec::new();
+    let mut ctx = InlayCtx {
+        source, uri, index, cfg, range_start, range_end, out: &mut out,
+    };
     let mut cursor = doc.tree.root_node().walk();
-    walk(
-        &mut cursor,
-        source,
-        uri,
-        index,
-        cfg,
-        range_start,
-        range_end,
-        &mut out,
-    );
+    walk(&mut cursor, &mut ctx);
     out
 }
 
 fn walk(
     cursor: &mut tree_sitter::TreeCursor,
-    source: &[u8],
-    uri: &Uri,
-    index: &mut WorkspaceAggregation,
-    cfg: &InlayHintConfig,
-    range_start: usize,
-    range_end: usize,
-    out: &mut Vec<InlayHint>,
+    ctx: &mut InlayCtx,
 ) {
     let node = cursor.node();
     // Early exit: whole subtree outside requested range.
-    if node.end_byte() < range_start || node.start_byte() > range_end {
+    if node.end_byte() < ctx.range_start || node.start_byte() > ctx.range_end {
         return;
     }
 
     match node.kind() {
-        "function_call" if cfg.parameter_names => {
-            collect_parameter_name_hints(node, source, uri, index, out);
+        "function_call" if ctx.cfg.parameter_names => {
+            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out);
         }
-        "local_declaration" if cfg.variable_types => {
-            collect_variable_type_hints(node, source, uri, index, out);
+        "local_declaration" if ctx.cfg.variable_types => {
+            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out);
         }
         _ => {}
     }
 
     if cursor.goto_first_child() {
         loop {
-            walk(cursor, source, uri, index, cfg, range_start, range_end, out);
+            walk(cursor, ctx);
             if !cursor.goto_next_sibling() {
                 break;
             }

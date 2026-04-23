@@ -5,7 +5,7 @@
 //!
 //! Grammar reference: `grammar/emmy.bnf`.
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 
 // ===========================================================================
 // AST types (emmy.bnf Part 4 → Rust)
@@ -938,7 +938,7 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
                 let opt = if *optional { "?" } else { "" };
                 let mut s = format!("@param `{}{}` `{}`", name, opt, type_expr);
                 if !desc.is_empty() {
-                    s.push_str(&format!(" — {}", desc));
+                    let _ = write!(s, " — {}", desc);
                 }
                 parts.push(s);
             }
@@ -949,41 +949,41 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
                     .join(", ");
                 let mut s = format!("@return `{}`", types_str);
                 if let Some(n) = name {
-                    s.push_str(&format!(" `{}`", n));
+                    let _ = write!(s, " `{}`", n);
                 }
                 if !desc.is_empty() {
-                    s.push_str(&format!(" — {}", desc));
+                    let _ = write!(s, " — {}", desc);
                 }
                 parts.push(s);
             }
             EmmyAnnotation::Type { type_expr, desc } => {
                 let mut s = format!("@type `{}`", type_expr);
                 if !desc.is_empty() {
-                    s.push_str(&format!(" — {}", desc));
+                    let _ = write!(s, " — {}", desc);
                 }
                 parts.push(s);
             }
             EmmyAnnotation::Class { name, parents, desc } => {
                 let mut s = format!("@class `{}`", name);
                 if !parents.is_empty() {
-                    s.push_str(&format!(" : {}", parents.join(", ")));
+                    let _ = write!(s, " : {}", parents.join(", "));
                 }
                 if !desc.is_empty() {
-                    s.push_str(&format!(" — {}", desc));
+                    let _ = write!(s, " — {}", desc);
                 }
                 parts.push(s);
             }
             EmmyAnnotation::Field { name, type_expr, desc, .. } => {
                 let mut s = format!("@field `{}` `{}`", name, type_expr);
                 if !desc.is_empty() {
-                    s.push_str(&format!(" — {}", desc));
+                    let _ = write!(s, " — {}", desc);
                 }
                 parts.push(s);
             }
             EmmyAnnotation::Deprecated { desc } => {
                 let mut s = "@deprecated".to_string();
                 if !desc.is_empty() {
-                    s.push_str(&format!(" {}", desc));
+                    let _ = write!(s, " {}", desc);
                 }
                 parts.push(s);
             }
