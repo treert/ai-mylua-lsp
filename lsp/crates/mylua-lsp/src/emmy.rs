@@ -1,9 +1,9 @@
-/// EmmyLua annotation parser — recursive-descent implementation.
-///
-/// Parses `---` comment text into structured `EmmyAnnotation` values with
-/// fully parsed `EmmyType` ASTs (no raw `type_text` strings).
-///
-/// Grammar reference: `grammar/emmy.bnf`.
+//! EmmyLua annotation parser — recursive-descent implementation.
+//!
+//! Parses `---` comment text into structured `EmmyAnnotation` values with
+//! fully parsed `EmmyType` ASTs (no raw `type_text` strings).
+//!
+//! Grammar reference: `grammar/emmy.bnf`.
 
 use std::fmt;
 
@@ -1068,7 +1068,7 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
             "nil" => TypeFact::Known(KnownType::Nil),
             "true" | "false" => TypeFact::Known(KnownType::Boolean),
             _ if s.starts_with('"') || s.starts_with('\'') => TypeFact::Known(KnownType::String),
-            _ if s.as_bytes().first().map_or(false, |b| b.is_ascii_digit()) => TypeFact::Known(KnownType::Number),
+            _ if s.as_bytes().first().is_some_and(|b| b.is_ascii_digit()) => TypeFact::Known(KnownType::Number),
             _ => TypeFact::Unknown,
         },
         EmmyType::Variadic(inner) => emmy_type_to_fact(inner),

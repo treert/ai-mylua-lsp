@@ -128,6 +128,12 @@ fn uri_priority_key(uri: &Uri) -> (u8, usize, usize, String) {
     (has_annotation, depth, path.len(), path)
 }
 
+impl Default for WorkspaceAggregation {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
@@ -221,8 +227,7 @@ impl WorkspaceAggregation {
             }
         }
 
-        let fingerprint_changed = old_fingerprint
-            .map_or(true, |old| old != summary.signature_fingerprint);
+        let fingerprint_changed = old_fingerprint != Some(summary.signature_fingerprint);
         if fingerprint_changed {
             if let Some(ref affected) = affected {
                 self.invalidate_dependants_targeted(affected);
@@ -372,7 +377,7 @@ impl WorkspaceAggregation {
                     return Some(uri.clone());
                 }
                 let alias_as_path = expanded.replace('.', "/");
-                for (uri, _) in &self.summaries {
+                for uri in self.summaries.keys() {
                     let uri_str = uri.to_string();
                     if uri_str.contains(&alias_as_path) {
                         return Some(uri.clone());
@@ -384,7 +389,7 @@ impl WorkspaceAggregation {
         // Fallback: check summaries for a URI path match (handles
         // modules discovered after require_map was built).
         let module_as_path = module_path.replace('.', "/");
-        for (uri, _) in &self.summaries {
+        for uri in self.summaries.keys() {
             let uri_str = uri.to_string();
             if uri_str.contains(&module_as_path) {
                 return Some(uri.clone());

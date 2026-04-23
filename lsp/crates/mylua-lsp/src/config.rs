@@ -207,16 +207,13 @@ impl Default for DiagnosticsConfig {
 ///   (rust-analyzer, pyright).
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[derive(Default)]
 pub enum DiagnosticScope {
+    #[default]
     Full,
     OpenOnly,
 }
 
-impl Default for DiagnosticScope {
-    fn default() -> Self {
-        Self::Full
-    }
-}
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -243,9 +240,9 @@ impl DiagnosticSeverityOption {
 ///
 /// - `enable` master switch
 /// - `parameter_names`: show `name:` before each non-variadic argument
-///    at function call sites where we have a FunctionSummary
+///   at function call sites where we have a FunctionSummary
 /// - `variable_types`: show `: Type` after `local x = ...` names when
-///    a useful inferred type is available
+///   a useful inferred type is available
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct InlayHintConfig {

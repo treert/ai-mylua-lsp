@@ -260,7 +260,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
             // `left == current` case.
             return parent
                 .child_by_field_name("left")
-                .map_or(false, |left| is_ancestor_or_equal(left, node));
+                .is_some_and(|left| is_ancestor_or_equal(left, node));
         }
         current = parent;
     }
@@ -337,12 +337,12 @@ let base_fact = crate::type_inference::infer_node_type(object, source, uri, inde
                     if let Some(severity) = emmy_severity {
                         let field_resolved = resolver::resolve_field_chain(
                             &resolved_base.type_fact,
-                            &[field_name.clone()],
+                            std::slice::from_ref(&field_name),
                             index,
                         );
                         if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none() {
                             let qualified = format!("{}.{}", type_name, field_name);
-                            if index.global_shard.get(&qualified).is_none() {
+                            if !index.global_shard.contains_key(&qualified) {
                                 diagnostics.push(Diagnostic {
                                     range: ts_node_to_range(field, source),
                                     severity: Some(severity),
@@ -379,8 +379,7 @@ let base_fact = crate::type_inference::infer_node_type(object, source, uri, inde
                                     .map(|prefix| {
                                         index
                                             .global_shard
-                                            .get(&format!("{}.{}", prefix, field_name))
-                                            .is_some()
+                                            .contains_key(&format!("{}.{}", prefix, field_name))
                                     })
                                     .unwrap_or(false);
                                 if !field_is_global {
@@ -1092,7 +1091,7 @@ fn visible_params_for(sig: &crate::type_system::FunctionSignature, is_method: bo
 
 fn signature_accepts_count(sig: &crate::type_system::FunctionSignature, actual: u32, is_method: bool) -> bool {
     let visible = visible_params_for(sig, is_method);
-    let has_vararg = visible.last().map_or(false, |p| p.name == "...");
+    let has_vararg = visible.last().is_some_and(|p| p.name == "...");
     let declared = visible.len() as u32;
     if has_vararg {
         // `declared - 1` is the count of non-vararg params; vararg
@@ -1112,7 +1111,7 @@ fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_metho
     let mut any_vararg = false;
     for sig in sigs {
         let visible = visible_params_for(sig, is_method);
-        let has_vararg = visible.last().map_or(false, |p| p.name == "...");
+        let has_vararg = visible.last().is_some_and(|p| p.name == "...");
         let declared = visible.len() as u32;
         let (lo, hi) = if has_vararg {
             any_vararg = true;
@@ -1166,7 +1165,7 @@ fn pick_best_typing_overload(
                 score += 1;
             }
         }
-        if best.map_or(true, |(_, s)| score > s) {
+        if best.is_none_or(|(_, s)| score > s) {
             best = Some((sig, score));
         }
     }
@@ -1530,10 +1529,8 @@ fn parse_directive_from_emmy_line(
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
             .collect();
-        if list.is_empty() {
+        if list.is_empty() || list.iter().any(|t| t == "*") {
             None
-        } else if list.iter().any(|t| t == "*") {
-            None // `*` means all — same as no list
         } else {
             Some(list)
         }

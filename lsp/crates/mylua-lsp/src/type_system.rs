@@ -200,7 +200,7 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
 /// - `a.b.c` → `a.b`   (dotted — treat everything before the last `.` as container)
 /// - `standalone` → `""`
 pub fn class_prefix_of(name: &str) -> &str {
-    if let Some(idx) = name.rfind(|c: char| c == ':' || c == '.') {
+    if let Some(idx) = name.rfind([':', '.']) {
         &name[..idx]
     } else {
         ""

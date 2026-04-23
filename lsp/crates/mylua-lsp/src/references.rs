@@ -24,10 +24,7 @@ pub fn find_references(
     let name: &str = if let Some(n) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         node_text(n, doc.text.as_bytes())
     } else {
-        name_owned = match extract_word_at(&doc.text, byte_offset) {
-            Some(s) => s,
-            None => return None,
-        };
+        name_owned = extract_word_at(&doc.text, byte_offset)?;
         name_owned.as_str()
     };
 
@@ -80,7 +77,7 @@ fn find_local_references(
     if include_declaration {
         locations.push(Location {
             uri: uri.clone(),
-            range: def.selection_range.clone(),
+            range: def.selection_range,
         });
     }
 
@@ -160,7 +157,7 @@ fn collect_idents_recursive(
             let ident_byte = node.start_byte();
             let resolves_to_target = scope_tree
                 .resolve_decl(ident_byte, name)
-                .map_or(false, |d| d.decl_byte == target_decl_byte);
+                .is_some_and(|d| d.decl_byte == target_decl_byte);
             if resolves_to_target {
                 locations.push(Location {
                     uri: uri.clone(),

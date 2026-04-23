@@ -190,6 +190,17 @@ fn infer_anon_caller_name(
     }
 }
 
+/// Intermediate state for a class being built across consecutive
+/// emmy_comment nodes: (name, parents, fields, generic_params,
+/// name_range of the `---@class <Name>` identifier token).
+type PendingClass = (
+    String,
+    Vec<String>,
+    Vec<TypeFieldDef>,
+    Vec<String>,
+    tower_lsp_server::ls_types::Range,
+);
+
 struct BuildContext<'a> {
     source: &'a [u8],
     require_bindings: Vec<RequireBinding>,
@@ -201,16 +212,8 @@ struct BuildContext<'a> {
     next_shape_id: u32,
     /// `---@type X` annotation pending attachment to the next local declaration.
     pending_type_annotation: Option<EmmyType>,
-    /// Class being built across consecutive emmy_comment nodes:
-    /// (name, parents, fields, generic_params, name_range of the
-    /// `---@class <Name>` identifier token).
-    pending_class: Option<(
-        String,
-        Vec<String>,
-        Vec<TypeFieldDef>,
-        Vec<String>,
-        tower_lsp_server::ls_types::Range,
-    )>,
+    /// Class being built across consecutive emmy_comment nodes.
+    pending_class: Option<PendingClass>,
     /// Buffer for `@generic` params that arrive before `@class`.
     pending_generic_params: Vec<String>,
     /// Type of the file-level `return` statement (module export).

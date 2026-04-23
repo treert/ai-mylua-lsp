@@ -47,7 +47,7 @@ pub fn search_workspace_symbols(
             // kind is `Function` or `TableExtension` — equivalent
             // Lua idioms (`function Foo.m()` vs `Foo.m = function()`)
             // must present identically.
-            let kind = member_kind.unwrap_or_else(|| match candidate.kind {
+            let kind = member_kind.unwrap_or(match candidate.kind {
                 GlobalContributionKind::Function => SymbolKind::FUNCTION,
                 _ => SymbolKind::VARIABLE,
             });

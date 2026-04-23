@@ -102,7 +102,7 @@ impl SummaryCache {
 
         for entry in read_dir.flatten() {
             let path = entry.path();
-            if path.extension().map_or(true, |e| e != "json") {
+            if path.extension().is_none_or(|e| e != "json") {
                 continue;
             }
             if let Ok(data) = std::fs::read(&path) {
@@ -168,7 +168,7 @@ impl SummaryCache {
             let path = entries_dir.join(format!("{}.json", filename));
             match serde_json::to_vec(&entry) {
                 Ok(data) => {
-                    if let Err(_) = std::fs::write(&path, data) {
+                    if std::fs::write(&path, data).is_err() {
                         write_errors += 1;
                     }
                 }

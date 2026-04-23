@@ -369,7 +369,7 @@ fn resolve_outgoing_target(
 /// qualified) callee name. `m.sub.foo` → `foo`; `obj:bar` → `bar`;
 /// `baz` → `baz`.
 fn last_segment(name: &str) -> &str {
-    if let Some(idx) = name.rfind(|c: char| c == '.' || c == ':') {
+    if let Some(idx) = name.rfind(['.', ':']) {
         &name[idx + 1..]
     } else {
         name

@@ -180,7 +180,7 @@ fn infer_call_return_fact(
         // parameters. A `CallReturn` stub would lose the actual type args.
         if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_fact {
             let field_result = resolver::resolve_field_chain_in_file(
-                uri, &base_fact, &[method_name.clone()], index,
+                uri, &base_fact, std::slice::from_ref(&method_name), index,
             );
             // If the field resolved to a function, extract its first return
             // type (already substituted by resolve_field_chain_in_file's

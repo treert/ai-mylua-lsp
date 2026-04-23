@@ -96,34 +96,13 @@ fn scan_dir_recursive(
     path_patterns: &[String],
     filter: &FileFilter,
 ) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let relative = path.strip_prefix(base)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        if path.is_dir() {
-            if !filter.should_enter_dir(&relative) {
-                continue;
-            }
-            scan_dir_recursive(base, &path, map, path_patterns, filter);
-        } else if path.extension().map_or(false, |ext| ext == "lua") {
-            if !filter.accepts(&relative) {
-                continue;
-            }
-            if let Some(uri) = path_to_uri(&path) {
-                for module_path in file_to_module_paths(base, &path, path_patterns) {
-                    map.entry(module_path).or_insert_with(|| uri.clone());
-                }
+    walk_lua_files(base, dir, filter, &mut |path| {
+        if let Some(uri) = path_to_uri(&path) {
+            for module_path in file_to_module_paths(base, &path, path_patterns) {
+                map.entry(module_path).or_insert_with(|| uri.clone());
             }
         }
-    }
+    });
 }
 
 /// Convert a file path to all possible Lua module paths based on path patterns.
@@ -162,7 +141,7 @@ pub fn file_to_module_paths(base: &Path, file: &Path, patterns: &[String]) -> Ve
     }
 
     let stem = relative.with_extension("");
-    let basic_module = stem.to_string_lossy().replace('\\', ".").replace('/', ".");
+    let basic_module = stem.to_string_lossy().replace(['\\', '/'], ".");
     if !basic_module.is_empty() && !modules.contains(&basic_module) {
         modules.push(basic_module);
     }
@@ -183,6 +162,20 @@ pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) 
 }
 
 fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>, filter: &FileFilter) {
+    walk_lua_files(base, dir, filter, &mut |path| {
+        files.push(path);
+    });
+}
+
+/// Generic recursive walker that visits every `.lua` file accepted by
+/// `filter` under `dir`. Extracted from `scan_dir_recursive` and
+/// `collect_files_recursive` to eliminate structural duplication.
+fn walk_lua_files(
+    base: &Path,
+    dir: &Path,
+    filter: &FileFilter,
+    visitor: &mut dyn FnMut(PathBuf),
+) {
     let entries = match std::fs::read_dir(dir) {
         Ok(e) => e,
         Err(_) => return,
@@ -199,12 +192,12 @@ fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>, fi
             if !filter.should_enter_dir(&relative) {
                 continue;
             }
-            collect_files_recursive(base, &path, files, filter);
-        } else if path.extension().map_or(false, |ext| ext == "lua") {
+            walk_lua_files(base, &path, filter, visitor);
+        } else if path.extension().is_some_and(|ext| ext == "lua") {
             if !filter.accepts(&relative) {
                 continue;
             }
-            files.push(path);
+            visitor(path);
         }
     }
 }

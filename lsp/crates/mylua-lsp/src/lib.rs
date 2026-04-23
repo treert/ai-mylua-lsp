@@ -358,7 +358,7 @@ impl Backend {
 
                 idx.upsert_summary(summary);
 
-                if old_fp.map_or(false, |old| old != new_fp) {
+                if old_fp.is_some_and(|old| old != new_fp) {
                     let mut affected = old_type_names;
                     for n in new_type_names {
                         if !affected.contains(&n) {
@@ -1419,7 +1419,7 @@ impl LanguageServer for Backend {
         let text_matches = {
             let docs = self.documents.lock().unwrap();
             docs.get(&uri)
-                .map_or(false, |d| d.text == params.text_document.text)
+                .is_some_and(|d| d.text == params.text_document.text)
         };
         if text_matches {
             self.open_uris.lock().unwrap().insert(uri.clone());
@@ -1550,7 +1550,7 @@ impl LanguageServer for Backend {
                     // need to reset the index to disk state.
                     let already_matches = {
                         let docs = self.documents.lock().unwrap();
-                        docs.get(&uri).map_or(false, |d| d.text == text)
+                        docs.get(&uri).is_some_and(|d| d.text == text)
                     };
                     if already_matches {
                         return;
@@ -1588,7 +1588,7 @@ impl LanguageServer for Backend {
             match change.typ {
                 FileChangeType::CREATED | FileChangeType::CHANGED => {
                     if let Some(path) = uri_to_path(&change.uri) {
-                        if path.extension().map_or(false, |e| e == "lua") {
+                        if path.extension().is_some_and(|e| e == "lua") {
                             if !workspace_scanner::should_index_path(&path, &roots, &filter) {
                                 continue;
                             }

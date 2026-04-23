@@ -80,7 +80,7 @@ fn collect_highlights(
         let matches_scope = match target_decl_byte {
             Some(target) => scope_tree
                 .resolve_decl(node.start_byte(), name)
-                .map_or(false, |d| d.decl_byte == target),
+                .is_some_and(|d| d.decl_byte == target),
             None => true,
         };
         if matches_scope {

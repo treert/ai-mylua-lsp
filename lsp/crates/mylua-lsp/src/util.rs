@@ -259,9 +259,7 @@ pub fn walk_ancestors<'a, T>(
 ) -> Option<T> {
     let mut current = node;
     for _ in 0..ANCESTOR_WALK_LIMIT {
-        let Some(parent) = current.parent() else {
-            return None;
-        };
+        let parent = current.parent()?;
         if let Some(v) = pred(parent) {
             return Some(v);
         }

@@ -391,7 +391,7 @@ fn build_field_hover(
         kind = kind_label,
     );
     let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[field_name.clone()], index,
+        uri, &base_fact, std::slice::from_ref(&field_name), index,
     );
     lsp_log!("[hover_{kind}] resolved={:?}", resolved.type_fact, kind = kind_label);
 
@@ -517,7 +517,7 @@ fn build_hover_for_definition(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(def.selection_range.clone()),
+        range: Some(def.selection_range),
     })
 }
 

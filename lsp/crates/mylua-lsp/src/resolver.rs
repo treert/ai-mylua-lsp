@@ -701,12 +701,10 @@ fn resolve_emmy_field_with_visited(
                         );
 
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
-                            if let Some(ref alias_fact) = td.alias_type {
-                                if let TypeFact::Known(KnownType::EmmyType(ref aliased_name)) = alias_fact {
-                                    let result = resolve_emmy_field_with_visited(aliased_name, field, agg, visited_types);
-                                    if result.type_fact != TypeFact::Unknown || result.def_uri.is_some() {
-                                        return result;
-                                    }
+                            if let Some(TypeFact::Known(KnownType::EmmyType(ref aliased_name))) = td.alias_type {
+                                let result = resolve_emmy_field_with_visited(aliased_name, field, agg, visited_types);
+                                if result.type_fact != TypeFact::Unknown || result.def_uri.is_some() {
+                                    return result;
                                 }
                             }
                         }
@@ -840,10 +838,8 @@ fn collect_emmy_fields_recursive(
                 for td in &summary.type_definitions {
                     if td.name == type_name {
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
-                            if let Some(ref alias_fact) = td.alias_type {
-                                if let TypeFact::Known(KnownType::EmmyType(ref aliased_name)) = alias_fact {
-                                    collect_emmy_fields_recursive(aliased_name, agg, fields, visited);
-                                }
+                            if let Some(TypeFact::Known(KnownType::EmmyType(ref aliased_name))) = td.alias_type {
+                                collect_emmy_fields_recursive(aliased_name, agg, fields, visited);
                             }
                         }
 

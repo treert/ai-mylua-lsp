@@ -208,8 +208,6 @@ fn document_link(range: Range, target: Uri) -> DocumentLink {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
     #[test]
     fn parse_module_path_rejects_long_brackets() {
         // Simulate a bracketed literal by crafting a string directly;
