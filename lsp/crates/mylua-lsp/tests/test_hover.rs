@@ -916,3 +916,71 @@ print(identity)
         "hover must NOT include the comment block separated by a blank line, got:\n{}", text,
     );
 }
+
+#[test]
+fn hover_trailing_comment_on_local_variable() {
+    // A trailing `-- comment` on the same line as a local declaration
+    // should appear in the hover output.
+    let src = r#"local top_str = foo()   -- hover type should be string?
+print(top_str)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "trailing_comment.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `top_str` at the usage site (line 1, col 6)
+    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+        .expect("hover on top_str should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("hover type should be string?"),
+        "hover should include the trailing comment, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_trailing_comment_not_on_different_line() {
+    // A comment on the NEXT line (not same line) should NOT be picked up
+    // as a trailing comment.
+    let src = r#"local abc = 123
+-- this is on the next line
+print(abc)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "trailing_no.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `abc` at the usage site (line 2, col 6)
+    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs)
+        .expect("hover on abc should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        !text.contains("this is on the next line"),
+        "hover should NOT include a comment from a different line, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_trailing_emmy_comment_not_collected() {
+    // A `---` Emmy-style comment on the same line should NOT be collected
+    // as a trailing comment (it's Emmy annotation material, not inline doc).
+    let src = r#"local xyz = 123   ---@type number
+print(xyz)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "trailing_emmy.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `xyz` at the usage site (line 1, col 6)
+    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+        .expect("hover on xyz should succeed");
+    let text = hover_content_string(&result);
+    // The `---@type number` should be handled by preceding-comment logic
+    // (if it's a preceding sibling) or not at all — but NOT by trailing.
+    // We just verify the raw `---@type number` text doesn't appear as
+    // plain doc text in the hover.
+    assert!(
+        !text.contains("---@type number"),
+        "hover should NOT show raw Emmy annotation as trailing doc, got:\n{}", text,
+    );
+}

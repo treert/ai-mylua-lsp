@@ -875,6 +875,44 @@ pub fn collect_preceding_comments<'a>(
     comments
 }
 
+/// Collect a trailing (end-of-line) comment on the same line as `node`.
+///
+/// Looks at the next sibling of `node`; if it is a `comment` node whose
+/// start row equals `node`'s end row, its text is returned (stripped of
+/// the leading `--` prefix and trimmed). This captures patterns like:
+///
+/// ```lua
+/// local x = foo()   -- some doc
+/// ```
+pub fn collect_trailing_comment<'a>(
+    node: tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<String> {
+    let stmt_end_row = node.end_position().row;
+    let next = node.next_sibling()?;
+    if next.start_position().row != stmt_end_row {
+        return None;
+    }
+    match next.kind() {
+        "comment" => {
+            let text = next.utf8_text(source).unwrap_or("");
+            // Strip the `--` prefix (but not `---` Emmy lines — those are
+            // preceding-comment material, not trailing doc).
+            if text.starts_with("---") {
+                return None;
+            }
+            if let Some(rest) = text.strip_prefix("--") {
+                let trimmed = rest.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+            None
+        }
+        _ => None,
+    }
+}
+
 // ===========================================================================
 // Hover formatting
 // ===========================================================================

@@ -1,6 +1,6 @@
 use tower_lsp_server::ls_types::*;
 use crate::document::Document;
-use crate::emmy::{collect_preceding_comments, parse_emmy_comments, format_annotations_markdown};
+use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_emmy_comments, format_annotations_markdown};
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
@@ -272,6 +272,7 @@ fn hover_at_declaration(
     let source = doc.text.as_bytes();
 
     let comment_lines = collect_preceding_comments(decl_node, source);
+    let trailing = collect_trailing_comment(decl_node, source);
     let comment_text = comment_lines.join("\n");
     let annotations = parse_emmy_comments(&comment_text);
     let emmy_md = format_annotations_markdown(&annotations);
@@ -298,6 +299,10 @@ fn hover_at_declaration(
     let doc_text = extract_doc_lines(&comment_lines);
     if !doc_text.is_empty() {
         parts.push(doc_text);
+    }
+
+    if let Some(trail) = &trailing {
+        parts.push(trail.clone());
     }
 
     let name_node = decl_node.child_by_field_name("name");
@@ -652,6 +657,7 @@ fn build_hover_for_definition(
     let stmt_node = find_enclosing_statement(def_node);
 
     let comment_lines = collect_preceding_comments(stmt_node, source);
+    let trailing = collect_trailing_comment(stmt_node, source);
     let comment_text = comment_lines.join("\n");
     let annotations = parse_emmy_comments(&comment_text);
     let emmy_md = format_annotations_markdown(&annotations);
@@ -688,6 +694,10 @@ fn build_hover_for_definition(
     let doc_text = extract_doc_lines(&comment_lines);
     if !doc_text.is_empty() {
         parts.push(doc_text);
+    }
+
+    if let Some(trail) = &trailing {
+        parts.push(trail.clone());
     }
 
     Some(Hover {
