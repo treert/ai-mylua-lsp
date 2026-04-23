@@ -860,6 +860,17 @@ pub fn collect_preceding_comments<'a>(
                     continue;
                 }
                 if text.starts_with("--") {
+                    // Check if this comment is actually a trailing comment
+                    // of a prior sibling (i.e. on the same line as the
+                    // previous non-comment node). If so, it belongs to that
+                    // statement, not to the node we are collecting for.
+                    if let Some(before) = prev.prev_sibling() {
+                        if before.end_position().row == prev.start_position().row {
+                            // This comment sits on the same line as `before`,
+                            // so it is a trailing comment — stop collecting.
+                            break;
+                        }
+                    }
                     comments.push(text.to_string());
                     next_start_row = prev.start_position().row;
                     sibling = prev.prev_sibling();

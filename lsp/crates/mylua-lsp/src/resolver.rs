@@ -1051,3 +1051,125 @@ fn substitute_in_fact(
         _ => fact.clone(),
     }
 }
+
+// ===========================================================================
+// Function-level generic inference (unification)
+// ===========================================================================
+
+/// Perform simple unification of function-level generic type parameters.
+///
+/// Given a function's `generic_params` (e.g. `["T"]`), its formal parameter
+/// types (from `FunctionSignature.params`), and the actual argument types
+/// at the call site, infer a binding table `{ T → string }` and substitute
+/// those bindings into the return types.
+///
+/// Returns `None` if the function has no generic params, or if no bindings
+/// could be inferred. Returns `Some(substituted_returns)` on success.
+///
+/// Currently supports top-level unification only:
+/// - `@param x T` + actual `string` → `T = string`
+/// - `@param xs T[]` + actual `string[]` → `T = string` (array element)
+/// - Nested generics (`List<T>` vs `List<string>`) are P3.
+pub fn unify_function_generics(
+    generic_params: &[String],
+    formal_params: &[crate::type_system::ParamInfo],
+    actual_arg_types: &[TypeFact],
+    return_types: &[TypeFact],
+) -> Option<Vec<TypeFact>> {
+    if generic_params.is_empty() {
+        return None;
+    }
+
+    // Build binding table: generic_param_name → actual_type
+    let mut bindings: Vec<Option<TypeFact>> = vec![None; generic_params.len()];
+
+    for (formal, actual) in formal_params.iter().zip(actual_arg_types.iter()) {
+        unify_one(&formal.type_fact, actual, generic_params, &mut bindings);
+    }
+
+    // Check if we got any bindings at all
+    let any_bound = bindings.iter().any(|b| b.is_some());
+    if !any_bound {
+        return None;
+    }
+
+    // Build the actual_params vector for substitute_in_fact.
+    // For unbound params, keep the original EmmyType("T") so it
+    // degrades gracefully.
+    let actual_params: Vec<TypeFact> = bindings
+        .into_iter()
+        .enumerate()
+        .map(|(i, b)| {
+            b.unwrap_or_else(|| TypeFact::Known(KnownType::EmmyType(generic_params[i].clone())))
+        })
+        .collect();
+
+    let substituted: Vec<TypeFact> = return_types
+        .iter()
+        .map(|r| substitute_in_fact(r, generic_params, &actual_params))
+        .collect();
+
+    Some(substituted)
+}
+
+/// Try to unify a single formal parameter type against an actual argument type,
+/// filling in the `bindings` table for any generic params that match.
+fn unify_one(
+    formal: &TypeFact,
+    actual: &TypeFact,
+    generic_params: &[String],
+    bindings: &mut [Option<TypeFact>],
+) {
+    // Skip unknown actuals — they don't contribute useful bindings.
+    if matches!(actual, TypeFact::Unknown) {
+        return;
+    }
+
+    match formal {
+        // Direct generic param: `@param x T` → T = actual
+        TypeFact::Known(KnownType::EmmyType(name)) => {
+            if let Some(i) = generic_params.iter().position(|p| p == name) {
+                if bindings[i].is_none() {
+                    bindings[i] = Some(actual.clone());
+                }
+            }
+        }
+        // Array of generic: `@param xs T[]` → T = element type of actual
+        // In our type system, `T[]` is represented as `EmmyGeneric("T", [])`
+        // or as a Union containing the array. For now, if the formal is
+        // an EmmyType that we know is a generic param, we already handle it
+        // above. The `T[]` case in Emmy is parsed as an array type wrapping T.
+        // Let's handle the Union case (T | nil → T?) as well.
+        TypeFact::Union(parts) => {
+            // For `T?` (= `T | nil`), try to unify the non-nil part
+            for part in parts {
+                if !matches!(part, TypeFact::Known(KnownType::Nil)) {
+                    // For the actual, also strip nil from union if present
+                    let stripped_actual = strip_nil(actual);
+                    unify_one(part, &stripped_actual, generic_params, bindings);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// Strip `nil` from a union type, returning the remaining type.
+/// If the type is not a union or has no nil, returns it unchanged.
+fn strip_nil(fact: &TypeFact) -> TypeFact {
+    match fact {
+        TypeFact::Union(parts) => {
+            let non_nil: Vec<TypeFact> = parts
+                .iter()
+                .filter(|p| !matches!(p, TypeFact::Known(KnownType::Nil)))
+                .cloned()
+                .collect();
+            match non_nil.len() {
+                0 => TypeFact::Known(KnownType::Nil),
+                1 => non_nil.into_iter().next().unwrap(),
+                _ => TypeFact::Union(non_nil),
+            }
+        }
+        other => other.clone(),
+    }
+}

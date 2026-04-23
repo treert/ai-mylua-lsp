@@ -62,4 +62,7 @@ local top_num = nstack:pop()   -- hover 类型应推断为 number?
 local n = identity(123)        -- T = number
 local s = identity("abc")      -- T = string
 
-print(top_str, top_num, n, s, first({ "a", "b" }))
+local a1 = first({ 1, 2, 3 })       -- T = number
+local a2 = first({ "a", "b" })     -- T = string
+
+print(top_str, top_num, n, s, a1, a2)

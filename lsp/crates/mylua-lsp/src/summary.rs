@@ -115,6 +115,11 @@ pub struct FunctionSummary {
     pub emmy_annotated: bool,
     /// Alternative signatures from `---@overload` annotations.
     pub overloads: Vec<FunctionSignature>,
+    /// Function-level generic type parameter names from `---@generic T, K`.
+    /// Empty for non-generic functions. Used by the resolver to perform
+    /// call-site generic argument inference (unification).
+    #[serde(default)]
+    pub generic_params: Vec<String>,
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).

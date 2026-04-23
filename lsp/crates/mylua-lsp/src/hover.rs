@@ -546,8 +546,43 @@ pub fn infer_node_type(
                 name: text.to_string(),
             })
         }
+        // Literal types — needed for function-level generic inference
+        // so that `identity("abc")` can infer `T = string`.
+        "number" => TypeFact::Known(crate::type_system::KnownType::Number),
+        "string" => TypeFact::Known(crate::type_system::KnownType::String),
+        "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
+        "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
         _ => TypeFact::Unknown,
     }
+}
+
+/// Collect the inferred types of actual arguments at a function call site.
+/// Used by function-level generic inference in the hover path.
+fn collect_hover_call_arg_types(
+    call_node: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    index: &mut WorkspaceAggregation,
+) -> Vec<TypeFact> {
+    let mut arg_types = Vec::new();
+    if let Some(args) = call_node.child_by_field_name("arguments") {
+        // The `arguments` node may contain an `expression_list` child
+        // (paren form `f(a, b)`) or direct children (string/table form).
+        for i in 0..args.named_child_count() {
+            if let Some(child) = args.named_child(i as u32) {
+                if child.kind() == "expression_list" {
+                    for j in 0..child.named_child_count() {
+                        if let Some(e) = child.named_child(j as u32) {
+                            arg_types.push(infer_node_type(e, source, uri, index));
+                        }
+                    }
+                } else {
+                    arg_types.push(infer_node_type(child, source, uri, index));
+                }
+            }
+        }
+    }
+    arg_types
 }
 
 /// Build a `TypeFact` for the return value of a `function_call` node.
@@ -641,18 +676,45 @@ fn infer_call_return_fact(
     // Plain local/global call — pick up the declared first return type
     // from the callee's FunctionSummary (if any).
     let callee_text = node_text(callee, source);
-    if let Some(summary) = index.summaries.get(uri) {
-        if let Some(fs) = summary.function_summaries.get(callee_text) {
-            if let Some(ret) = fs.signature.returns.first() {
-                // `@return T` gives us an EmmyType stub; keep it as-is
-                // so the resolver can look up `T`'s fields.
-                return match ret {
-                    TypeFact::Known(KnownType::EmmyType(name)) => {
-                        TypeFact::Stub(SymbolicStub::TypeRef { name: name.clone() })
-                    }
-                    other => other.clone(),
-                };
+
+    // Extract function summary data first (immutable borrow of index),
+    // then release the borrow before calling collect_hover_call_arg_types
+    // (which needs mutable borrow).
+    let fs_data = index.summaries.get(uri).and_then(|summary| {
+        summary.function_summaries.get(callee_text).map(|fs| {
+            (
+                fs.generic_params.clone(),
+                fs.signature.params.clone(),
+                fs.signature.returns.clone(),
+            )
+        })
+    });
+
+    if let Some((generic_params, formal_params, returns)) = fs_data {
+        // Function-level generic inference: if the callee has @generic params,
+        // try to unify them from the actual argument types at the call site.
+        if !generic_params.is_empty() {
+            let actual_arg_types = collect_hover_call_arg_types(node, source, uri, index);
+            if let Some(substituted_returns) = resolver::unify_function_generics(
+                &generic_params,
+                &formal_params,
+                &actual_arg_types,
+                &returns,
+            ) {
+                if let Some(ret) = substituted_returns.first() {
+                    return ret.clone();
+                }
             }
+        }
+        if let Some(ret) = returns.first() {
+            // `@return T` gives us an EmmyType stub; keep it as-is
+            // so the resolver can look up `T`'s fields.
+            return match ret {
+                TypeFact::Known(KnownType::EmmyType(name)) => {
+                    TypeFact::Stub(SymbolicStub::TypeRef { name: name.clone() })
+                }
+                other => other.clone(),
+            };
         }
     }
     TypeFact::Unknown

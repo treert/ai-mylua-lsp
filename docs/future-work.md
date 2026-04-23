@@ -126,15 +126,15 @@
 | `type_dependants` 扫描时排除泛型参数名（防止 `T` 误连到真类 `T`） | `aggregation.rs:464-472` |
 | `self` 类型替换成 class 名（fluent-style 方法链） | `type_system.rs::substitute_self` |
 
-### 2.2 [P2] 函数级泛型的实参推断未实现
+### 2.2 [P2] 函数级泛型的实参推断 ✅ 已实现（简化版本）
 
 - **动机**：`@class Foo<T>` 上绑定的方法能 resolve；但**纯函数泛型**—— `---@generic T ---@param x T ---@return T` 这种不挂 class 的——**无法从调用点的实参类型反推 `T = string`**。`substitute_generics` 只接受显式的 `actual_params`（即 `Foo<string>` 里已经写死的）。
-- **影响范围**：`resolver.rs` 函数调用解析；`signature_help` / `hover` 对 `my_func("hello")` 的返回类型展示；诊断对泛型调用的参数/返回校验。
-- **建议方案**：
-  - 在 `resolve_call_return` 链路里引入**合一（unification）**：从 `signature.params` 的 `TypeFact` 和实参的 `TypeFact` 推出泛型参数绑定表 `{ T → string }`，再 substitute 到 returns 上。
-  - 简化版本先只支持"顶层 EmmyType → 具体类型"的一级合一，嵌套泛型（`List<T>` 对上 `List<string>`）作为 P3 追加。
-- **验收**：`tests/lua-root/generics.lua` 增加 fixture 覆盖；独立 test 验证 `hover` 对调用点返回类型展示泛型实参。
-- **风险**：合一实现得不完善时容易出现"部分推断、部分 Unknown"的混乱状态；需要把"推断失败时保持 `EmmyType(T)` 不替换"的兜底写清楚。
+- **已实现**：
+  - `FunctionSummary` 新增 `generic_params: Vec<String>` 字段，`build_function_summary` 收集 `@generic` 注解。
+  - `resolver.rs` 新增 `unify_function_generics()` 函数，实现顶层一级合一：`@param x T` + actual `string` → `T = string`，支持 `T?`（Union with nil）。
+  - `summary_builder::infer_call_return_type` 和 `hover::infer_call_return_fact` 在 plain function call 路径中调用泛型推断。
+  - 测试覆盖：`test_hover.rs` 新增 `hover_generic_function_infers_return_type_string` 和 `hover_generic_function_infers_return_type_number`。
+- **未覆盖（P3 追加）**：嵌套泛型合一（`List<T>` vs `List<string>`）、跨文件泛型函数调用的推断、`signature_help` / `diagnostics` 路径的泛型推断。
 
 ### 2.3 [P2] `is_named_type_compatible` 忽略泛型实参 → 假阴性
 

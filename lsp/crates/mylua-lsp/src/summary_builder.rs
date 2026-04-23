@@ -625,6 +625,7 @@ fn build_function_summary(
     let mut returns = Vec::new();
     let mut emmy_annotated = false;
     let mut overloads = Vec::new();
+    let mut func_generic_params = Vec::new();
 
     for ann in &annotations {
         match ann {
@@ -644,6 +645,11 @@ fn build_function_summary(
             EmmyAnnotation::Overload { fun_type } => {
                 if let TypeFact::Known(KnownType::Function(sig)) = emmy_type_to_fact(fun_type) {
                     overloads.push(sig);
+                }
+            }
+            EmmyAnnotation::Generic { params: gparams } => {
+                for gp in gparams {
+                    func_generic_params.push(gp.name.clone());
                 }
             }
             _ => {}
@@ -702,6 +708,7 @@ fn build_function_summary(
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
+        generic_params: func_generic_params,
     }
 }
 
@@ -1549,6 +1556,53 @@ fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth:
     }
 }
 
+/// Collect the inferred types of actual arguments at a function call site.
+/// Used by function-level generic inference to unify `@generic T` params.
+///
+/// Uses a lightweight inference that handles literals and local variable
+/// lookups without requiring `&mut BuildContext`.
+fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> Vec<TypeFact> {
+    let mut arg_types = Vec::new();
+    if let Some(args) = call_node.child_by_field_name("arguments") {
+        // The `arguments` node may contain an `expression_list` child
+        // (paren form `f(a, b)`) or direct children (string/table form).
+        for i in 0..args.named_child_count() {
+            if let Some(child) = args.named_child(i as u32) {
+                if child.kind() == "expression_list" {
+                    for j in 0..child.named_child_count() {
+                        if let Some(e) = child.named_child(j as u32) {
+                            arg_types.push(infer_arg_type_lightweight(ctx, e));
+                        }
+                    }
+                } else {
+                    arg_types.push(infer_arg_type_lightweight(ctx, child));
+                }
+            }
+        }
+    }
+    arg_types
+}
+
+/// Lightweight type inference for call arguments — only handles literals
+/// and local variable lookups. Sufficient for function-level generic
+/// unification (e.g. `identity("abc")` → `T = string`).
+fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
+    match node.kind() {
+        "number" => TypeFact::Known(KnownType::Number),
+        "string" => TypeFact::Known(KnownType::String),
+        "true" | "false" => TypeFact::Known(KnownType::Boolean),
+        "nil" => TypeFact::Known(KnownType::Nil),
+        "variable" | "identifier" => {
+            let text = node_text(node, ctx.source);
+            if let Some(ltf) = ctx.local_type_facts.get(text) {
+                return ltf.type_fact.clone();
+            }
+            TypeFact::Unknown
+        }
+        _ => TypeFact::Unknown,
+    }
+}
+
 fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
     let callee = match node.child_by_field_name("callee") {
         Some(c) => c,
@@ -1632,6 +1686,21 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
 
     // Simple local/global function call — check local function summaries
     if let Some(fs) = ctx.function_summaries.get(callee_text) {
+        // Function-level generic inference: if the callee has @generic params,
+        // try to unify them from the actual argument types at the call site.
+        if !fs.generic_params.is_empty() {
+            let actual_arg_types = collect_call_arg_types(ctx, node);
+            if let Some(substituted_returns) = crate::resolver::unify_function_generics(
+                &fs.generic_params,
+                &fs.signature.params,
+                &actual_arg_types,
+                &fs.signature.returns,
+            ) {
+                if let Some(ret) = substituted_returns.first() {
+                    return ret.clone();
+                }
+            }
+        }
         if let Some(ret) = fs.signature.returns.first() {
             return ret.clone();
         }

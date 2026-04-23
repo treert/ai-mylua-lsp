@@ -984,3 +984,87 @@ print(xyz)
         "hover should NOT show raw Emmy annotation as trailing doc, got:\n{}", text,
     );
 }
+
+#[test]
+fn hover_prev_line_trailing_comment_not_leaked() {
+    // A trailing `-- comment` on the PREVIOUS line's statement should NOT
+    // leak into the hover of the NEXT line's variable.
+    let src = r#"local n = identity(123)        -- T = number
+local s = identity("abc")      -- T = string
+print(s)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "trailing_leak.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `s` at the usage site (line 2, col 6)
+    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs)
+        .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        !text.contains("T = number"),
+        "hover on `s` must NOT include the trailing comment from the previous line, got:\n{}", text,
+    );
+    assert!(
+        text.contains("T = string"),
+        "hover on `s` should include its own trailing comment, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_generic_function_infers_return_type_string() {
+    // Function-level generic: `identity("abc")` should infer T = string.
+    let src = r#"---@generic T
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+
+local s = identity("abc")
+print(s)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "generic_str.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `s` at the usage site (line 8, col 6)
+    let result = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs)
+        .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("string"),
+        "hover on `s` should show type `string` (inferred from generic), got:\n{}", text,
+    );
+    assert!(
+        !text.contains("Type: T"),
+        "hover on `s` should NOT show raw generic param `T`, got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_generic_function_infers_return_type_number() {
+    // Function-level generic: `identity(123)` should infer T = number.
+    let src = r#"---@generic T
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+
+local n = identity(123)
+print(n)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "generic_num.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `n` at the usage site (line 8, col 6)
+    let result = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs)
+        .expect("hover on n should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("number"),
+        "hover on `n` should show type `number` (inferred from generic), got:\n{}", text,
+    );
+}
