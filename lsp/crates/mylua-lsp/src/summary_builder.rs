@@ -289,12 +289,30 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.module_return_range = Some(ts_node_to_range(node, ctx.source));
-    if let Some(values) = node.child_by_field_name("values") {
+    // Grammar: `return_statement = word_return, optional(expression_list), optional(';')`
+    // The expression_list has no field name, so use `find_named_child_by_kind`.
+    if let Some(values) = find_named_child_by_kind(node, "expression_list") {
         if let Some(first_expr) = values.named_child(0) {
             let type_fact = infer_expression_type(ctx, first_expr, 0);
             ctx.module_return_type = Some(type_fact);
         }
     }
+}
+
+/// Find the first named child of `node` whose kind matches `kind`.
+/// Used when the grammar doesn't assign a field name to a child.
+fn find_named_child_by_kind<'a>(
+    node: tree_sitter::Node<'a>,
+    kind: &str,
+) -> Option<tree_sitter::Node<'a>> {
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            if child.kind() == kind {
+                return Some(child);
+            }
+        }
+    }
+    None
 }
 
 fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -597,6 +615,54 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let sig_for_global = fs.signature.clone();
     ctx.function_summaries.insert(name.clone(), fs);
 
+    // `function M.add(a, b)` / `function M:method()` — when the base is a
+    // local with a Table shape, register the function as a field on that
+    // shape (so `return M` carries the field through `require()`), and
+    // skip global_contributions (M is local, not global).
+    //
+    // Only when the base is NOT a known local do we fall through to the
+    // global contribution path — mirroring `visit_assignment`'s
+    // `register_nested_field_write` → `continue` pattern.
+    let wrote_to_shape = 'shape: {
+        let (base_name, field_name) = if let Some((b, f)) = name.rsplit_once(':') {
+            (b, f)
+        } else if let Some((b, f)) = name.rsplit_once('.') {
+            (b, f)
+        } else {
+            break 'shape false; // bare name, nothing to register
+        };
+
+        // Only single-segment bases (e.g. `M` in `M.add`). Multi-segment
+        // bases like `a.b.c` would need nested shape walking which is
+        // already handled by `register_nested_field_write` for assignments.
+        if base_name.contains('.') || base_name.contains(':') {
+            break 'shape false;
+        }
+
+        if let Some(ltf) = ctx.local_type_facts.get(base_name) {
+            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
+                let sid = *shape_id;
+                if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
+                    shape.set_field(field_name.to_string(), FieldInfo {
+                        name: field_name.to_string(),
+                        type_fact: TypeFact::Known(KnownType::Function(sig_for_global.clone())),
+                        def_range: Some(ts_node_to_range(name_node, ctx.source)),
+                        assignment_count: 1,
+                    });
+                    break 'shape true;
+                }
+            }
+        }
+        false
+    };
+
+    // Base is a local table → field already written to shape, no global.
+    if wrote_to_shape {
+        return;
+    }
+
+    // Base is not a local (or bare name) → register as global contribution
+    // (e.g. `function Player.new()` where Player is a global).
     ctx.global_contributions.push(GlobalContribution {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
@@ -802,7 +868,7 @@ fn collect_return_types(
         let child = cursor.node();
         match child.kind() {
             "return_statement" => {
-                if let Some(values) = child.child_by_field_name("values") {
+                if let Some(values) = find_named_child_by_kind(child, "expression_list") {
                     for i in 0..values.named_child_count() {
                         if let Some(expr) = values.named_child(i as u32) {
                             let tf = infer_expression_type(ctx, expr, 0);
@@ -1659,6 +1725,29 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
                     (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
                 }
+                // When the base is a local Table shape, look up the method
+                // directly in the shape or function_summaries.
+                TypeFact::Known(KnownType::Table(shape_id)) => {
+                    if let Some(shape) = ctx.table_shapes.get(shape_id) {
+                        if let Some(fi) = shape.fields.get(&method_name) {
+                            if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
+                                if let Some(ret) = sig.returns.first() {
+                                    return ret.clone();
+                                }
+                            }
+                        }
+                    }
+                    // Fallback: qualified name in function_summaries
+                    for sep in [":", "."] {
+                        let qualified = format!("{}{}{}", callee_text, sep, method_name);
+                        if let Some(fs) = ctx.function_summaries.get(&qualified) {
+                            if let Some(ret) = fs.signature.returns.first() {
+                                return ret.clone();
+                            }
+                        }
+                    }
+                    (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![])
+                }
                 _ => (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![]),
             }
         } else {
@@ -1690,6 +1779,29 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                         }
                         TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
                             (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
+                        }
+                        // When the base is a local Table shape (e.g. `local M = {}`),
+                        // look up the function field directly in the shape and
+                        // return its first declared return type. This avoids
+                        // generating a GlobalRef stub for a local variable.
+                        TypeFact::Known(KnownType::Table(shape_id)) => {
+                            if let Some(shape) = ctx.table_shapes.get(shape_id) {
+                                if let Some(fi) = shape.fields.get(&func_name) {
+                                    if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
+                                        if let Some(ret) = sig.returns.first() {
+                                            return ret.clone();
+                                        }
+                                    }
+                                }
+                            }
+                            // Fallback: qualified name in function_summaries
+                            let qualified = format!("{}.{}", base_text, func_name);
+                            if let Some(fs) = ctx.function_summaries.get(&qualified) {
+                                if let Some(ret) = fs.signature.returns.first() {
+                                    return ret.clone();
+                                }
+                            }
+                            (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![])
                         }
                         _ => (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![]),
                     }

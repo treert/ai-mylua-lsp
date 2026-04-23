@@ -1068,3 +1068,84 @@ print(n)
         "hover on `n` should show type `number` (inferred from generic), got:\n{}", text,
     );
 }
+
+#[test]
+fn hover_dotted_function_on_local_table_writes_to_shape() {
+    // `function M.add(a, b)` where M is a local table should write `add`
+    // into M's table shape. Hovering on `M.add(...)` should resolve the
+    // function type, and `add` should NOT appear in global_contributions.
+    let src = r#"local M = {}
+
+---@param a number
+---@param b number
+---@return number
+function M.add(a, b)
+    return a + b
+end
+
+local sum = M.add(1, 2)
+print(sum)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dotted_func_shape.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `add` in `M.add(1, 2)` — line 9, col 14 is `add`
+    let result = hover::hover(doc, &uri, pos(9, 14), &mut agg, &docs);
+    assert!(result.is_some(), "hover on `add` in `M.add(1, 2)` should succeed");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("number"),
+        "hover on `add` should show number return type, got:\n{}", text,
+    );
+
+    // hover on `sum` — should show number type
+    let result2 = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs);
+    assert!(result2.is_some(), "hover on `sum` should succeed");
+    let text2 = hover_content_string(result2.as_ref().unwrap());
+    assert!(
+        text2.contains("number"),
+        "hover on `sum` should show number type, got:\n{}", text2,
+    );
+}
+
+#[test]
+fn hover_cross_file_require_dotted_function() {
+    // Cross-file scenario: `require("math_utils")` returns a local table
+    // with `function M.add(a, b)`. Hovering on `math_utils.add` in the
+    // consumer file should resolve the function type.
+    let mod_src = r#"local M = {}
+
+---@param a number
+---@param b number
+---@return number
+function M.add(a, b)
+    return a + b
+end
+
+return M
+"#;
+    let main_src = r#"local math_utils = require("math_utils")
+local sum = math_utils.add(1, 2)
+print(sum)
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("math_utils.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    // Register require mapping
+    let mod_uri = make_uri("math_utils.lua");
+    agg.set_require_mapping("math_utils".to_string(), mod_uri.clone());
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).unwrap();
+
+    // hover on `add` in `math_utils.add(1, 2)` — line 1, col 23 is `add`
+    let result = hover::hover(main_doc, &main_uri, pos(1, 23), &mut agg, &docs);
+    assert!(result.is_some(), "hover on `add` in cross-file `math_utils.add(1, 2)` should succeed");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("number"),
+        "hover on cross-file `add` should show number return type, got:\n{}", text,
+    );
+}
