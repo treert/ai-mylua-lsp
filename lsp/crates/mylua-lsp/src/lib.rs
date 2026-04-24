@@ -1227,6 +1227,11 @@ impl LanguageServer for Backend {
 
         if let Some(cfg) = incoming_cfg {
             lsp_log!("[mylua-lsp] config: {:?}", cfg);
+            // Apply top_keyword setting to the scanner's global default
+            // BEFORE any parser is created. When `top_keyword = true`,
+            // column-0 keywords emit TOP_WORD_* for error front-loading;
+            // when `false` (default), they emit normal WORD_*.
+            tree_sitter_mylua::set_top_keyword_default_disabled(!cfg.runtime.top_keyword);
             *self.config.lock().unwrap() = cfg;
         }
 
@@ -1652,6 +1657,11 @@ impl LanguageServer for Backend {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let cfg = LspConfig::from_value(params.settings);
         lsp_log!("[mylua-lsp] config updated: {:?}", cfg);
+        // Update the scanner global so newly created parsers pick up
+        // the changed setting. Already-parsed documents keep their
+        // existing scanner state; a full re-index (restart) is needed
+        // for the change to take effect on all files.
+        tree_sitter_mylua::set_top_keyword_default_disabled(!cfg.runtime.top_keyword);
         *self.config.lock().unwrap() = cfg;
     }
 

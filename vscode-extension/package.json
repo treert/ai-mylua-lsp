@@ -84,6 +84,11 @@
           "default": "5.4",
           "description": "Assumed Lua runtime version. Affects the builtin identifier set used for `undefinedGlobal` suppression and the path of the bundled stdlib stubs auto-loaded via `mylua.workspace.useBundledStdlib`. If a bundled stub tree for the requested version does not exist, the extension falls back to the latest available bundled version (currently 5.4)."
         },
+        "mylua.runtime.topKeyword": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Enable top-level keyword splitting in the parser. When `true`, column-0 keywords (`if`, `while`, `for`, `function`, etc.) emit special `TOP_WORD_*` tokens that force block closure — this improves error localization (\"error front-loading\") but requires nested code to be indented. When `false` (default), all keywords are treated equally regardless of column. Individual files can still override via `---#enable top_keyword` / `---#disable top_keyword` directives."
+        },
         "mylua.require.paths": {
           "type": "array",
           "items": { "type": "string" },

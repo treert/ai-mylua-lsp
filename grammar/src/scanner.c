@@ -51,6 +51,19 @@ enum TokenType {
 static void advance(TSLexer *lexer) { lexer->advance(lexer, false); }
 static void skip_ws(TSLexer *lexer) { lexer->advance(lexer, true); }
 
+/* Global default for top_keyword_disabled. Set by the LSP host via
+   `mylua_set_top_keyword_default_disabled()` before any parser is
+   created. Each scanner instance reads this value once in `create`
+   and `deserialize(length==0)`. Individual files can still override
+   with `---#enable top_keyword` / `---#disable top_keyword`.
+   Default: true (top-level keyword splitting OFF). */
+static bool g_top_keyword_default_disabled = true;
+
+/* Public setter — called from Rust via FFI. */
+void mylua_set_top_keyword_default_disabled(bool value) {
+  g_top_keyword_default_disabled = value;
+}
+
 /* Scanner state: persisted across incremental parses via serialize/deserialize.
    Currently tracks whether top-level keyword emission is disabled via
    the ---#disable top_keyword directive. */
@@ -443,6 +456,7 @@ static bool check_directive(TSLexer *lexer, ScannerState *state) {
 
 void *tree_sitter_lua_external_scanner_create(void) {
   ScannerState *state = calloc(1, sizeof(ScannerState));
+  state->top_keyword_disabled = g_top_keyword_default_disabled;
   return state;
 }
 
@@ -461,7 +475,7 @@ void tree_sitter_lua_external_scanner_deserialize(void *payload, const char *buf
   if (length >= 1) {
     state->top_keyword_disabled = (buffer[0] != 0);
   } else {
-    state->top_keyword_disabled = false;
+    state->top_keyword_disabled = g_top_keyword_default_disabled;
   }
 }
 

@@ -34,12 +34,23 @@ impl Default for DebugConfig {
 #[serde(default)]
 pub struct RuntimeConfig {
     pub version: String,
+    /// Global toggle for top-level keyword splitting in the
+    /// tree-sitter scanner. When `true`, column-0 keywords emit
+    /// `TOP_WORD_*` tokens that force block closure — useful for
+    /// error front-loading. When `false` (default), all keywords
+    /// emit normal `WORD_*` regardless of column.
+    ///
+    /// Individual files can still override via `---#enable top_keyword`
+    /// / `---#disable top_keyword` directives.
+    #[serde(rename = "topKeyword")]
+    pub top_keyword: bool,
 }
 
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             version: "5.3".to_string(),
+            top_keyword: false,
         }
     }
 }

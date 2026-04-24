@@ -73,6 +73,7 @@ function collectLspConfig(
   return {
     runtime: {
       version,
+      topKeyword: cfg.get('runtime.topKeyword'),
     },
     require: {
       paths: cfg.get('require.paths'),
