@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tower_lsp_server::ls_types::Uri;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use jwalk::WalkDir;
 
 use crate::config::{RequireConfig, WorkspaceConfig};
 
@@ -25,7 +26,7 @@ const BUILTIN_CACHE_DIR: &str = ".vscode/.cache-mylua-lsp";
 
 fn is_builtin_cache_path(relative_path: &str) -> bool {
     // `relative_path` is forward-slash normalized by the scanner
-    // (see `scan_dir_recursive`), so matching on `/` is
+    // (see `walk_lua_files_jwalk`), so matching on `/` is
     // cross-platform safe.
     relative_path == BUILTIN_CACHE_DIR
         || relative_path.starts_with(&format!("{}/", BUILTIN_CACHE_DIR))
@@ -52,7 +53,10 @@ impl FileFilter {
 
     /// Returns `true` if a directory should be recursed into.
     /// Skips directories that are themselves matched by an exclude pattern.
-    fn should_enter_dir(&self, relative_dir: &str) -> bool {
+    /// Note: currently only used by `should_index_path` callers; the main
+    /// walk uses `process_read_dir` for pruning.
+    #[allow(dead_code)]
+    pub(crate) fn should_enter_dir(&self, relative_dir: &str) -> bool {
         if is_builtin_cache_path(relative_dir) {
             return false;
         }
@@ -82,27 +86,44 @@ pub fn scan_workspace_lua_files(
 
     for root in roots {
         if root.is_dir() {
-            scan_dir_recursive(root, root, &mut require_map, &require_config.paths, &filter);
+            for path in walk_lua_files_jwalk(root, &filter) {
+                if let Some(uri) = path_to_uri(&path) {
+                    for module_path in file_to_module_paths(root, &path, &require_config.paths) {
+                        require_map.entry(module_path).or_insert_with(|| uri.clone());
+                    }
+                }
+            }
         }
     }
 
     require_map
 }
 
-fn scan_dir_recursive(
-    base: &Path,
-    dir: &Path,
-    map: &mut HashMap<String, Uri>,
-    path_patterns: &[String],
-    filter: &FileFilter,
-) {
-    walk_lua_files(base, dir, filter, &mut |path| {
-        if let Some(uri) = path_to_uri(&path) {
-            for module_path in file_to_module_paths(base, &path, path_patterns) {
-                map.entry(module_path).or_insert_with(|| uri.clone());
+/// Scan and collect in a single pass: returns (require_map, file_list).
+/// This avoids walking the entire directory tree twice.
+pub fn scan_and_collect_lua_files(
+    roots: &[PathBuf],
+    require_config: &RequireConfig,
+    workspace_config: &WorkspaceConfig,
+) -> (HashMap<String, Uri>, Vec<PathBuf>) {
+    let mut require_map = HashMap::new();
+    let mut files = Vec::new();
+    let filter = FileFilter::from_config(workspace_config);
+
+    for root in roots {
+        if root.is_dir() {
+            for path in walk_lua_files_jwalk(root, &filter) {
+                if let Some(uri) = path_to_uri(&path) {
+                    for module_path in file_to_module_paths(root, &path, &require_config.paths) {
+                        require_map.entry(module_path).or_insert_with(|| uri.clone());
+                    }
+                }
+                files.push(path);
             }
         }
-    });
+    }
+
+    (require_map, files)
 }
 
 /// Convert a file path to all possible Lua module paths based on path patterns.
@@ -155,51 +176,68 @@ pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) 
     let filter = FileFilter::from_config(workspace_config);
     for root in roots {
         if root.is_dir() {
-            collect_files_recursive(root, root, &mut files, &filter);
+            files.extend(walk_lua_files_jwalk(root, &filter));
         }
     }
     files
 }
 
-fn collect_files_recursive(base: &Path, dir: &Path, files: &mut Vec<PathBuf>, filter: &FileFilter) {
-    walk_lua_files(base, dir, filter, &mut |path| {
-        files.push(path);
-    });
-}
+/// Walk a directory tree using `jwalk` for parallel I/O, returning all
+/// `.lua` files accepted by `filter`. Directory pruning happens inside
+/// `process_read_dir` so excluded subtrees (e.g. `node_modules`,
+/// `.git`) never trigger further `readdir` syscalls.
+fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
+    let base_owned = base.to_path_buf();
+    let filter_exclude = filter.exclude.clone();
 
-/// Generic recursive walker that visits every `.lua` file accepted by
-/// `filter` under `dir`. Extracted from `scan_dir_recursive` and
-/// `collect_files_recursive` to eliminate structural duplication.
-fn walk_lua_files(
-    base: &Path,
-    dir: &Path,
-    filter: &FileFilter,
-    visitor: &mut dyn FnMut(PathBuf),
-) {
-    let entries = match std::fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
+    let walker = WalkDir::new(base)
+        .skip_hidden(false) // we handle hidden dirs via our own exclude globs
+        .process_read_dir(move |_depth, _path, _state, children| {
+            children.retain(|entry_result| {
+                let Ok(entry) = entry_result.as_ref() else {
+                    return false;
+                };
+                if entry.file_type.is_dir() {
+                    // Compute relative path for directory filtering
+                    let relative = entry
+                        .path()
+                        .strip_prefix(&base_owned)
+                        .unwrap_or(&entry.path())
+                        .to_string_lossy()
+                        .replace('\\', "/");
+                    // Apply built-in cache dir check + user exclude globs
+                    if is_builtin_cache_path(&relative) {
+                        return false;
+                    }
+                    !filter_exclude.is_match(&relative)
+                } else {
+                    // Keep all non-directory entries; file-level filtering
+                    // is done after the walk to avoid duplicating the
+                    // include+exclude logic inside the closure.
+                    true
+                }
+            });
+        });
 
-    for entry in entries.flatten() {
+    let mut files = Vec::new();
+    for entry in walker {
+        let Ok(entry) = entry else { continue };
+        if entry.file_type.is_dir() {
+            continue;
+        }
         let path = entry.path();
-        let relative = path.strip_prefix(base)
-            .unwrap_or(&path)
-            .to_string_lossy()
-            .replace('\\', "/");
-
-        if path.is_dir() {
-            if !filter.should_enter_dir(&relative) {
-                continue;
+        if path.extension().is_some_and(|ext| ext == "lua") {
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            if filter.accepts(&relative) {
+                files.push(path);
             }
-            walk_lua_files(base, &path, filter, visitor);
-        } else if path.extension().is_some_and(|ext| ext == "lua") {
-            if !filter.accepts(&relative) {
-                continue;
-            }
-            visitor(path);
         }
     }
+    files
 }
 
 /// Resolve user-configured `workspace.library` strings to absolute,

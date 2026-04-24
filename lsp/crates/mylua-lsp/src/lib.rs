@@ -643,10 +643,8 @@ async fn run_workspace_scan(
 
     let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
 
-    let require_map =
-        workspace_scanner::scan_workspace_lua_files(&all_roots, &require_config, &workspace_config);
-
-    let files = workspace_scanner::collect_lua_files(&all_roots, &workspace_config);
+    let (require_map, files) =
+        workspace_scanner::scan_and_collect_lua_files(&all_roots, &require_config, &workspace_config);
     let total = files.len();
 
     let phase1_ms = phase1_started.elapsed().as_millis();
