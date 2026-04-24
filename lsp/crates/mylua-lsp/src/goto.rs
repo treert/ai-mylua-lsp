@@ -16,6 +16,7 @@ pub fn goto_definition(
     let byte_offset = position_to_byte_offset(&doc.text, position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let name = node_text(ident_node, doc.text.as_bytes());
+    lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));
 
     // If clicking on the LHS name of `local x = require("mod")`, prefer
     // jumping to the required module's `return` statement over resolving

@@ -342,16 +342,6 @@ impl Backend {
             if self.library_uris.lock().unwrap().contains(&uri) {
                 summary.is_meta = true;
             }
-            lsp_log!(
-                "[index] summary for {:?}: locals={:?} types={:?} globals={}",
-                uri,
-                summary.local_type_facts.keys().collect::<Vec<_>>(),
-                summary.type_definitions
-                    .iter()
-                    .map(|t| &t.name)
-                    .collect::<Vec<_>>(),
-                summary.global_contributions.len(),
-            );
 
             // Snapshot the set of *indexed* URIs (entire workspace after
             // cold-start, not just client-opened ones) BEFORE locking
@@ -613,10 +603,18 @@ async fn run_workspace_scan(
     send_index_phase(&client, "scanning", "Scanning workspace…", 0, 0).await;
 
     // Deduplicate library roots that fall under an existing workspace
-    // root to avoid double-scanning.
+    // root to avoid double-scanning. On Windows, `canonicalize()`
+    // returns a `\\?\` verbatim prefix with an uppercase drive letter;
+    // normalize it so `starts_with` comparisons against the already-
+    // normalized `library_roots` work correctly.
     let canonical_roots: Vec<PathBuf> = roots
         .iter()
-        .map(|r| r.canonicalize().unwrap_or_else(|_| r.clone()))
+        .map(|r| {
+            let c = r.canonicalize().unwrap_or_else(|_| r.clone());
+            #[cfg(windows)]
+            let c = workspace_scanner::normalize_windows_path(c);
+            c
+        })
         .collect();
     let mut all_roots = roots.clone();
     for lib in &library_roots {
@@ -1797,7 +1795,24 @@ impl LanguageServer for Backend {
         };
         let mut idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy))
+        let result = goto::goto_definition(doc, uri, position, &mut idx, &strategy);
+        match &result {
+            Some(GotoDefinitionResponse::Scalar(loc)) => {
+                lsp_log!("[goto] result: {:?} {}:{}-{}:{}", loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
+            }
+            Some(GotoDefinitionResponse::Array(locs)) => {
+                for (i, loc) in locs.iter().enumerate() {
+                    lsp_log!("[goto] result[{}]: {:?} {}:{}-{}:{}", i, loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
+                }
+            }
+            Some(GotoDefinitionResponse::Link(_)) => {
+                lsp_log!("[goto] result: Link");
+            }
+            None => {
+                lsp_log!("[goto] result: None");
+            }
+        }
+        Ok(result)
     }
 
     async fn goto_type_definition(

@@ -304,6 +304,13 @@ pub fn resolve_library_roots(
         if !canonical.is_dir() {
             continue;
         }
+        // On Windows, canonicalize() returns a `\\?\` verbatim
+        // prefix and an uppercase drive letter. Normalize both so
+        // that downstream `path_to_uri` and `starts_with` checks
+        // against workspace roots (which use the client's original
+        // casing) behave consistently.
+        #[cfg(windows)]
+        let canonical = normalize_windows_path(canonical);
         if seen.insert(canonical.clone()) {
             out.push(canonical);
         }
@@ -330,18 +337,107 @@ pub fn should_index_path(path: &Path, roots: &[PathBuf], filter: &FileFilter) ->
 }
 
 /// Convert a file path to a `file://` URI.
+///
+/// Delegates to `Uri::from_file_path` which handles Windows drive-letter
+/// percent-encoding (`C:` → `C%3A`) and special characters correctly.
+/// For non-absolute paths, resolves against `current_dir` first.
+///
+/// On Windows, strips the `\\?\` verbatim prefix that
+/// `std::fs::canonicalize` produces, since `Uri::from_file_path`
+/// would percent-encode the `?` and produce a malformed URI.
+/// Additionally normalizes the drive letter to lowercase so that
+/// URIs are consistent regardless of whether the path came from
+/// `canonicalize()` (uppercase) or the LSP client (lowercase).
 pub fn path_to_uri(path: &Path) -> Option<Uri> {
     let abs = if path.is_absolute() {
         path.to_path_buf()
     } else {
         std::env::current_dir().ok()?.join(path)
     };
-    let normalized = abs.to_string_lossy().replace('\\', "/");
-    if cfg!(windows) {
-        format!("file:///{}", normalized).parse().ok()
-    } else {
-        format!("file://{}", normalized).parse().ok()
+    #[cfg(windows)]
+    let abs = normalize_windows_path(abs);
+    let uri = Uri::from_file_path(&abs)?;
+    // `ls-types`' `Uri::from_file_path` calls `capitalize_drive_letter`
+    // internally, forcing the drive letter to uppercase (e.g. `F%3A`).
+    // VS Code sends URIs with a lowercase drive letter (`f%3A`), so we
+    // must post-process the URI string to lowercase the drive letter,
+    // otherwise the same file ends up with two distinct URIs and
+    // `global_shard` accumulates duplicate candidates.
+    #[cfg(windows)]
+    let uri = lowercase_drive_in_uri(uri);
+    Some(uri)
+}
+
+/// Normalize a Windows path for consistent URI generation:
+/// 1. Strip the `\\?\` (verbatim) prefix that `std::fs::canonicalize`
+///    adds — the prefix confuses URI builders (`\\?\C:\foo` would
+///    become `file:////%3F/C%3A/foo` instead of `file:///c%3A/foo`).
+/// 2. Lowercase the drive letter so that URIs are identical regardless
+///    of whether the path came from `canonicalize()` (uppercase `F:`)
+///    or the LSP client / VS Code (lowercase `f:`). Without this,
+///    `did_open` on a library file creates a second URI that doesn't
+///    match the one from the cold-start scan, causing duplicate
+///    `global_shard` candidates.
+#[cfg(windows)]
+pub fn normalize_windows_path(path: PathBuf) -> PathBuf {
+    use std::path::{Component, Prefix};
+    match path.components().next() {
+        Some(Component::Prefix(p)) => {
+            let (drive_char, is_verbatim) = match p.kind() {
+                Prefix::VerbatimDisk(disk) => (disk as char, true),
+                Prefix::Disk(disk) => (disk as char, false),
+                _ => return path,
+            };
+            let lower = drive_char.to_ascii_lowercase();
+            // Skip normalization when the drive letter is already
+            // lowercase and there is no verbatim prefix to strip.
+            if lower == drive_char && !is_verbatim {
+                return path;
+            }
+            let drive = format!("{}:", lower);
+            let rest: PathBuf = path.components().skip(1).collect();
+            PathBuf::from(drive).join(rest)
+        }
+        _ => path,
     }
+}
+
+/// Post-process a URI produced by `Uri::from_file_path` to lowercase
+/// the Windows drive letter. `ls-types`' `from_file_path` calls
+/// `capitalize_drive_letter` internally, producing `file:///F%3A/…`,
+/// but VS Code consistently uses lowercase (`file:///f%3A/…`). The
+/// mismatch causes the same physical file to appear under two distinct
+/// URI keys in `global_shard` / `summaries`.
+///
+/// The function rewrites the URI string in-place when it matches the
+/// pattern `file:///X%3A/…` (single ASCII letter followed by `%3A`).
+#[cfg(windows)]
+fn lowercase_drive_in_uri(uri: Uri) -> Uri {
+    let s = uri.as_str();
+    // `file:///F%3A/…`
+    //  0       8
+    //  file:///F%3A/…
+    //          ^--- drive letter at index 8
+    //           ^^^--- "%3A" at index 9..12
+    if s.len() >= 13
+        && s.starts_with("file:///")
+        && s.as_bytes()[9..12].eq_ignore_ascii_case(b"%3A")
+    {
+        let drive = s.as_bytes()[8];
+        if drive.is_ascii_alphabetic() {
+            let lower = drive.to_ascii_lowercase();
+            if lower != drive {
+                let mut owned = s.to_owned();
+                // SAFETY: replacing one ASCII byte with another ASCII byte
+                // preserves UTF-8 validity.
+                unsafe { owned.as_bytes_mut()[8] = lower; }
+                if let Ok(new_uri) = owned.parse::<Uri>() {
+                    return new_uri;
+                }
+            }
+        }
+    }
+    uri
 }
 
 #[cfg(test)]
