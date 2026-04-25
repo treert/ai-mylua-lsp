@@ -17,7 +17,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - **新增/删除/重构 LSP 能力** → 更新 `ai-readme.md` 的「已实现 LSP 能力」列表
 - **改变架构或数据流**（索引策略、模块边界、数据模型）→ 更新 `docs/architecture.md` 或 `docs/index-architecture.md`
-- **改变阶段完成状态或技术路线** → 更新 `docs/implementation-roadmap.md`
 
 纯 bug 修复、纯重构（对外行为不变）、配置微调不需要更新文档。
 

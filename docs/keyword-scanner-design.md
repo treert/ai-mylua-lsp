@@ -5,67 +5,48 @@
 
 ---
 
-## 1. Background: Why a Custom Keyword Scanner
+## 1. 设计动机
 
-### 1.1 The `_col0_block_end` Problem (Removed)
+### 为什么所有关键字由外部扫描器管理
 
-The original grammar included a `_col0_block_end` mechanism: the scanner emitted a zero-width token at column 0 when it encountered what looked like a new statement, and the grammar accepted this token as a valid block-end alternative to `end`. This effectively **faked block closure** when `end` was missing.
+将所有关键字和标识符交由 `scanner.c` 统一产出，解决了以下问题：
 
-**Why it was removed:**
+1. **`end` 被降级为 identifier**：当 `end` 是内联字符串时，tree-sitter 错误恢复可能将其降级
+2. **隐藏 token 无 MISSING 节点**：`_` 前缀的外部 token 不会生成 `MISSING` 节点，影响诊断
+3. **部分匹配破坏词法器状态**：逐字符匹配关键字失败时，词法器位置被污染
+4. **内联字符串绕过列 0 约束**：关键字同时存在外部 token 和内联字符串时，错误恢复可绕过扫描器
 
-- It turned missing-`end` errors into **legitimate parse paths**, silently swallowing errors
-- It **polluted the syntax tree** — the CST no longer purely represented valid Lua
-- It **weakened diagnostics** — `ERROR` / `MISSING` nodes were not generated for genuinely broken code
-- It introduced a **non-standard constraint** ("nested code must be indented") baked into the grammar itself
-- The design was a **layer violation**: error recovery logic does not belong in the grammar
+### 顶层关键字分裂
 
-**Conclusion**: `_col0_block_end` was removed entirely. It is not to be reintroduced.
-
-### 1.2 The Top-Level Keyword Split Idea
-
-To replace `_col0_block_end`, a new approach was adopted: **distinguish top-level (column 0) keyword statements from nested ones** at the grammar/scanner level. This makes missing-`end` errors surface earlier — at the next top-level keyword — without faking block closure.
-
-### 1.3 Evolution to Full Scanner Ownership
-
-During implementation, several issues were discovered:
-
-1. **`end` as identifier**: When `end` was an inline grammar string (`'end'`), tree-sitter's error recovery could demote it to `identifier` in certain states. Moving `end` to the external scanner (as `block_end`) fixed this.
-
-2. **Hidden tokens don't get MISSING nodes**: When `_block_end` was a hidden external token (prefixed with `_`), tree-sitter would **not** insert `MISSING` nodes during error recovery. Renaming it to `block_end` (visible) fixed this — tree-sitter now correctly inserts `MISSING block_end`.
-
-3. **Partial keyword matching corrupts lexer state**: The original `scan_top_keyword` used `try_match_keyword` which advanced the lexer character-by-character. If matching failed partway (e.g., trying to match `repeat` on `return`), the lexer position was corrupted for subsequent matching attempts in the same `scan()` call.
-
-4. **Inline keyword strings allow error-recovery fallback**: When keywords like `local` existed both as external tokens (`TOP_LOCAL`) and inline strings (`'local'`), tree-sitter could bypass the scanner's column-0 enforcement by falling back to the inline string during error recovery.
-
-These issues led to the final design: **all keywords and identifiers are owned by the external scanner**.
+区分列 0（顶层）和嵌套位置的关键字，使缺失 `end` 的错误在下一个顶层关键字处提前暴露，而非延迟到文件末尾。
 
 ---
 
-## 2. Current Architecture
+## 2. 当前架构
 
-### 2.1 Core Principle
+### 核心原则
 
-> Every token starting with `[a-zA-Z_]` is produced by the external scanner.
-> The scanner emits either a keyword token (`word_*` / `top_word_*`) or `identifier`.
-> The grammar contains **no inline keyword strings** and **no identifier regex**.
+> 每个以 `[a-zA-Z_]` 开头的 token 都由外部扫描器产出。
+> 扫描器发射关键字 token（`word_*` / `top_word_*`）或 `identifier`。
+> grammar 中**无内联关键字字符串**，**无 identifier 正则**。
 
-### 2.2 Scanner: `scan_word` Function
+### `scan_word` 函数
 
-The unified `scan_word` function in `scanner.c`:
+`scanner.c` 中的统一入口：
 
-1. Checks that the current character is `[a-zA-Z_]`
-2. Reads the **full identifier** into a buffer (up to 63 chars)
-3. Calls `mark_end` to commit the consumed text
-4. Looks up the buffer in the keyword table:
-   - If it matches a keyword **at column 0** with a top variant → emit `TOP_WORD_*`
-   - If it matches a keyword at other columns (or no top variant) → emit `WORD_*`
-   - If no match → emit `IDENTIFIER`
+1. 检查当前字符是否为 `[a-zA-Z_]`
+2. 读取**完整标识符**到缓冲区（最多 63 字符）
+3. 调用 `mark_end` 提交已消费文本
+4. 在关键字表中查找：
+   - 匹配关键字 + 列 0 + 有 top 变体 → 发射 `TOP_WORD_*`
+   - 匹配关键字但非列 0（或无 top 变体）→ 发射 `WORD_*`
+   - 无匹配 → 发射 `IDENTIFIER`
 
-This "read-then-match" approach avoids the partial-matching bug entirely.
+"先读后匹配"避免了部分匹配 bug。
 
-### 2.3 Keyword Table
+### 关键字表
 
-All 22 Lua keywords are in the scanner's keyword table:
+全部 22 个 Lua 关键字，其中 8 个有顶层变体（`if`, `while`, `repeat`, `for`, `function`, `goto`, `do`, `local`）：
 
 | Keyword    | Normal Token    | Top Token (col 0) |
 |------------|-----------------|---------------------|
@@ -92,9 +73,7 @@ All 22 Lua keywords are in the scanner's keyword table:
 | `until`    | `WORD_UNTIL`    | —                   |
 | `while`    | `WORD_WHILE`    | `TOP_WORD_WHILE`    |
 
-8 keywords have top-level variants: `if`, `while`, `repeat`, `for`, `function`, `goto`, `do`, `local`.
-
-### 2.4 Grammar Structure
+### Grammar 结构
 
 ```
 source_file  →  _top_block
@@ -102,201 +81,107 @@ _top_block   →  { _top_statement | _statement } [ return_statement ]
 _block       →  { _statement } [ return_statement ]
 ```
 
-- `_top_block` is used **only** at the `source_file` level. It accepts both `_top_statement` (column-0 keyword variants) and `_statement` (everything else).
-- `_block` is used in **all nested positions** (do, while, if, for, repeat, function body). It accepts only `_statement`.
+- `_top_block` 仅用于 `source_file` 层级，接受 `_top_statement`（列 0 关键字变体）和 `_statement`
+- `_block` 用于所有嵌套位置，仅接受 `_statement`
 
-Each affected keyword has two internal rules:
+每个受影响的关键字有两条内部规则，通过 `alias()` 统一最终 CST 节点名：
 
 ```js
 _top_if_statement  →  $.top_word_if ...   // aliased to $.if_statement
 _if_statement      →  $.word_if ...       // aliased to $.if_statement
 ```
 
-The `alias()` ensures the final CST node name is always `if_statement` — no `top_*` leaks.
+### Token 可见性
 
-### 2.5 Token Naming Convention
+所有关键字 token 均为**可见**（无 `_` 前缀）。这确保 tree-sitter 在错误恢复时生成 `MISSING` 节点。
 
-| Category | Naming | Example | Visibility |
-|----------|--------|---------|------------|
-| Top-level keyword | `$.top_word_*` | `$.top_word_if` | Visible in CST |
-| Normal keyword | `$.word_*` | `$.word_if` | Visible in CST |
-| Identifier | `$.identifier` | `$.identifier` | Visible in CST |
-
-All keyword tokens are **visible** (no `_` prefix). This is critical because:
-- Tree-sitter generates `MISSING` nodes for visible tokens during error recovery
-- Hidden tokens (`_` prefix) do **not** get `MISSING` nodes, breaking diagnostics
-
-### 2.6 Scanner Execution Order
+### 扫描器执行顺序
 
 ```
-1. Shebang (only at file start, column 0)
-2. Skip whitespace
-3. Short string content (inside "..." or '...')
-4. Word scanning: scan_word() — keywords + identifiers
-5. EmmyLua line / Comment (--- or --)
-6. Long string content ([=*[...]=*])
+1. Shebang（仅文件开头，列 0）
+2. 跳过空白
+3. 短字符串内容（"..." 或 '...' 内部）
+4. Word 扫描：scan_word() — 关键字 + 标识符
+5. EmmyLua 行 / 注释（--- 或 --）
+6. 长字符串内容（[=*[...]=*]）
 ```
-
-Word scanning comes **after** short-string content (to avoid matching keywords inside strings) and **before** comment/emmy (to avoid consuming `-` as part of a word).
 
 ---
 
-## 3. Behavior
+## 3. 行为
 
-### 3.1 Column 0 Enforcement
+### 列 0 强制
 
-When a keyword with a top variant appears at column 0, the scanner **unconditionally** emits `TOP_WORD_*`, regardless of the parser state (`valid_symbols`). This means:
+列 0 处有 top 变体的关键字**无条件**发射 `TOP_WORD_*`：
 
-- **At the top level**: `TOP_WORD_*` is accepted by `_top_statement` in `_top_block` → normal parsing
-- **Inside a nested block**: `_block` does not accept `_top_statement`, so `TOP_WORD_*` is unexpected → parse error
+- **顶层**：被 `_top_block` 中的 `_top_statement` 接受 → 正常解析
+- **嵌套块内**：`_block` 不接受 `_top_statement` → 解析错误
 
-**Consequence**: Nested code **must be indented**. A column-0 keyword inside a nested block will trigger a parse error. This is a deliberate design trade-off.
+**约束**：嵌套代码必须缩进。列 0 的关键字在嵌套块内会触发解析错误。
 
-### 3.2 Error Front-Loading
+### 错误前置
 
-When `end` is missing from a block, the next column-0 keyword forces the parser to close the current block early (via `MISSING word_end`), then start a new top-level statement. This moves the error **forward** to near the actual problem, rather than deferring it to the end of the file.
+缺失 `end` 时，下一个列 0 关键字强制关闭当前块（通过 `MISSING word_end`），然后开始新的顶层语句：
 
-Example:
 ```lua
 function foo()
     if a then
         bar()
-function other() end   -- column 0 → TOP_WORD_FUNCTION
+function other() end   -- 列 0 → TOP_WORD_FUNCTION → foo() 被强制关闭
 ```
 
-Result:
-```
-(source_file
-  (ERROR ...)                    -- foo's broken body
-  (function_declaration ...))    -- other() parsed correctly
-```
-
-### 3.3 MISSING Node Generation
-
-Because all keyword tokens are **visible** (not hidden), tree-sitter correctly generates `MISSING` nodes when a required keyword is absent:
+### MISSING 节点生成
 
 ```lua
 function foo()
-local y = 2    -- column 0 → TOP_WORD_LOCAL → forces foo() to close
-end            -- orphaned → ERROR
+local y = 2    -- 列 0 → TOP_WORD_LOCAL → foo() 被强制关闭
+end            -- 孤立 → ERROR
 ```
 
-Result:
-```
-(source_file
-  (function_declaration
-    ...
-    (function_body
-      ...
-      (MISSING word_end)))    -- ← MISSING node generated!
-  (local_declaration ...)
-  (ERROR ...))
-```
+结果中 `foo` 的函数体包含 `(MISSING word_end)` 节点。
 
-### 3.4 `word` Property
+### 局限性
 
-The grammar retains `word: $ => $.identifier`. Although `identifier` is now an external token, tree-sitter accepts this. The `word` property enables tree-sitter's keyword extraction optimization for any remaining inline string tokens (currently only punctuation operators).
+- 仅 8 个有 top 变体的关键字触发错误前置；赋值、函数调用、`return` 等不会
+- `return` 不作为 top keyword（不开启块，非有效同步点）
+- 表达式级 `function_definition`（如 `local f = function() end`）不受影响，始终使用 `$.word_function`
 
 ---
 
-## 4. Non-Goals and Limitations
+## 4. Scanner 指令
 
-### 4.1 Not Standard Lua
+### `---#disable top_keyword`
 
-This design introduces a non-standard constraint: **nested code must be indented**. Column-0 keywords inside nested blocks will trigger parse errors. This is an intentional trade-off for better error localization.
-
-### 4.2 Not All Errors Are Front-Loaded
-
-Only the 8 keywords with top variants (`if`, `while`, `repeat`, `for`, `function`, `goto`, `do`, `local`) trigger error front-loading. Missing `end` followed by:
-- Assignment statements
-- Function call statements
-- `return` statements
-- Other non-top-keyword constructs
-
-...will **not** be front-loaded. The error may still defer to the end of the file in these cases.
-
-### 4.3 `return` Is Not a Top Keyword
-
-`return` is deliberately excluded from top-level splitting. It does not start a block and is not a useful synchronization point.
-
-### 4.4 Expression-Level `function_definition` Is Not Affected
-
-Only statement-level `function_declaration` has a top variant. Expression-level `function_definition` (e.g., `local f = function() end`) uses `$.word_function` at any column.
-
----
-
-## 5. Scanner Directives
-
-### 5.1 `---#disable top_keyword`
-
-Disables top-level keyword emission from the point of the directive to the end of the file (or until a corresponding `---#enable top_keyword` is encountered). When disabled, all keywords at column 0 emit their normal `WORD_*` tokens instead of `TOP_WORD_*`.
-
-**Syntax:**
-```lua
----#disable top_keyword
-```
-
-**Effect:** After this directive, the scanner treats all column-0 keywords as if they were indented — they emit `WORD_*` instead of `TOP_WORD_*`. This means the parser will not force block closure at column-0 keywords.
-
-### 5.2 `---#enable top_keyword`
-
-Re-enables top-level keyword emission. This restores the default behavior where column-0 keywords emit `TOP_WORD_*`.
-
-**Syntax:**
-```lua
----#enable top_keyword
-```
-
-### 5.3 Use Case
-
-Some Lua files have deeply nested code at column 0 (e.g., code inside a `function()` expression assigned to a local). In such files, the top-keyword mechanism incorrectly forces block closure. The directive allows these files to opt out:
+从指令位置到文件末尾（或遇到 `---#enable top_keyword`），禁用顶层关键字发射。列 0 关键字改为发射 `WORD_*`。
 
 ```lua
 ---#disable top_keyword
 local createJson = function ()
-local math = require('math')    -- column 0, but no TOP_WORD_LOCAL
+local math = require('math')    -- 列 0，但不发射 TOP_WORD_LOCAL
 local string = require("string")
--- ... rest of file ...
 end
 return createJson()
 ```
 
-### 5.4 Implementation Details
+### `---#enable top_keyword`
 
-- **Scanner state**: A `ScannerState` struct with a `top_keyword_disabled` boolean flag
-- **Serialization**: The flag is serialized/deserialized as 1 byte, ensuring correct behavior with tree-sitter's incremental parsing
-- **Detection**: The directive is detected during EmmyLua line scanning (`---` prefix). After consuming the third dash, the scanner checks for `#disable top_keyword` or `#enable top_keyword`
-- **Directive must be at column 0**: Since `---` comments are typically at column 0, and the directive is part of an EmmyLua line, it naturally requires column 0 placement
-- **The directive is still emitted as `EMMY_LINE`**: It is a valid EmmyLua comment that happens to have side effects on the scanner state
+恢复默认行为。
 
-### 5.5 Constraints
+### 实现细节
 
-- The directive only affects `TOP_WORD_*` emission. Normal `WORD_*` tokens and `IDENTIFIER` tokens are unaffected
-- The directive is file-scoped: it persists from the point of occurrence until overridden or until end of file
-- The directive format is strict: `---#disable top_keyword` or `---#enable top_keyword` (optional whitespace between `---` and `#`, and between the command and `top_keyword`)
+- `ScannerState` 中的 `top_keyword_disabled` 布尔标志，序列化为 1 字节（支持增量解析）
+- 在 EmmyLua 行扫描（`---` 前缀）时检测指令
+- 指令本身仍作为 `EMMY_LINE` 发射
+- 格式严格：`---#disable top_keyword` 或 `---#enable top_keyword`
 
 ---
 
-## 6. Future Possibilities
+## 5. 文件索引
 
-The scanner-owned keyword architecture enables several future extensions:
-
-1. **Context-sensitive keywords**: e.g., `t.end = 1` where `end` after `.` is treated as `identifier` instead of `word_end`. This can be implemented by checking the previous token or maintaining scanner state.
-
-2. **Additional top keywords**: If needed, more keywords can be given top variants by adding entries to the keyword table.
-
-3. **Custom syntax extensions**: The scanner can be extended to support non-standard Lua syntax (e.g., new keywords, modified keyword semantics) without changing the grammar's core structure.
-
----
-
-## 7. File Reference
-
-| File | Role |
+| 文件 | 说明 |
 |------|------|
-| `grammar/grammar.js` | Grammar rules, externals, alias mappings |
-| `grammar/src/scanner.c` | External scanner: `scan_word`, keyword table, all token scanning |
-| `grammar/lua.bnf` | BNF documentation (human-readable, not machine-consumed) |
-| `grammar/test/corpus/col0_error_recovery.txt` | Error recovery test cases |
-| `grammar/test/corpus/top_level_keyword_split.txt` | Top-level keyword split test cases |
-| `grammar/test/corpus/statements.txt` | Statement parsing test cases |
-| `grammar/test/corpus/expressions.txt` | Expression parsing test cases |
+| `grammar/grammar.js` | Grammar 规则、externals、alias 映射 |
+| `grammar/src/scanner.c` | 外部扫描器：`scan_word`、关键字表、所有 token 扫描 |
+| `grammar/lua.bnf` | BNF 文档（人类可读） |
+| `grammar/test/corpus/col0_error_recovery.txt` | 错误恢复测试 |
+| `grammar/test/corpus/top_level_keyword_split.txt` | 顶层关键字分裂测试 |

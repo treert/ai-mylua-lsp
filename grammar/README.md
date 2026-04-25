@@ -54,5 +54,3 @@ npx tree-sitter parse <file.lua>  # 解析单个文件查看 CST
 
 - **grammar**：只回答「长什么样、树节点是什么」。
 - **lsp**：把树 + 工程信息变成定义、引用、类型、诊断；不在此目录写语义。
-
-更后排期见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md) 阶段 A。

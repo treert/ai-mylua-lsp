@@ -131,8 +131,6 @@ ai-mylua-lsp/
 | [`docs/architecture.md`](docs/architecture.md) | Extension / LSP / Grammar 三分解、数据流 |
 | [`docs/index-architecture.md`](docs/index-architecture.md) | 索引内部架构：数据模型、推断、类型、构建与维护 |
 | [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md) | LSP 语义能力：语义约定、消费规则 |
-| [`docs/implementation-roadmap.md`](docs/implementation-roadmap.md) | 阶段门禁、Monorepo 布局、技术栈 |
 | [`docs/performance-analysis.md`](docs/performance-analysis.md) | 性能现状、瓶颈分析、优化路线图 |
-| [`docs/index-implementation-plan.md`](docs/index-implementation-plan.md) | 索引架构落地实施步骤（历史归档） |
 | [`docs/future-work.md`](docs/future-work.md) | 后续待办与优化方向（索引坑点 + 泛型缺口 + 维护清单） |
 | [`docs/col0-block-end-redesign.md`](docs/col0-block-end-redesign.md) | Column-0 块边界重设计讨论（WIP） |
