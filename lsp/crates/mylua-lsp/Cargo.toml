@@ -13,6 +13,10 @@ path = "src/lib.rs"
 name = "mylua-lsp"
 path = "src/main.rs"
 
+[[bin]]
+name = "lua-perf"
+path = "src/bin/lua_perf.rs"
+
 [dependencies]
 tower-lsp-server = "0.23"
 tokio = { version = "1", features = ["full"] }

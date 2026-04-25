@@ -88,6 +88,65 @@ lsp/
 
 详见 [docs/implementation-roadmap.md](../docs/implementation-roadmap.md)。
 
+### CLI 工具：`lua-perf`（性能分析）
+
+独立的命令行工具，用于分析 Lua 文件在各解析阶段的耗时，帮助定位性能瓶颈。
+
+**构建**
+
+```bash
+cd lsp && cargo build --release --bin lua-perf
+```
+
+**使用**
+
+```bash
+# 分析单个文件
+cargo run --release --bin lua-perf -- /path/to/file.lua
+
+# 分析多个文件
+cargo run --release --bin lua-perf -- file1.lua file2.lua file3.lua
+
+# 或直接运行编译产物
+./target/release/lua-perf /path/to/file.lua
+```
+
+> ⚠️ 请使用 `--release` 模式，debug 模式下的耗时数据没有参考意义。
+
+**输出示例**
+
+```
+=== Performance breakdown for MoeGameCore-annotation.lua ===
+  Path: /path/to/MoeGameCore-annotation.lua
+  File size: 1234567 bytes, 45678 lines
+
+[Phase 1] tree-sitter parse:   120 ms
+  root node children: 12345
+  root named children: 6789
+  has_error: false
+[Phase 2] build_summary:       350 ms
+  global_contributions: 100
+  type_definitions: 200
+  table_shapes: 50
+  call_sites: 30
+  function_summaries: 80
+[Phase 3] build_scope_tree:    80 ms
+
+[Total]                        550 ms
+  parse:   21.8%
+  summary: 63.6%
+  scope:   14.5%
+=== End ===
+```
+
+**三个阶段说明**
+
+| 阶段 | 说明 |
+|------|------|
+| Phase 1: tree-sitter parse | 将源码解析为 AST |
+| Phase 2: build_summary | 从 AST 提取全局贡献、类型定义、函数摘要等索引信息 |
+| Phase 3: build_scope_tree | 构建作用域树，用于局部变量解析 |
+
 ### 与 `grammar/` 的边界
 
 - **grammar** 只更新句法树；**lsp** 负责 **ANN（注解绑定）**、**索引**、**LSP 行为**。
