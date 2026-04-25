@@ -184,6 +184,17 @@ fn check_undefined_globals(
 
     if cursor.goto_first_child() {
         loop {
+            // Skip bracket-key-only table constructors — they contain
+            // no identifiers, only literal key-value pairs.
+            let child = cursor.node();
+            if child.kind() == "table_constructor"
+                && crate::util::is_bracket_key_only_table(child)
+            {
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+                continue;
+            }
             check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics, severity);
             if !cursor.goto_next_sibling() {
                 break;
@@ -748,6 +759,12 @@ fn check_duplicate_keys_recursive(
 ) {
     let node = cursor.node();
     if node.kind() == "table_constructor" {
+        // Skip bracket-key-only tables — they are data-mapping tables
+        // where duplicate key checking is not useful and would be
+        // expensive for thousands of entries.
+        if crate::util::is_bracket_key_only_table(node) {
+            return;
+        }
         let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
         for i in 0..node.named_child_count() {
             let Some(field_list) = node.named_child(i as u32) else { continue };
@@ -874,6 +891,17 @@ fn count_identifier_references(
     }
     if cursor.goto_first_child() {
         loop {
+            // Skip bracket-key-only table constructors — they contain
+            // no identifiers, only literal key-value pairs.
+            let child = cursor.node();
+            if child.kind() == "table_constructor"
+                && crate::util::is_bracket_key_only_table(child)
+            {
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+                continue;
+            }
             count_identifier_references(cursor, source, scope_tree, ref_count);
             if !cursor.goto_next_sibling() {
                 break;

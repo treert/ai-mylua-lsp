@@ -368,11 +368,11 @@ print(t.age)
 
 #[test]
 fn static_bracket_string_key_is_normalized() {
-    // `["foo"] = 1` should land in `shape.fields["foo"]` (quotes
-    // stripped) so both `t.foo` and `t["foo"]` field diagnostics
-    // treat it as present. Without normalization the key would be
-    // stored as `"foo"` (with literal quotes) and every subsequent
-    // `t.foo` read would flag as Unknown.
+    // Bracket-key-only tables (`{ ["foo"] = 1, [2] = "two" }`) are
+    // recognized as data-mapping tables. Their shape is open with no
+    // per-field entries, so `t.foo` / `t[2]` reads should NOT produce
+    // Error-severity "Unknown field" diagnostics (open shapes downgrade
+    // to Warning at most).
     let src = r#"
 local t = { ["foo"] = 1, [2] = "two" }
 print(t.foo)
@@ -384,13 +384,14 @@ print(t[2])
         doc.tree.root_node(), src.as_bytes(), &uri,
         &mut agg, &doc.scope_tree, &cfg,
     );
-    let unknown: Vec<_> = diags.iter()
+    let errors: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
+        .filter(|d| d.severity == Some(tower_lsp_server::ls_types::DiagnosticSeverity::ERROR))
         .collect();
     assert!(
-        unknown.is_empty(),
-        "static bracket keys must be stored under their normalized names, got: {:?}",
-        unknown,
+        errors.is_empty(),
+        "bracket-key-only table should be open (no Error-severity Unknown-field), got: {:?}",
+        errors,
     );
 }
 
@@ -609,7 +610,9 @@ fn duplicate_table_key_reports_warning() {
 
 #[test]
 fn duplicate_table_key_across_numeric_and_string_keys() {
-    // `[1] = "x"` vs `[1] = "y"` — numeric keys also dedup.
+    // Bracket-key-only tables are recognized as data-mapping tables
+    // and skip duplicate-key checking. Verify that no diagnostic is
+    // emitted for `{ [1] = "x", [1] = "y" }` (bracket-key-only).
     let src = "local t = { [1] = \"x\", [1] = \"y\" }\n";
     let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
     let cfg = DiagnosticsConfig::default();
@@ -617,7 +620,7 @@ fn duplicate_table_key_across_numeric_and_string_keys() {
         doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg,
     );
     let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
-    assert_eq!(dup.len(), 1, "numeric bracket keys dedup, got: {:?}", diags);
+    assert_eq!(dup.len(), 0, "bracket-key-only tables skip duplicate-key check, got: {:?}", diags);
 }
 
 #[test]

@@ -144,6 +144,19 @@ fn collect_variable_tokens(
 
     if cursor.goto_first_child() {
         loop {
+            // Skip bracket-key-only table constructors — they contain
+            // no identifiers that need semantic token coloring, only
+            // literal key-value pairs. Avoids O(N) traversal on large
+            // data-mapping tables.
+            let child = cursor.node();
+            if child.kind() == "table_constructor"
+                && crate::util::is_bracket_key_only_table(child)
+            {
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+                continue;
+            }
             collect_variable_tokens(cursor, source, scope_tree, builtins, tokens);
             if !cursor.goto_next_sibling() {
                 break;

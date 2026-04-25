@@ -29,6 +29,12 @@ pub struct TableShape {
     /// loadable.
     #[serde(default)]
     pub owner_name: Option<String>,
+    /// Key type for bracket-key-only tables (e.g. `{ [string] = value, ... }`).
+    /// When set, `fields` is empty and the shape represents a map-like table
+    /// whose individual entries are not tracked. Consumers should use
+    /// `key_type` + `array_element_type` for type information.
+    #[serde(default)]
+    pub key_type: Option<crate::type_system::TypeFact>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -53,6 +59,7 @@ impl TableShape {
             is_closed: true,
             truncated: false,
             owner_name: None,
+            key_type: None,
         }
     }
 

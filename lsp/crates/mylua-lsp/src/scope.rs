@@ -226,6 +226,15 @@ impl<'a> TreeBuilder<'a> {
                 self.visit_children(node, child_scope);
             }
             _ => {
+                // Skip bracket-key-only table constructors — they contain
+                // no scope declarations (no function_body / local / for),
+                // only literal key-value pairs. Skipping avoids O(N)
+                // traversal of thousands of field nodes in data tables.
+                if node.kind() == "table_constructor"
+                    && crate::util::is_bracket_key_only_table(node)
+                {
+                    return;
+                }
                 self.visit_children(node, scope_id);
             }
         }

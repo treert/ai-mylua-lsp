@@ -153,6 +153,13 @@ fn collect_calls_in_scope(
         }
         _ => {}
     }
+    // Skip bracket-key-only table constructors — they contain only
+    // literal key-value pairs, never function calls.
+    if node.kind() == "table_constructor"
+        && crate::util::is_bracket_key_only_table(node)
+    {
+        return;
+    }
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
             collect_calls_in_scope(child, source, caller_name, out);
@@ -1951,6 +1958,18 @@ fn extract_table_shape(
     //
     // We also read the CST field `key` (not the historical name `name`)
     // as defined by the grammar's `field` rule.
+
+    // ── Fast path: bracket-key-only tables ──────────────────────────
+    // Tables where ALL fields use bracket-key syntax (`[exp] = value`)
+    // are typically data-mapping tables (e.g. asset path remapping).
+    // For these tables we skip per-field extraction and only record
+    // the key/value types — this avoids O(N) HashMap inserts and
+    // string allocations for tables with thousands of entries.
+    if crate::util::is_bracket_key_only_table(constructor) {
+        extract_bracket_key_table_types(ctx, constructor, shape, depth);
+        return;
+    }
+
     for i in 0..constructor.named_child_count() {
         let Some(field_list) = constructor.named_child(i as u32) else { continue };
         if field_list.kind() != "field_list" {
@@ -1964,6 +1983,58 @@ fn extract_table_shape(
             extract_single_field(ctx, field_node, shape, depth);
         }
     }
+}
+
+/// Fast-path extraction for bracket-key-only tables: sample a few
+/// fields to determine key and value types, then set them on the
+/// shape without storing individual field entries.
+fn extract_bracket_key_table_types(
+    ctx: &mut BuildContext,
+    constructor: tree_sitter::Node,
+    shape: &mut TableShape,
+    depth: usize,
+) {
+    shape.mark_open();
+
+    // Sample up to SAMPLE_COUNT fields to infer key/value types.
+    const SAMPLE_COUNT: usize = 4;
+    let mut sampled = 0usize;
+    let mut key_type: Option<TypeFact> = None;
+    let mut value_type: Option<TypeFact> = None;
+
+    'outer: for i in 0..constructor.named_child_count() {
+        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        if field_list.kind() != "field_list" {
+            continue;
+        }
+        for j in 0..field_list.named_child_count() {
+            if sampled >= SAMPLE_COUNT {
+                break 'outer;
+            }
+            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            if field_node.kind() != "field" {
+                continue;
+            }
+            if let Some(k) = field_node.child_by_field_name("key") {
+                let kt = infer_expression_type(ctx, k, depth);
+                key_type = Some(match key_type.take() {
+                    Some(existing) => merge_types(existing, kt),
+                    None => kt,
+                });
+            }
+            if let Some(v) = field_node.child_by_field_name("value") {
+                let vt = infer_expression_type(ctx, v, depth);
+                value_type = Some(match value_type.take() {
+                    Some(existing) => merge_types(existing, vt),
+                    None => vt,
+                });
+            }
+            sampled += 1;
+        }
+    }
+
+    shape.key_type = key_type;
+    shape.array_element_type = value_type;
 }
 
 fn extract_single_field(

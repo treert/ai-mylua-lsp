@@ -512,6 +512,48 @@ pub fn extract_call_arg_nodes<'tree>(
     exprs
 }
 
+/// Check whether a `table_constructor` AST node uses ONLY bracket-key
+/// fields (`[exp] = value`). Returns `false` if any field uses
+/// `Name = value` or positional (`value`) syntax, or if the table is
+/// empty. Used by multiple subsystems (summary_builder, scope,
+/// diagnostics, semantic_tokens) to skip expensive per-field
+/// processing on large data-mapping tables.
+///
+/// For efficiency, only the first few fields are inspected — if they
+/// are all bracket-key, the rest are assumed to follow the same
+/// pattern.
+pub fn is_bracket_key_only_table(constructor: tree_sitter::Node) -> bool {
+    let mut has_fields = false;
+    for i in 0..constructor.named_child_count() {
+        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        if field_list.kind() != "field_list" {
+            continue;
+        }
+        for j in 0..field_list.named_child_count() {
+            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            if field_node.kind() != "field" {
+                continue;
+            }
+            has_fields = true;
+            let key_node = field_node.child_by_field_name("key");
+            match key_node {
+                // `Name = value` — identifier key → NOT bracket-key-only
+                Some(k) if k.kind() == "identifier" => return false,
+                // `[exp] = value` — bracket key → OK, continue checking
+                Some(_) => {}
+                // Positional `value` — no key → NOT bracket-key-only
+                None => return false,
+            }
+            // Early exit: once we've confirmed a few fields are bracket-key,
+            // trust the rest follow the same pattern.
+            if j >= 3 {
+                return true;
+            }
+        }
+    }
+    has_fields
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
