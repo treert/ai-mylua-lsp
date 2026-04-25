@@ -8,15 +8,17 @@ use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape, TableShapeId, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
-use crate::util::{node_text, ts_node_to_range, extract_string_literal};
+use crate::util::{node_text, extract_string_literal, LineIndex};
 
 /// Build a `DocumentSummary` from a parsed AST.
 ///
 /// This is the core of single-file inference (index-architecture.md §3).
 /// Zero cross-file dependencies: all unresolved references become `SymbolicStub`s.
 pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> DocumentSummary {
+    let line_index = LineIndex::new(source);
     let mut ctx = BuildContext {
         source,
+        line_index: &line_index,
         require_bindings: Vec::new(),
         global_contributions: Vec::new(),
         function_summaries: HashMap::new(),
@@ -36,7 +38,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> Docu
 
     let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
-    let call_sites = collect_call_sites(root, source);
+    let call_sites = collect_call_sites(root, source, &line_index);
     let (is_meta, meta_name) = detect_meta_annotation(root, source);
 
     DocumentSummary {
@@ -101,9 +103,9 @@ fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Opti
 /// than threading through the main visitor) because the main
 /// visitor is already cluttered with type-inference state and the
 /// call-site concern is mostly independent.
-fn collect_call_sites(root: tree_sitter::Node, source: &[u8]) -> Vec<crate::summary::CallSite> {
+fn collect_call_sites(root: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Vec<crate::summary::CallSite> {
     let mut out = Vec::new();
-    collect_calls_in_scope(root, source, "", &mut out);
+    collect_calls_in_scope(root, source, "", &mut out, line_index);
     out
 }
 
@@ -115,6 +117,7 @@ fn collect_calls_in_scope(
     source: &[u8],
     caller_name: &str,
     out: &mut Vec<crate::summary::CallSite>,
+    line_index: &LineIndex,
 ) {
     match node.kind() {
         "function_declaration" | "local_function_declaration" => {
@@ -123,7 +126,7 @@ fn collect_calls_in_scope(
                 .map(|n| node_text(n, source).to_string())
                 .unwrap_or_default();
             if let Some(body) = node.child_by_field_name("body") {
-                collect_calls_in_scope(body, source, &name, out);
+                collect_calls_in_scope(body, source, &name, out, line_index);
             }
             return;
         }
@@ -139,12 +142,12 @@ fn collect_calls_in_scope(
             let inferred = infer_anon_caller_name(node, source);
             let sub_caller = inferred.as_deref().unwrap_or(caller_name);
             if let Some(body) = node.child_by_field_name("body") {
-                collect_calls_in_scope(body, source, sub_caller, out);
+                collect_calls_in_scope(body, source, sub_caller, out, line_index);
             }
             return;
         }
         "function_call" => {
-            if let Some(cs) = crate::call_hierarchy::extract_call_site(node, source, caller_name) {
+            if let Some(cs) = crate::call_hierarchy::extract_call_site(node, source, caller_name, line_index) {
                 out.push(cs);
             }
             // Still recurse — arguments may contain nested calls
@@ -162,7 +165,7 @@ fn collect_calls_in_scope(
     }
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
-            collect_calls_in_scope(child, source, caller_name, out);
+            collect_calls_in_scope(child, source, caller_name, out, line_index);
         }
     }
 }
@@ -210,6 +213,7 @@ type PendingClass = (
 
 struct BuildContext<'a> {
     source: &'a [u8],
+    line_index: &'a LineIndex,
     require_bindings: Vec<RequireBinding>,
     global_contributions: Vec<GlobalContribution>,
     function_summaries: HashMap<String, FunctionSummary>,
@@ -295,7 +299,7 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
 }
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    ctx.module_return_range = Some(ts_node_to_range(node, ctx.source));
+    ctx.module_return_range = Some(ctx.line_index.ts_node_to_range(node, ctx.source));
     // Grammar: `return_statement = word_return, optional(expression_list), optional(';')`
     // The expression_list has no field name, so use `find_named_child_by_kind`.
     if let Some(values) = find_named_child_by_kind(node, "expression_list") {
@@ -393,7 +397,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             _ => continue,
         };
         let name = node_text(name_node, ctx.source).to_string();
-        let range = ts_node_to_range(name_node, ctx.source);
+        let range = ctx.line_index.ts_node_to_range(name_node, ctx.source);
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
@@ -579,7 +583,7 @@ fn try_extract_require<'a>(
     Some(RequireBinding {
         local_name: local_name.to_string(),
         module_path,
-        range: ts_node_to_range(value_node, ctx.source),
+        range: ctx.line_index.ts_node_to_range(value_node, ctx.source),
     })
 }
 
@@ -653,7 +657,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     shape.set_field(field_name.to_string(), FieldInfo {
                         name: field_name.to_string(),
                         type_fact: TypeFact::Known(KnownType::Function(sig_for_global.clone())),
-                        def_range: Some(ts_node_to_range(name_node, ctx.source)),
+                        def_range: Some(ctx.line_index.ts_node_to_range(name_node, ctx.source)),
                         assignment_count: 1,
                     });
                     break 'shape true;
@@ -674,8 +678,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
         type_fact: TypeFact::Known(KnownType::Function(sig_for_global)),
-        range: ts_node_to_range(node, ctx.source),
-        selection_range: ts_node_to_range(name_node, ctx.source),
+        range: ctx.line_index.ts_node_to_range(node, ctx.source),
+        selection_range: ctx.line_index.ts_node_to_range(name_node, ctx.source),
     });
 }
 
@@ -772,7 +776,7 @@ fn build_function_summary(
     FunctionSummary {
         name: name.to_string(),
         signature: sig,
-        range: ts_node_to_range(decl_node, ctx.source),
+        range: ctx.line_index.ts_node_to_range(decl_node, ctx.source),
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
@@ -956,8 +960,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     kind: GlobalContributionKind::Variable,
                     type_fact,
-                    range: ts_node_to_range(node, ctx.source),
-                    selection_range: ts_node_to_range(var_node, ctx.source),
+                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_range(var_node, ctx.source),
                 });
             }
             // Field assignment: `x.foo = expr` or `a.b.c = expr` etc.
@@ -996,7 +1000,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         .unwrap_or(TypeFact::Unknown)
                 };
 
-                let assign_range = ts_node_to_range(node, ctx.source);
+                let assign_range = ctx.line_index.ts_node_to_range(node, ctx.source);
                 if register_nested_field_write(
                     ctx,
                     &chain.base_name,
@@ -1028,8 +1032,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     kind: GlobalContributionKind::TableExtension,
                     type_fact,
-                    range: ts_node_to_range(node, ctx.source),
-                    selection_range: ts_node_to_range(var_node, ctx.source),
+                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_range(var_node, ctx.source),
                 });
             }
             // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
@@ -1219,7 +1223,7 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             fields,
             alias_type: None,
             generic_params,
-            range: ts_node_to_range(node, ctx.source),
+            range: ctx.line_index.ts_node_to_range(node, ctx.source),
             name_range: Some(name_range),
         });
     }
@@ -1237,7 +1241,7 @@ fn emit_pending_class_as_typedef(
             fields,
             alias_type: None,
             generic_params: gparams,
-            range: ts_node_to_range(node, ctx.source),
+            range: ctx.line_index.ts_node_to_range(node, ctx.source),
             name_range: Some(name_range),
         });
     }
@@ -1267,6 +1271,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 emit_pending_class_as_typedef(ctx, node);
                 let initial_gparams = std::mem::take(&mut ctx.pending_generic_params);
                 let name_range = find_name_range_in_line(
+                    ctx.line_index,
                     ctx.source,
                     line_start_byte,
                     line_end_byte,
@@ -1295,8 +1300,9 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             EmmyAnnotation::Field { name: fname, type_expr, .. } => {
                 if let Some((_, _, ref mut fields, _, _)) = ctx.pending_class {
-                    let full_range = ts_node_to_range(line_node, ctx.source);
+                    let full_range = ctx.line_index.ts_node_to_range(line_node, ctx.source);
                     let name_range = find_name_range_in_line(
+                        ctx.line_index,
                         ctx.source,
                         line_start_byte,
                         line_end_byte,
@@ -1320,6 +1326,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             EmmyAnnotation::Alias { name, type_expr } => {
                 emit_pending_class_as_typedef(ctx, node);
                 let name_range = find_name_range_in_line(
+                    ctx.line_index,
                     ctx.source,
                     line_start_byte,
                     line_end_byte,
@@ -1338,7 +1345,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // `IndexType` keys (`[string]: number`) are not
                 // nameable via dot/colon access, so they're skipped.
                 let aliased_fields = if let EmmyType::Table(tfs) = type_expr {
-                    let line_range = ts_node_to_range(line_node, ctx.source);
+                    let line_range = ctx.line_index.ts_node_to_range(line_node, ctx.source);
                     tfs.iter()
                         .filter_map(|tf| match &tf.key {
                             EmmyTableFieldKey::Name(n) => Some(TypeFieldDef {
@@ -1360,13 +1367,14 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: aliased_fields,
                     alias_type: Some(emmy_type_to_fact(type_expr)),
                     generic_params: Vec::new(),
-                    range: ts_node_to_range(node, ctx.source),
+                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
                     name_range: Some(name_range),
                 });
             }
             EmmyAnnotation::Enum { name } => {
                 emit_pending_class_as_typedef(ctx, node);
                 let name_range = find_name_range_in_line(
+                    ctx.line_index,
                     ctx.source,
                     line_start_byte,
                     line_end_byte,
@@ -1381,7 +1389,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: Vec::new(),
                     alias_type: None,
                     generic_params: Vec::new(),
-                    range: ts_node_to_range(node, ctx.source),
+                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
                     name_range: Some(name_range),
                 });
             }
@@ -1403,6 +1411,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 /// the field name token so `---@field private name integer` resolves
 /// to `name`, not `private`.
 fn find_name_range_in_line(
+    line_index: &LineIndex,
     source: &[u8],
     line_start_byte: usize,
     line_end_byte: usize,
@@ -1413,7 +1422,7 @@ fn find_name_range_in_line(
     // Find the `@<tag>` occurrence; scan forward to the name token.
     let tag_marker = format!("@{}", tag);
     let Some(tag_pos) = line_text.find(&tag_marker) else {
-        return byte_range_to_range(source, line_start_byte, line_end_byte);
+        return byte_range_to_range(line_index, source, line_start_byte, line_end_byte);
     };
     // Byte cursor past the tag keyword.
     let mut cursor = tag_pos + tag_marker.len();
@@ -1452,10 +1461,10 @@ fn find_name_range_in_line(
         if before_ok && after_ok {
             let start = line_start_byte + cursor;
             let end = start + name.len();
-            return byte_range_to_range(source, start, end);
+            return byte_range_to_range(line_index, source, start, end);
         }
     }
-    byte_range_to_range(source, line_start_byte, line_end_byte)
+    byte_range_to_range(line_index, source, line_start_byte, line_end_byte)
 }
 
 /// Read an ASCII identifier starting at `start` within `bytes`.
@@ -1481,31 +1490,20 @@ fn read_identifier(bytes: &[u8], start: usize) -> Option<(String, usize)> {
 /// walk. Keeps UTF-16 column encoding consistent with the rest of
 /// the crate.
 fn byte_range_to_range(
+    line_index: &LineIndex,
     source: &[u8],
     start_byte: usize,
     end_byte: usize,
 ) -> tower_lsp_server::ls_types::Range {
     tower_lsp_server::ls_types::Range {
-        start: byte_to_position(source, start_byte),
-        end: byte_to_position(source, end_byte),
+        start: byte_to_position(line_index, source, start_byte),
+        end: byte_to_position(line_index, source, end_byte),
     }
 }
 
-fn byte_to_position(source: &[u8], target: usize) -> tower_lsp_server::ls_types::Position {
-    let mut line: u32 = 0;
-    let mut line_start: usize = 0;
-    let mut i: usize = 0;
-    while i < target && i < source.len() {
-        if source[i] == b'\n' {
-            line += 1;
-            line_start = i + 1;
-        }
-        i += 1;
-    }
-    let col_bytes = target.min(source.len()) - line_start;
-    let line_slice = &source[line_start..line_start + col_bytes];
-    let character = crate::util::byte_col_to_utf16_col(line_slice, col_bytes);
-    tower_lsp_server::ls_types::Position { line, character }
+fn byte_to_position(line_index: &LineIndex, source: &[u8], target: usize) -> tower_lsp_server::ls_types::Position {
+    line_index.byte_offset_to_position(source, target)
+        .unwrap_or(tower_lsp_server::ls_types::Position { line: 0, character: 0 })
 }
 
 // ---------------------------------------------------------------------------
@@ -2055,7 +2053,7 @@ fn extract_single_field(
                 shape.set_field(key.clone(), FieldInfo {
                     name: key,
                     type_fact,
-                    def_range: Some(ts_node_to_range(field_node, ctx.source)),
+                    def_range: Some(ctx.line_index.ts_node_to_range(field_node, ctx.source)),
                     assignment_count: 1,
                 });
             }
@@ -2083,7 +2081,7 @@ fn extract_single_field(
                 shape.set_field(key_text.clone(), FieldInfo {
                     name: key_text,
                     type_fact,
-                    def_range: Some(ts_node_to_range(field_node, ctx.source)),
+                    def_range: Some(ctx.line_index.ts_node_to_range(field_node, ctx.source)),
                     assignment_count: 1,
                 });
             }

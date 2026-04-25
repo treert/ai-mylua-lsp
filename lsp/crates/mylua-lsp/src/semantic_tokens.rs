@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 use crate::scope::ScopeTree;
-use crate::util::{node_text, ts_point_to_position};
+use crate::util::{node_text, LineIndex};
 
 const TT_VARIABLE: u32 = 0;
 const TM_DEFAULT_LIBRARY: u32 = 1 << 0; // bit 0
@@ -26,8 +26,9 @@ pub fn collect_semantic_tokens(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_semantic_tokens_with_version(root, source, scope_tree, "5.3")
+    collect_semantic_tokens_with_version(root, source, scope_tree, "5.3", line_index)
 }
 
 pub fn collect_semantic_tokens_with_version(
@@ -35,8 +36,9 @@ pub fn collect_semantic_tokens_with_version(
     source: &[u8],
     scope_tree: &ScopeTree,
     runtime_version: &str,
+    line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, None, runtime_version)
+    collect_tokens_filtered(root, source, scope_tree, None, runtime_version, line_index)
 }
 
 /// `textDocument/semanticTokens/range` — return tokens that overlap
@@ -48,8 +50,9 @@ pub fn collect_semantic_tokens_range(
     source: &[u8],
     scope_tree: &ScopeTree,
     range: Range,
+    line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_semantic_tokens_range_with_version(root, source, scope_tree, range, "5.3")
+    collect_semantic_tokens_range_with_version(root, source, scope_tree, range, "5.3", line_index)
 }
 
 pub fn collect_semantic_tokens_range_with_version(
@@ -58,8 +61,9 @@ pub fn collect_semantic_tokens_range_with_version(
     scope_tree: &ScopeTree,
     range: Range,
     runtime_version: &str,
+    line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, Some(range), runtime_version)
+    collect_tokens_filtered(root, source, scope_tree, Some(range), runtime_version, line_index)
 }
 
 fn collect_tokens_filtered(
@@ -68,13 +72,14 @@ fn collect_tokens_filtered(
     scope_tree: &ScopeTree,
     range: Option<Range>,
     runtime_version: &str,
+    line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
     let builtins: HashSet<&str> = crate::lua_builtins::builtins_for(runtime_version)
         .into_iter()
         .collect();
     let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
-    collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw);
+    collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw, line_index);
 
     // Line-based range filtering: keep tokens whose start line is
     // inside `range.start.line..=range.end.line` inclusive. Column
@@ -113,6 +118,7 @@ fn collect_variable_tokens(
     scope_tree: &ScopeTree,
     builtins: &HashSet<&str>,
     tokens: &mut Vec<(u32, u32, u32, u32)>,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
 
@@ -133,8 +139,8 @@ fn collect_variable_tokens(
             // Convert tree-sitter byte columns to LSP UTF-16 code-unit
             // columns so non-ASCII lines (Chinese identifiers / comments
             // preceding the token) align correctly in the client.
-            let start_pos = ts_point_to_position(start, source);
-            let end_pos = ts_point_to_position(end, source);
+            let start_pos = line_index.ts_point_to_position(start, source);
+            let end_pos = line_index.ts_point_to_position(end, source);
             let length = end_pos.character.saturating_sub(start_pos.character);
             if length > 0 {
                 tokens.push((start_pos.line, start_pos.character, length, modifiers));
@@ -157,7 +163,7 @@ fn collect_variable_tokens(
                 }
                 continue;
             }
-            collect_variable_tokens(cursor, source, scope_tree, builtins, tokens);
+            collect_variable_tokens(cursor, source, scope_tree, builtins, tokens, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }

@@ -16,24 +16,24 @@
 use tower_lsp_server::ls_types::{Position, Range, SelectionRange};
 
 use crate::document::Document;
-use crate::util::{position_to_byte_offset, ts_node_to_range};
+use crate::util::LineIndex;
 
 pub fn selection_range(doc: &Document, positions: &[Position]) -> Vec<SelectionRange> {
     let root = doc.tree.root_node();
     let source = doc.text.as_bytes();
     positions
         .iter()
-        .filter_map(|pos| build_chain(root, source, &doc.text, *pos))
+        .filter_map(|pos| build_chain(root, source, &doc.line_index, *pos))
         .collect()
 }
 
 fn build_chain(
     root: tree_sitter::Node,
     source: &[u8],
-    text: &str,
+    line_index: &LineIndex,
     position: Position,
 ) -> Option<SelectionRange> {
-    let offset = position_to_byte_offset(text, position)?;
+    let offset = line_index.position_to_byte_offset(source, position)?;
     let innermost = root.descendant_for_byte_range(offset, offset)?;
 
     // Collect ranges from innermost up to root, dedup adjacent
@@ -43,7 +43,7 @@ fn build_chain(
     let mut last: Option<Range> = None;
     while let Some(n) = current {
         if n.is_named() {
-            let r = ts_node_to_range(n, source);
+            let r = line_index.ts_node_to_range(n, source);
             if Some(r) != last {
                 ranges.push(r);
                 last = Some(r);
@@ -57,7 +57,7 @@ fn build_chain(
         // parent chain is all unnamed (extremely rare — empty file
         // with a shebang, etc.). Fall back to the root range.
         return Some(SelectionRange {
-            range: ts_node_to_range(root, source),
+            range: line_index.ts_node_to_range(root, source),
             parent: None,
         });
     }

@@ -107,15 +107,15 @@ fn goto_require_jumps_to_module_return() {
     let mod_uri = make_uri("mymod.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_src.as_bytes());
-    let mod_scope = scope::build_scope_tree(&mod_tree, mod_src.as_bytes());
-    let _mod_doc = Document { text: mod_src.to_string(), tree: mod_tree, scope_tree: mod_scope };
+    let mod_scope = scope::build_scope_tree(&mod_tree, mod_src.as_bytes(), &mylua_lsp::util::LineIndex::new(mod_src.as_bytes()));
+    let _mod_doc = Document { text: mod_src.to_string(), tree: mod_tree, scope_tree: mod_scope, line_index: util::LineIndex::new(mod_src.as_bytes()) };
 
     let caller_src = "local m = require(\"mymod\")\nprint(m)";
     let caller_uri = make_uri("caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_summary = summary_builder::build_summary(&caller_uri, &caller_tree, caller_src.as_bytes());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes());
-    let caller_doc = Document { text: caller_src.to_string(), tree: caller_tree, scope_tree: caller_scope };
+    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes(), &mylua_lsp::util::LineIndex::new(caller_src.as_bytes()));
+    let caller_doc = Document { text: caller_src.to_string(), tree: caller_tree, scope_tree: caller_scope, line_index: util::LineIndex::new(caller_src.as_bytes()) };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.set_require_mapping("mymod".to_string(), mod_uri.clone());
@@ -165,11 +165,12 @@ fn goto_require_with_attribute_before_target() {
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_summary =
         summary_builder::build_summary(&caller_uri, &caller_tree, caller_src.as_bytes());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes());
+    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes(), &mylua_lsp::util::LineIndex::new(caller_src.as_bytes()));
     let caller_doc = Document {
         text: caller_src.to_string(),
         tree: caller_tree,
         scope_tree: caller_scope,
+        line_index: util::LineIndex::new(caller_src.as_bytes()),
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
@@ -254,6 +255,7 @@ fn semantic_token_columns_are_utf16_units() {
         doc.tree.root_node(),
         doc.text.as_bytes(),
         &doc.scope_tree,
+        &doc.line_index,
     );
     // `z` on line 1 is AFTER `"👋"` (which is 4 UTF-8 bytes but 2 UTF-16 units).
     // Compute expected utf16 column for `z`: prefix on line 1 is
@@ -343,8 +345,8 @@ return Player"#;
     let mod_uri = make_uri("player.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_src.as_bytes());
-    let mod_scope = scope::build_scope_tree(&mod_tree, mod_src.as_bytes());
-    let _mod_doc = Document { text: mod_src.to_string(), tree: mod_tree, scope_tree: mod_scope };
+    let mod_scope = scope::build_scope_tree(&mod_tree, mod_src.as_bytes(), &mylua_lsp::util::LineIndex::new(mod_src.as_bytes()));
+    let _mod_doc = Document { text: mod_src.to_string(), tree: mod_tree, scope_tree: mod_scope, line_index: util::LineIndex::new(mod_src.as_bytes()) };
 
     // main.lua: require("player") and call Player.new("Alice")
     let caller_src = r#"local Player = require("player")
@@ -352,11 +354,12 @@ local hero = Player.new("Alice")"#;
     let caller_uri = make_uri("main.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_summary = summary_builder::build_summary(&caller_uri, &caller_tree, caller_src.as_bytes());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes());
+    let caller_scope = scope::build_scope_tree(&caller_tree, caller_src.as_bytes(), &mylua_lsp::util::LineIndex::new(caller_src.as_bytes()));
     let caller_doc = Document {
         text: caller_src.to_string(),
         tree: caller_tree,
         scope_tree: caller_scope,
+        line_index: util::LineIndex::new(caller_src.as_bytes()),
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();

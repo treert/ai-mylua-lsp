@@ -55,6 +55,7 @@ end
         &mut agg,
         &doc.scope_tree,
         &cfg,
+        &doc.line_index,
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Undefined global")),
@@ -80,6 +81,7 @@ print(some_unknown_global)
         &mut agg,
         &doc.scope_tree,
         &cfg,
+        &doc.line_index,
     );
     assert!(
         diags.iter().any(|d| d.message.contains("some_unknown_global")),
@@ -115,6 +117,7 @@ fn meta_globals_still_participate_in_workspace_index() {
         &mut agg,
         &doc.scope_tree,
         &cfg,
+        &doc.line_index,
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("mylib_api")),

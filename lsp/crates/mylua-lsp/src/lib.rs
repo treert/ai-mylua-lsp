@@ -187,6 +187,7 @@ struct ParsedFile {
     tree: tree_sitter::Tree,
     summary: summary::DocumentSummary,
     scope_tree: scope::ScopeTree,
+    line_index: util::LineIndex,
 }
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
@@ -324,10 +325,11 @@ impl Backend {
             Some(t) => t,
             None => {
                 if let Some(old) = old_tree {
-                    let scope_tree = scope::build_scope_tree(&old, text.as_bytes());
+                    let line_index = util::LineIndex::new(text.as_bytes());
+                    let scope_tree = scope::build_scope_tree(&old, text.as_bytes(), &line_index);
                     self.documents.lock().unwrap().insert(
                         uri,
-                        Document { text, tree: old, scope_tree },
+                        Document { text, tree: old, scope_tree, line_index },
                     );
                 }
                 return;
@@ -395,11 +397,12 @@ impl Backend {
                 }
             };
 
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+            let line_index = util::LineIndex::new(text.as_bytes());
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
-                Document { text, tree, scope_tree },
+                Document { text, tree, scope_tree, line_index },
             );
 
             // All diagnostics (both syntax and semantic) flow through
@@ -474,11 +477,12 @@ impl Backend {
                 summary.is_meta = true;
             }
             self.index.lock().unwrap().upsert_summary(summary);
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+            let line_index = util::LineIndex::new(text.as_bytes());
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri, Document { text, tree, scope_tree });
+                .insert(uri, Document { text, tree, scope_tree, line_index });
         }
     }
 
@@ -536,6 +540,7 @@ impl Backend {
             let syntax = diagnostics::collect_diagnostics(
                 doc.tree.root_node(),
                 doc.text.as_bytes(),
+                &doc.line_index,
             );
             diagnostics::apply_diagnostic_suppressions(
                 doc.tree.root_node(),
@@ -755,12 +760,14 @@ async fn run_workspace_scan(
                     let content_hash = content_hash(&text);
                     let is_library = library_uris.contains(&uri);
 
+                    let line_index = util::LineIndex::new(text.as_bytes());
+
                     let result = if let Some(cached_summary) = cached.get(&uri.to_string()) {
                         if cached_summary.content_hash == content_hash {
                             hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             let mut parser = new_parser();
                             let tree = parser.parse(text.as_bytes(), None)?;
-                            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
                             let mut summary = cached_summary.clone();
                             if is_library {
                                 summary.is_meta = true;
@@ -783,7 +790,7 @@ async fn run_workspace_scan(
                         if is_library {
                             summary.is_meta = true;
                         }
-                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
                         (tree, summary, scope_tree)
                     };
 
@@ -798,7 +805,7 @@ async fn run_workspace_scan(
                     }
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri, text, tree, summary, scope_tree })
+                    Some(ParsedFile { uri, text, tree, summary, scope_tree, line_index })
                 })
                 .collect()
         })
@@ -867,6 +874,7 @@ async fn run_workspace_scan(
                     text: pf.text,
                     tree: pf.tree,
                     scope_tree: pf.scope_tree,
+                    line_index: pf.line_index,
                 },
             );
         }
@@ -1043,7 +1051,7 @@ async fn consumer_loop(
                 continue;
             };
             let mut syntax =
-                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes());
+                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes(), &doc.line_index);
             let mut idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
             let semantic = diagnostics::collect_semantic_diagnostics_with_version(
@@ -1054,6 +1062,7 @@ async fn consumer_loop(
                 &doc.scope_tree,
                 &cfg.diagnostics,
                 &cfg.runtime.version,
+                &doc.line_index,
             );
             syntax.extend(semantic);
             diagnostics::apply_diagnostic_suppressions(
@@ -1665,6 +1674,7 @@ impl LanguageServer for Backend {
             doc.tree.root_node(),
             doc.text.as_bytes(),
             summary,
+            &doc.line_index,
         );
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
@@ -1693,6 +1703,7 @@ impl LanguageServer for Backend {
             doc.tree.root_node(),
             doc.text.as_bytes(),
             &idx,
+            &doc.line_index,
         )))
     }
 
@@ -1953,6 +1964,7 @@ impl LanguageServer for Backend {
             doc.text.as_bytes(),
             &doc.scope_tree,
             &runtime_version,
+            &doc.line_index,
         );
         let result_id = self.mint_semantic_token_result_id();
         // Cache the full response so a subsequent `delta` request
@@ -1988,6 +2000,7 @@ impl LanguageServer for Backend {
             doc.text.as_bytes(),
             &doc.scope_tree,
             &runtime_version,
+            &doc.line_index,
         );
         drop(docs);
 
@@ -2046,6 +2059,7 @@ impl LanguageServer for Backend {
             &doc.scope_tree,
             params.range,
             &runtime_version,
+            &doc.line_index,
         );
         Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,

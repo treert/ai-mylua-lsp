@@ -4,7 +4,7 @@ use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::type_inference;
 use crate::resolver;
-use crate::util::{node_text, position_to_byte_offset, walk_ancestors};
+use crate::util::{node_text, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
 
@@ -69,7 +69,7 @@ pub fn complete(
 /// right after `---@` (with optional partial tag text). Triggered both via
 /// the `@` trigger character and manual invocation.
 fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<CompletionItem>> {
-    let offset = position_to_byte_offset(&doc.text, position)?;
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let bytes = doc.text.as_bytes();
     // EmmyLua tags are lowercase ASCII letters only (`class`, `param`, …).
     // We deliberately do NOT skip digits / underscores here; doing so would
@@ -121,7 +121,7 @@ fn try_require_path_completion(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = position_to_byte_offset(&doc.text, position)?;
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let node = doc
         .tree
         .root_node()
@@ -192,7 +192,7 @@ fn try_dot_completion_ast(
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = position_to_byte_offset(&doc.text, position)?;
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     if offset == 0 {
         return None;
     }
@@ -297,7 +297,7 @@ fn is_base_expr_kind(kind: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn get_prefix(doc: &Document, position: Position) -> String {
-    let Some(offset) = position_to_byte_offset(&doc.text, position) else {
+    let Some(offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
         return String::new();
     };
     let bytes = doc.text.as_bytes();
@@ -321,7 +321,7 @@ fn collect_scope_completions(
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    let Some(offset) = position_to_byte_offset(&doc.text, position) else {
+    let Some(offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
         return;
     };
     for decl in doc.scope_tree.visible_locals(offset) {

@@ -23,12 +23,13 @@ use crate::config::InlayHintConfig;
 use crate::document::Document;
 use crate::signature_help;
 use crate::type_system::{KnownType, TypeFact};
-use crate::util::{node_text, position_to_byte_offset, ts_point_to_position};
+use crate::util::{node_text, LineIndex};
 
 /// Shared context for the inlay-hint tree walk, avoiding a long
 /// parameter list on the recursive `walk` function.
 struct InlayCtx<'a> {
     source: &'a [u8],
+    line_index: &'a LineIndex,
     uri: &'a Uri,
     index: &'a mut WorkspaceAggregation,
     cfg: &'a InlayHintConfig,
@@ -49,12 +50,12 @@ pub fn inlay_hints(
     }
 
     let source = doc.text.as_bytes();
-    let range_start = position_to_byte_offset(&doc.text, range.start).unwrap_or(0);
-    let range_end = position_to_byte_offset(&doc.text, range.end).unwrap_or(source.len());
+    let range_start = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), range.start).unwrap_or(0);
+    let range_end = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), range.end).unwrap_or(source.len());
 
     let mut out = Vec::new();
     let mut ctx = InlayCtx {
-        source, uri, index, cfg, range_start, range_end, out: &mut out,
+        source, line_index: &doc.line_index, uri, index, cfg, range_start, range_end, out: &mut out,
     };
     let mut cursor = doc.tree.root_node().walk();
     walk(&mut cursor, &mut ctx);
@@ -73,10 +74,10 @@ fn walk(
 
     match node.kind() {
         "function_call" if ctx.cfg.parameter_names => {
-            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out);
+            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out, ctx.line_index);
         }
         "local_declaration" if ctx.cfg.variable_types => {
-            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out);
+            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out, ctx.line_index);
         }
         _ => {}
     }
@@ -98,6 +99,7 @@ fn collect_parameter_name_hints(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
+    line_index: &LineIndex,
 ) {
     let Some(args) = call.child_by_field_name("arguments") else { return };
 
@@ -134,7 +136,7 @@ fn collect_parameter_name_hints(
 
     let arg_exprs = crate::util::extract_call_arg_nodes(args, source);
     for (arg_index, expr) in arg_exprs.iter().enumerate() {
-        emit_param_hint(&params, arg_index, *expr, source, out);
+        emit_param_hint(&params, arg_index, *expr, source, out, line_index);
     }
 }
 
@@ -144,6 +146,7 @@ fn emit_param_hint(
     expr: tree_sitter::Node,
     source: &[u8],
     out: &mut Vec<InlayHint>,
+    line_index: &LineIndex,
 ) {
     let Some(param) = params.get(arg_index) else { return };
     if param.name == "..." {
@@ -154,7 +157,7 @@ fn emit_param_hint(
     if node_text(expr, source) == param.name {
         return;
     }
-    let pos = ts_point_to_position(expr.start_position(), source);
+    let pos = line_index.ts_point_to_position(expr.start_position(), source);
     out.push(InlayHint {
         position: pos,
         label: InlayHintLabel::String(format!("{}:", param.name)),
@@ -173,6 +176,7 @@ fn collect_variable_type_hints(
     uri: &Uri,
     index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
+    line_index: &LineIndex,
 ) {
     let Some(names) = decl.child_by_field_name("names") else { return };
     // Skip if user explicitly annotated with `---@type ...` above.
@@ -191,7 +195,7 @@ fn collect_variable_type_hints(
         if !is_interesting_type(&ltf.type_fact) {
             continue;
         }
-        let end_pos = ts_point_to_position(id.end_position(), source);
+        let end_pos = line_index.ts_point_to_position(id.end_position(), source);
         out.push(InlayHint {
             position: end_pos,
             label: InlayHintLabel::String(format!(": {}", ltf.type_fact)),

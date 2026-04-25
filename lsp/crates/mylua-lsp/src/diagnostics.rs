@@ -4,17 +4,17 @@ use crate::config::DiagnosticsConfig;
 use crate::resolver;
 use crate::scope::ScopeTree;
 use crate::type_system::{TypeFact, KnownType, SymbolicStub};
-use crate::util::{is_ancestor_or_equal, ts_node_to_range, node_text, truncate};
+use crate::util::{is_ancestor_or_equal, node_text, truncate, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 // Built-in identifier set is now version-dependent and lives in
 // `lua_builtins::builtins_for(version)`. Diagnostic paths pull the
 // set through `collect_semantic_diagnostics`'s config parameter.
 
-pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8]) -> Vec<Diagnostic> {
+pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut cursor = root.walk();
-    collect_errors_recursive(&mut cursor, source, &mut diagnostics);
+    collect_errors_recursive(&mut cursor, source, &mut diagnostics, line_index);
     diagnostics
 }
 
@@ -25,9 +25,10 @@ pub fn collect_semantic_diagnostics(
     index: &mut WorkspaceAggregation,
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
+    line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     collect_semantic_diagnostics_with_version(
-        root, source, uri, index, scope_tree, diag_config, "5.3",
+        root, source, uri, index, scope_tree, diag_config, "5.3", line_index,
     )
 }
 
@@ -43,6 +44,7 @@ pub fn collect_semantic_diagnostics_with_version(
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
     runtime_version: &str,
+    line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     if !diag_config.enable {
         return Vec::new();
@@ -61,7 +63,7 @@ pub fn collect_semantic_diagnostics_with_version(
     let is_meta = index.summaries.get(uri).map(|s| s.is_meta).unwrap_or(false);
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
         if !is_meta {
-            check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity);
+            check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity, line_index);
         }
     }
     let emmy_severity = diag_config.emmy_unknown_field.to_lsp_severity();
@@ -70,29 +72,29 @@ pub fn collect_semantic_diagnostics_with_version(
     if emmy_severity.is_some() || lua_error_severity.is_some() || lua_warn_severity.is_some() {
         check_field_access_diagnostics(
             root, source, uri, index, &mut diagnostics,
-            emmy_severity, lua_error_severity, lua_warn_severity,
+            emmy_severity, lua_error_severity, lua_warn_severity, line_index,
         );
     }
     if let Some(severity) = diag_config.emmy_type_mismatch.to_lsp_severity() {
         check_type_mismatch_diagnostics(
-            root, source, uri, index, scope_tree, &mut diagnostics, severity,
+            root, source, uri, index, scope_tree, &mut diagnostics, severity, line_index,
         );
     }
     if let Some(severity) = diag_config.duplicate_table_key.to_lsp_severity() {
-        check_duplicate_table_keys(root, source, &mut diagnostics, severity);
+        check_duplicate_table_keys(root, source, &mut diagnostics, severity, line_index);
     }
     if let Some(severity) = diag_config.unused_local.to_lsp_severity() {
-        check_unused_locals(root, source, scope_tree, &mut diagnostics, severity);
+        check_unused_locals(root, source, scope_tree, &mut diagnostics, severity, line_index);
     }
     let count_sev = diag_config.argument_count_mismatch.to_lsp_severity();
     let type_sev = diag_config.argument_type_mismatch.to_lsp_severity();
     if count_sev.is_some() || type_sev.is_some() {
         check_call_argument_diagnostics(
-            root, source, uri, index, &mut diagnostics, count_sev, type_sev,
+            root, source, uri, index, &mut diagnostics, count_sev, type_sev, line_index,
         );
     }
     if let Some(severity) = diag_config.return_mismatch.to_lsp_severity() {
-        check_return_mismatch_diagnostics(root, source, &mut diagnostics, severity);
+        check_return_mismatch_diagnostics(root, source, &mut diagnostics, severity, line_index);
     }
     diagnostics
 }
@@ -137,6 +139,7 @@ fn check_undefined_globals(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
 
@@ -171,7 +174,7 @@ fn check_undefined_globals(
                     && !index.global_shard.contains_key(name)
                 {
                     diagnostics.push(Diagnostic {
-                        range: ts_node_to_range(node, source),
+                        range: line_index.ts_node_to_range(node, source),
                         severity: Some(severity),
                         source: Some("mylua".to_string()),
                         message: format!("Undefined global '{}'", name),
@@ -195,7 +198,7 @@ fn check_undefined_globals(
                 }
                 continue;
             }
-            check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics, severity);
+            check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics, severity, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -208,11 +211,12 @@ fn collect_errors_recursive(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
     if node.is_error() {
         diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node, source),
+            range: line_index.ts_node_to_range(node, source),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("mylua".to_string()),
             message: format!("Syntax error near '{}'", truncate(node_text(node, source), 40)),
@@ -220,7 +224,7 @@ fn collect_errors_recursive(
         });
     } else if node.is_missing() {
         diagnostics.push(Diagnostic {
-            range: ts_node_to_range(node, source),
+            range: line_index.ts_node_to_range(node, source),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("mylua".to_string()),
             message: format!("Missing '{}'", node.kind()),
@@ -230,7 +234,7 @@ fn collect_errors_recursive(
 
     if node.has_error() && cursor.goto_first_child() {
         loop {
-            collect_errors_recursive(cursor, source, diagnostics);
+            collect_errors_recursive(cursor, source, diagnostics, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -243,6 +247,7 @@ fn collect_errors_recursive(
 /// long parameter lists in the recursive walker.
 struct FieldDiagCtx<'a> {
     source: &'a [u8],
+    line_index: &'a LineIndex,
     uri: &'a Uri,
     index: &'a mut WorkspaceAggregation,
     diagnostics: &'a mut Vec<Diagnostic>,
@@ -260,9 +265,10 @@ fn check_field_access_diagnostics(
     emmy_severity: Option<DiagnosticSeverity>,
     lua_error_severity: Option<DiagnosticSeverity>,
     lua_warn_severity: Option<DiagnosticSeverity>,
+    line_index: &LineIndex,
 ) {
     let mut ctx = FieldDiagCtx {
-        source, uri, index, diagnostics,
+        source, line_index, uri, index, diagnostics,
         emmy_severity, lua_error_severity, lua_warn_severity,
     };
     let mut cursor = root.walk();
@@ -345,7 +351,7 @@ let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.u
                             let qualified = format!("{}.{}", type_name, field_name);
                             if !ctx.index.global_shard.contains_key(&qualified) {
                                 ctx.diagnostics.push(Diagnostic {
-                                    range: ts_node_to_range(field, ctx.source),
+                                    range: ctx.line_index.ts_node_to_range(field, ctx.source),
                                     severity: Some(severity),
                                     source: Some("mylua".to_string()),
                                     message: format!(
@@ -379,7 +385,7 @@ let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.u
                                     };
                                     if let Some(sev) = severity {
                                         ctx.diagnostics.push(Diagnostic {
-                                            range: ts_node_to_range(field, ctx.source),
+                                            range: ctx.line_index.ts_node_to_range(field, ctx.source),
                                             severity: Some(sev),
                                             source: Some("mylua".to_string()),
                                             message: format!(
@@ -418,6 +424,7 @@ fn check_type_mismatch_diagnostics(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let Some(summary) = index.summaries.get(uri).cloned() else { return };
 
@@ -456,7 +463,7 @@ fn check_type_mismatch_diagnostics(
     // assignments inside that scope won't be checked against the
     // outer declaration's type.
     check_assignment_type_mismatches(
-        root, source, &summary, scope_tree, diagnostics, severity,
+        root, source, &summary, scope_tree, diagnostics, severity, line_index,
     );
 }
 
@@ -471,9 +478,10 @@ fn check_assignment_type_mismatches(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let mut cursor = root.walk();
-    walk_assignment_nodes(&mut cursor, source, summary, scope_tree, diagnostics, severity);
+    walk_assignment_nodes(&mut cursor, source, summary, scope_tree, diagnostics, severity, line_index);
 }
 
 fn walk_assignment_nodes(
@@ -483,14 +491,15 @@ fn walk_assignment_nodes(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
     if node.kind() == "assignment_statement" {
-        inspect_assignment_for_mismatch(node, source, summary, scope_tree, diagnostics, severity);
+        inspect_assignment_for_mismatch(node, source, summary, scope_tree, diagnostics, severity, line_index);
     }
     if cursor.goto_first_child() {
         loop {
-            walk_assignment_nodes(cursor, source, summary, scope_tree, diagnostics, severity);
+            walk_assignment_nodes(cursor, source, summary, scope_tree, diagnostics, severity, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -506,6 +515,7 @@ fn inspect_assignment_for_mismatch(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let Some(left) = node.child_by_field_name("left") else { return };
     let Some(right) = node.child_by_field_name("right") else { return };
@@ -564,7 +574,7 @@ fn inspect_assignment_for_mismatch(
         }
         if !is_type_compatible(&ltf.type_fact, &actual) {
             diagnostics.push(Diagnostic {
-                range: ts_node_to_range(ident, source),
+                range: line_index.ts_node_to_range(ident, source),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
                 message: format!(
@@ -746,9 +756,10 @@ fn check_duplicate_table_keys(
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let mut cursor = root.walk();
-    check_duplicate_keys_recursive(&mut cursor, source, diagnostics, severity);
+    check_duplicate_keys_recursive(&mut cursor, source, diagnostics, severity, line_index);
 }
 
 fn check_duplicate_keys_recursive(
@@ -756,6 +767,7 @@ fn check_duplicate_keys_recursive(
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
     if node.kind() == "table_constructor" {
@@ -780,7 +792,7 @@ fn check_duplicate_keys_recursive(
                 }
                 let Some(key_text) = extract_field_key(field, source) else { continue };
                 if let Some(first_range) = seen.get(&key_text) {
-                    let range = ts_node_to_range(field, source);
+                    let range = line_index.ts_node_to_range(field, source);
                     diagnostics.push(Diagnostic {
                         range,
                         severity: Some(severity),
@@ -793,7 +805,7 @@ fn check_duplicate_keys_recursive(
                         ..Default::default()
                     });
                 } else {
-                    seen.insert(key_text, ts_node_to_range(field, source));
+                    seen.insert(key_text, line_index.ts_node_to_range(field, source));
                 }
             }
         }
@@ -801,7 +813,7 @@ fn check_duplicate_keys_recursive(
 
     if cursor.goto_first_child() {
         loop {
-            check_duplicate_keys_recursive(cursor, source, diagnostics, severity);
+            check_duplicate_keys_recursive(cursor, source, diagnostics, severity, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -844,6 +856,7 @@ fn check_unused_locals(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    _line_index: &LineIndex,
 ) {
     // Count references per (name, decl_byte) by walking the tree
     // and resolving each identifier through the scope tree.
@@ -936,6 +949,7 @@ fn check_call_argument_diagnostics(
     diagnostics: &mut Vec<Diagnostic>,
     count_severity: Option<DiagnosticSeverity>,
     type_severity: Option<DiagnosticSeverity>,
+    line_index: &LineIndex,
 ) {
     // Depth-first collection of call nodes; we have to collect up front
     // because `resolve_call_signatures` borrows `index` mutably and we
@@ -969,7 +983,7 @@ fn check_call_argument_diagnostics(
                 // Use the smallest/largest expected count range across
                 // overloads for the human-readable message.
                 let (min_expected, max_expected) = expected_count_range(&sigs, is_method);
-                let range = ts_node_to_range(args_node, source);
+                let range = line_index.ts_node_to_range(args_node, source);
                 let expected_desc = if min_expected == max_expected {
                     format!("{}", min_expected)
                 } else if max_expected == u32::MAX {
@@ -1022,7 +1036,7 @@ fn check_call_argument_diagnostics(
                 }
                 if !is_type_compatible(&param.type_fact, &actual) {
                     diagnostics.push(Diagnostic {
-                        range: ts_node_to_range(*arg_expr, source),
+                        range: line_index.ts_node_to_range(*arg_expr, source),
                         severity: Some(severity),
                         source: Some("mylua".to_string()),
                         message: format!(
@@ -1194,11 +1208,12 @@ fn check_return_mismatch_diagnostics(
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     let mut functions: Vec<tree_sitter::Node> = Vec::new();
     collect_function_like_nodes(root, &mut functions);
     for fun in functions {
-        inspect_function_returns(fun, source, diagnostics, severity);
+        inspect_function_returns(fun, source, diagnostics, severity, line_index);
     }
 }
 
@@ -1224,6 +1239,7 @@ fn inspect_function_returns(
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     // For `function_definition` (anonymous `local f = function() end`
     // or `Class.m = function() end`), the anchor statement (used to
@@ -1269,7 +1285,7 @@ fn inspect_function_returns(
     }
 
     for ret in returns {
-        inspect_single_return(ret, &declared_types, source, diagnostics, severity);
+        inspect_single_return(ret, &declared_types, source, diagnostics, severity, line_index);
     }
 }
 
@@ -1302,6 +1318,7 @@ fn inspect_single_return(
     source: &[u8],
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
+    line_index: &LineIndex,
 ) {
     // `return_statement` in our grammar is `'return' optional(expression_list)
     // optional(';')` — no `values` field. Find the `expression_list`
@@ -1330,7 +1347,7 @@ fn inspect_single_return(
 
     if actual_count != declared_count {
         diagnostics.push(Diagnostic {
-            range: ts_node_to_range(ret, source),
+            range: line_index.ts_node_to_range(ret, source),
             severity: Some(severity),
             source: Some("mylua".to_string()),
             message: format!(
@@ -1355,7 +1372,7 @@ fn inspect_single_return(
             }
             if !is_type_compatible(declared, &actual) {
                 diagnostics.push(Diagnostic {
-                    range: ts_node_to_range(val, source),
+                    range: line_index.ts_node_to_range(val, source),
                     severity: Some(severity),
                     source: Some("mylua".to_string()),
                     message: format!(

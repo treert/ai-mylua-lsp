@@ -15,6 +15,7 @@ fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
         doc.tree.root_node(),
         src.as_bytes(),
         Some(&summary),
+        &doc.line_index,
     )
 }
 

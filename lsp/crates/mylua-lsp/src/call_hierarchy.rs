@@ -31,7 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
-use crate::util::{is_ancestor_or_equal, node_text, position_to_byte_offset, ts_node_to_range};
+use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
 // Prepare
@@ -43,7 +43,7 @@ pub fn prepare_call_hierarchy(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyItem> {
-    let Some(byte_offset) = position_to_byte_offset(&doc.text, position) else {
+    let Some(byte_offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
         return Vec::new();
     };
     let source = doc.text.as_bytes();
@@ -56,7 +56,7 @@ pub fn prepare_call_hierarchy(
     // Case 1: the cursor is on the declaration name of a function
     // (function_declaration / local_function_declaration). We can
     // build the item without looking it up elsewhere.
-    if let Some(item) = item_from_enclosing_declaration(ident, source, uri) {
+    if let Some(item) = item_from_enclosing_declaration(ident, source, uri, &doc.line_index) {
         return vec![item];
     }
 
@@ -104,6 +104,7 @@ fn item_from_enclosing_declaration(
     ident: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    line_index: &LineIndex,
 ) -> Option<CallHierarchyItem> {
     let parent = ident.parent()?;
     // `function_declaration` uses `function_name` for the name
@@ -131,8 +132,8 @@ fn item_from_enclosing_declaration(
         name,
         kind,
         uri.clone(),
-        ts_node_to_range(decl, source),
-        ts_node_to_range(name_node, source),
+        line_index.ts_node_to_range(decl, source),
+        line_index.ts_node_to_range(name_node, source),
     ))
 }
 
@@ -384,6 +385,7 @@ pub fn extract_call_site(
     call: tree_sitter::Node,
     source: &[u8],
     caller_name: &str,
+    line_index: &LineIndex,
 ) -> Option<CallSite> {
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
@@ -391,18 +393,18 @@ pub fn extract_call_site(
     let (callee_name, range) = if let Some(m) = method {
         // `obj:m(...)` — use the method name
         let name = node_text(m, source).to_string();
-        (name, ts_node_to_range(m, source))
+        (name, line_index.ts_node_to_range(m, source))
     } else if callee.kind() == "identifier" {
-        (node_text(callee, source).to_string(), ts_node_to_range(callee, source))
+        (node_text(callee, source).to_string(), line_index.ts_node_to_range(callee, source))
     } else if matches!(callee.kind(), "variable" | "field_expression") {
         // Dotted: `a.b.c()` or field expression — take the rightmost
         // field's range and the whole dotted chain as the callee_name
         // (caller can use `last_segment` if they only want the name).
         let text = node_text(callee, source).to_string();
         if let Some(field) = callee.child_by_field_name("field") {
-            (text, ts_node_to_range(field, source))
+            (text, line_index.ts_node_to_range(field, source))
         } else {
-            (text, ts_node_to_range(callee, source))
+            (text, line_index.ts_node_to_range(callee, source))
         }
     } else {
         return None;

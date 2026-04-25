@@ -6,7 +6,7 @@ use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
 use crate::type_inference::infer_node_type;
-use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
@@ -16,7 +16,7 @@ pub fn hover(
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let ident_text = node_text(ident_node, doc.text.as_bytes());
 
@@ -163,8 +163,8 @@ pub fn hover(
                         }
                         // Include doc comments from the definition site
                         if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
-                            let def_byte = crate::util::position_to_byte_offset(
-                                &def_doc.text, td.range.start,
+                            let def_byte = def_doc.line_index.position_to_byte_offset(
+                                def_doc.text.as_bytes(), td.range.start,
                             );
                             if let Some(db) = def_byte {
                                 if let Some(def_node) = def_doc.tree.root_node()
@@ -320,7 +320,7 @@ fn hover_at_declaration(
     }
 
     let name_node = decl_node.child_by_field_name("name");
-    let range = name_node.map(|n| crate::util::ts_node_to_range(n, source));
+    let range = name_node.map(|n| doc.line_index.ts_node_to_range(n, source));
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -345,7 +345,7 @@ fn hover_method_call(
     let source = doc.text.as_bytes();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs)
+    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs, &doc.line_index)
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -362,7 +362,7 @@ fn hover_variable_field(
     let source = doc.text.as_bytes();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs)
+    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs, &doc.line_index)
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -380,6 +380,7 @@ fn build_field_hover(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
+    line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = node_text(name_node, source).to_string();
 
@@ -422,7 +423,7 @@ fn build_field_hover(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(crate::util::ts_node_to_range(name_node, source)),
+        range: Some(line_index.ts_node_to_range(name_node, source)),
     })
 }
 
@@ -464,7 +465,7 @@ fn build_hover_for_definition(
     let source = doc.text.as_bytes();
 
     let def_start = def.range.start;
-    let def_byte = crate::util::position_to_byte_offset(&doc.text, def_start)?;
+    let def_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def_start)?;
     let def_node = doc.tree.root_node().descendant_for_byte_range(def_byte, def_byte)?;
 
     let stmt_node = find_enclosing_statement(def_node);

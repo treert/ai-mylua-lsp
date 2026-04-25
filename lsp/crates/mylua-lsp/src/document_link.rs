@@ -27,7 +27,7 @@
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::util::{node_text, ts_node_to_range};
+use crate::util::{node_text, LineIndex};
 
 /// Collect all `require("mod")` document links in `tree`. Strings that
 /// don't resolve to a known workspace module are silently skipped —
@@ -36,10 +36,11 @@ pub fn document_links(
     root: tree_sitter::Node,
     source: &[u8],
     index: &WorkspaceAggregation,
+    line_index: &LineIndex,
 ) -> Vec<DocumentLink> {
     let mut out = Vec::new();
     let mut cursor = root.walk();
-    collect_recursive(&mut cursor, source, index, &mut out);
+    collect_recursive(&mut cursor, source, index, &mut out, line_index);
     out
 }
 
@@ -48,6 +49,7 @@ fn collect_recursive(
     source: &[u8],
     index: &WorkspaceAggregation,
     out: &mut Vec<DocumentLink>,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
     if node.kind() == "function_call" {
@@ -59,15 +61,15 @@ fn collect_recursive(
                 // the full string node range if we can't find quote
                 // bytes (e.g. malformed string that tree-sitter still
                 // produced as `string` via error recovery).
-                let link_range = content_range_inside_quotes(string_node, source)
-                    .unwrap_or_else(|| ts_node_to_range(string_node, source));
+                let link_range = content_range_inside_quotes(string_node, source, line_index)
+                    .unwrap_or_else(|| line_index.ts_node_to_range(string_node, source));
                 out.push(document_link(link_range, target));
             }
         }
     }
     if cursor.goto_first_child() {
         loop {
-            collect_recursive(cursor, source, index, out);
+            collect_recursive(cursor, source, index, out, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -168,8 +170,8 @@ fn parse_module_path_from_string(string_node: tree_sitter::Node, source: &[u8]) 
 /// of a short-quoted string node. Keeps the client's underline
 /// visually tight on the module path. Returns `None` when the node
 /// range is degenerate (zero or one byte wide).
-fn content_range_inside_quotes(string_node: tree_sitter::Node, source: &[u8]) -> Option<Range> {
-    let full = ts_node_to_range(string_node, source);
+fn content_range_inside_quotes(string_node: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Option<Range> {
+    let full = line_index.ts_node_to_range(string_node, source);
     let start_byte = string_node.start_byte();
     let end_byte = string_node.end_byte();
     if end_byte <= start_byte + 1 {

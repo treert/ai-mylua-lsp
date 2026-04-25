@@ -1,6 +1,6 @@
 use tower_lsp_server::ls_types::{Range, Uri};
 use crate::types::{DefKind, Definition};
-use crate::util::{node_text, ts_node_to_range};
+use crate::util::{node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -53,10 +53,11 @@ pub struct ScopeTree {
 // Building
 // ---------------------------------------------------------------------------
 
-pub fn build_scope_tree(tree: &tree_sitter::Tree, source: &[u8]) -> ScopeTree {
+pub fn build_scope_tree(tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> ScopeTree {
     let mut builder = TreeBuilder {
         scopes: Vec::new(),
         source,
+        line_index,
     };
     let root = tree.root_node();
     builder.push_scope(ScopeKind::File, root.start_byte(), root.end_byte(), None);
@@ -67,6 +68,7 @@ pub fn build_scope_tree(tree: &tree_sitter::Tree, source: &[u8]) -> ScopeTree {
 struct TreeBuilder<'a> {
     scopes: Vec<Scope>,
     source: &'a [u8],
+    line_index: &'a LineIndex,
 }
 
 impl<'a> TreeBuilder<'a> {
@@ -193,8 +195,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: DefKind::ForVariable,
                         decl_byte: db,
                         visible_after_byte: db,
-                        range: ts_node_to_range(node, self.source),
-                        selection_range: ts_node_to_range(name_node, self.source),
+                        range: self.line_index.ts_node_to_range(node, self.source),
+                        selection_range: self.line_index.ts_node_to_range(name_node, self.source),
                     });
                 }
                 self.visit_children(node, child_scope);
@@ -216,8 +218,8 @@ impl<'a> TreeBuilder<'a> {
                                     kind: DefKind::ForVariable,
                                     decl_byte: db,
                                     visible_after_byte: db,
-                                    range: ts_node_to_range(node, self.source),
-                                    selection_range: ts_node_to_range(id_node, self.source),
+                                    range: self.line_index.ts_node_to_range(node, self.source),
+                                    selection_range: self.line_index.ts_node_to_range(id_node, self.source),
                                 });
                             }
                         }
@@ -255,8 +257,8 @@ impl<'a> TreeBuilder<'a> {
                     kind: DefKind::LocalFunction,
                     decl_byte: db,
                     visible_after_byte: db,
-                    range: ts_node_to_range(node, self.source),
-                    selection_range: ts_node_to_range(name_node, self.source),
+                    range: self.line_index.ts_node_to_range(node, self.source),
+                    selection_range: self.line_index.ts_node_to_range(name_node, self.source),
                 });
             }
         }
@@ -273,8 +275,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: ts_node_to_range(child, self.source),
-                            selection_range: ts_node_to_range(child, self.source),
+                            range: self.line_index.ts_node_to_range(child, self.source),
+                            selection_range: self.line_index.ts_node_to_range(child, self.source),
                         });
                     } else if child.kind() == "name_list" {
                         for j in 0..child.named_child_count() {
@@ -286,8 +288,8 @@ impl<'a> TreeBuilder<'a> {
                                         kind: DefKind::Parameter,
                                         decl_byte: db,
                                         visible_after_byte: db,
-                                        range: ts_node_to_range(id, self.source),
-                                        selection_range: ts_node_to_range(id, self.source),
+                                        range: self.line_index.ts_node_to_range(id, self.source),
+                                        selection_range: self.line_index.ts_node_to_range(id, self.source),
                                     });
                                 }
                             }
@@ -309,8 +311,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: ts_node_to_range(func_body, self.source),
-                            selection_range: ts_node_to_range(func_body, self.source),
+                            range: self.line_index.ts_node_to_range(func_body, self.source),
+                            selection_range: self.line_index.ts_node_to_range(func_body, self.source),
                         });
                     }
                 }
@@ -334,8 +336,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: kind.clone(),
                         decl_byte: child.start_byte(),
                         visible_after_byte: visible_after,
-                        range: ts_node_to_range(stmt_node, self.source),
-                        selection_range: ts_node_to_range(child, self.source),
+                        range: self.line_index.ts_node_to_range(stmt_node, self.source),
+                        selection_range: self.line_index.ts_node_to_range(child, self.source),
                     });
                 }
             }

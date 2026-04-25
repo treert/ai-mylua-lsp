@@ -19,7 +19,7 @@
 use tower_lsp_server::ls_types::*;
 
 use crate::document::Document;
-use crate::util::{find_node_at_position, is_ancestor_or_equal, node_text, position_to_byte_offset, ts_node_to_range};
+use crate::util::{find_node_at_position, is_ancestor_or_equal, node_text, LineIndex};
 
 pub fn document_highlight(
     doc: &Document,
@@ -29,7 +29,7 @@ pub fn document_highlight(
     // `_uri` is accepted for symmetry with other LSP handlers but
     // unused: documentHighlight is strictly same-file and `ScopeTree`
     // doesn't need the URI for a decl-byte lookup.
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let clicked = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let source = doc.text.as_bytes();
     let name = node_text(clicked, source);
@@ -57,6 +57,7 @@ pub fn document_highlight(
         source,
         &doc.scope_tree,
         target_decl_byte,
+        &doc.line_index,
         &mut highlights,
     );
     // `TreeCursor` pre-order traversal visits each node once and in
@@ -71,6 +72,7 @@ fn collect_highlights(
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
     target_decl_byte: Option<usize>,
+    line_index: &LineIndex,
     out: &mut Vec<DocumentHighlight>,
 ) {
     let node = cursor.node();
@@ -86,7 +88,7 @@ fn collect_highlights(
         if matches_scope {
             let kind = classify_kind(node);
             out.push(DocumentHighlight {
-                range: ts_node_to_range(node, source),
+                range: line_index.ts_node_to_range(node, source),
                 kind: Some(kind),
             });
         }
@@ -94,7 +96,7 @@ fn collect_highlights(
 
     if cursor.goto_first_child() {
         loop {
-            collect_highlights(cursor, name, source, scope_tree, target_decl_byte, out);
+            collect_highlights(cursor, name, source, scope_tree, target_decl_byte, line_index, out);
             if !cursor.goto_next_sibling() {
                 break;
             }

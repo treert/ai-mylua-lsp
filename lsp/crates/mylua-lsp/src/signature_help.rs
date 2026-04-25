@@ -15,7 +15,7 @@ use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
-use crate::util::{node_text, position_to_byte_offset};
+use crate::util::node_text;
 
 pub fn signature_help(
     doc: &Document,
@@ -23,7 +23,7 @@ pub fn signature_help(
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
-    let offset = position_to_byte_offset(&doc.text, position)?;
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let source = doc.text.as_bytes();
 
     // Find the enclosing function call whose argument list contains the cursor.

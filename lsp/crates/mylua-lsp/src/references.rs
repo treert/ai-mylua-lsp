@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
 use crate::document::Document;
-use crate::util::{node_text, ts_node_to_range, position_to_byte_offset, find_node_at_position, byte_offset_to_position};
+use crate::util::{node_text, find_node_at_position, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn find_references(
@@ -14,7 +14,7 @@ pub fn find_references(
     all_docs: &HashMap<Uri, Document>,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
 
     // Prefer an identifier AST node at the cursor; fall back to extracting
     // the surrounding ASCII word from raw source. The fallback covers the
@@ -81,7 +81,7 @@ fn find_local_references(
         });
     }
 
-    let def_byte = position_to_byte_offset(&doc.text, def.selection_range.start)
+    let def_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def.selection_range.start)
         .unwrap_or(0);
 
     // For `local` decls, `visible_after_byte == stmt.end_byte`, meaning the
@@ -89,7 +89,7 @@ fn find_local_references(
     // probe at the end of the decl's full range (statement end) to land in
     // a position where the ScopeDecl is in scope. For params / for-vars
     // where `visible_after_byte == decl_byte`, this also works.
-    let probe_byte = position_to_byte_offset(&doc.text, def.range.end)
+    let probe_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def.range.end)
         .unwrap_or(def_byte.saturating_add(name.len()));
     let target_decl_byte = doc.scope_tree
         .resolve_decl(probe_byte, name)
@@ -113,6 +113,7 @@ fn find_local_references(
             def,
             target_decl_byte,
             &doc.scope_tree,
+            &doc.line_index,
         );
     }
 
@@ -124,6 +125,7 @@ fn find_local_references(
 struct RefSearchCtx<'a> {
     name: &'a str,
     source: &'a [u8],
+    line_index: &'a LineIndex,
     uri: &'a Uri,
     locations: &'a mut Vec<Location>,
     def: &'a crate::types::Definition,
@@ -140,9 +142,10 @@ fn collect_identifier_occurrences(
     def: &crate::types::Definition,
     target_decl_byte: usize,
     scope_tree: &crate::scope::ScopeTree,
+    line_index: &LineIndex,
 ) {
     let mut ctx = RefSearchCtx {
-        name, source, uri, locations, def, target_decl_byte, scope_tree,
+        name, source, line_index, uri, locations, def, target_decl_byte, scope_tree,
     };
     let mut cursor = scope.walk();
     collect_idents_recursive(&mut cursor, &mut ctx);
@@ -155,7 +158,7 @@ fn collect_idents_recursive(
     let node = cursor.node();
 
     if node.kind() == "identifier" && node_text(node, ctx.source) == ctx.name {
-        let range = ts_node_to_range(node, ctx.source);
+        let range = ctx.line_index.ts_node_to_range(node, ctx.source);
         if range != ctx.def.selection_range {
             let ident_byte = node.start_byte();
             let resolves_to_target = ctx.scope_tree
@@ -234,7 +237,7 @@ fn find_global_references(
     for (doc_uri, doc) in all_docs {
         let source = doc.text.as_bytes();
         let mut cursor = doc.tree.root_node().walk();
-        collect_global_name_occurrences(&mut cursor, name, source, doc_uri, &mut locations);
+        collect_global_name_occurrences(&mut cursor, name, source, doc_uri, &mut locations, &doc.line_index);
     }
 
     locations.sort_by(|a, b| {
@@ -263,7 +266,7 @@ fn collect_emmy_type_references(
     for (doc_uri, doc) in all_docs {
         let source = doc.text.as_bytes();
         let mut cursor = doc.tree.root_node().walk();
-        scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations);
+        scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations, &doc.line_index);
     }
 }
 
@@ -273,18 +276,19 @@ fn scan_type_in_comments(
     source: &[u8],
     uri: &Uri,
     locations: &mut Vec<Location>,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
     match node.kind() {
         "emmy_line" | "comment" => {
-            emit_type_matches_in_node(node, type_name, source, uri, locations);
+            emit_type_matches_in_node(node, type_name, source, uri, locations, line_index);
             return;
         }
         _ => {}
     }
     if cursor.goto_first_child() {
         loop {
-            scan_type_in_comments(cursor, type_name, source, uri, locations);
+            scan_type_in_comments(cursor, type_name, source, uri, locations, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -299,6 +303,7 @@ fn emit_type_matches_in_node(
     source: &[u8],
     uri: &Uri,
     locations: &mut Vec<Location>,
+    line_index: &LineIndex,
 ) {
     let node_start_byte = node.start_byte();
     let line_bytes = match source.get(node_start_byte..node.end_byte()) {
@@ -325,8 +330,8 @@ fn emit_type_matches_in_node(
                 let abs_start = node_start_byte + i;
                 let abs_end = abs_start + pattern.len();
                 if let (Some(start), Some(end)) = (
-                    byte_offset_to_position(source, abs_start),
-                    byte_offset_to_position(source, abs_end),
+                    line_index.byte_offset_to_position(source, abs_start),
+                    line_index.byte_offset_to_position(source, abs_end),
                 ) {
                     locations.push(Location {
                         uri: uri.clone(),
@@ -379,6 +384,7 @@ fn collect_global_name_occurrences(
     source: &[u8],
     uri: &Uri,
     locations: &mut Vec<Location>,
+    line_index: &LineIndex,
 ) {
     let node = cursor.node();
 
@@ -390,7 +396,7 @@ fn collect_global_name_occurrences(
                 if is_bare_name {
                     locations.push(Location {
                         uri: uri.clone(),
-                        range: ts_node_to_range(node, source),
+                        range: line_index.ts_node_to_range(node, source),
                     });
                 }
             }
@@ -399,7 +405,7 @@ fn collect_global_name_occurrences(
 
     if cursor.goto_first_child() {
         loop {
-            collect_global_name_occurrences(cursor, name, source, uri, locations);
+            collect_global_name_occurrences(cursor, name, source, uri, locations, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }

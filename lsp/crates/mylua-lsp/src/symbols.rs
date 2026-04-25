@@ -25,14 +25,15 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp_server::ls_types::*;
 
 use crate::summary::{DocumentSummary, TypeDefinitionKind};
-use crate::util::{node_text, ts_node_to_range};
+use crate::util::{node_text, LineIndex};
 
 pub fn collect_document_symbols(
     root: tree_sitter::Node,
     source: &[u8],
     summary: Option<&DocumentSummary>,
+    line_index: &LineIndex,
 ) -> Vec<DocumentSymbol> {
-    let mut builder = OutlineBuilder::new(summary);
+    let mut builder = OutlineBuilder::new(summary, line_index);
     builder.visit_top_level(root, source);
     let mut symbols = builder.finalize();
     normalize_ranges(&mut symbols);
@@ -88,7 +89,8 @@ fn union_range(a: Range, b: Range) -> Range {
     Range { start, end }
 }
 
-struct OutlineBuilder {
+struct OutlineBuilder<'a> {
+    line_index: &'a LineIndex,
     /// Class name → index into `class_nodes` for O(1) child-append.
     class_index: HashMap<String, usize>,
     /// Fully-populated `DocumentSymbol` Class/Enum/Alias nodes.
@@ -101,8 +103,8 @@ struct OutlineBuilder {
     class_child_keys: HashMap<String, HashSet<String>>,
 }
 
-impl OutlineBuilder {
-    fn new(summary: Option<&DocumentSummary>) -> Self {
+impl<'a> OutlineBuilder<'a> {
+    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex) -> Self {
         let mut class_index = HashMap::new();
         let mut class_nodes: Vec<DocumentSymbol> = Vec::new();
         let mut class_child_keys: HashMap<String, HashSet<String>> = HashMap::new();
@@ -167,6 +169,7 @@ impl OutlineBuilder {
             class_nodes,
             top: Vec::new(),
             class_child_keys,
+            line_index,
         }
     }
 
@@ -225,8 +228,8 @@ impl OutlineBuilder {
             kind: SymbolKind::FUNCTION,
             tags: None,
             deprecated: None,
-            range: ts_node_to_range(node, source),
-            selection_range: ts_node_to_range(name_node, source),
+            range: self.line_index.ts_node_to_range(node, source),
+            selection_range: self.line_index.ts_node_to_range(name_node, source),
             children: None,
         });
     }
@@ -241,8 +244,8 @@ impl OutlineBuilder {
             kind: SymbolKind::FUNCTION,
             tags: None,
             deprecated: None,
-            range: ts_node_to_range(node, source),
-            selection_range: ts_node_to_range(name_node, source),
+            range: self.line_index.ts_node_to_range(node, source),
+            selection_range: self.line_index.ts_node_to_range(name_node, source),
             children: None,
         });
     }
@@ -269,8 +272,8 @@ impl OutlineBuilder {
                 kind: SymbolKind::VARIABLE,
                 tags: None,
                 deprecated: None,
-                range: ts_node_to_range(node, source),
-                selection_range: ts_node_to_range(id_node, source),
+                range: self.line_index.ts_node_to_range(node, source),
+                selection_range: self.line_index.ts_node_to_range(id_node, source),
                 children: None,
             });
         }
@@ -299,8 +302,8 @@ impl OutlineBuilder {
             kind: SymbolKind::VARIABLE,
             tags: None,
             deprecated: None,
-            range: ts_node_to_range(node, source),
-            selection_range: ts_node_to_range(first_var, source),
+            range: self.line_index.ts_node_to_range(node, source),
+            selection_range: self.line_index.ts_node_to_range(first_var, source),
             children: None,
         });
     }
@@ -337,8 +340,8 @@ impl OutlineBuilder {
             kind,
             tags: None,
             deprecated: None,
-            range: ts_node_to_range(range_node, source),
-            selection_range: ts_node_to_range(selection_node, source),
+            range: self.line_index.ts_node_to_range(range_node, source),
+            selection_range: self.line_index.ts_node_to_range(selection_node, source),
             children: None,
         });
     }

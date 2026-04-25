@@ -6,7 +6,7 @@ fn resolve_name(src: &str, line: u32, col: u32) -> Option<String> {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let uri = make_uri("test.lua");
-    let offset = mylua_lsp::util::position_to_byte_offset(&doc.text, pos(line, col))?;
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), pos(line, col))?;
     let ident = mylua_lsp::util::find_node_at_position(doc.tree.root_node(), offset)?;
     let name = mylua_lsp::util::node_text(ident, doc.text.as_bytes());
     doc.scope_tree.resolve(offset, name, &uri)
@@ -169,7 +169,7 @@ end
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     // At line 5 col 8 (inside do block, at "print()")
-    let offset = mylua_lsp::util::position_to_byte_offset(&doc.text, pos(5, 14)).unwrap();
+    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), pos(5, 14)).unwrap();
     let locals = doc.scope_tree.visible_locals(offset);
     let names: Vec<&str> = locals.iter().map(|d| d.name.as_str()).collect();
     assert!(names.contains(&"a"), "should see outer 'a': {:?}", names);

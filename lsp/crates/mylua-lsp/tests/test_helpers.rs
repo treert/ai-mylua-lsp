@@ -8,6 +8,7 @@ use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
+pub use mylua_lsp::util;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
 
@@ -52,11 +53,13 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
     let tree = parser
         .parse(text.as_bytes(), None)
         .expect("parse returned None");
-    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
+    let line_index = util::LineIndex::new(text.as_bytes());
+    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
     Document {
         text: text.to_string(),
         tree,
         scope_tree,
+        line_index,
     }
 }
 
@@ -145,8 +148,9 @@ pub fn setup_workspace_from_dir(
         if let Some(tree) = tree {
             let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
             agg.upsert_summary(summary);
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-            docs.insert(uri, Document { text, tree, scope_tree });
+            let line_index = util::LineIndex::new(text.as_bytes());
+            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+            docs.insert(uri, Document { text, tree, scope_tree, line_index });
         }
     }
 
@@ -221,8 +225,9 @@ pub fn setup_workspace_with_library(
         // contract.
         summary.is_meta = true;
         agg.upsert_summary(summary);
-        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes());
-        docs.insert(uri, Document { text, tree, scope_tree });
+        let line_index = util::LineIndex::new(text.as_bytes());
+        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+        docs.insert(uri, Document { text, tree, scope_tree, line_index });
     }
 
     (docs, agg, parser, library_uris)

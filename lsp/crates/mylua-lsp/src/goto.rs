@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, position_to_byte_offset, find_node_at_position, walk_ancestors, extract_string_literal};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal};
 
 pub fn goto_definition(
     doc: &Document,
@@ -13,7 +13,7 @@ pub fn goto_definition(
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let name = node_text(ident_node, doc.text.as_bytes());
     lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));
@@ -126,7 +126,7 @@ pub fn goto_type_definition(
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = position_to_byte_offset(&doc.text, position)?;
+    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
 
     // Identifier AST path — click on a Lua identifier. Resolve to a
     // local declaration, then walk its stored `TypeFact` to an Emmy
