@@ -8,7 +8,6 @@ use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
-pub use mylua_lsp::util;
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
