@@ -31,7 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
-use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
+use crate::util::{is_ancestor_or_equal, node_text, ByteRange, LineIndex};
 
 // ---------------------------------------------------------------------------
 // Prepare
@@ -42,6 +42,7 @@ pub fn prepare_call_hierarchy(
     uri: &Uri,
     position: Position,
     index: &WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyItem> {
     let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
@@ -63,17 +64,19 @@ pub fn prepare_call_hierarchy(
     // Case 2: the cursor is on some other identifier occurrence (e.g.
     // a call site). Resolve the name through the local summary's
     // function_summaries first, then the workspace global_shard.
+    let li = doc.line_index();
+    let src = doc.source();
     if let Some(summary) = index.summaries.get(uri) {
         if let Some(fs) = summary.function_summaries.get(&name) {
             return vec![build_item(
                 fs.name.clone(),
                 SymbolKind::FUNCTION,
                 uri.clone(),
-                fs.range,
+                li.byte_range_to_lsp_range(fs.range, src),
                 // Best-effort: declaration `range` already encloses
                 // the header; clients accept the same range as
                 // selection_range when no finer info exists.
-                fs.range,
+                li.byte_range_to_lsp_range(fs.range, src),
             )];
         }
     }
@@ -84,12 +87,14 @@ pub fn prepare_call_hierarchy(
             } else {
                 SymbolKind::VARIABLE
             };
+            let r = convert_byte_range(&c.source_uri, c.range, documents);
+            let sr = convert_byte_range(&c.source_uri, c.selection_range, documents);
             return vec![build_item(
                 name,
                 kind,
                 c.source_uri.clone(),
-                c.range,
-                c.selection_range,
+                r,
+                sr,
             )];
         }
     }
@@ -190,6 +195,7 @@ fn build_item(
 pub fn incoming_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyIncomingCall> {
     let target = last_segment(&item.name);
     // Map from (caller_uri, caller_name) → accumulated call ranges.
@@ -200,13 +206,14 @@ pub fn incoming_calls(
             if last_segment(&cs.callee_name) != target {
                 continue;
             }
-            let caller_item = resolve_caller_item(uri, &cs.caller_name, summary);
+            let caller_item = resolve_caller_item(uri, &cs.caller_name, summary, documents);
+            let lsp_range = convert_byte_range(uri, cs.range, documents);
             let key = (uri.clone(), cs.caller_name.clone());
             groups
                 .entry(key)
                 .or_insert_with(|| (caller_item, Vec::new()))
                 .1
-                .push(cs.range);
+                .push(lsp_range);
         }
     }
 
@@ -222,7 +229,12 @@ pub fn incoming_calls(
 /// Build a `CallHierarchyItem` for the caller of a call site. When
 /// `caller_name` is empty (the call lives at file top level), we
 /// return a "module-scope" item using the file URI as the handle.
-fn resolve_caller_item(uri: &Uri, caller_name: &str, summary: &DocumentSummary) -> CallHierarchyItem {
+fn resolve_caller_item(
+    uri: &Uri,
+    caller_name: &str,
+    summary: &DocumentSummary,
+    documents: &HashMap<Uri, Document>,
+) -> CallHierarchyItem {
     if caller_name.is_empty() {
         let range = Range {
             start: Position { line: 0, character: 0 },
@@ -242,12 +254,13 @@ fn resolve_caller_item(uri: &Uri, caller_name: &str, summary: &DocumentSummary) 
         } else {
             SymbolKind::FUNCTION
         };
+        let lsp_range = convert_byte_range(uri, fs.range, documents);
         return build_item(
             caller_name.to_string(),
             kind,
             uri.clone(),
-            fs.range,
-            fs.range,
+            lsp_range,
+            lsp_range,
         );
     }
     // Fallback: unknown caller name (shouldn't happen for a
@@ -271,6 +284,7 @@ fn file_name_hint(uri: &Uri) -> String {
 pub fn outgoing_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyOutgoingCall> {
     let Some(summary) = index.summaries.get(&item.uri) else { return Vec::new() };
 
@@ -282,12 +296,13 @@ pub fn outgoing_calls(
             continue;
         }
         let target_name = last_segment(&cs.callee_name).to_string();
-        let to_item = resolve_outgoing_target(&target_name, index, &item.uri, cs.range);
+        let lsp_range = convert_byte_range(&item.uri, cs.range, documents);
+        let to_item = resolve_outgoing_target(&target_name, index, &item.uri, lsp_range, documents);
         groups
             .entry(target_name.clone())
             .or_insert_with(|| (to_item, Vec::new()))
             .1
-            .push(cs.range);
+            .push(lsp_range);
     }
 
     groups
@@ -308,6 +323,7 @@ fn resolve_outgoing_target(
     index: &WorkspaceAggregation,
     fallback_uri: &Uri,
     fallback_range: Range,
+    documents: &HashMap<Uri, Document>,
 ) -> CallHierarchyItem {
     // 1. O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
@@ -316,12 +332,13 @@ fn resolve_outgoing_target(
             // the candidate's source file.
             if let Some(summary) = index.summaries.get(&c.source_uri) {
                 if let Some(fs) = summary.function_summaries.get(name) {
+                    let lsp_range = convert_byte_range(&c.source_uri, fs.range, documents);
                     return build_item(
                         name.to_string(),
                         SymbolKind::FUNCTION,
                         c.source_uri.clone(),
-                        fs.range,
-                        fs.range,
+                        lsp_range,
+                        lsp_range,
                     );
                 }
             }
@@ -330,12 +347,14 @@ fn resolve_outgoing_target(
             } else {
                 SymbolKind::VARIABLE
             };
+            let r = convert_byte_range(&c.source_uri, c.range, documents);
+            let sr = convert_byte_range(&c.source_uri, c.selection_range, documents);
             return build_item(
                 name.to_string(),
                 kind,
                 c.source_uri.clone(),
-                c.range,
-                c.selection_range,
+                r,
+                sr,
             );
         }
     }
@@ -343,12 +362,13 @@ fn resolve_outgoing_target(
     //    registered in global_shard, e.g. local helpers).
     for (uri, summary) in &index.summaries {
         if let Some(fs) = summary.function_summaries.get(name) {
+            let lsp_range = convert_byte_range(uri, fs.range, documents);
             return build_item(
                 name.to_string(),
                 SymbolKind::FUNCTION,
                 uri.clone(),
-                fs.range,
-                fs.range,
+                lsp_range,
+                lsp_range,
             );
         }
     }
@@ -369,6 +389,25 @@ fn resolve_outgoing_target(
 /// Return the last dot-or-colon-separated segment of a (possibly
 /// qualified) callee name. `m.sub.foo` → `foo`; `obj:bar` → `bar`;
 /// `baz` → `baz`.
+/// Convert a `ByteRange` to an LSP `Range` using the document's
+/// source and line index. Falls back to a zero-range if the document
+/// is not available (e.g. file was closed).
+fn convert_byte_range(
+    uri: &Uri,
+    br: ByteRange,
+    documents: &HashMap<Uri, Document>,
+) -> Range {
+    if let Some(doc) = documents.get(uri) {
+        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+    } else {
+        // Fallback: use row/col directly (byte col == utf16 col for ASCII).
+        Range {
+            start: Position { line: br.start_row, character: br.start_col },
+            end: Position { line: br.end_row, character: br.end_col },
+        }
+    }
+}
+
 fn last_segment(name: &str) -> &str {
     if let Some(idx) = name.rfind(['.', ':']) {
         &name[idx + 1..]
@@ -393,18 +432,18 @@ pub fn extract_call_site(
     let (callee_name, range) = if let Some(m) = method {
         // `obj:m(...)` — use the method name
         let name = node_text(m, source).to_string();
-        (name, line_index.ts_node_to_range(m, source))
+        (name, line_index.ts_node_to_byte_range(m, source))
     } else if callee.kind() == "identifier" {
-        (node_text(callee, source).to_string(), line_index.ts_node_to_range(callee, source))
+        (node_text(callee, source).to_string(), line_index.ts_node_to_byte_range(callee, source))
     } else if matches!(callee.kind(), "variable" | "field_expression") {
         // Dotted: `a.b.c()` or field expression — take the rightmost
         // field's range and the whole dotted chain as the callee_name
         // (caller can use `last_segment` if they only want the name).
         let text = node_text(callee, source).to_string();
         if let Some(field) = callee.child_by_field_name("field") {
-            (text, line_index.ts_node_to_range(field, source))
+            (text, line_index.ts_node_to_byte_range(field, source))
         } else {
-            (text, line_index.ts_node_to_range(callee, source))
+            (text, line_index.ts_node_to_byte_range(callee, source))
         }
     } else {
         return None;

@@ -33,7 +33,7 @@ pub fn collect_document_symbols(
     summary: Option<&DocumentSummary>,
     line_index: &LineIndex,
 ) -> Vec<DocumentSymbol> {
-    let mut builder = OutlineBuilder::new(summary, line_index);
+    let mut builder = OutlineBuilder::new(summary, line_index, source);
     builder.visit_top_level(root, source);
     let mut symbols = builder.finalize();
     normalize_ranges(&mut symbols);
@@ -104,7 +104,7 @@ struct OutlineBuilder<'a> {
 }
 
 impl<'a> OutlineBuilder<'a> {
-    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex) -> Self {
+    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex, source: &[u8]) -> Self {
         let mut class_index = HashMap::new();
         let mut class_nodes: Vec<DocumentSymbol> = Vec::new();
         let mut class_child_keys: HashMap<String, HashSet<String>> = HashMap::new();
@@ -132,7 +132,8 @@ impl<'a> OutlineBuilder<'a> {
                     // the user clicks this outline entry. Fall back to
                     // the full `---@field` line range if the summary
                     // was produced before the precise range was tracked.
-                    let selection_range = fd.name_range.unwrap_or(fd.range);
+                    let selection_range = line_index.byte_range_to_lsp_range(
+                        fd.name_range.unwrap_or(fd.range), source);
                     #[allow(deprecated)]
                     children.push(DocumentSymbol {
                         name: fd.name.clone(),
@@ -140,14 +141,15 @@ impl<'a> OutlineBuilder<'a> {
                         kind: SymbolKind::FIELD,
                         tags: None,
                         deprecated: None,
-                        range: fd.range,
+                        range: line_index.byte_range_to_lsp_range(fd.range, source),
                         selection_range,
                         children: None,
                     });
                 }
                 // Same rationale as fields: use the `---@class <Name>`
                 // identifier token for the outline's selection target.
-                let selection_range = td.name_range.unwrap_or(td.range);
+                let selection_range = line_index.byte_range_to_lsp_range(
+                    td.name_range.unwrap_or(td.range), source);
                 #[allow(deprecated)]
                 class_nodes.push(DocumentSymbol {
                     name: td.name.clone(),
@@ -155,7 +157,7 @@ impl<'a> OutlineBuilder<'a> {
                     kind,
                     tags: None,
                     deprecated: None,
-                    range: td.range,
+                    range: line_index.byte_range_to_lsp_range(td.range, source),
                     selection_range,
                     children: Some(children),
                 });

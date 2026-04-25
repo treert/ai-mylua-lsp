@@ -441,7 +441,7 @@ fn check_type_mismatch_diagnostics(
         }
         if !is_type_compatible(declared, &actual) {
             diagnostics.push(Diagnostic {
-                range: ltf.range,
+                range: line_index.byte_range_to_lsp_range(ltf.range, source),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
                 message: format!(
@@ -602,17 +602,17 @@ fn ltf_matches_decl(
             line += 1;
         }
     }
-    ltf.range.start.line == line
+    ltf.range.start_row == line
 }
 
 fn find_actual_type_for_local(
     name: &str,
-    decl_range: &Range,
+    decl_range: &crate::util::ByteRange,
     root: tree_sitter::Node,
     source: &[u8],
     summary: &crate::summary::DocumentSummary,
 ) -> TypeFact {
-    let target_line = decl_range.start.line;
+    let target_line = decl_range.start_row;
     find_local_rhs_type(root, name, target_line, summary, source)
 }
 
@@ -856,7 +856,7 @@ fn check_unused_locals(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
-    _line_index: &LineIndex,
+    line_index: &LineIndex,
 ) {
     // Count references per (name, decl_byte) by walking the tree
     // and resolving each identifier through the scope tree.
@@ -874,7 +874,7 @@ fn check_unused_locals(
         let key = (decl.name.clone(), decl.decl_byte);
         if ref_count.get(&key).copied().unwrap_or(0) == 0 {
             diagnostics.push(Diagnostic {
-                range: decl.selection_range,
+                range: line_index.byte_range_to_lsp_range(decl.selection_range, source),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
                 message: format!("Unused local '{}'", decl.name),

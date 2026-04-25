@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
-use tower_lsp_server::ls_types::{Range, Uri};
+use tower_lsp_server::ls_types::Uri;
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
+use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.
 ///
@@ -45,8 +46,8 @@ pub struct GlobalCandidate {
     pub name: String,
     pub kind: GlobalContributionKind,
     pub type_fact: TypeFact,
-    pub range: Range,
-    pub selection_range: Range,
+    pub range: ByteRange,
+    pub selection_range: ByteRange,
     pub source_uri: Uri,
 }
 
@@ -56,7 +57,7 @@ pub struct TypeCandidate {
     pub name: String,
     pub kind: crate::summary::TypeDefinitionKind,
     pub source_uri: Uri,
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 /// A file that depends on a given URI via `require`.
@@ -94,7 +95,7 @@ pub enum CacheKey {
 pub struct CachedResolution {
     pub resolved_type: TypeFact,
     pub def_uri: Option<Uri>,
-    pub def_range: Option<tower_lsp_server::ls_types::Range>,
+    pub def_range: Option<ByteRange>,
     pub dirty: bool,
 }
 

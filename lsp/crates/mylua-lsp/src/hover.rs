@@ -163,9 +163,7 @@ pub fn hover(
                         }
                         // Include doc comments from the definition site
                         if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
-                            let def_byte = def_doc.line_index().position_to_byte_offset(
-                                def_doc.source(), td.range.start,
-                            );
+                            let def_byte = Some(td.range.start_byte);
                             if let Some(db) = def_byte {
                                 if let Some(def_node) = def_doc.tree.root_node()
                                     .descendant_for_byte_range(db, db)
@@ -464,9 +462,8 @@ fn build_hover_for_definition(
     let doc = all_docs.get(&def.uri)?;
     let source = doc.source();
 
-    let def_start = def.range.start;
-    let def_byte = doc.line_index().position_to_byte_offset(doc.source(), def_start)?;
-    let def_node = doc.tree.root_node().descendant_for_byte_range(def_byte, def_byte)?;
+    let def_start_byte = def.range.start_byte;
+    let def_node = doc.tree.root_node().descendant_for_byte_range(def_start_byte, def_start_byte)?;
 
     let stmt_node = find_enclosing_statement(def_node);
 
@@ -519,7 +516,7 @@ fn build_hover_for_definition(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(def.selection_range),
+        range: Some(doc.line_index().byte_range_to_lsp_range(def.selection_range, doc.source())),
     })
 }
 

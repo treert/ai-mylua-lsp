@@ -304,7 +304,7 @@ local Color = {
 }
 "#;
     let (_doc, _uri, agg) = setup_single_file(src, "enum.lua");
-    let results = mylua_lsp::workspace_symbol::search_workspace_symbols("Color", &agg);
+    let results = mylua_lsp::workspace_symbol::search_workspace_symbols("Color", &agg, &std::collections::HashMap::new());
     assert!(
         results.iter().any(|s| s.name == "Color"),
         "workspace/symbol should find @enum Color, got: {:?}",

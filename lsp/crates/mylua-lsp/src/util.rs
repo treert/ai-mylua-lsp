@@ -1,5 +1,6 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use serde::{Serialize, Deserialize};
 use tower_lsp_server::ls_types::*;
 
 pub fn hash_bytes(data: &[u8]) -> u64 {
@@ -75,6 +76,11 @@ impl LineIndex {
         self.line_starts.get(row).copied()
     }
 
+    /// Access the raw line-start table for binary search.
+    pub fn line_starts(&self) -> &[usize] {
+        &self.line_starts
+    }
+
     /// Convert a byte offset to an LSP `Position` using O(log N)
     /// binary search on the line-start table.
     pub fn byte_offset_to_position(&self, source: &[u8], byte_offset: usize) -> Option<Position> {
@@ -133,6 +139,69 @@ impl LineIndex {
             end: self.ts_point_to_position(node.end_position(), source),
         }
     }
+
+    /// Convert a tree-sitter `Node` span to an internal `ByteRange`.
+    ///
+    /// This extracts byte offsets and row/byte-column directly from the
+    /// tree-sitter node **without** any UTF-16 conversion, making it
+    /// significantly cheaper than `ts_node_to_range` for hot paths like
+    /// `build_summary` and `build_scope_tree`.
+    pub fn ts_node_to_byte_range(&self, node: tree_sitter::Node, _source: &[u8]) -> ByteRange {
+        let sp = node.start_position();
+        let ep = node.end_position();
+        ByteRange {
+            start_byte: node.start_byte(),
+            end_byte: node.end_byte(),
+            start_row: sp.row as u32,
+            start_col: sp.column as u32,
+            end_row: ep.row as u32,
+            end_col: ep.column as u32,
+        }
+    }
+
+    /// Convert an internal `ByteRange` to an LSP `Range` (UTF-16).
+    ///
+    /// This is the **outbound** conversion used at the LSP protocol
+    /// boundary when sending responses/notifications to VS Code.
+    pub fn byte_range_to_lsp_range(&self, br: ByteRange, source: &[u8]) -> Range {
+        let start_line_bytes = self.line_bytes_for_row(source, br.start_row as usize);
+        let end_line_bytes = self.line_bytes_for_row(source, br.end_row as usize);
+        Range {
+            start: Position {
+                line: br.start_row,
+                character: byte_col_to_utf16_col(start_line_bytes, br.start_col as usize),
+            },
+            end: Position {
+                line: br.end_row,
+                character: byte_col_to_utf16_col(end_line_bytes, br.end_col as usize),
+            },
+        }
+    }
+
+    /// Convert an LSP `Range` (UTF-16) to an internal `ByteRange`.
+    ///
+    /// This is the **inbound** conversion used when VS Code sends a
+    /// range that needs to be compared with internal `ByteRange` values.
+    pub fn lsp_range_to_byte_range(&self, range: Range, source: &[u8]) -> ByteRange {
+        let start_line_start = self.byte_offset_of_line(range.start.line as usize).unwrap_or(0);
+        let start_line_bytes = line_bytes_after(source, start_line_start);
+        let start_col_byte = utf16_col_to_byte_col(start_line_bytes, range.start.character);
+        let start_byte = start_line_start + start_col_byte;
+
+        let end_line_start = self.byte_offset_of_line(range.end.line as usize).unwrap_or(0);
+        let end_line_bytes = line_bytes_after(source, end_line_start);
+        let end_col_byte = utf16_col_to_byte_col(end_line_bytes, range.end.character);
+        let end_byte = end_line_start + end_col_byte;
+
+        ByteRange {
+            start_byte,
+            end_byte,
+            start_row: range.start.line,
+            start_col: start_col_byte as u32,
+            end_row: range.end.line,
+            end_col: end_col_byte as u32,
+        }
+    }
 }
 
 /// Bundles source text with its pre-computed [`LineIndex`].
@@ -175,6 +244,51 @@ impl LuaSource {
     /// Consume and return the inner `String` (e.g. for snapshot copies).
     pub fn into_text(self) -> String {
         self.text
+    }
+}
+
+/// Internal byte-oriented range type used throughout the LSP server.
+///
+/// Stores tree-sitter's native byte offsets and row/byte-column pairs,
+/// avoiding the cost of UTF-16 conversion during `build_summary` and
+/// `build_scope_tree`. Conversion to/from LSP `Range` (UTF-16) happens
+/// only at the protocol boundary via `LineIndex::byte_range_to_lsp_range`
+/// and `LineIndex::lsp_range_to_byte_range`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct ByteRange {
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub start_row: u32,
+    pub start_col: u32,
+    pub end_row: u32,
+    pub end_col: u32,
+}
+
+impl ByteRange {
+    /// Returns `true` if the given byte offset falls within this range
+    /// (inclusive start, exclusive end).
+    #[inline]
+    pub fn contains_byte(&self, offset: usize) -> bool {
+        offset >= self.start_byte && offset < self.end_byte
+    }
+
+    /// Returns `true` if the given byte offset falls within this range
+    /// (inclusive start, inclusive end).
+    #[inline]
+    pub fn contains_byte_inclusive(&self, offset: usize) -> bool {
+        offset >= self.start_byte && offset <= self.end_byte
+    }
+
+    /// Start position as `(row, byte_col)` tuple.
+    #[inline]
+    pub fn start_position(&self) -> (u32, u32) {
+        (self.start_row, self.start_col)
+    }
+
+    /// End position as `(row, byte_col)` tuple.
+    #[inline]
+    pub fn end_position(&self) -> (u32, u32) {
+        (self.end_row, self.end_col)
     }
 }
 
@@ -793,6 +907,91 @@ mod tests {
             Some(4),
             "src_a row 1 after round-trip through src_b"
         );
+    }
+
+    // ── ByteRange tests ──────────────────────────────────────────
+
+    #[test]
+    fn ts_node_to_byte_range_ascii() {
+        let src = "local x = 1\n";
+        let tree = parse_source(src);
+        let root = tree.root_node();
+        let idx = LineIndex::new(src.as_bytes());
+        // Find the `1` number literal.
+        let number = root.descendant_for_byte_range(10, 10).expect("number");
+        assert_eq!(number.kind(), "number");
+        let br = idx.ts_node_to_byte_range(number, src.as_bytes());
+        assert_eq!(br.start_byte, 10);
+        assert_eq!(br.end_byte, 11);
+        assert_eq!(br.start_row, 0);
+        assert_eq!(br.start_col, 10);
+        assert_eq!(br.end_row, 0);
+        assert_eq!(br.end_col, 11);
+    }
+
+    #[test]
+    fn byte_range_to_lsp_range_ascii_roundtrip() {
+        let src = "local x = 1\n";
+        let tree = parse_source(src);
+        let root = tree.root_node();
+        let idx = LineIndex::new(src.as_bytes());
+        let number = root.descendant_for_byte_range(10, 10).expect("number");
+        let br = idx.ts_node_to_byte_range(number, src.as_bytes());
+        let lsp_range = idx.byte_range_to_lsp_range(br, src.as_bytes());
+        let expected = idx.ts_node_to_range(number, src.as_bytes());
+        assert_eq!(lsp_range, expected, "ASCII: byte_range_to_lsp_range must match ts_node_to_range");
+    }
+
+    #[test]
+    fn byte_range_to_lsp_range_chinese() {
+        // "local x = \"中abc\"\n" — the string literal starts after `= `.
+        let src = "local x = \"中abc\"\n";
+        let tree = parse_source(src);
+        let root = tree.root_node();
+        let idx = LineIndex::new(src.as_bytes());
+        // Find the string node.
+        let string_node = root.descendant_for_byte_range(11, 11).expect("string");
+        let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
+        let lsp_range = idx.byte_range_to_lsp_range(br, src.as_bytes());
+        let expected = idx.ts_node_to_range(string_node, src.as_bytes());
+        assert_eq!(lsp_range, expected, "Chinese: byte_range_to_lsp_range must match ts_node_to_range");
+    }
+
+    #[test]
+    fn lsp_range_to_byte_range_roundtrip() {
+        let src = "local x = \"中abc\"\n";
+        let tree = parse_source(src);
+        let root = tree.root_node();
+        let idx = LineIndex::new(src.as_bytes());
+        let string_node = root.descendant_for_byte_range(11, 11).expect("string");
+        let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
+        let lsp_range = idx.byte_range_to_lsp_range(br, src.as_bytes());
+        let back = idx.lsp_range_to_byte_range(lsp_range, src.as_bytes());
+        assert_eq!(back, br, "roundtrip: lsp_range_to_byte_range(byte_range_to_lsp_range(br)) must equal br");
+    }
+
+    #[test]
+    fn byte_range_contains() {
+        let br = ByteRange {
+            start_byte: 10, end_byte: 20,
+            start_row: 0, start_col: 10, end_row: 0, end_col: 20,
+        };
+        assert!(br.contains_byte(10));
+        assert!(br.contains_byte(15));
+        assert!(!br.contains_byte(20)); // exclusive end
+        assert!(br.contains_byte_inclusive(20)); // inclusive end
+        assert!(!br.contains_byte(9));
+    }
+
+    #[test]
+    fn byte_range_default_is_zero() {
+        let br = ByteRange::default();
+        assert_eq!(br.start_byte, 0);
+        assert_eq!(br.end_byte, 0);
+        assert_eq!(br.start_row, 0);
+        assert_eq!(br.start_col, 0);
+        assert_eq!(br.end_row, 0);
+        assert_eq!(br.end_col, 0);
     }
 
     #[test]

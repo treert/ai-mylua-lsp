@@ -27,7 +27,11 @@ use crate::summary::DocumentSummary;
 //   `DocumentSummary` that the cache stores. Since the global index
 //   is rebuilt from scratch on every session, the fingerprint was
 //   redundant.
-const SCHEMA_VERSION: u32 = 5;
+// v6 (2025-04): internal position storage changed from LSP `Range`
+//   (UTF-16) to `ByteRange` (byte offsets + row/byte-column). All
+//   serialized `DocumentSummary` fields now use `ByteRange`, so old
+//   caches are incompatible.
+const SCHEMA_VERSION: u32 = 6;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
 use crate::document::Document;
-use crate::util::{node_text, find_node_at_position, LineIndex};
+use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn find_references(
@@ -77,20 +77,18 @@ fn find_local_references(
     if include_declaration {
         locations.push(Location {
             uri: uri.clone(),
-            range: def.selection_range,
+            range: doc.line_index().byte_range_to_lsp_range(def.selection_range, doc.source()),
         });
     }
 
-    let def_byte = doc.line_index().position_to_byte_offset(doc.source(), def.selection_range.start)
-        .unwrap_or(0);
+    let def_byte = def.selection_range.start_byte;
 
     // For `local` decls, `visible_after_byte == stmt.end_byte`, meaning the
     // name is not yet visible inside its own declaration statement. So we
     // probe at the end of the decl's full range (statement end) to land in
     // a position where the ScopeDecl is in scope. For params / for-vars
     // where `visible_after_byte == decl_byte`, this also works.
-    let probe_byte = doc.line_index().position_to_byte_offset(doc.source(), def.range.end)
-        .unwrap_or(def_byte.saturating_add(name.len()));
+    let probe_byte = def.range.end_byte;
     let target_decl_byte = doc.scope_tree
         .resolve_decl(probe_byte, name)
         .map(|d| d.decl_byte)
@@ -159,7 +157,9 @@ fn collect_idents_recursive(
 
     if node.kind() == "identifier" && node_text(node, ctx.source) == ctx.name {
         let range = ctx.line_index.ts_node_to_range(node, ctx.source);
-        if range != ctx.def.selection_range {
+        // Compare using byte offsets to avoid ByteRange vs Range mismatch.
+        let node_start_byte = node.start_byte();
+        if node_start_byte != ctx.def.selection_range.start_byte {
             let ident_byte = node.start_byte();
             let resolves_to_target = ctx.scope_tree
                 .resolve_decl(ident_byte, ctx.name)
@@ -200,7 +200,7 @@ fn find_global_references(
                     if let Some(best) = candidates.first() {
                         locations.push(Location {
                             uri: best.source_uri.clone(),
-                            range: best.selection_range,
+                            range: br_to_range(&best.source_uri, best.selection_range, all_docs),
                         });
                     }
                 }
@@ -208,7 +208,7 @@ fn find_global_references(
                     if let Some(best) = candidates.first() {
                         locations.push(Location {
                             uri: best.source_uri.clone(),
-                            range: best.range,
+                            range: br_to_range(&best.source_uri, best.range, all_docs),
                         });
                     }
                 }
@@ -218,7 +218,7 @@ fn find_global_references(
                     for candidate in candidates {
                         locations.push(Location {
                             uri: candidate.source_uri.clone(),
-                            range: candidate.selection_range,
+                            range: br_to_range(&candidate.source_uri, candidate.selection_range, all_docs),
                         });
                     }
                 }
@@ -226,7 +226,7 @@ fn find_global_references(
                     for candidate in candidates {
                         locations.push(Location {
                             uri: candidate.source_uri.clone(),
-                            range: candidate.range,
+                            range: br_to_range(&candidate.source_uri, candidate.range, all_docs),
                         });
                     }
                 }
@@ -411,5 +411,21 @@ fn collect_global_name_occurrences(
             }
         }
         cursor.goto_parent();
+    }
+}
+
+/// Convert a `ByteRange` to an LSP `Range` using the document's source.
+fn br_to_range(
+    uri: &Uri,
+    br: ByteRange,
+    documents: &HashMap<Uri, Document>,
+) -> Range {
+    if let Some(doc) = documents.get(uri) {
+        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+    } else {
+        Range {
+            start: Position { line: br.start_row, character: br.start_col },
+            end: Position { line: br.end_row, character: br.end_col },
+        }
     }
 }

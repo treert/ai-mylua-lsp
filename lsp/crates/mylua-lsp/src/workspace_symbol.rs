@@ -12,17 +12,20 @@
 //!   search e.g. `ba` and find `Foo.bar` and `Bar.bar` as two separate
 //!   entries with different `container_name`.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
+use crate::document::Document;
 use crate::summary::{GlobalContributionKind, TypeDefinitionKind};
 use crate::type_system::{KnownType, TypeFact};
+use crate::util::ByteRange;
 
 pub fn search_workspace_symbols(
     query: &str,
     index: &WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Vec<SymbolInformation> {
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();
@@ -82,7 +85,7 @@ pub fn search_workspace_symbols(
                 deprecated: None,
                 location: Location {
                     uri: candidate.source_uri.clone(),
-                    range: candidate.selection_range,
+                    range: br_to_range(&candidate.source_uri, candidate.selection_range, documents),
                 },
                 container_name: container.clone(),
             });
@@ -123,7 +126,7 @@ pub fn search_workspace_symbols(
                 deprecated: None,
                 location: Location {
                     uri: candidate.source_uri.clone(),
-                    range: location_range,
+                    range: br_to_range(&candidate.source_uri, location_range, documents),
                 },
                 container_name: None,
             });
@@ -154,7 +157,7 @@ pub fn search_workspace_symbols(
                     deprecated: None,
                     location: Location {
                         uri: uri.clone(),
-                        range: location_range,
+                        range: br_to_range(uri, location_range, documents),
                     },
                     container_name: Some(td.name.clone()),
                 });
@@ -216,4 +219,20 @@ fn split_qualified_name(
         }
     }
     (name.to_string(), None, None)
+}
+
+/// Convert a `ByteRange` to an LSP `Range` using the document's source.
+fn br_to_range(
+    uri: &Uri,
+    br: ByteRange,
+    documents: &HashMap<Uri, Document>,
+) -> Range {
+    if let Some(doc) = documents.get(uri) {
+        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+    } else {
+        Range {
+            start: Position { line: br.start_row, character: br.start_col },
+            end: Position { line: br.end_row, character: br.end_col },
+        }
+    }
 }

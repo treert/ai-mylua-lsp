@@ -1,9 +1,10 @@
 use std::collections::HashSet;
-use tower_lsp_server::ls_types::{Range, Uri};
+use tower_lsp_server::ls_types::Uri;
 
 use crate::aggregation::{CacheKey, CachedResolution, WorkspaceAggregation};
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
+use crate::util::ByteRange;
 
 const MAX_RESOLVE_DEPTH: usize = 32;
 
@@ -12,7 +13,7 @@ const MAX_RESOLVE_DEPTH: usize = 32;
 pub struct ResolvedType {
     pub type_fact: TypeFact,
     pub def_uri: Option<Uri>,
-    pub def_range: Option<Range>,
+    pub def_range: Option<ByteRange>,
 }
 
 impl ResolvedType {
@@ -24,7 +25,7 @@ impl ResolvedType {
         Self { type_fact: fact, def_uri: None, def_range: None }
     }
 
-    fn with_location(fact: TypeFact, uri: Uri, range: Range) -> Self {
+    fn with_location(fact: TypeFact, uri: Uri, range: ByteRange) -> Self {
         Self { type_fact: fact, def_uri: Some(uri), def_range: Some(range) }
     }
 }
@@ -233,7 +234,7 @@ pub struct FieldCompletion {
     pub type_display: String,
     pub is_function: bool,
     pub def_uri: Option<Uri>,
-    pub def_range: Option<Range>,
+    pub def_range: Option<ByteRange>,
 }
 
 // ---------------------------------------------------------------------------
@@ -658,7 +659,7 @@ fn resolve_field_access(
 
         TypeFact::Union(types) => {
             let mut resolved_types = Vec::new();
-            let mut best_location: Option<(Uri, Range)> = None;
+            let mut best_location: Option<(Uri, ByteRange)> = None;
             for t in types {
                 let result = resolve_field_access(t, field, agg, depth + 1, visited);
                 if result.type_fact != TypeFact::Unknown {

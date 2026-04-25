@@ -75,6 +75,13 @@ pub fn pos(line: u32, character: u32) -> Position {
     Position { line, character }
 }
 
+/// Build an empty documents map for tests.
+/// The `br_to_range` fallback uses row/col directly, which is correct
+/// for ASCII-only test fixtures (byte col == UTF-16 col).
+pub fn empty_docs() -> HashMap<Uri, Document> {
+    HashMap::new()
+}
+
 /// Set up a single-file workspace: parse the file, build its summary, upsert
 /// into the aggregation, and return everything needed to call LSP handlers.
 pub fn setup_single_file(

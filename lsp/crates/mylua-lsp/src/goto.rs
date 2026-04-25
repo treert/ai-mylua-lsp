@@ -4,7 +4,8 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, ByteRange};
+use std::collections::HashMap;
 
 pub fn goto_definition(
     doc: &Document,
@@ -12,6 +13,7 @@ pub fn goto_definition(
     position: Position,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
@@ -21,14 +23,15 @@ pub fn goto_definition(
     // If clicking on the LHS name of `local x = require("mod")`, prefer
     // jumping to the required module's `return` statement over resolving
     // to the (same) local declaration itself.
-    if let Some(target) = try_require_goto(doc, ident_node, index) {
+    if let Some(target) = try_require_goto(doc, ident_node, index, documents) {
         return Some(target);
     }
 
     if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
+        let lsp_range = br_to_range(&def.uri, def.selection_range, documents);
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def.uri,
-            range: def.selection_range,
+            range: lsp_range,
         }));
     }
 
@@ -47,7 +50,7 @@ pub fn goto_definition(
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
-                return Some(goto_variable_field(p, doc, uri, index));
+                return Some(goto_variable_field(p, doc, uri, index, documents));
             }
         }
         // `obj:method(...)` — the `method` identifier on a `function_call`
@@ -59,7 +62,7 @@ pub fn goto_definition(
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
-                return Some(goto_method_call(p, doc, uri, index));
+                return Some(goto_method_call(p, doc, uri, index, documents));
             }
         }
         None
@@ -76,7 +79,7 @@ pub fn goto_definition(
         if let Some(candidate) = candidates.first() {
             return Some(GotoDefinitionResponse::Scalar(Location {
                 uri: candidate.source_uri.clone(),
-                range: candidate.range,
+                range: br_to_range(&candidate.source_uri, candidate.range, documents),
             }));
         }
     }
@@ -86,7 +89,7 @@ pub fn goto_definition(
             .iter()
             .map(|c| Location {
                 uri: c.source_uri.clone(),
-                range: c.selection_range,
+                range: br_to_range(&c.source_uri, c.selection_range, documents),
             })
             .collect();
 
@@ -125,6 +128,7 @@ pub fn goto_type_definition(
     position: Position,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
@@ -136,7 +140,7 @@ pub fn goto_type_definition(
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-            if let Some(target) = type_definition_for_local(&def.uri, &def.name, index, strategy) {
+            if let Some(target) = type_definition_for_local(&def.uri, &def.name, index, strategy, documents) {
                 return Some(target);
             }
         }
@@ -145,7 +149,7 @@ pub fn goto_type_definition(
         // collision (`local Foo` in a workspace that also declares
         // `@class Foo`) must not jump us to the class. Fall back to
         // plain `goto_definition` instead.
-        return goto_definition(doc, uri, position, index, strategy);
+        return goto_definition(doc, uri, position, index, strategy, documents);
     }
 
     // Word-extraction fallback — cursor is inside an `emmy_line` text
@@ -154,7 +158,7 @@ pub fn goto_type_definition(
     // directly. If not found, returning None is correct (there's no
     // Lua-side definition to fall back to).
     let word = crate::references::extract_word_at(doc.text(), byte_offset)?;
-    type_definition_for_name(&word, index, strategy)
+    type_definition_for_name(&word, index, strategy, documents)
 }
 
 /// Given a local variable's declaration URI + name, look up its
@@ -165,6 +169,7 @@ fn type_definition_for_local(
     local_name: &str,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let fact = index
         .summaries
@@ -176,7 +181,7 @@ fn type_definition_for_local(
     // For `Known(_)` facts the resolver would just return the same
     // fact, so skip the redundant pass.
     if let Some(type_name) = type_name_of(&fact) {
-        return type_definition_for_name(&type_name, index, strategy);
+        return type_definition_for_name(&type_name, index, strategy, documents);
     }
     // Indirect: `local x = someGlobalReturningFoo()` / `require("mod")`
     // with Emmy module return type — let the resolver chase stubs
@@ -184,7 +189,7 @@ fn type_definition_for_local(
     // resolved fact.
     let resolved_fact = resolver::resolve_type(&fact, index).type_fact;
     if let Some(type_name) = type_name_of(&resolved_fact) {
-        return type_definition_for_name(&type_name, index, strategy);
+        return type_definition_for_name(&type_name, index, strategy, documents);
     }
     None
 }
@@ -205,6 +210,7 @@ fn type_definition_for_name(
     name: &str,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let candidates = index.type_shard.get(name)?;
     if candidates.is_empty() {
@@ -214,7 +220,7 @@ fn type_definition_for_name(
         .iter()
         .map(|c| Location {
             uri: c.source_uri.clone(),
-            range: c.range,
+            range: br_to_range(&c.source_uri, c.range, documents),
         })
         .collect();
     Some(apply_goto_strategy(locations, strategy))
@@ -228,11 +234,12 @@ fn goto_variable_field(
     doc: &Document,
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    goto_field_or_method(base_node, name_node, source, uri, index)
+    goto_field_or_method(base_node, name_node, source, uri, index, documents)
 }
 
 /// AST-driven goto for a method call: `obj:method(...)`. The clicked
@@ -244,11 +251,12 @@ fn goto_method_call(
     doc: &Document,
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    goto_field_or_method(base_node, name_node, source, uri, index)
+    goto_field_or_method(base_node, name_node, source, uri, index, documents)
 }
 
 /// Shared goto helper for dotted field access (`a.b`) and method calls
@@ -260,6 +268,7 @@ fn goto_field_or_method(
     source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
@@ -270,8 +279,8 @@ let base_fact = crate::type_inference::infer_node_type(base_node, source, uri, i
 
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
         return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: def_uri,
-            range: def_range,
+            uri: def_uri.clone(),
+            range: br_to_range(&def_uri, def_range, documents),
         }));
     }
 
@@ -282,6 +291,7 @@ fn try_require_goto(
     doc: &Document,
     ident_node: tree_sitter::Node,
     index: &WorkspaceAggregation,
+    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     // Walk up to the enclosing local_declaration if the clicked identifier
     // is one of its LHS names (directly, or nested inside `name_list`).
@@ -336,6 +346,7 @@ fn try_require_goto(
             s.module_return_range
                 .or_else(|| s.global_contributions.first().map(|gc| gc.selection_range))
         })
+        .map(|br| br_to_range(&target_uri, br, documents))
         .unwrap_or_default();
 
     Some(GotoDefinitionResponse::Scalar(Location {
@@ -383,6 +394,23 @@ fn apply_goto_strategy(
             } else {
                 GotoDefinitionResponse::Array(locations)
             }
+        }
+    }
+}
+
+/// Convert a `ByteRange` to an LSP `Range` using the document's source.
+/// Falls back to using row/col directly if the document is not available.
+fn br_to_range(
+    uri: &Uri,
+    br: ByteRange,
+    documents: &HashMap<Uri, Document>,
+) -> Range {
+    if let Some(doc) = documents.get(uri) {
+        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+    } else {
+        Range {
+            start: Position { line: br.start_row, character: br.start_col },
+            end: Position { line: br.end_row, character: br.end_col },
         }
     }
 }

@@ -1,6 +1,6 @@
-use tower_lsp_server::ls_types::{Range, Uri};
+use tower_lsp_server::ls_types::Uri;
 use crate::types::{DefKind, Definition};
-use crate::util::{node_text, LineIndex};
+use crate::util::{node_text, ByteRange, LineIndex};
 
 // ---------------------------------------------------------------------------
 // Data structures
@@ -30,8 +30,8 @@ pub struct ScopeDecl {
     /// For `local` declarations this equals the statement's end byte,
     /// matching Lua semantics where `local x = x + 1` RHS sees the outer `x`.
     pub visible_after_byte: usize,
-    pub range: Range,
-    pub selection_range: Range,
+    pub range: ByteRange,
+    pub selection_range: ByteRange,
 }
 
 #[derive(Debug)]
@@ -195,8 +195,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: DefKind::ForVariable,
                         decl_byte: db,
                         visible_after_byte: db,
-                        range: self.line_index.ts_node_to_range(node, self.source),
-                        selection_range: self.line_index.ts_node_to_range(name_node, self.source),
+                        range: self.line_index.ts_node_to_byte_range(node, self.source),
+                        selection_range: self.line_index.ts_node_to_byte_range(name_node, self.source),
                     });
                 }
                 self.visit_children(node, child_scope);
@@ -218,8 +218,8 @@ impl<'a> TreeBuilder<'a> {
                                     kind: DefKind::ForVariable,
                                     decl_byte: db,
                                     visible_after_byte: db,
-                                    range: self.line_index.ts_node_to_range(node, self.source),
-                                    selection_range: self.line_index.ts_node_to_range(id_node, self.source),
+                                    range: self.line_index.ts_node_to_byte_range(node, self.source),
+                                    selection_range: self.line_index.ts_node_to_byte_range(id_node, self.source),
                                 });
                             }
                         }
@@ -257,8 +257,8 @@ impl<'a> TreeBuilder<'a> {
                     kind: DefKind::LocalFunction,
                     decl_byte: db,
                     visible_after_byte: db,
-                    range: self.line_index.ts_node_to_range(node, self.source),
-                    selection_range: self.line_index.ts_node_to_range(name_node, self.source),
+                    range: self.line_index.ts_node_to_byte_range(node, self.source),
+                    selection_range: self.line_index.ts_node_to_byte_range(name_node, self.source),
                 });
             }
         }
@@ -275,8 +275,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: self.line_index.ts_node_to_range(child, self.source),
-                            selection_range: self.line_index.ts_node_to_range(child, self.source),
+                            range: self.line_index.ts_node_to_byte_range(child, self.source),
+                            selection_range: self.line_index.ts_node_to_byte_range(child, self.source),
                         });
                     } else if child.kind() == "name_list" {
                         for j in 0..child.named_child_count() {
@@ -288,8 +288,8 @@ impl<'a> TreeBuilder<'a> {
                                         kind: DefKind::Parameter,
                                         decl_byte: db,
                                         visible_after_byte: db,
-                                        range: self.line_index.ts_node_to_range(id, self.source),
-                                        selection_range: self.line_index.ts_node_to_range(id, self.source),
+                                        range: self.line_index.ts_node_to_byte_range(id, self.source),
+                                        selection_range: self.line_index.ts_node_to_byte_range(id, self.source),
                                     });
                                 }
                             }
@@ -311,8 +311,8 @@ impl<'a> TreeBuilder<'a> {
                             kind: DefKind::Parameter,
                             decl_byte: db,
                             visible_after_byte: db,
-                            range: self.line_index.ts_node_to_range(func_body, self.source),
-                            selection_range: self.line_index.ts_node_to_range(func_body, self.source),
+                            range: self.line_index.ts_node_to_byte_range(func_body, self.source),
+                            selection_range: self.line_index.ts_node_to_byte_range(func_body, self.source),
                         });
                     }
                 }
@@ -336,8 +336,8 @@ impl<'a> TreeBuilder<'a> {
                         kind: kind.clone(),
                         decl_byte: child.start_byte(),
                         visible_after_byte: visible_after,
-                        range: self.line_index.ts_node_to_range(stmt_node, self.source),
-                        selection_range: self.line_index.ts_node_to_range(child, self.source),
+                        range: self.line_index.ts_node_to_byte_range(stmt_node, self.source),
+                        selection_range: self.line_index.ts_node_to_byte_range(child, self.source),
                     });
                 }
             }

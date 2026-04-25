@@ -207,7 +207,7 @@ type PendingClass = (
     Vec<String>,
     Vec<TypeFieldDef>,
     Vec<String>,
-    tower_lsp_server::ls_types::Range,
+    crate::util::ByteRange,
 );
 
 struct BuildContext<'a> {
@@ -229,7 +229,7 @@ struct BuildContext<'a> {
     /// Type of the file-level `return` statement (module export).
     module_return_type: Option<TypeFact>,
     /// Source range of the file-level `return` statement.
-    module_return_range: Option<tower_lsp_server::ls_types::Range>,
+    module_return_range: Option<crate::util::ByteRange>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -298,7 +298,7 @@ fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
 }
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    ctx.module_return_range = Some(ctx.line_index.ts_node_to_range(node, ctx.source));
+    ctx.module_return_range = Some(ctx.line_index.ts_node_to_byte_range(node, ctx.source));
     // Grammar: `return_statement = word_return, optional(expression_list), optional(';')`
     // The expression_list has no field name, so use `find_named_child_by_kind`.
     if let Some(values) = find_named_child_by_kind(node, "expression_list") {
@@ -396,7 +396,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             _ => continue,
         };
         let name = node_text(name_node, ctx.source).to_string();
-        let range = ctx.line_index.ts_node_to_range(name_node, ctx.source);
+        let range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
@@ -582,7 +582,7 @@ fn try_extract_require<'a>(
     Some(RequireBinding {
         local_name: local_name.to_string(),
         module_path,
-        range: ctx.line_index.ts_node_to_range(value_node, ctx.source),
+        range: ctx.line_index.ts_node_to_byte_range(value_node, ctx.source),
     })
 }
 
@@ -656,7 +656,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     shape.set_field(field_name.to_string(), FieldInfo {
                         name: field_name.to_string(),
                         type_fact: TypeFact::Known(KnownType::Function(sig_for_global.clone())),
-                        def_range: Some(ctx.line_index.ts_node_to_range(name_node, ctx.source)),
+                        def_range: Some(ctx.line_index.ts_node_to_byte_range(name_node, ctx.source)),
                         assignment_count: 1,
                     });
                     break 'shape true;
@@ -677,8 +677,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
         type_fact: TypeFact::Known(KnownType::Function(sig_for_global)),
-        range: ctx.line_index.ts_node_to_range(node, ctx.source),
-        selection_range: ctx.line_index.ts_node_to_range(name_node, ctx.source),
+        range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+        selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
     });
 }
 
@@ -775,7 +775,7 @@ fn build_function_summary(
     FunctionSummary {
         name: name.to_string(),
         signature: sig,
-        range: ctx.line_index.ts_node_to_range(decl_node, ctx.source),
+        range: ctx.line_index.ts_node_to_byte_range(decl_node, ctx.source),
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
@@ -959,8 +959,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     kind: GlobalContributionKind::Variable,
                     type_fact,
-                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
-                    selection_range: ctx.line_index.ts_node_to_range(var_node, ctx.source),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
                 });
             }
             // Field assignment: `x.foo = expr` or `a.b.c = expr` etc.
@@ -999,7 +999,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         .unwrap_or(TypeFact::Unknown)
                 };
 
-                let assign_range = ctx.line_index.ts_node_to_range(node, ctx.source);
+                let assign_range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
                 if register_nested_field_write(
                     ctx,
                     &chain.base_name,
@@ -1031,8 +1031,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     name,
                     kind: GlobalContributionKind::TableExtension,
                     type_fact,
-                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
-                    selection_range: ctx.line_index.ts_node_to_range(var_node, ctx.source),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
                 });
             }
             // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
@@ -1135,7 +1135,7 @@ fn register_nested_field_write(
     base_name: &str,
     fields: &[String],
     type_fact: TypeFact,
-    assign_range: tower_lsp_server::ls_types::Range,
+    assign_range: crate::util::ByteRange,
 ) -> bool {
     let base_shape_id = match ctx.local_type_facts.get(base_name) {
         Some(ltf) => match &ltf.type_fact {
@@ -1222,7 +1222,7 @@ fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
             fields,
             alias_type: None,
             generic_params,
-            range: ctx.line_index.ts_node_to_range(node, ctx.source),
+            range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
         });
     }
@@ -1240,7 +1240,7 @@ fn emit_pending_class_as_typedef(
             fields,
             alias_type: None,
             generic_params: gparams,
-            range: ctx.line_index.ts_node_to_range(node, ctx.source),
+            range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
         });
     }
@@ -1299,7 +1299,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             EmmyAnnotation::Field { name: fname, type_expr, .. } => {
                 if let Some((_, _, ref mut fields, _, _)) = ctx.pending_class {
-                    let full_range = ctx.line_index.ts_node_to_range(line_node, ctx.source);
+                    let full_range = ctx.line_index.ts_node_to_byte_range(line_node, ctx.source);
                     let name_range = find_name_range_in_line(
                         ctx.line_index,
                         ctx.source,
@@ -1344,7 +1344,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // `IndexType` keys (`[string]: number`) are not
                 // nameable via dot/colon access, so they're skipped.
                 let aliased_fields = if let EmmyType::Table(tfs) = type_expr {
-                    let line_range = ctx.line_index.ts_node_to_range(line_node, ctx.source);
+                    let line_range = ctx.line_index.ts_node_to_byte_range(line_node, ctx.source);
                     tfs.iter()
                         .filter_map(|tf| match &tf.key {
                             EmmyTableFieldKey::Name(n) => Some(TypeFieldDef {
@@ -1366,7 +1366,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: aliased_fields,
                     alias_type: Some(emmy_type_to_fact(type_expr)),
                     generic_params: Vec::new(),
-                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     name_range: Some(name_range),
                 });
             }
@@ -1388,7 +1388,7 @@ fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     fields: Vec::new(),
                     alias_type: None,
                     generic_params: Vec::new(),
-                    range: ctx.line_index.ts_node_to_range(node, ctx.source),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     name_range: Some(name_range),
                 });
             }
@@ -1417,11 +1417,11 @@ fn find_name_range_in_line(
     line_text: &str,
     name: &str,
     tag: &str,
-) -> tower_lsp_server::ls_types::Range {
+) -> crate::util::ByteRange {
     // Find the `@<tag>` occurrence; scan forward to the name token.
     let tag_marker = format!("@{}", tag);
     let Some(tag_pos) = line_text.find(&tag_marker) else {
-        return byte_range_to_range(line_index, source, line_start_byte, line_end_byte);
+        return byte_span_to_byte_range(line_index, source, line_start_byte, line_end_byte);
     };
     // Byte cursor past the tag keyword.
     let mut cursor = tag_pos + tag_marker.len();
@@ -1460,10 +1460,10 @@ fn find_name_range_in_line(
         if before_ok && after_ok {
             let start = line_start_byte + cursor;
             let end = start + name.len();
-            return byte_range_to_range(line_index, source, start, end);
+            return byte_span_to_byte_range(line_index, source, start, end);
         }
     }
-    byte_range_to_range(line_index, source, line_start_byte, line_end_byte)
+    byte_span_to_byte_range(line_index, source, line_start_byte, line_end_byte)
 }
 
 /// Read an ASCII identifier starting at `start` within `bytes`.
@@ -1484,25 +1484,36 @@ fn read_identifier(bytes: &[u8], start: usize) -> Option<(String, usize)> {
     Some((word, end))
 }
 
-/// Build an LSP `Range` from an absolute byte span, reusing the
-/// file-level line/column computation via a tree-sitter Point-like
-/// walk. Keeps UTF-16 column encoding consistent with the rest of
-/// the crate.
-fn byte_range_to_range(
+/// Build a `ByteRange` from an absolute byte span, using the
+/// file-level `LineIndex` to compute row / byte-column.
+fn byte_span_to_byte_range(
     line_index: &LineIndex,
-    source: &[u8],
+    _source: &[u8],
     start_byte: usize,
     end_byte: usize,
-) -> tower_lsp_server::ls_types::Range {
-    tower_lsp_server::ls_types::Range {
-        start: byte_to_position(line_index, source, start_byte),
-        end: byte_to_position(line_index, source, end_byte),
-    }
-}
+) -> crate::util::ByteRange {
+    let start_row = match line_index.line_starts().binary_search(&start_byte) {
+        Ok(exact) => exact,
+        Err(ins) => ins.saturating_sub(1),
+    };
+    let start_line_start = line_index.byte_offset_of_line(start_row).unwrap_or(0);
+    let start_col = start_byte - start_line_start;
 
-fn byte_to_position(line_index: &LineIndex, source: &[u8], target: usize) -> tower_lsp_server::ls_types::Position {
-    line_index.byte_offset_to_position(source, target)
-        .unwrap_or(tower_lsp_server::ls_types::Position { line: 0, character: 0 })
+    let end_row = match line_index.line_starts().binary_search(&end_byte) {
+        Ok(exact) => exact,
+        Err(ins) => ins.saturating_sub(1),
+    };
+    let end_line_start = line_index.byte_offset_of_line(end_row).unwrap_or(0);
+    let end_col = end_byte - end_line_start;
+
+    crate::util::ByteRange {
+        start_byte,
+        end_byte,
+        start_row: start_row as u32,
+        start_col: start_col as u32,
+        end_row: end_row as u32,
+        end_col: end_col as u32,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2052,7 +2063,7 @@ fn extract_single_field(
                 shape.set_field(key.clone(), FieldInfo {
                     name: key,
                     type_fact,
-                    def_range: Some(ctx.line_index.ts_node_to_range(field_node, ctx.source)),
+                    def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
                     assignment_count: 1,
                 });
             }
@@ -2080,7 +2091,7 @@ fn extract_single_field(
                 shape.set_field(key_text.clone(), FieldInfo {
                     name: key_text,
                     type_fact,
-                    def_range: Some(ctx.line_index.ts_node_to_range(field_node, ctx.source)),
+                    def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
                     assignment_count: 1,
                 });
             }

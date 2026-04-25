@@ -1,9 +1,10 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use tower_lsp_server::ls_types::{Range, Uri};
+use tower_lsp_server::ls_types::Uri;
 
 use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::{FunctionSignature, TypeFact};
+use crate::util::ByteRange;
 
 /// Per-file summary: the "recipe" of type facts produced by single-file inference.
 ///
@@ -33,7 +34,7 @@ pub struct DocumentSummary {
     /// goto-definition to jump to the module's export. `None` if the file
     /// has no top-level return.
     #[serde(default)]
-    pub module_return_range: Option<Range>,
+    pub module_return_range: Option<ByteRange>,
     /// Fingerprint of all externally-visible type signatures.
     /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
     pub signature_fingerprint: u64,
@@ -74,7 +75,7 @@ pub struct CallSite {
     /// Range of the callee identifier / final segment — not the
     /// whole `function_call` node. Preferred by clients as the
     /// highlight target.
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 /// `local <name> = require("<module_path>")`.
@@ -82,7 +83,7 @@ pub struct CallSite {
 pub struct RequireBinding {
     pub local_name: String,
     pub module_path: String,
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 /// A global name contributed by this file (assignment, function declaration, table extension).
@@ -91,8 +92,8 @@ pub struct GlobalContribution {
     pub name: String,
     pub kind: GlobalContributionKind,
     pub type_fact: TypeFact,
-    pub range: Range,
-    pub selection_range: Range,
+    pub range: ByteRange,
+    pub selection_range: ByteRange,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -108,7 +109,7 @@ pub struct FunctionSummary {
     pub name: String,
     pub signature: FunctionSignature,
     /// Range of the full function declaration.
-    pub range: Range,
+    pub range: ByteRange,
     /// Stable hash of `(params_types, return_types)` for cascade invalidation.
     pub signature_fingerprint: u64,
     /// Whether Emmy annotations are the authority for this function's signature.
@@ -137,7 +138,7 @@ pub struct TypeDefinition {
     /// following statement that anchors the class value (`Foo = {}`);
     /// for alias/enum it is the range of the emmy_comment node itself.
     /// Used by clients that want to highlight the whole construct.
-    pub range: Range,
+    pub range: ByteRange,
     /// Range of just the `Foo` identifier within `---@class Foo`,
     /// `---@alias Foo ...`, or `---@enum Foo`. Used as the
     /// `selection_range` in `documentSymbol` and as the highlight
@@ -145,7 +146,7 @@ pub struct TypeDefinition {
     /// jumps precisely to the type name rather than the whole line.
     /// Falls back to `range` for legacy summaries (`#[serde(default)]`).
     #[serde(default)]
-    pub name_range: Option<Range>,
+    pub name_range: Option<ByteRange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,13 +162,13 @@ pub struct TypeFieldDef {
     pub name: String,
     pub type_fact: TypeFact,
     /// Full `---@field ...` line range.
-    pub range: Range,
+    pub range: ByteRange,
     /// Range of just the field name token (`bar` within
     /// `---@field bar integer`). When `None`, clients should fall
     /// back to `range`. `#[serde(default)]` keeps cached summaries
     /// produced by older builds readable.
     #[serde(default)]
-    pub name_range: Option<Range>,
+    pub name_range: Option<ByteRange>,
 }
 
 /// Inferred type fact for a key local variable, with provenance.
@@ -176,7 +177,7 @@ pub struct LocalTypeFact {
     pub name: String,
     pub type_fact: TypeFact,
     pub source: TypeFactSource,
-    pub range: Range,
+    pub range: ByteRange,
 }
 
 /// Where a local's type information came from.

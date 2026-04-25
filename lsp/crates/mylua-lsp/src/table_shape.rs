@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use tower_lsp_server::ls_types::Range;
+use crate::util::ByteRange;
 
 /// Stable identity for a table literal or constructed table within a file.
 /// The inner `u32` is a per-file unique id assigned during summary generation.
@@ -42,7 +42,7 @@ pub struct FieldInfo {
     pub name: String,
     pub type_fact: crate::type_system::TypeFact,
     /// Where this field was first defined.
-    pub def_range: Option<Range>,
+    pub def_range: Option<ByteRange>,
     /// Accumulates when the same field is assigned multiple times (union).
     pub assignment_count: u32,
 }
