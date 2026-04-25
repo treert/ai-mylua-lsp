@@ -538,44 +538,24 @@ impl WorkspaceAggregation {
     }
 
     /// Find the best matching URI for a normalized module path.
-    /// Uses last-segment lookup + longest suffix matching.
+    /// Uses last-segment lookup + strict suffix matching.
+    /// A candidate matches if it equals the query or ends with `.{query}`.
     fn find_best_match(&self, module_path: &str) -> Option<Uri> {
         use crate::workspace_scanner::module_last_segment;
 
         let query_last = module_last_segment(module_path);
         let candidates = self.module_index.get(query_last)?;
-
-        if candidates.len() == 1 {
-            // Fast path: only one candidate with this last segment.
-            return Some(candidates[0].1.clone());
-        }
-
-        // Split query into segments for suffix matching.
-        let query_segments: Vec<&str> = module_path.split('.').collect();
-
-        let mut best_uri: Option<&Uri> = None;
-        let mut best_match_len: usize = 0;
+        let dot_query = format!(".{}", module_path);
 
         for (candidate_name, candidate_uri) in candidates {
-            let cand_segments: Vec<&str> = candidate_name.split('.').collect();
-
-            // Count matching suffix segments (from the end).
-            let match_len = query_segments
-                .iter()
-                .rev()
-                .zip(cand_segments.iter().rev())
-                .take_while(|(q, c)| q == c)
-                .count();
-
-            // Must match at least the last segment (guaranteed by
-            // the HashMap key lookup, but be defensive).
-            if match_len > best_match_len {
-                best_match_len = match_len;
-                best_uri = Some(candidate_uri);
+            if candidate_name == module_path
+                || candidate_name.ends_with(dot_query.as_str())
+            {
+                return Some(candidate_uri.clone());
             }
         }
 
-        best_uri.cloned()
+        None
     }
 }
 
