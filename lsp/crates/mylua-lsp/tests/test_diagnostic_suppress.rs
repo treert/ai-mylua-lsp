@@ -14,7 +14,7 @@ use tower_lsp_server::ls_types::NumberOrString;
 /// in `lib.rs`.
 fn collect_all(src: &str, name: &str, cfg: DiagnosticsConfig) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, name);
-    let mut all = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), &doc.line_index);
+    let mut all = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     let semantic = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(),
         src.as_bytes(),
@@ -22,7 +22,7 @@ fn collect_all(src: &str, name: &str, cfg: DiagnosticsConfig) -> Vec<tower_lsp_s
         &mut agg,
         &doc.scope_tree,
         &cfg,
-        &doc.line_index,
+        doc.line_index(),
     );
     all.extend(semantic);
     diagnostics::apply_diagnostic_suppressions(doc.tree.root_node(), src.as_bytes(), all)

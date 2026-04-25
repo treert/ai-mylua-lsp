@@ -14,7 +14,7 @@ pub fn find_references(
     all_docs: &HashMap<Uri, Document>,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
-    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     // Prefer an identifier AST node at the cursor; fall back to extracting
     // the surrounding ASCII word from raw source. The fallback covers the
@@ -22,9 +22,9 @@ pub fn find_references(
     // which lives inside an `emmy_line` text node rather than an identifier.
     let name_owned: String;
     let name: &str = if let Some(n) = find_node_at_position(doc.tree.root_node(), byte_offset) {
-        node_text(n, doc.text.as_bytes())
+        node_text(n, doc.source())
     } else {
-        name_owned = extract_word_at(&doc.text, byte_offset)?;
+        name_owned = extract_word_at(doc.text(), byte_offset)?;
         name_owned.as_str()
     };
 
@@ -72,7 +72,7 @@ fn find_local_references(
     include_declaration: bool,
 ) -> Vec<Location> {
     let mut locations = Vec::new();
-    let source = doc.text.as_bytes();
+    let source = doc.source();
 
     if include_declaration {
         locations.push(Location {
@@ -81,7 +81,7 @@ fn find_local_references(
         });
     }
 
-    let def_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def.selection_range.start)
+    let def_byte = doc.line_index().position_to_byte_offset(doc.source(), def.selection_range.start)
         .unwrap_or(0);
 
     // For `local` decls, `visible_after_byte == stmt.end_byte`, meaning the
@@ -89,7 +89,7 @@ fn find_local_references(
     // probe at the end of the decl's full range (statement end) to land in
     // a position where the ScopeDecl is in scope. For params / for-vars
     // where `visible_after_byte == decl_byte`, this also works.
-    let probe_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def.range.end)
+    let probe_byte = doc.line_index().position_to_byte_offset(doc.source(), def.range.end)
         .unwrap_or(def_byte.saturating_add(name.len()));
     let target_decl_byte = doc.scope_tree
         .resolve_decl(probe_byte, name)
@@ -113,7 +113,7 @@ fn find_local_references(
             def,
             target_decl_byte,
             &doc.scope_tree,
-            &doc.line_index,
+            doc.line_index(),
         );
     }
 
@@ -235,9 +235,9 @@ fn find_global_references(
     }
 
     for (doc_uri, doc) in all_docs {
-        let source = doc.text.as_bytes();
+        let source = doc.source();
         let mut cursor = doc.tree.root_node().walk();
-        collect_global_name_occurrences(&mut cursor, name, source, doc_uri, &mut locations, &doc.line_index);
+        collect_global_name_occurrences(&mut cursor, name, source, doc_uri, &mut locations, doc.line_index());
     }
 
     locations.sort_by(|a, b| {
@@ -264,9 +264,9 @@ fn collect_emmy_type_references(
     locations: &mut Vec<Location>,
 ) {
     for (doc_uri, doc) in all_docs {
-        let source = doc.text.as_bytes();
+        let source = doc.source();
         let mut cursor = doc.tree.root_node().walk();
-        scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations, &doc.line_index);
+        scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations, doc.line_index());
     }
 }
 

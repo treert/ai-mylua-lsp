@@ -13,9 +13,9 @@ pub fn goto_definition(
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
-    let name = node_text(ident_node, doc.text.as_bytes());
+    let name = node_text(ident_node, doc.source());
     lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));
 
     // If clicking on the LHS name of `local x = require("mod")`, prefer
@@ -126,7 +126,7 @@ pub fn goto_type_definition(
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     // Identifier AST path — click on a Lua identifier. Resolve to a
     // local declaration, then walk its stored `TypeFact` to an Emmy
@@ -134,7 +134,7 @@ pub fn goto_type_definition(
     // (primitive, bare shape table, function, etc.), fall back to
     // `goto_definition` so the feature never goes silent.
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
-        let name = node_text(ident_node, doc.text.as_bytes());
+        let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
             if let Some(target) = type_definition_for_local(&def.uri, &def.name, index, strategy) {
                 return Some(target);
@@ -153,7 +153,7 @@ pub fn goto_type_definition(
     // Here the word IS a type name by context; query `type_shard`
     // directly. If not found, returning None is correct (there's no
     // Lua-side definition to fall back to).
-    let word = crate::references::extract_word_at(&doc.text, byte_offset)?;
+    let word = crate::references::extract_word_at(doc.text(), byte_offset)?;
     type_definition_for_name(&word, index, strategy)
 }
 
@@ -229,7 +229,7 @@ fn goto_variable_field(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
     goto_field_or_method(base_node, name_node, source, uri, index)
@@ -245,7 +245,7 @@ fn goto_method_call(
     uri: &Uri,
     index: &mut WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
     goto_field_or_method(base_node, name_node, source, uri, index)
@@ -311,7 +311,7 @@ fn try_require_goto(
         return None;
     }
     let callee = first_val.child_by_field_name("callee")?;
-    let callee_text = node_text(callee, doc.text.as_bytes());
+    let callee_text = node_text(callee, doc.source());
     if callee_text != "require" {
         return None;
     }
@@ -324,7 +324,7 @@ fn try_require_goto(
     } else {
         arg
     };
-    let module_path = extract_string_literal(string_node, doc.text.as_bytes())?;
+    let module_path = extract_string_literal(string_node, doc.source())?;
 
     let target_uri = index.resolve_module_to_uri(&module_path)?;
 

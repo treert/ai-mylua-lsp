@@ -14,7 +14,7 @@ fn run_diagnostics(src: &str, version: &str) -> Vec<tower_lsp_server::ls_types::
         &doc.scope_tree,
         &DiagnosticsConfig::default(),
         version,
-        &doc.line_index,
+        doc.line_index(),
     )
 }
 

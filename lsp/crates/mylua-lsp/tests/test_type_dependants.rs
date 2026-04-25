@@ -116,7 +116,7 @@ fn type_dependants_updates_on_resummary() {
     // Initial: both files reference Foo; a defines it, b uses it.
     for (uri, src) in &[(&a_uri, a_src), (&b_uri, b_src_with)] {
         let doc = parse_doc(&mut parser, src);
-        let summary = mylua_lsp::summary_builder::build_summary(uri, &doc.tree, src.as_bytes());
+        let summary = mylua_lsp::summary_builder::build_summary(uri, &doc.tree, doc.source(), doc.line_index());
         agg.upsert_summary(summary);
     }
     assert!(
@@ -127,7 +127,7 @@ fn type_dependants_updates_on_resummary() {
     // Re-index b.lua without the `---@type Foo` reference.
     let doc = parse_doc(&mut parser, b_src_without);
     let summary = mylua_lsp::summary_builder::build_summary(
-        &b_uri, &doc.tree, b_src_without.as_bytes()
+        &b_uri, &doc.tree, doc.source(), doc.line_index()
     );
     agg.upsert_summary(summary);
 
@@ -198,7 +198,7 @@ fn type_dependants_preserves_old_name_after_class_rename() {
 
     for (uri, src) in &[(&a_uri, a_before), (&b_uri, b_src)] {
         let doc = parse_doc(&mut parser, src);
-        let summary = mylua_lsp::summary_builder::build_summary(uri, &doc.tree, src.as_bytes());
+        let summary = mylua_lsp::summary_builder::build_summary(uri, &doc.tree, doc.source(), doc.line_index());
         agg.upsert_summary(summary);
     }
 
@@ -210,7 +210,7 @@ fn type_dependants_preserves_old_name_after_class_rename() {
 
     // Rename `@class Foo` → `@class FooBar` in a.lua.
     let doc = parse_doc(&mut parser, a_after);
-    let summary = mylua_lsp::summary_builder::build_summary(&a_uri, &doc.tree, a_after.as_bytes());
+    let summary = mylua_lsp::summary_builder::build_summary(&a_uri, &doc.tree, doc.source(), doc.line_index());
     agg.upsert_summary(summary);
 
     // `type_dependants["Foo"]` must STILL include b.lua — b.lua

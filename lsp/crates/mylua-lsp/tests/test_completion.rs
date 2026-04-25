@@ -73,7 +73,7 @@ fn complete_fixture_test4_table_field() {
     let src_with_dot = format!("{}\nabcdefg.", src.trim());
     let mut parser = new_parser();
     let doc2 = parse_doc(&mut parser, &src_with_dot);
-    let summary = mylua_lsp::summary_builder::build_summary(&uri, &doc2.tree, src_with_dot.as_bytes());
+    let summary = mylua_lsp::summary_builder::build_summary(&uri, &doc2.tree, doc2.source(), doc2.line_index());
     let mut agg2 = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg2.upsert_summary(summary);
 
@@ -146,7 +146,7 @@ fn complete_require_path_from_index() {
     let caller_uri = make_uri("caller.lua");
     let caller_doc = parse_doc(&mut parser, caller_src);
     let caller_summary = summary_builder::build_summary(
-        &caller_uri, &caller_doc.tree, caller_src.as_bytes(),
+        &caller_uri, &caller_doc.tree, caller_doc.source(), caller_doc.line_index(),
     );
 
     let mut agg = WorkspaceAggregation::new();

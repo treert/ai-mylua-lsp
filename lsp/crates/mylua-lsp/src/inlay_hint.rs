@@ -49,13 +49,13 @@ pub fn inlay_hints(
         return Vec::new();
     }
 
-    let source = doc.text.as_bytes();
-    let range_start = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), range.start).unwrap_or(0);
-    let range_end = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), range.end).unwrap_or(source.len());
+    let source = doc.source();
+    let range_start = doc.line_index().position_to_byte_offset(doc.source(), range.start).unwrap_or(0);
+    let range_end = doc.line_index().position_to_byte_offset(doc.source(), range.end).unwrap_or(source.len());
 
     let mut out = Vec::new();
     let mut ctx = InlayCtx {
-        source, line_index: &doc.line_index, uri, index, cfg, range_start, range_end, out: &mut out,
+        source, line_index: doc.line_index(), uri, index, cfg, range_start, range_end, out: &mut out,
     };
     let mut cursor = doc.tree.root_node().walk();
     walk(&mut cursor, &mut ctx);

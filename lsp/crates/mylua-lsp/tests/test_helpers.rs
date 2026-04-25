@@ -9,6 +9,7 @@ use mylua_lsp::document::Document;
 use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
 pub use mylua_lsp::util;
+use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
 
@@ -53,13 +54,12 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
     let tree = parser
         .parse(text.as_bytes(), None)
         .expect("parse returned None");
-    let line_index = util::LineIndex::new(text.as_bytes());
-    let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+    let lua_source = LuaSource::new(text.to_string());
+    let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
     Document {
-        text: text.to_string(),
+        lua_source,
         tree,
         scope_tree,
-        line_index,
     }
 }
 
@@ -85,7 +85,7 @@ pub fn setup_single_file(
     let doc = parse_doc(&mut parser, source);
     let uri = make_uri(filename);
     let mut agg = WorkspaceAggregation::new();
-    let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+    let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
     // Register module mapping so resolve_module_to_uri works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
         agg.set_require_mapping(module_name, uri.clone());
@@ -106,7 +106,7 @@ pub fn setup_workspace(
     for (filename, source) in files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+        let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -146,11 +146,11 @@ pub fn setup_workspace_from_dir(
         };
         let tree = parser.parse(text.as_bytes(), None);
         if let Some(tree) = tree {
-            let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            let lua_source = LuaSource::new(text);
+            let summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
             agg.upsert_summary(summary);
-            let line_index = util::LineIndex::new(text.as_bytes());
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
-            docs.insert(uri, Document { text, tree, scope_tree, line_index });
+            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
+            docs.insert(uri, Document { lua_source, tree, scope_tree });
         }
     }
 
@@ -179,7 +179,7 @@ pub fn setup_workspace_with_library(
     for (filename, source) in workspace_files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+        let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -219,15 +219,15 @@ pub fn setup_workspace_with_library(
         let Some(tree) = parser.parse(text.as_bytes(), None) else {
             continue;
         };
-        let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+        let lua_source = LuaSource::new(text);
+        let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
         // Production `run_workspace_scan` does this override for any
         // URI originating from a library root; tests mirror the same
         // contract.
         summary.is_meta = true;
         agg.upsert_summary(summary);
-        let line_index = util::LineIndex::new(text.as_bytes());
-        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
-        docs.insert(uri, Document { text, tree, scope_tree, line_index });
+        let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
+        docs.insert(uri, Document { lua_source, tree, scope_tree });
     }
 
     (docs, agg, parser, library_uris)

@@ -35,7 +35,7 @@ use crate::document::Document;
 
 pub fn folding_range(doc: &Document) -> Vec<FoldingRange> {
     let mut out = Vec::new();
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let root = doc.tree.root_node();
 
     collect_block_and_block_comment_folds(root, source, &mut out);

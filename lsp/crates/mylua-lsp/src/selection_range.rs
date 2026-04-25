@@ -20,10 +20,10 @@ use crate::util::LineIndex;
 
 pub fn selection_range(doc: &Document, positions: &[Position]) -> Vec<SelectionRange> {
     let root = doc.tree.root_node();
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     positions
         .iter()
-        .filter_map(|pos| build_chain(root, source, &doc.line_index, *pos))
+        .filter_map(|pos| build_chain(root, source, doc.line_index(), *pos))
         .collect()
 }
 

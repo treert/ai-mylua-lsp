@@ -13,9 +13,9 @@ fn document_link_resolves_require_paren_form() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert_eq!(links.len(), 1, "exactly one require link, got: {:?}", links);
     let link = &links[0];
@@ -47,9 +47,9 @@ fn document_link_resolves_require_short_call() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert_eq!(
         links.len(), 1,
@@ -68,9 +68,9 @@ fn document_link_ignores_unresolved_module() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert!(
         links.is_empty(),
@@ -89,9 +89,9 @@ fn document_link_ignores_non_require_calls() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert!(
         links.is_empty(),
@@ -113,9 +113,9 @@ fn document_link_rejects_aliased_require() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert!(
         links.is_empty(),
@@ -137,9 +137,9 @@ fn document_link_multi_require_each_get_link() {
     let doc = docs.get(&uri).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &agg,
-        &doc.line_index,
+        doc.line_index(),
     );
     assert_eq!(links.len(), 2, "two distinct require calls → two links, got: {:?}", links);
 }

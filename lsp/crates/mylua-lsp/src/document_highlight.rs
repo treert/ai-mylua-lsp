@@ -29,9 +29,9 @@ pub fn document_highlight(
     // `_uri` is accepted for symmetry with other LSP handlers but
     // unused: documentHighlight is strictly same-file and `ScopeTree`
     // doesn't need the URI for a decl-byte lookup.
-    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let clicked = find_node_at_position(doc.tree.root_node(), byte_offset)?;
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let name = node_text(clicked, source);
     if name.is_empty() {
         return None;
@@ -57,7 +57,7 @@ pub fn document_highlight(
         source,
         &doc.scope_tree,
         target_decl_byte,
-        &doc.line_index,
+        doc.line_index(),
         &mut highlights,
     );
     // `TreeCursor` pre-order traversal visits each node once and in

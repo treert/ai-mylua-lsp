@@ -135,7 +135,48 @@ impl LineIndex {
     }
 }
 
+/// Bundles source text with its pre-computed [`LineIndex`].
+///
+/// Every time the text changes a new `LuaSource` is built, so the
+/// line-start table is always in sync with the content. This replaces
+/// the old pattern of storing `text: String` and `line_index: LineIndex`
+/// as separate fields and manually keeping them consistent.
+pub struct LuaSource {
+    text: String,
+    line_index: LineIndex,
+}
 
+impl LuaSource {
+    /// Build a new `LuaSource` from owned text. The `LineIndex` is
+    /// computed once during construction.
+    pub fn new(text: String) -> Self {
+        let line_index = LineIndex::new(text.as_bytes());
+        Self { text, line_index }
+    }
+
+    /// Raw source bytes (`&[u8]`).
+    #[inline]
+    pub fn source(&self) -> &[u8] {
+        self.text.as_bytes()
+    }
+
+    /// Source text as `&str`.
+    #[inline]
+    pub fn text(&self) -> &str {
+        &self.text
+    }
+
+    /// The pre-computed line index.
+    #[inline]
+    pub fn line_index(&self) -> &LineIndex {
+        &self.line_index
+    }
+
+    /// Consume and return the inner `String` (e.g. for snapshot copies).
+    pub fn into_text(self) -> String {
+        self.text
+    }
+}
 
 pub fn node_text<'a>(node: tree_sitter::Node<'a>, source: &'a [u8]) -> &'a str {
     node.utf8_text(source).unwrap_or("<error>")

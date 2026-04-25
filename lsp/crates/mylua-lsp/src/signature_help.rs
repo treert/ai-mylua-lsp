@@ -23,8 +23,8 @@ pub fn signature_help(
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
-    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
-    let source = doc.text.as_bytes();
+    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let source = doc.source();
 
     // Find the enclosing function call whose argument list contains the cursor.
     let call = find_enclosing_call(doc.tree.root_node(), offset)?;

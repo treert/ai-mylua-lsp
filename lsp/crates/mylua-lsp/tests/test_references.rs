@@ -140,9 +140,9 @@ fn references_emmy_type_scans_annotations() {
     let defn_src = "---@class Foo\n---@field x number\nFoo = {}";
     let defn_uri = make_uri("defn.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
-    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes());
+    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
     let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { text: defn_src.to_string(), tree: defn_tree, scope_tree: defn_scope, line_index: util::LineIndex::new(defn_src.as_bytes()) };
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_scope };
 
     // Three distinct Emmy mentions of Foo in different annotation positions.
     let user_src = r#"---@type Foo
@@ -154,9 +154,9 @@ local function use(x) return x end
 Bar = {}"#;
     let user_uri = make_uri("user.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
-    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes());
+    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
     let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { text: user_src.to_string(), tree: user_tree, scope_tree: user_scope, line_index: util::LineIndex::new(user_src.as_bytes()) };
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_scope };
 
     let mut agg = WorkspaceAggregation::new();
     agg.upsert_summary(defn_summary);
@@ -186,7 +186,7 @@ Bar = {}"#;
     // Also must not emit a spurious match inside `function` / other words
     // that merely contain "Foo" substrings. Sanity check.
     for l in &user_refs {
-        let text = &docs[&user_uri].text;
+        let text = docs[&user_uri].text();
         let line = text.lines().nth(l.range.start.line as usize).unwrap_or("");
         // Every reported range should actually sit at a Foo occurrence.
         assert!(
@@ -208,16 +208,16 @@ fn references_emmy_type_word_boundary() {
     let defn_src = "---@class Foo\nFoo = {}";
     let defn_uri = make_uri("d.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
-    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes());
+    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
     let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { text: defn_src.to_string(), tree: defn_tree, scope_tree: defn_scope, line_index: util::LineIndex::new(defn_src.as_bytes()) };
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_scope };
 
     let user_src = "---@type FooBar\nlocal x = nil";
     let user_uri = make_uri("u.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
-    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes());
+    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
     let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { text: user_src.to_string(), tree: user_tree, scope_tree: user_scope, line_index: util::LineIndex::new(user_src.as_bytes()) };
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_scope };
 
     let mut agg = WorkspaceAggregation::new();
     agg.upsert_summary(defn_summary);

@@ -10,12 +10,12 @@ fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let uri = make_uri("test.lua");
-    let summary = summary_builder::build_summary(&uri, &doc.tree, src.as_bytes());
+    let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
     symbols::collect_document_symbols(
         doc.tree.root_node(),
-        src.as_bytes(),
+        doc.source(),
         Some(&summary),
-        &doc.line_index,
+        doc.line_index(),
     )
 }
 

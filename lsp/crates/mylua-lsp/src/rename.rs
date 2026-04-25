@@ -10,9 +10,9 @@ pub fn prepare_rename(
     doc: &Document,
     position: Position,
 ) -> Option<PrepareRenameResponse> {
-    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let node = crate::util::find_node_at_position(doc.tree.root_node(), offset)?;
-    let text = crate::util::node_text(node, doc.text.as_bytes());
+    let text = crate::util::node_text(node, doc.source());
 
     if LUA_KEYWORDS.contains(&text) {
         return None;
@@ -21,7 +21,7 @@ pub fn prepare_rename(
         return None;
     }
 
-    let range = doc.line_index.ts_node_to_range(node, doc.text.as_bytes());
+    let range = doc.line_index().ts_node_to_range(node, doc.source());
     Some(PrepareRenameResponse::RangeWithPlaceholder {
         range,
         placeholder: text.to_string(),

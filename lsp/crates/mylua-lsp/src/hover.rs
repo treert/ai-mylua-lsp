@@ -16,9 +16,9 @@ pub fn hover(
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
-    let byte_offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
-    let ident_text = node_text(ident_node, doc.text.as_bytes());
+    let ident_text = node_text(ident_node, doc.source());
 
     // Request-path logs: bounded by user interaction (one hover click),
     // never triggered during cold-start indexing. Invaluable for
@@ -163,15 +163,15 @@ pub fn hover(
                         }
                         // Include doc comments from the definition site
                         if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
-                            let def_byte = def_doc.line_index.position_to_byte_offset(
-                                def_doc.text.as_bytes(), td.range.start,
+                            let def_byte = def_doc.line_index().position_to_byte_offset(
+                                def_doc.source(), td.range.start,
                             );
                             if let Some(db) = def_byte {
                                 if let Some(def_node) = def_doc.tree.root_node()
                                     .descendant_for_byte_range(db, db)
                                 {
                                     let stmt = find_enclosing_statement(def_node);
-                                    let comment_lines = collect_preceding_comments(stmt, def_doc.text.as_bytes());
+                                    let comment_lines = collect_preceding_comments(stmt, def_doc.source());
                                     let doc_text = extract_doc_lines(&comment_lines);
                                     if !doc_text.is_empty() {
                                         parts.push(doc_text);
@@ -283,7 +283,7 @@ fn hover_at_declaration(
     decl_node: tree_sitter::Node,
     doc: &Document,
 ) -> Option<Hover> {
-    let source = doc.text.as_bytes();
+    let source = doc.source();
 
     let comment_lines = collect_preceding_comments(decl_node, source);
     let trailing = collect_trailing_comment(decl_node, source);
@@ -320,7 +320,7 @@ fn hover_at_declaration(
     }
 
     let name_node = decl_node.child_by_field_name("name");
-    let range = name_node.map(|n| doc.line_index.ts_node_to_range(n, source));
+    let range = name_node.map(|n| doc.line_index().ts_node_to_range(n, source));
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -342,10 +342,10 @@ fn hover_method_call(
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs, &doc.line_index)
+    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs, doc.line_index())
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -359,10 +359,10 @@ fn hover_variable_field(
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs, &doc.line_index)
+    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs, doc.line_index())
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -462,10 +462,10 @@ fn build_hover_for_definition(
     type_info: Option<&str>,
 ) -> Option<Hover> {
     let doc = all_docs.get(&def.uri)?;
-    let source = doc.text.as_bytes();
+    let source = doc.source();
 
     let def_start = def.range.start;
-    let def_byte = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), def_start)?;
+    let def_byte = doc.line_index().position_to_byte_offset(doc.source(), def_start)?;
     let def_node = doc.tree.root_node().descendant_for_byte_range(def_byte, def_byte)?;
 
     let stmt_node = find_enclosing_statement(def_node);

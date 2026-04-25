@@ -34,10 +34,12 @@ fn test_perf_large_enum_file() {
     eprintln!("  root named children: {}", root.named_child_count());
     eprintln!("  has_error: {}", root.has_error());
 
+    let lua_source = mylua_lsp::util::LuaSource::new(text);
+
     // Phase 2: build_summary
     let uri = make_uri("ue-lua-enum.lua");
     let t1 = std::time::Instant::now();
-    let summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+    let summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
     let summary_ms = t1.elapsed().as_millis();
     eprintln!("[Phase 2] build_summary:       {} ms", summary_ms);
     eprintln!("  global_contributions: {}", summary.global_contributions.len());
@@ -48,7 +50,7 @@ fn test_perf_large_enum_file() {
 
     // Phase 3: build_scope_tree
     let t2 = std::time::Instant::now();
-    let _scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &mylua_lsp::util::LineIndex::new(text.as_bytes()));
+    let _scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
     let scope_ms = t2.elapsed().as_millis();
     eprintln!("[Phase 3] build_scope_tree:    {} ms", scope_ms);
 

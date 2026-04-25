@@ -69,8 +69,8 @@ pub fn complete(
 /// right after `---@` (with optional partial tag text). Triggered both via
 /// the `@` trigger character and manual invocation.
 fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
-    let bytes = doc.text.as_bytes();
+    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let bytes = doc.source();
     // EmmyLua tags are lowercase ASCII letters only (`class`, `param`, …).
     // We deliberately do NOT skip digits / underscores here; doing so would
     // let the cursor "eat" into an adjacent Lua identifier abutting the
@@ -121,7 +121,7 @@ fn try_require_path_completion(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let node = doc
         .tree
         .root_node()
@@ -130,7 +130,7 @@ fn try_require_path_completion(
     // Walk up looking for a string node whose ancestor is `require("...")`.
     // `walk_ancestors` caps depth with a shared safety limit + logs on
     // overflow (see `util::ANCESTOR_WALK_LIMIT`).
-    let source = doc.text.as_bytes();
+    let source = doc.source();
     let string_node = if matches!(node.kind(), "short_string" | "string") {
         Some(node)
     } else {
@@ -192,12 +192,12 @@ fn try_dot_completion_ast(
     position: Position,
     index: &mut WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position)?;
+    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if offset == 0 {
         return None;
     }
 
-    let bytes = doc.text.as_bytes();
+    let bytes = doc.source();
     // Walk back past any partial identifier after the dot/colon.
     let mut dot_pos = offset;
     while dot_pos > 0
@@ -297,10 +297,10 @@ fn is_base_expr_kind(kind: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn get_prefix(doc: &Document, position: Position) -> String {
-    let Some(offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
+    let Some(offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return String::new();
     };
-    let bytes = doc.text.as_bytes();
+    let bytes = doc.source();
     let mut start = offset;
     while start > 0 {
         let b = bytes[start - 1];
@@ -321,7 +321,7 @@ fn collect_scope_completions(
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    let Some(offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
+    let Some(offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return;
     };
     for decl in doc.scope_tree.visible_locals(offset) {

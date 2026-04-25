@@ -36,10 +36,10 @@ fn semantic_tokens_range_filters_to_range() {
     // Range covering lines 1..=2 (middle two lines)
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
         range(1, 0, 2, 0),
-        &doc.line_index,
+        doc.line_index(),
     );
     let positions = absolute_cols(&tokens);
     let lines: Vec<u32> = positions.iter().map(|(l, _, _)| *l).collect();
@@ -63,10 +63,10 @@ fn semantic_tokens_range_delta_encoding_starts_fresh() {
 
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
         range(2, 0, 2, 20),
-        &doc.line_index,
+        doc.line_index(),
     );
     assert!(!tokens.is_empty(), "line 2 should have at least the `c` token");
     // First (and only) token: `c` at line 2 col 6, length 1.
@@ -83,10 +83,10 @@ fn semantic_tokens_range_empty_range_returns_empty() {
     // Range on an empty line past EOF has no identifiers.
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
         range(100, 0, 100, 0),
-        &doc.line_index,
+        doc.line_index(),
     );
     assert!(tokens.is_empty(), "out-of-range request should be empty");
 }
@@ -99,16 +99,16 @@ fn semantic_tokens_range_full_file_equals_full_result() {
 
     let full = semantic_tokens::collect_semantic_tokens(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
-        &doc.line_index,
+        doc.line_index(),
     );
     let ranged = semantic_tokens::collect_semantic_tokens_range(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
         range(0, 0, 100, 0),
-        &doc.line_index,
+        doc.line_index(),
     );
     assert_eq!(full.len(), ranged.len(), "full equivalent range should yield same count");
     for (f, r) in full.iter().zip(ranged.iter()) {

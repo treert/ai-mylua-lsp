@@ -14,11 +14,10 @@ use crate::util::{node_text, extract_string_literal, LineIndex};
 ///
 /// This is the core of single-file inference (index-architecture.md §3).
 /// Zero cross-file dependencies: all unresolved references become `SymbolicStub`s.
-pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8]) -> DocumentSummary {
-    let line_index = LineIndex::new(source);
+pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> DocumentSummary {
     let mut ctx = BuildContext {
         source,
-        line_index: &line_index,
+        line_index,
         require_bindings: Vec::new(),
         global_contributions: Vec::new(),
         function_summaries: HashMap::new(),

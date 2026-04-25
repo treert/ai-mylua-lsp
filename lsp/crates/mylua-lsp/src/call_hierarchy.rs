@@ -43,10 +43,10 @@ pub fn prepare_call_hierarchy(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyItem> {
-    let Some(byte_offset) = doc.line_index.position_to_byte_offset(doc.text.as_bytes(), position) else {
+    let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
     };
-    let source = doc.text.as_bytes();
+    let source = doc.source();
 
     let Some(ident) = identifier_at_offset(doc.tree.root_node(), byte_offset) else {
         return Vec::new();
@@ -56,7 +56,7 @@ pub fn prepare_call_hierarchy(
     // Case 1: the cursor is on the declaration name of a function
     // (function_declaration / local_function_declaration). We can
     // build the item without looking it up elsewhere.
-    if let Some(item) = item_from_enclosing_declaration(ident, source, uri, &doc.line_index) {
+    if let Some(item) = item_from_enclosing_declaration(ident, source, uri, doc.line_index()) {
         return vec![item];
     }
 

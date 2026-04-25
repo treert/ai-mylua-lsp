@@ -15,10 +15,10 @@ fn delta_zero_edits_for_identical_document() {
     let (doc, _uri, _agg) = setup_single_file(src, "same.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc.tree.root_node(),
-        doc.text.as_bytes(),
+        doc.source(),
         &doc.scope_tree,
         "5.3",
-        &doc.line_index,
+        doc.line_index(),
     );
     let t2 = t1.clone();
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
@@ -33,17 +33,17 @@ fn delta_reflects_appended_line() {
     let (doc2, _, _) = setup_single_file(after, "after.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.tree.root_node(),
-        doc1.text.as_bytes(),
+        doc1.source(),
         &doc1.scope_tree,
         "5.3",
-        &doc1.line_index,
+        doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
         doc2.tree.root_node(),
-        doc2.text.as_bytes(),
+        doc2.source(),
         &doc2.scope_tree,
         "5.3",
-        &doc2.line_index,
+        doc2.line_index(),
     );
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
     assert_eq!(edits.len(), 1, "single edit for append, got: {:?}", edits);
@@ -68,17 +68,17 @@ fn delta_reflects_deleted_line() {
     let (doc2, _, _) = setup_single_file(after, "del2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.tree.root_node(),
-        doc1.text.as_bytes(),
+        doc1.source(),
         &doc1.scope_tree,
         "5.3",
-        &doc1.line_index,
+        doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
         doc2.tree.root_node(),
-        doc2.text.as_bytes(),
+        doc2.source(),
         &doc2.scope_tree,
         "5.3",
-        &doc2.line_index,
+        doc2.line_index(),
     );
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
     // A deletion might produce 1 edit with delete_count > 0.
@@ -94,17 +94,17 @@ fn delta_middle_edit_preserves_prefix_and_suffix() {
     let (doc2, _, _) = setup_single_file(after, "m2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.tree.root_node(),
-        doc1.text.as_bytes(),
+        doc1.source(),
         &doc1.scope_tree,
         "5.3",
-        &doc1.line_index,
+        doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
         doc2.tree.root_node(),
-        doc2.text.as_bytes(),
+        doc2.source(),
         &doc2.scope_tree,
         "5.3",
-        &doc2.line_index,
+        doc2.line_index(),
     );
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
     assert_eq!(edits.len(), 1, "single edit for middle change, got: {:?}", edits);

@@ -13,7 +13,7 @@ local b = "hello"
 print(a, b)
 "#;
     let doc = parse_doc(&mut parser, src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), &doc.line_index);
+    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     assert!(diags.is_empty(), "clean code should have no diagnostics, got: {:?}", diags);
 }
 
@@ -22,7 +22,7 @@ fn diagnostics_for_syntax_errors() {
     let src = read_fixture("parse/test1.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), &doc.line_index);
+    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     // test1.lua contains intentional parse errors (e.g. "dfjsofjao", "if faf fsf")
     assert!(!diags.is_empty(), "parse/test1.lua should produce diagnostics");
 }
@@ -32,7 +32,7 @@ fn diagnostics_for_define_test1() {
     let src = read_fixture("define/test1.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), &doc.line_index);
+    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     // define/test1.lua has some intentionally invalid lines
     assert!(!diags.is_empty(), "define/test1.lua should produce parse-level diagnostics");
 }
@@ -52,7 +52,7 @@ print(undefined_var)
         &mut agg,
         &doc.scope_tree,
         &diag_config,
-        &doc.line_index,
+        doc.line_index(),
     );
     // `print` and `undefined_var` are both globals — the exact behavior depends
     // on LSP config defaults, but we verify the function doesn't panic.
@@ -74,7 +74,7 @@ end
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     let undefined: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Undefined global 'A1213'"))
@@ -112,7 +112,7 @@ end
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     // Exactly two undefined-global diagnostics: the two distinct bases.
     let undefined_messages: Vec<&str> = diags.iter()
@@ -149,7 +149,7 @@ end
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     let undefined: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Undefined global 'NoSuch'"))
@@ -175,7 +175,7 @@ foo()
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'foo'")),
         "bare `function foo()` must define foo, not flag it. diags={:?}", diags);
@@ -196,7 +196,7 @@ end
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
         "local ABC must not be flagged as undefined. diags={:?}", diags);
@@ -217,7 +217,7 @@ end
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, &doc.line_index,
+        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
     );
     assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
         "global ABC (assigned earlier) must not be flagged. diags={:?}", diags);
@@ -235,7 +235,7 @@ print(t.no_exist)
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let field_diags: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -258,7 +258,7 @@ local x = 42
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatch: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -281,7 +281,7 @@ local x = 42
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatch: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Type mismatch"))
@@ -325,7 +325,7 @@ a.b.c = 1
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -355,7 +355,7 @@ print(t.age)
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -383,7 +383,7 @@ print(t[2])
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let errors: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -411,7 +411,7 @@ print(t.anything)
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let field_errors: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -444,7 +444,7 @@ print(t[1])
     // smoke test for the `None` arm of `extract_single_field`.
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -469,7 +469,7 @@ print(t.no_exist)
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().any(|d| d.message.contains("no_exist")),
@@ -509,7 +509,7 @@ end
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -602,7 +602,7 @@ fn duplicate_table_key_reports_warning() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_key.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
     assert_eq!(dup.len(), 1, "exactly one duplicate report, got: {:?}", diags);
@@ -618,7 +618,7 @@ fn duplicate_table_key_across_numeric_and_string_keys() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
     assert_eq!(dup.len(), 0, "bracket-key-only tables skip duplicate-key check, got: {:?}", diags);
@@ -631,7 +631,7 @@ fn duplicate_table_key_off_via_config() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.duplicate_table_key = DiagnosticSeverityOption::Off;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Duplicate table key")),
@@ -649,7 +649,7 @@ fn unused_local_off_by_default() {
     let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     // Default config has unused_local = Off; no such diagnostic.
     assert!(
@@ -665,7 +665,7 @@ fn unused_local_reports_when_enabled() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
     assert_eq!(unused.len(), 1, "only `x` is unused, got: {:?}", diags);
@@ -680,7 +680,7 @@ fn unused_local_skips_underscore_names() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Unused local")),
@@ -695,7 +695,7 @@ fn unused_local_counts_reference_in_expression() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Unused local")),
@@ -721,7 +721,7 @@ x = "not a number"
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Type mismatch on assignment"))
@@ -754,7 +754,7 @@ end
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Type mismatch on assignment")),
@@ -777,7 +777,7 @@ f(1, 2, 3)
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("argument(s)"))
@@ -797,7 +797,7 @@ f(1)
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("argument(s)"))
@@ -816,7 +816,7 @@ f(1, 2, 3, 4, 5)
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
@@ -843,7 +843,7 @@ g:hello("world")
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     // The call passes 1 visible arg ("world"); the signature has
     // 2 params (self, name); after hiding `self` it's 1 — match.
@@ -868,7 +868,7 @@ f(1)
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
@@ -886,7 +886,7 @@ f(1, 2, 3)
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
@@ -907,7 +907,7 @@ f("str", 42)
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let type_mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.starts_with("Argument "))
@@ -935,7 +935,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let return_mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Return statement yields"))
@@ -957,7 +957,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let return_mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Return value"))
@@ -981,7 +981,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     // The string return inside `if` should be flagged as type mismatch,
     // the outer `return 0` is correct.
@@ -1007,7 +1007,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
@@ -1025,7 +1025,7 @@ local function f() return "str" end
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
@@ -1051,7 +1051,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
@@ -1073,7 +1073,7 @@ end
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
@@ -1099,7 +1099,7 @@ takes_number(s)
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let mismatches: Vec<_> = diags.iter()
         .filter(|d| d.message.starts_with("Argument "))
@@ -1133,7 +1133,7 @@ utils2.hello()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1174,7 +1174,7 @@ utils2.hello()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, &doc_b.line_index,
+        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1211,7 +1211,7 @@ print(utils2.bar)
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, &doc_b.line_index,
+        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1254,7 +1254,7 @@ utils2.sub.hello()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, &doc_b.line_index,
+        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1293,7 +1293,7 @@ utils2.doesnotexist()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, &doc_b.line_index,
+        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field 'doesnotexist'"))
@@ -1323,7 +1323,7 @@ print(p.x, p.z)
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, &doc.line_index,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1375,7 +1375,7 @@ local name = hero:getName()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
-        &mut agg, &main_doc.scope_tree, &cfg, &main_doc.line_index,
+        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))
@@ -1449,7 +1449,7 @@ hero:describe()
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
-        &mut agg, &main_doc.scope_tree, &cfg, &main_doc.line_index,
+        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
     );
     let unknown: Vec<_> = diags.iter()
         .filter(|d| d.message.contains("Unknown field"))

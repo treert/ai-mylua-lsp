@@ -183,11 +183,10 @@ pub struct Backend {
 
 struct ParsedFile {
     uri: Uri,
-    text: String,
+    lua_source: util::LuaSource,
     tree: tree_sitter::Tree,
     summary: summary::DocumentSummary,
     scope_tree: scope::ScopeTree,
-    line_index: util::LineIndex,
 }
 
 fn semantic_tokens_legend() -> SemanticTokensLegend {
@@ -325,11 +324,11 @@ impl Backend {
             Some(t) => t,
             None => {
                 if let Some(old) = old_tree {
-                    let line_index = util::LineIndex::new(text.as_bytes());
-                    let scope_tree = scope::build_scope_tree(&old, text.as_bytes(), &line_index);
+                    let lua_source = util::LuaSource::new(text);
+                    let scope_tree = scope::build_scope_tree(&old, lua_source.source(), lua_source.line_index());
                     self.documents.lock().unwrap().insert(
                         uri,
-                        Document { text, tree: old, scope_tree, line_index },
+                        Document { lua_source, tree: old, scope_tree },
                     );
                 }
                 return;
@@ -337,7 +336,8 @@ impl Backend {
         };
 
         {
-            let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            let lua_source = util::LuaSource::new(text);
+            let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
             // Library stubs retain their meta treatment across edits.
             // `summary_builder::build_summary` infers `is_meta` from
             // `---@meta` headers, and bundled stdlib stubs typically
@@ -397,12 +397,11 @@ impl Backend {
                 }
             };
 
-            let line_index = util::LineIndex::new(text.as_bytes());
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
-                Document { text, tree, scope_tree, line_index },
+                Document { lua_source, tree, scope_tree },
             );
 
             // All diagnostics (both syntax and semantic) flow through
@@ -463,7 +462,8 @@ impl Backend {
             parser.parse(text.as_bytes(), None)
         };
         if let Some(tree) = tree {
-            let mut summary = summary_builder::build_summary(&uri, &tree, text.as_bytes());
+            let lua_source = util::LuaSource::new(text);
+            let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
             // Keep library files flagged `is_meta=true` across
             // watcher-driven re-indexes. `summary_builder` infers
             // `is_meta` from an explicit `---@meta` header which
@@ -477,12 +477,11 @@ impl Backend {
                 summary.is_meta = true;
             }
             self.index.lock().unwrap().upsert_summary(summary);
-            let line_index = util::LineIndex::new(text.as_bytes());
-            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri, Document { text, tree, scope_tree, line_index });
+                .insert(uri, Document { lua_source, tree, scope_tree });
         }
     }
 
@@ -539,12 +538,12 @@ impl Backend {
             };
             let syntax = diagnostics::collect_diagnostics(
                 doc.tree.root_node(),
-                doc.text.as_bytes(),
-                &doc.line_index,
+                doc.source(),
+                doc.line_index(),
             );
             diagnostics::apply_diagnostic_suppressions(
                 doc.tree.root_node(),
-                doc.text.as_bytes(),
+                doc.source(),
                 syntax,
             )
         };
@@ -760,14 +759,14 @@ async fn run_workspace_scan(
                     let content_hash = content_hash(&text);
                     let is_library = library_uris.contains(&uri);
 
-                    let line_index = util::LineIndex::new(text.as_bytes());
+                    let lua_source = util::LuaSource::new(text);
 
                     let result = if let Some(cached_summary) = cached.get(&uri.to_string()) {
                         if cached_summary.content_hash == content_hash {
                             hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             let mut parser = new_parser();
-                            let tree = parser.parse(text.as_bytes(), None)?;
-                            let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+                            let tree = parser.parse(lua_source.source(), None)?;
+                            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
                             let mut summary = cached_summary.clone();
                             if is_library {
                                 summary.is_meta = true;
@@ -784,13 +783,13 @@ async fn run_workspace_scan(
                         hit
                     } else {
                         let mut parser = new_parser();
-                        let tree = parser.parse(text.as_bytes(), None)?;
+                        let tree = parser.parse(lua_source.source(), None)?;
                         let mut summary =
-                            summary_builder::build_summary(&uri, &tree, text.as_bytes());
+                            summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
                         if is_library {
                             summary.is_meta = true;
                         }
-                        let scope_tree = scope::build_scope_tree(&tree, text.as_bytes(), &line_index);
+                        let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
                         (tree, summary, scope_tree)
                     };
 
@@ -799,13 +798,13 @@ async fn run_workspace_scan(
                         lsp_log!(
                             "[scan] SLOW {} ms ({} bytes): {}",
                             elapsed_ms,
-                            text.len(),
+                            lua_source.text().len(),
                             path.display()
                         );
                     }
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri, text, tree, summary, scope_tree, line_index })
+                    Some(ParsedFile { uri, lua_source, tree, summary, scope_tree })
                 })
                 .collect()
         })
@@ -871,10 +870,9 @@ async fn run_workspace_scan(
             docs.insert(
                 pf.uri,
                 Document {
-                    text: pf.text,
+                    lua_source: pf.lua_source,
                     tree: pf.tree,
                     scope_tree: pf.scope_tree,
-                    line_index: pf.line_index,
                 },
             );
         }
@@ -1042,7 +1040,7 @@ async fn consumer_loop(
             let Some(doc) = docs.get(&uri) else {
                 continue;
             };
-            doc.text.clone()
+            doc.text().to_string()
         };
 
         let diags = {
@@ -1051,23 +1049,23 @@ async fn consumer_loop(
                 continue;
             };
             let mut syntax =
-                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.text.as_bytes(), &doc.line_index);
+                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.source(), doc.line_index());
             let mut idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
             let semantic = diagnostics::collect_semantic_diagnostics_with_version(
                 doc.tree.root_node(),
-                doc.text.as_bytes(),
+                doc.source(),
                 &uri,
                 &mut idx,
                 &doc.scope_tree,
                 &cfg.diagnostics,
                 &cfg.runtime.version,
-                &doc.line_index,
+                doc.line_index(),
             );
             syntax.extend(semantic);
             diagnostics::apply_diagnostic_suppressions(
                 doc.tree.root_node(),
-                doc.text.as_bytes(),
+                doc.source(),
                 syntax,
             )
         };
@@ -1078,7 +1076,7 @@ async fn consumer_loop(
         let stale = {
             let docs = documents.lock().unwrap();
             match docs.get(&uri) {
-                Some(doc) => doc.text != snapshot,
+                Some(doc) => doc.text() != snapshot,
                 None => true,
             }
         };
@@ -1445,7 +1443,7 @@ impl LanguageServer for Backend {
         let text_matches = {
             let docs = self.documents.lock().unwrap();
             docs.get(&uri)
-                .is_some_and(|d| d.text == params.text_document.text)
+                .is_some_and(|d| d.text() == params.text_document.text)
         };
         if text_matches {
             self.open_uris.lock().unwrap().insert(uri.clone());
@@ -1486,7 +1484,7 @@ impl LanguageServer for Backend {
             let mut text;
             let mut tree: Option<tree_sitter::Tree>;
             if let Some(doc) = docs.remove(&uri) {
-                text = doc.text;
+                text = doc.lua_source.into_text();
                 tree = Some(doc.tree);
             } else {
                 text = String::new();
@@ -1576,7 +1574,7 @@ impl LanguageServer for Backend {
                     // need to reset the index to disk state.
                     let already_matches = {
                         let docs = self.documents.lock().unwrap();
-                        docs.get(&uri).is_some_and(|d| d.text == text)
+                        docs.get(&uri).is_some_and(|d| d.text() == text)
                     };
                     if already_matches {
                         return;
@@ -1672,9 +1670,9 @@ impl LanguageServer for Backend {
         let summary = idx.summaries.get(&params.text_document.uri);
         let syms = symbols::collect_document_symbols(
             doc.tree.root_node(),
-            doc.text.as_bytes(),
+            doc.source(),
             summary,
-            &doc.line_index,
+            doc.line_index(),
         );
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
@@ -1701,9 +1699,9 @@ impl LanguageServer for Backend {
         let idx = self.index.lock().unwrap();
         Ok(Some(document_link::document_links(
             doc.tree.root_node(),
-            doc.text.as_bytes(),
+            doc.source(),
             &idx,
-            &doc.line_index,
+            doc.line_index(),
         )))
     }
 
@@ -1961,10 +1959,10 @@ impl LanguageServer for Backend {
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let data = semantic_tokens::collect_semantic_tokens_with_version(
             doc.tree.root_node(),
-            doc.text.as_bytes(),
+            doc.source(),
             &doc.scope_tree,
             &runtime_version,
-            &doc.line_index,
+            doc.line_index(),
         );
         let result_id = self.mint_semantic_token_result_id();
         // Cache the full response so a subsequent `delta` request
@@ -1997,10 +1995,10 @@ impl LanguageServer for Backend {
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let new_tokens = semantic_tokens::collect_semantic_tokens_with_version(
             doc.tree.root_node(),
-            doc.text.as_bytes(),
+            doc.source(),
             &doc.scope_tree,
             &runtime_version,
-            &doc.line_index,
+            doc.line_index(),
         );
         drop(docs);
 
@@ -2055,11 +2053,11 @@ impl LanguageServer for Backend {
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let data = semantic_tokens::collect_semantic_tokens_range_with_version(
             doc.tree.root_node(),
-            doc.text.as_bytes(),
+            doc.source(),
             &doc.scope_tree,
             params.range,
             &runtime_version,
-            &doc.line_index,
+            doc.line_index(),
         );
         Ok(Some(SemanticTokensRangeResult::Tokens(SemanticTokens {
             result_id: None,
