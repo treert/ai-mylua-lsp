@@ -83,6 +83,10 @@ pub fn setup_single_file(
     let uri = make_uri(filename);
     let mut agg = WorkspaceAggregation::new();
     let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+    // Register module mapping so resolve_module_to_uri works.
+    if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
+        agg.set_require_mapping(module_name, uri.clone());
+    }
     agg.upsert_summary(summary);
     (doc, uri, agg)
 }
@@ -100,6 +104,10 @@ pub fn setup_workspace(
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
         let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+        // Register module mapping so resolve_module_to_uri works.
+        if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
+            agg.set_require_mapping(module_name, uri.clone());
+        }
         agg.upsert_summary(summary);
         docs.insert(uri, doc);
     }
@@ -118,8 +126,8 @@ pub fn setup_workspace_from_dir(
     let mut agg = WorkspaceAggregation::new();
 
     let roots = vec![dir.clone()];
-    let require_map = workspace_scanner::scan_workspace_lua_files(&roots, &RequireConfig::default(), &WorkspaceConfig::default());
-    for (module, uri) in &require_map {
+    let module_entries = workspace_scanner::scan_workspace_lua_files(&roots, &RequireConfig::default(), &WorkspaceConfig::default());
+    for (module, uri) in &module_entries {
         agg.set_require_mapping(module.clone(), uri.clone());
     }
 
@@ -168,6 +176,10 @@ pub fn setup_workspace_with_library(
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
         let summary = summary_builder::build_summary(&uri, &doc.tree, source.as_bytes());
+        // Register module mapping so resolve_module_to_uri works.
+        if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
+            agg.set_require_mapping(module_name, uri.clone());
+        }
         agg.upsert_summary(summary);
         docs.insert(uri, doc);
     }
@@ -184,12 +196,12 @@ pub fn setup_workspace_with_library(
         .filter_map(|p| workspace_scanner::path_to_uri(p))
         .collect();
 
-    let require_map = workspace_scanner::scan_workspace_lua_files(
+    let module_entries = workspace_scanner::scan_workspace_lua_files(
         library_roots_absolute,
         &require_config,
         &ws_config,
     );
-    for (module, uri) in &require_map {
+    for (module, uri) in &module_entries {
         agg.set_require_mapping(module.clone(), uri.clone());
     }
 

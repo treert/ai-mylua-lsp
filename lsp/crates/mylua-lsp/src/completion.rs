@@ -147,10 +147,7 @@ fn try_require_path_completion(
         return None;
     }
     let mut items: Vec<CompletionItem> = index
-        .require_map
-        .keys()
-        .cloned()
-        .collect::<HashSet<_>>()
+        .all_module_names()
         .into_iter()
         .map(|m| CompletionItem {
             label: m.clone(),

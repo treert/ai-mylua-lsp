@@ -16,8 +16,8 @@ type IndexStatusParams = {
   indexed: number;
   total: number;
   elapsedMs?: number;
-  /** Current indexing phase: 'scanning' | 'parsing' | 'merging'. */
-  phase?: 'scanning' | 'parsing' | 'merging';
+  /** Current indexing phase: 'scanning' | 'module_map_ready' | 'parsing' | 'merging'. */
+  phase?: 'scanning' | 'module_map_ready' | 'parsing' | 'merging';
   /** Human-readable message for the current phase. */
   message?: string;
 };
@@ -76,7 +76,6 @@ function collectLspConfig(
       topKeyword: cfg.get('runtime.topKeyword'),
     },
     require: {
-      paths: cfg.get('require.paths'),
       aliases: cfg.get('require.aliases'),
     },
     workspace: {
@@ -146,6 +145,9 @@ function renderStatus(status: IndexStatusParams): void {
     if (phase === 'scanning') {
       statusBarItem.text = '💛scanning…';
       statusBarItem.tooltip = 'MyLua: scanning workspace for Lua files… — click to open settings';
+    } else if (phase === 'module_map_ready') {
+      statusBarItem.text = `💛parsing ${total}`;
+      statusBarItem.tooltip = `MyLua: module map ready, parsing files (${total})… — click to open settings`;
     } else if (phase === 'merging') {
       statusBarItem.text = `💛merging ${total}`;
       statusBarItem.tooltip = `MyLua: building global index (${total} files)… — click to open settings`;

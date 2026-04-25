@@ -310,36 +310,40 @@ hover 在 p.name 上
 
 ### 6.1 冷启动策略：4 阶段流水线
 
-冷启动采用 **4 阶段流水线**，在 `initialized` 中 `tokio::spawn` 后台执行，不阻塞后续 LSP 请求：
+冷启动采用 **5 阶段流水线**，在 `initialized` 中 `tokio::spawn` 后台执行，不阻塞后续 LSP 请求：
 
 ```
-Phase 1: Scan          Phase 2: Parse           Phase 3: Merge          Phase 4: Ready
-┌──────────────┐      ┌──────────────────┐      ┌──────────────────┐    ┌──────────┐
-│ discover     │      │ rayon 全量并行    │      │ 原子 build_initial│    │ flip     │
-│ .lua files   │─────▶│ read + parse +   │─────▶│ 构建全局索引      │───▶│ IndexState│
-│ + build      │      │ build_summary    │      │ (单次临界区)      │    │ = Ready  │
-│ require_map  │      │ (不持任何锁)     │      │                  │    │ + seed   │
-└──────────────┘      └──────────────────┘      └──────────────────┘    │ diag     │
-                                                                        └──────────┘
+Phase 1: Scan       Phase 1.5: Module   Phase 2: Parse           Phase 3: Merge          Phase 4: Ready
+┌──────────────┐    ┌──────────────┐    ┌──────────────────┐      ┌──────────────────┐    ┌──────────┐
+│ discover     │    │ populate     │    │ rayon 全量并行    │      │ 原子 build_initial│    │ flip     │
+│ .lua files   │───▶│ module_index │───▶│ read + parse +   │─────▶│ 构建全局索引      │───▶│ IndexState│
+│ + build      │    │ (document_   │    │ build_summary    │      │ (单次临界区)      │    │ = Ready  │
+│ module_entries│    │  link 可用)  │    │ (不持任何锁)     │      │                  │    │ + seed   │
+└──────────────┘    └──────────────┘    └──────────────────┘      └──────────────────┘    │ diag     │
+                                                                                          └──────────┘
 ```
 
 | 阶段 | 做什么 | 持锁 | 复杂度 |
 |------|--------|------|--------|
-| **Phase 1: Scan** | `collect_lua_files` 发现文件列表 + `scan_workspace_lua_files` 建 `require_map` | 短暂持 `index` 锁写入 `require_map`（已移到 Phase 3） | O(文件数) |
+| **Phase 1: Scan** | `scan_and_collect_lua_files` 发现文件列表 + 构建 `module_entries`（`file_path_to_module_name` 固定规则：全路径小写 + `.` 分隔 + 去 `.lua` + `init.lua` 特殊处理） | 无 | O(文件数) |
+| **Phase 1.5: Module Index** | 将 `module_entries` 写入 `index.module_index`（last-segment → Vec<(module_name, Uri)> 索引）+ 设置 `require_aliases`。此后 `document_link` 和 `require` 路径补全即可工作 | 短暂持 `index` 锁 | O(module_entries) |
 | **Phase 2: Parse** | `rayon` 全量并行：`read_to_string` → `tree-sitter parse` → `build_summary` → `build_scope_tree`。`AtomicUsize` 计数器驱动进度上报 | **不持任何锁** | O(文件数 / 核数) |
-| **Phase 3: Merge** | 单次临界区持 `open_uris → documents → index` 三锁：写入 `require_map` + `require_aliases`，收集所有 summaries（跳过 `open_uris` 中已有的，改用其 buffer 版本），调用 `build_initial` 一次性构建全局索引 | 持 `open_uris → documents → index` | O(总贡献数)，20k 文件 ~几十 ms |
+| **Phase 3: Merge** | 单次临界区持 `open_uris → documents → index` 三锁：收集所有 summaries（跳过 `open_uris` 中已有的，改用其 buffer 版本），调用 `build_initial` 一次性构建全局索引（`build_initial` 不清除 `module_index`） | 持 `open_uris → documents → index` | O(总贡献数)，20k 文件 ~几十 ms |
 | **Phase 4: Ready** | `IndexState::Ready` + `seed_bulk` 诊断队列 + 保存磁盘缓存（如启用） | 各锁短暂独立持有 | O(1) |
 
 **关键设计**：
 
 - **Phase 2 不持锁**：并行 parse 期间，`did_open` / `did_change` 正常执行 `upsert_summary`（增量路径），不会被阻塞。
-- **Phase 3 原子重建**：`build_initial` 先清空所有 shard，再一次性重建。冷启动期间 `did_open` 写入的 summary 从 `idx.summaries` 收集后一并传入，确保不丢失。
-- **消除时序依赖**：`build_initial` 先插入所有 summaries 到 `self.summaries`，再构建 shard。`resolve_module_to_uri` 在完整的 `require_map` + `summaries` 上运行，不存在"早期文件无法 resolve 后期文件"的问题。
-- **进度上报**：`mylua/indexStatus` 通知携带 `phase` 字段（`scanning` / `parsing` / `merging`），VS Code 状态栏分阶段显示。
+- **Phase 2 不持锁**：并行 parse 期间，`did_open` / `did_change` 正常执行 `upsert_summary`（增量路径），不会被阻塞。
+- **Phase 1.5 提前可用**：`module_index` 仅依赖文件路径，不需要 parse。Phase 1.5 写入后 `document_link`（require 字符串可点击链接）和 `require` 路径补全立即可用，无需等待 Phase 3。
+- **Phase 3 原子重建**：`build_initial` 先清空 summaries/global_shard/type_shard/require_by_return/type_dependants/resolution_cache（**不清除 module_index**），再一次性重建。冷启动期间 `did_open` 写入的 summary 从 `idx.summaries` 收集后一并传入，确保不丢失。
+- **消除时序依赖**：`build_initial` 先插入所有 summaries 到 `self.summaries`，再构建 shard。`resolve_module_to_uri` 在完整的 `module_index` + `summaries` 上运行，不存在"早期文件无法 resolve 后期文件"的问题。
+- **进度上报**：`mylua/indexStatus` 通知携带 `phase` 字段（`scanning` / `module_map_ready` / `parsing` / `merging`），VS Code 状态栏分阶段显示。
 
 查询层状态分为：
 
 - **`Initializing`**：摘要与聚合层正在构建；`goto`/`hover` 可返回部分结果（接受漏报），`workspace/symbol` 提供渐进结果，`references` 应向用户标明结果可能不完整。冷启动期间 `did_open` / `did_change` 通过 `publish_syntax_only_during_indexing` 抢跑 syntax-only 诊断。
+- **`ModuleMapReady`**：Phase 1.5 完成后进入；`module_index` 已填充，`document_link`（require 字符串可点击链接）和 `require` 路径补全可用；全局索引尚未构建，语义能力仍受限。
 - **`Ready`**：Phase 3 merge 完成后进入；查询结果视为完整工作区语义。
 
 冷启动与编辑期增量保持同一心智模型：冷启动 = 从空状态对全部文件做一次性原子导入；编辑期 = 基于已有索引对少量文件做 `upsert_summary` 增量更新。

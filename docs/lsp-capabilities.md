@@ -138,7 +138,7 @@ Tree-sitter ERROR/MISSING 节点自动转为 `publishDiagnostics`。
 ## 自定义 LSP 通知
 
 ### `mylua/indexStatus`（server → client，单向）
-payload `{ state: "indexing" | "ready", indexed: number, total: number, elapsedMs?: number }`。由 `lib.rs::run_workspace_scan` 在扫描开始、每批（50 文件）结束、以及 `IndexState::Ready` 后发出；扩展侧驱动 StatusBarItem。`elapsedMs` **仅**在终态 `ready` 时出现，表示从 `initialized` handler 进入到 `IndexState::Ready` 的 wall-clock 毫秒数。Rust 定义：`lib.rs::IndexStatusNotification` / `IndexStatusParams`。
+payload `{ state: "indexing" | "ready", indexed: number, total: number, elapsedMs?: number, phase?: string, message?: string }`。由 `lib.rs::run_workspace_scan` 在扫描开始、module_index 就绪、每批解析进度、以及 `IndexState::Ready` 后发出；扩展侧驱动 StatusBarItem。`phase` 字段值：`scanning` / `module_map_ready` / `parsing` / `merging`。`elapsedMs` **仅**在终态 `ready` 时出现，表示从 `initialized` handler 进入到 `IndexState::Ready` 的 wall-clock 毫秒数。Rust 定义：`lib.rs::IndexStatusNotification` / `IndexStatusParams`。
 
 ## 构建与测试
 

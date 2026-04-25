@@ -30,9 +30,12 @@ pub struct WorkspaceAggregation {
     /// marked dirty on upstream signature changes.
     pub resolution_cache: HashMap<CacheKey, CachedResolution>,
 
-    /// Module path → target URI, used by `resolve_module_to_uri`.
-    pub require_map: HashMap<String, Uri>,
+    /// Module index: last_segment → Vec<(full_module_name, Uri)>.
+    /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
+    /// followed by longest-suffix matching among candidates.
+    pub module_index: HashMap<String, Vec<(String, Uri)>>,
     /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
+    /// The longest matching prefix alias is chosen.
     pub require_aliases: HashMap<String, String>,
 }
 
@@ -143,7 +146,7 @@ impl WorkspaceAggregation {
             require_by_return: HashMap::new(),
             type_dependants: HashMap::new(),
             resolution_cache: HashMap::new(),
-            require_map: HashMap::new(),
+            module_index: HashMap::new(),
             require_aliases: HashMap::new(),
         }
     }
@@ -329,17 +332,36 @@ impl WorkspaceAggregation {
     /// Remove a file from the aggregation layer entirely.
     pub fn remove_file(&mut self, uri: &Uri) {
         self.remove_contributions(uri);
-        // Only removing the file entirely should drop its require_map entries
-        // (module_path → this_uri). Re-indexing the same file (upsert) must
-        // NOT drop these — the file's path, and therefore its require-able
-        // module paths, don't change across edits.
-        self.require_map.retain(|_, target_uri| target_uri != uri);
+        // Remove this URI from the module_index.
+        self.module_index.retain(|_, entries| {
+            entries.retain(|(_, u)| u != uri);
+            !entries.is_empty()
+        });
         self.summaries.remove(uri);
     }
 
-    /// Set require mapping directly (module path → target URI).
-    pub fn set_require_mapping(&mut self, module_path: String, uri: Uri) {
-        self.require_map.insert(module_path, uri);
+    /// Register a module name → URI mapping in the module index.
+    /// The module_name should already be normalized (lowercase, `.`-separated,
+    /// init.lua handled).
+    pub fn set_require_mapping(&mut self, module_name: String, uri: Uri) {
+        use crate::workspace_scanner::module_last_segment;
+        let last_seg = module_last_segment(&module_name).to_string();
+        let entries = self.module_index.entry(last_seg).or_default();
+        // Avoid duplicates: if this exact (module_name, uri) pair exists, skip.
+        if !entries.iter().any(|(m, u)| m == &module_name && u == &uri) {
+            entries.push((module_name, uri));
+        }
+    }
+
+    /// Get all registered module names (for completion).
+    pub fn all_module_names(&self) -> Vec<String> {
+        let mut names: HashSet<String> = HashSet::new();
+        for entries in self.module_index.values() {
+            for (module_name, _) in entries {
+                names.insert(module_name.clone());
+            }
+        }
+        names.into_iter().collect()
     }
 
     fn remove_contributions(&mut self, uri: &Uri) {
@@ -426,9 +448,11 @@ impl WorkspaceAggregation {
         }
 
         // Module paths that resolve to this URI
-        for (mod_path, target_uri) in &self.require_map {
-            if target_uri == uri {
-                module_paths.insert(mod_path.clone());
+        for entries in self.module_index.values() {
+            for (mod_path, target_uri) in entries {
+                if target_uri == uri {
+                    module_paths.insert(mod_path.clone());
+                }
             }
         }
 
@@ -452,39 +476,106 @@ impl WorkspaceAggregation {
         }
     }
 
+    /// Resolve a `require("module.path")` string to a file URI.
+    ///
+    /// Algorithm:
+    /// 1. Normalize the module path (lowercase, strip trailing `.init`).
+    /// 2. Apply alias expansion (longest-prefix match).
+    /// 3. Look up candidates by last segment (O(1) HashMap lookup).
+    /// 4. Among candidates whose last segment matches, pick the one
+    ///    with the longest matching suffix (by `.`-separated segments).
     pub fn resolve_module_to_uri(&self, module_path: &str) -> Option<Uri> {
-        if let Some(uri) = self.require_map.get(module_path) {
-            return Some(uri.clone());
+        use crate::workspace_scanner::normalize_require_path;
+
+        let normalized = normalize_require_path(module_path);
+
+        // Step 1: Try alias expansion (longest-prefix match first).
+        let resolved = self.apply_alias_expansion(&normalized);
+
+        // Step 2: Look up by last segment.
+        self.find_best_match(&resolved)
+    }
+
+    /// Apply alias expansion: find the longest matching alias prefix
+    /// and replace it. E.g. aliases={"@": "src", "@utils": "src.utils"},
+    /// "@utils.foo" → "src.utils.foo" (longest prefix "@utils" wins).
+    fn apply_alias_expansion(&self, module_path: &str) -> String {
+        if self.require_aliases.is_empty() {
+            return module_path.to_string();
         }
 
-        // Try alias expansion: if module_path starts with an alias prefix,
-        // replace it and retry. E.g. aliases={"@": "src/"}, "@utils.foo" → "src/utils.foo"
+        let mut best_alias: Option<(&str, &str)> = None;
+        let mut best_len = 0;
+
         for (alias, replacement) in &self.require_aliases {
-            if !alias.is_empty() && module_path.starts_with(alias.as_str()) {
-                let expanded = format!("{}{}", replacement, &module_path[alias.len()..]);
-                if let Some(uri) = self.require_map.get(&expanded) {
-                    return Some(uri.clone());
-                }
-                let alias_as_path = expanded.replace('.', "/");
-                for uri in self.summaries.keys() {
-                    let uri_str = uri.to_string();
-                    if uri_str.contains(&alias_as_path) {
-                        return Some(uri.clone());
-                    }
+            if alias.is_empty() {
+                continue;
+            }
+            if module_path.starts_with(alias.as_str()) && alias.len() > best_len {
+                // Ensure the alias matches at a segment boundary:
+                // either the alias covers the entire path, or the
+                // next char after the alias is `.`
+                let rest = &module_path[alias.len()..];
+                if rest.is_empty() || rest.starts_with('.') {
+                    best_alias = Some((alias.as_str(), replacement.as_str()));
+                    best_len = alias.len();
                 }
             }
         }
 
-        // Fallback: check summaries for a URI path match (handles
-        // modules discovered after require_map was built).
-        let module_as_path = module_path.replace('.', "/");
-        for uri in self.summaries.keys() {
-            let uri_str = uri.to_string();
-            if uri_str.contains(&module_as_path) {
-                return Some(uri.clone());
+        match best_alias {
+            Some((alias, replacement)) => {
+                let rest = &module_path[alias.len()..];
+                if rest.is_empty() {
+                    replacement.to_string()
+                } else {
+                    // rest starts with '.', so just concatenate
+                    format!("{}{}", replacement, rest)
+                }
+            }
+            None => module_path.to_string(),
+        }
+    }
+
+    /// Find the best matching URI for a normalized module path.
+    /// Uses last-segment lookup + longest suffix matching.
+    fn find_best_match(&self, module_path: &str) -> Option<Uri> {
+        use crate::workspace_scanner::module_last_segment;
+
+        let query_last = module_last_segment(module_path);
+        let candidates = self.module_index.get(query_last)?;
+
+        if candidates.len() == 1 {
+            // Fast path: only one candidate with this last segment.
+            return Some(candidates[0].1.clone());
+        }
+
+        // Split query into segments for suffix matching.
+        let query_segments: Vec<&str> = module_path.split('.').collect();
+
+        let mut best_uri: Option<&Uri> = None;
+        let mut best_match_len: usize = 0;
+
+        for (candidate_name, candidate_uri) in candidates {
+            let cand_segments: Vec<&str> = candidate_name.split('.').collect();
+
+            // Count matching suffix segments (from the end).
+            let match_len = query_segments
+                .iter()
+                .rev()
+                .zip(cand_segments.iter().rev())
+                .take_while(|(q, c)| q == c)
+                .count();
+
+            // Must match at least the last segment (guaranteed by
+            // the HashMap key lookup, but be defensive).
+            if match_len > best_match_len {
+                best_match_len = match_len;
+                best_uri = Some(candidate_uri);
             }
         }
-        None
+
+        best_uri.cloned()
     }
 }
 

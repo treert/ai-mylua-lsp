@@ -51,6 +51,10 @@ use document::Document;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
     Initializing,
+    /// Module index (require_map) is populated — `document_link` and
+    /// `require` path completion work, but full semantic features
+    /// (goto, hover, diagnostics) are not yet available.
+    ModuleMapReady,
     Ready,
 }
 
@@ -641,17 +645,39 @@ async fn run_workspace_scan(
 
     let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
 
-    let (require_map, files) =
+    let (module_entries, files) =
         workspace_scanner::scan_and_collect_lua_files(&all_roots, &require_config, &workspace_config);
     let total = files.len();
 
     let phase1_ms = phase1_started.elapsed().as_millis();
     lsp_log!(
-        "[scan] phase 1 (scan): {} files discovered, require_map {} entries, {} ms",
+        "[scan] phase 1 (scan): {} files discovered, module_index {} entries, {} ms",
         total,
-        require_map.len(),
+        module_entries.len(),
         phase1_ms
     );
+
+    // ── Phase 1.5: Populate module_index immediately ───────────────
+    // The module_index (require_map) is fully determined by file paths
+    // alone — no parsing needed. Write it into the index now so that
+    // `document_link` (require string → clickable link) works during
+    // the parse phase, before the full global index is built.
+    {
+        let mut idx = index.lock().unwrap();
+        idx.require_aliases = require_config.aliases.clone();
+        for (module, uri) in &module_entries {
+            idx.set_require_mapping(module.clone(), uri.clone());
+        }
+    }
+    *index_state.lock().unwrap() = IndexState::ModuleMapReady;
+    send_index_phase(
+        &client,
+        "module_map_ready",
+        &format!("Module map ready ({} entries), parsing…", module_entries.len()),
+        0,
+        total as u64,
+    )
+    .await;
 
     // ── Phase 2: Parse (parallel) ──────────────────────────────────
     let phase2_started = std::time::Instant::now();
@@ -819,12 +845,12 @@ async fn run_workspace_scan(
         let mut docs = documents.lock().unwrap();
         let mut idx = index.lock().unwrap();
 
-        // Set up require_map and aliases before build_initial so that
-        // resolve_module_to_uri works correctly during the merge.
-        idx.require_aliases = require_config.aliases.clone();
-        for (module, uri) in &require_map {
-            idx.set_require_mapping(module.clone(), uri.clone());
-        }
+        // module_index and aliases were already populated in Phase 1.5
+        // (right after the scan). build_initial() does NOT clear
+        // module_index — it only clears summaries, global_shard,
+        // type_shard, require_by_return, type_dependants, and
+        // resolution_cache. So module_index is already ready for
+        // resolve_module_to_uri during the merge.
 
         // Separate parsed files into two sets: those already open in
         // the editor (skip — buffer version wins) and the rest.
@@ -1119,37 +1145,9 @@ fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     }
 }
 
-/// Percent-decode a URI path. Accumulates decoded bytes and interprets the
-/// final buffer as UTF-8, so multi-byte encodings (e.g. `%E4%B8%AD` → 中)
-/// are decoded correctly. Falls back to lossy decoding if the result is
-/// not valid UTF-8.
+/// Percent-decode a URI path — delegates to `util::percent_decode`.
 fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        let b = bytes[i];
-        if b == b'%' && i + 2 < bytes.len() {
-            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(b);
-        i += 1;
-    }
-    String::from_utf8(out)
-        .unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
+    util::percent_decode(s)
 }
 
 #[cfg(test)]
@@ -1597,9 +1595,9 @@ impl LanguageServer for Backend {
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
         let roots = self.workspace_roots.lock().unwrap().clone();
-        let (require_config, workspace_config) = {
+        let workspace_config = {
             let cfg = self.config.lock().unwrap();
-            (cfg.require.clone(), cfg.workspace.clone())
+            cfg.workspace.clone()
         };
         let filter = workspace_scanner::FileFilter::from_config(&workspace_config);
 
@@ -1612,22 +1610,12 @@ impl LanguageServer for Backend {
                                 continue;
                             }
                             self.index_file_from_disk(&path);
-                            for root in &roots {
-                                if path.starts_with(root) {
-                                    let modules = workspace_scanner::file_to_module_paths(
-                                        root,
-                                        &path,
-                                        &require_config.paths,
-                                    );
-                                    let mut idx = self.index.lock().unwrap();
-                                    for module in modules {
-                                        idx.set_require_mapping(
-                                            module,
-                                            change.uri.clone(),
-                                        );
-                                    }
-                                    break;
-                                }
+                            if let Some(module_name) = workspace_scanner::file_path_to_module_name(&path) {
+                                let mut idx = self.index.lock().unwrap();
+                                idx.set_require_mapping(
+                                    module_name,
+                                    change.uri.clone(),
+                                );
                             }
                         }
                     }

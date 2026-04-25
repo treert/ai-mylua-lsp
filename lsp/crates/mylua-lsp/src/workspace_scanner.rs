@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tower_lsp_server::ls_types::Uri;
 use globset::{Glob, GlobSet, GlobSetBuilder};
@@ -75,38 +74,38 @@ fn build_globset(patterns: &[String]) -> GlobSet {
 }
 
 /// Scan a directory recursively for .lua files.
-/// Returns a map of module_path -> file URI.
+/// Returns a list of (module_name, Uri) pairs for building the module index.
 pub fn scan_workspace_lua_files(
     roots: &[PathBuf],
-    require_config: &RequireConfig,
+    _require_config: &RequireConfig,
     workspace_config: &WorkspaceConfig,
-) -> HashMap<String, Uri> {
-    let mut require_map = HashMap::new();
+) -> Vec<(String, Uri)> {
+    let mut modules = Vec::new();
     let filter = FileFilter::from_config(workspace_config);
 
     for root in roots {
         if root.is_dir() {
             for path in walk_lua_files_jwalk(root, &filter) {
                 if let Some(uri) = path_to_uri(&path) {
-                    for module_path in file_to_module_paths(root, &path, &require_config.paths) {
-                        require_map.entry(module_path).or_insert_with(|| uri.clone());
+                    if let Some(module_name) = file_path_to_module_name(&path) {
+                        modules.push((module_name, uri));
                     }
                 }
             }
         }
     }
 
-    require_map
+    modules
 }
 
-/// Scan and collect in a single pass: returns (require_map, file_list).
+/// Scan and collect in a single pass: returns (module_entries, file_list).
 /// This avoids walking the entire directory tree twice.
 pub fn scan_and_collect_lua_files(
     roots: &[PathBuf],
-    require_config: &RequireConfig,
+    _require_config: &RequireConfig,
     workspace_config: &WorkspaceConfig,
-) -> (HashMap<String, Uri>, Vec<PathBuf>) {
-    let mut require_map = HashMap::new();
+) -> (Vec<(String, Uri)>, Vec<PathBuf>) {
+    let mut modules = Vec::new();
     let mut files = Vec::new();
     let filter = FileFilter::from_config(workspace_config);
 
@@ -114,8 +113,8 @@ pub fn scan_and_collect_lua_files(
         if root.is_dir() {
             for path in walk_lua_files_jwalk(root, &filter) {
                 if let Some(uri) = path_to_uri(&path) {
-                    for module_path in file_to_module_paths(root, &path, &require_config.paths) {
-                        require_map.entry(module_path).or_insert_with(|| uri.clone());
+                    if let Some(module_name) = file_path_to_module_name(&path) {
+                        modules.push((module_name, uri));
                     }
                 }
                 files.push(path);
@@ -123,51 +122,127 @@ pub fn scan_and_collect_lua_files(
         }
     }
 
-    (require_map, files)
+    (modules, files)
 }
 
-/// Convert a file path to all possible Lua module paths based on path patterns.
+/// Convert a file path to a normalized module name.
 ///
-/// For path patterns like `["?.lua", "?/init.lua"]`:
-/// - `game/player.lua` matches `?.lua` → module `"game.player"`
-/// - `game/init.lua` matches `?/init.lua` → module `"game"`
-/// - `game/init.lua` also matches `?.lua` → module `"game.init"`
-pub fn file_to_module_paths(base: &Path, file: &Path, patterns: &[String]) -> Vec<String> {
-    let relative = match file.strip_prefix(base) {
-        Ok(r) => r,
-        Err(_) => return Vec::new(),
-    };
-    let relative_str = relative.to_string_lossy().replace('\\', "/");
+/// Rules:
+/// 1. Use the full file path (no base directory stripping, except
+///    Windows drive letter removal).
+/// 2. Replace path separators with `.`
+/// 3. Lowercase all letters.
+/// 4. Strip `.lua` extension.
+/// 5. For `init.lua` files, remove the trailing `.init` segment
+///    (the last segment becomes the directory name).
+///
+/// Examples:
+/// - `/project/game/player.lua` → `project.game.player`
+/// - `/project/game/init.lua`   → `project.game`
+/// - `/project/Game/Player.lua` → `project.game.player`
+pub fn file_path_to_module_name(file: &Path) -> Option<String> {
+    let path_str = file.to_string_lossy();
+    // Normalize separators to `/`
+    let normalized = path_str.replace('\\', "/");
 
-    let mut modules = Vec::new();
+    // Strip Windows drive letter (e.g. "C:/" → "/")
+    let without_drive = strip_drive_letter(&normalized);
 
-    for pattern in patterns {
-        let pattern_normalized = pattern.replace('\\', "/");
-        if let Some(q_pos) = pattern_normalized.find('?') {
-            let prefix = &pattern_normalized[..q_pos];
-            let suffix = &pattern_normalized[q_pos + 1..];
+    // Strip leading `/`
+    let trimmed = without_drive.trim_start_matches('/');
 
-            if relative_str.starts_with(prefix) && relative_str.ends_with(suffix) {
-                let end = match relative_str.len().checked_sub(suffix.len()) {
-                    Some(e) if e >= prefix.len() => e,
-                    _ => continue,
-                };
-                let module_part = &relative_str[prefix.len()..end];
-                if !module_part.is_empty() {
-                    let module_path = module_part.replace('/', ".");
-                    modules.push(module_path);
-                }
-            }
+    // Strip `.lua` extension
+    let without_ext = trimmed.strip_suffix(".lua").unwrap_or(trimmed);
+
+    if without_ext.is_empty() {
+        return None;
+    }
+
+    // Replace `/` with `.` and lowercase
+    let module_name = without_ext.replace('/', ".").to_ascii_lowercase();
+
+    // Handle init.lua: strip trailing `.init`
+    let module_name = if module_name.ends_with(".init") {
+        let stripped = &module_name[..module_name.len() - 5]; // len(".init") == 5
+        if stripped.is_empty() {
+            // Edge case: the file is just `/init.lua` → module name "init"
+            return Some("init".to_string());
         }
-    }
+        stripped.to_string()
+    } else {
+        module_name
+    };
 
-    let stem = relative.with_extension("");
-    let basic_module = stem.to_string_lossy().replace(['\\', '/'], ".");
-    if !basic_module.is_empty() && !modules.contains(&basic_module) {
-        modules.push(basic_module);
-    }
+    Some(module_name)
+}
 
-    modules
+/// Convert a file URI to a normalized module name.
+/// Parses the `file:///path` URI format directly.
+pub fn uri_to_module_name(uri: &Uri) -> Option<String> {
+    let s = uri.to_string();
+    let path_str = s.strip_prefix("file:///")?;
+    let decoded = crate::util::percent_decode(path_str);
+    // On Unix, re-add the leading `/`
+    let full_path = if cfg!(not(windows)) {
+        format!("/{}", decoded)
+    } else {
+        decoded
+    };
+    file_path_to_module_name(std::path::Path::new(&full_path))
+}
+
+/// Strip Windows drive letter prefix from a path string.
+/// E.g. "C:/foo" → "/foo", "/foo" → "/foo"
+fn strip_drive_letter(path: &str) -> &str {
+    let bytes = path.as_bytes();
+    if bytes.len() >= 3
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && (bytes[2] == b'/' || bytes[2] == b'\\')
+    {
+        &path[2..]
+    } else {
+        path
+    }
+}
+
+/// Normalize a require module path string using the same rules:
+/// - Replace `.` separators (already done in require strings)
+/// - Lowercase all letters
+/// - If the last segment is "init", remove it
+pub fn normalize_require_path(module_path: &str) -> String {
+    let lowered = module_path.to_ascii_lowercase();
+    // If last segment is "init", strip it
+    if let Some(stripped) = lowered.strip_suffix(".init") {
+        if stripped.is_empty() {
+            // bare "init" → keep as "init" (edge case)
+            return lowered;
+        }
+        return stripped.to_string();
+    }
+    if lowered == "init" {
+        return lowered;
+    }
+    lowered
+}
+
+/// Extract the last segment from a dot-separated module name.
+/// E.g. "game.player" → "player", "player" → "player"
+pub fn module_last_segment(module_name: &str) -> &str {
+    match module_name.rfind('.') {
+        Some(pos) => &module_name[pos + 1..],
+        None => module_name,
+    }
+}
+
+/// Legacy wrapper: convert a file path to module paths (returns a Vec
+/// for backward compatibility, but now always contains 0 or 1 entry).
+pub fn file_to_module_paths(base: &Path, file: &Path, _patterns: &[String]) -> Vec<String> {
+    let _ = base; // no longer used
+    match file_path_to_module_name(file) {
+        Some(name) => vec![name],
+        None => Vec::new(),
+    }
 }
 
 /// Collect all .lua file paths in the workspace (for batch indexing).
@@ -449,65 +524,101 @@ mod tests {
         vec!["?.lua".to_string(), "?/init.lua".to_string()]
     }
 
+    // ── file_path_to_module_name tests ─────────────────────────────
+
     #[test]
-    fn regular_file_default_patterns() {
+    fn regular_file_module_name() {
+        let file = Path::new("/project/game/player.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game.player".to_string()));
+    }
+
+    #[test]
+    fn init_lua_strips_init_segment() {
+        let file = Path::new("/project/game/init.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game".to_string()));
+    }
+
+    #[test]
+    fn root_init_lua_returns_init() {
+        let file = Path::new("/init.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("init".to_string()));
+    }
+
+    #[test]
+    fn module_name_is_lowercased() {
+        let file = Path::new("/Project/Game/Player.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game.player".to_string()));
+    }
+
+    #[test]
+    fn no_base_stripping_full_path_preserved() {
+        // The full path (minus drive letter and .lua) becomes the module name
+        let file = Path::new("/workspace/src/utils/math.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("workspace.src.utils.math".to_string()));
+    }
+
+    #[test]
+    fn nested_init_lua() {
+        let file = Path::new("/project/game/systems/init.lua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game.systems".to_string()));
+    }
+
+    // ── normalize_require_path tests ───────────────────────────────
+
+    #[test]
+    fn normalize_strips_trailing_init() {
+        assert_eq!(normalize_require_path("game.init"), "game");
+    }
+
+    #[test]
+    fn normalize_bare_init_stays() {
+        assert_eq!(normalize_require_path("init"), "init");
+    }
+
+    #[test]
+    fn normalize_lowercases() {
+        assert_eq!(normalize_require_path("Game.Player"), "game.player");
+    }
+
+    #[test]
+    fn normalize_no_init_suffix() {
+        assert_eq!(normalize_require_path("game.player"), "game.player");
+    }
+
+    // ── module_last_segment tests ──────────────────────────────────
+
+    #[test]
+    fn last_segment_dotted() {
+        assert_eq!(module_last_segment("game.player"), "player");
+    }
+
+    #[test]
+    fn last_segment_single() {
+        assert_eq!(module_last_segment("player"), "player");
+    }
+
+    // ── Legacy file_to_module_paths wrapper ────────────────────────
+
+    #[test]
+    fn legacy_wrapper_regular_file() {
         let base = Path::new("/project");
         let file = Path::new("/project/game/player.lua");
         let result = file_to_module_paths(base, file, &default_patterns());
-        assert_eq!(result, vec!["game.player"]);
+        assert_eq!(result, vec!["project.game.player"]);
     }
 
     #[test]
-    fn init_lua_produces_short_and_long_module() {
+    fn legacy_wrapper_init_lua() {
         let base = Path::new("/project");
         let file = Path::new("/project/game/init.lua");
         let result = file_to_module_paths(base, file, &default_patterns());
-        assert!(result.contains(&"game".to_string()), "should contain 'game': {:?}", result);
-        assert!(result.contains(&"game.init".to_string()), "should contain 'game.init': {:?}", result);
-    }
-
-    #[test]
-    fn root_init_lua_no_empty_module() {
-        let base = Path::new("/project");
-        let file = Path::new("/project/init.lua");
-        let result = file_to_module_paths(base, file, &default_patterns());
-        assert!(!result.contains(&"".to_string()), "should not contain empty string: {:?}", result);
-        assert!(result.contains(&"init".to_string()), "should contain 'init': {:?}", result);
-    }
-
-    #[test]
-    fn custom_lib_prefix_pattern() {
-        let patterns = vec!["lib/?.lua".to_string()];
-        let base = Path::new("/project");
-        let file = Path::new("/project/lib/utils.lua");
-        let result = file_to_module_paths(base, file, &patterns);
-        assert!(result.contains(&"utils".to_string()), "should contain 'utils': {:?}", result);
-        assert!(result.contains(&"lib.utils".to_string()), "fallback should add 'lib.utils': {:?}", result);
-    }
-
-    #[test]
-    fn empty_patterns_only_fallback() {
-        let base = Path::new("/project");
-        let file = Path::new("/project/foo/bar.lua");
-        let result = file_to_module_paths(base, file, &[]);
-        assert_eq!(result, vec!["foo.bar"]);
-    }
-
-    #[test]
-    fn overlapping_prefix_suffix_no_panic() {
-        let patterns = vec!["very/long/prefix/?.lua".to_string()];
-        let base = Path::new("/project");
-        let file = Path::new("/project/a.lua");
-        let result = file_to_module_paths(base, file, &patterns);
-        assert!(result.contains(&"a".to_string()), "fallback should still work: {:?}", result);
-    }
-
-    #[test]
-    fn file_outside_base_returns_empty() {
-        let base = Path::new("/project");
-        let file = Path::new("/other/foo.lua");
-        let result = file_to_module_paths(base, file, &default_patterns());
-        assert!(result.is_empty());
+        assert_eq!(result, vec!["project.game"]);
     }
 
     #[test]

@@ -58,14 +58,13 @@ impl Default for RuntimeConfig {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct RequireConfig {
-    pub paths: Vec<String>,
+    /// Path aliases for require resolution, e.g. `{"@": "src"}`.
     pub aliases: HashMap<String, String>,
 }
 
 impl Default for RequireConfig {
     fn default() -> Self {
         Self {
-            paths: vec!["?.lua".to_string(), "?/init.lua".to_string()],
             aliases: HashMap::new(),
         }
     }

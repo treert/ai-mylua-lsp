@@ -9,6 +9,39 @@ pub fn hash_bytes(data: &[u8]) -> u64 {
     hasher.finish()
 }
 
+/// Percent-decode a URI path. Accumulates decoded bytes and interprets the
+/// final buffer as UTF-8, so multi-byte encodings (e.g. `%E4%B8%AD` → 中)
+/// are decoded correctly. Falls back to lossy decoding if the result is
+/// not valid UTF-8.
+pub fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        if b == b'%' && i + 2 < bytes.len() {
+            if let (Some(h), Some(l)) = (hex_val(bytes[i + 1]), hex_val(bytes[i + 2])) {
+                out.push((h << 4) | l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b);
+        i += 1;
+    }
+    String::from_utf8(out)
+        .unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
+}
+
+fn hex_val(b: u8) -> Option<u8> {
+    match b {
+        b'0'..=b'9' => Some(b - b'0'),
+        b'a'..=b'f' => Some(b - b'a' + 10),
+        b'A'..=b'F' => Some(b - b'A' + 10),
+        _ => None,
+    }
+}
+
 /// Thread-local cache of `\n` byte offsets for the last-seen source
 /// buffer. `ts_point_to_position` / `ts_node_to_range` hit this path
 /// hundreds of times per call to `build_summary`; without the cache
