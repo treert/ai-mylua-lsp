@@ -8,7 +8,7 @@
 
 本文档收集 `WorkspaceAggregation`（聚合层）与相关索引数据结构 / 泛型支持的**已知坑点**和**优化方向**。
 >
-> **当前状态**：以下条目在现网行为可见但**暂未造成严重回归**（除冷启动依赖丢失外），大多属于性能/精度层面的改进。实际排期取决于规模增长（>1 万文件）和诊断准确性需求。
+> **当前状态**：以下条目在现网行为可见但**暂未造成严重回归**，大多属于性能/精度层面的改进。实际排期取决于规模增长（>1 万文件）和诊断准确性需求。
 >
 > **关联文档**：
 > - 实现现状：[`index-architecture.md`](index-architecture.md)、[`../ai-readme.md`](../ai-readme.md) 「索引架构」章节
@@ -20,27 +20,9 @@
 
 代码位置：[`lsp/crates/mylua-lsp/src/aggregation.rs`](../lsp/crates/mylua-lsp/src/aggregation.rs)。
 
-### 1.1 [P1] ~~冷启动阶段 `require_by_return` 反向边丢失~~ ✅ 已修复
+### 1.1 ~~冷启动阶段 `require_by_return` 反向边丢失~~ ✅ 已修复
 
 > **已修复**：冷启动重构为 4 阶段流水线后，Phase 3 的 `build_initial` 在完整的 `require_map` + `summaries` 上一次性构建所有 shard，`resolve_module_to_uri` 不再受文件处理顺序影响。见 `aggregation.rs::build_initial`、`lib.rs::run_workspace_scan`。
->
-> 以下为原始问题描述，保留作为历史参考。
-
-- **动机**：`upsert_summary` 写 `require_by_return` 前调用 `resolve_module_to_uri(rb.module_path)`；若冷启动时被 require 的目标文件尚未建 `require_map`，返回 `None` 后这条反向依赖**永久丢失**（无幂等回填）。触发 cascade 失效时（`require_by_return` 驱动的诊断重跑）会漏掉这些文件，表现为"改了 `m.n`，引用它的 A 文件诊断没刷"。
-- **影响范围**：
-  - `aggregation.rs:192-202`（`upsert_summary` 的 require_bindings 分支）
-  - `aggregation.rs:236-238`（`set_require_mapping` — 当前只写 map，不触发回填）
-  - `workspace_scanner.rs`（冷启动文件遍历顺序）
-  - 间接影响诊断调度器的 cascade 完整性
-- **根因**：聚合层没有"待决反向边"队列；新 `require_map` 条目被写入时不主动扫已有 summary 补登反向边。
-- **建议方案**：
-  - (a) **最小改动**：在 `set_require_mapping` 里扫描 `summaries` 的 `require_bindings`，把 `module_path == 新注册路径` 的条目补登进 `require_by_return`。写操作 O(summaries × avg require_bindings)，冷启动一次性开销可接受。
-  - (b) **更稳**：维护一张 `pending_reverse_edges: HashMap<String, Vec<RequireDependant>>` 暂存未解析的边；`set_require_mapping` 命中时排空对应 bucket 并提升到 `require_by_return`。
-  - 无论哪种，`resolve_module_to_uri` 的 fallback 路径（`aggregation.rs:348-354`）命中时建议把结果回填进 `require_map`，避免每次 upsert 都重扫。
-- **验收**：
-  - 新增 `test_workspace.rs` 用例：随机顺序 upsert 一组互相 require 的文件 → 所有反向边齐全。
-  - 现有 `test_type_dependants.rs::test_cascade_*` 风格的用例增加 "A require B 但 B 先扫入" 的场景。
-- **风险**：`set_require_mapping` 当前是轻量操作（O(1) 写 HashMap），方案 (a) 把它变成 O(N) 线扫；若 workspace 扫描阶段大量调用它，可能明显拖慢。先压测 + 考虑批处理。
 
 ### 1.2 [P1] `signature_fingerprint` 粒度过粗导致过度失效
 
@@ -130,15 +112,11 @@
 | `type_dependants` 扫描时排除泛型参数名（防止 `T` 误连到真类 `T`） | `aggregation.rs:464-472` |
 | `self` 类型替换成 class 名（fluent-style 方法链） | `type_system.rs::substitute_self` |
 
-### 2.2 [P2] 函数级泛型的实参推断 ✅ 已实现（简化版本）
+### 2.2 ~~函数级泛型的实参推断~~ ✅ 已实现（简化版本）
 
-- **动机**：`@class Foo<T>` 上绑定的方法能 resolve；但**纯函数泛型**—— `---@generic T ---@param x T ---@return T` 这种不挂 class 的——**无法从调用点的实参类型反推 `T = string`**。`substitute_generics` 只接受显式的 `actual_params`（即 `Foo<string>` 里已经写死的）。
-- **已实现**：
-  - `FunctionSummary` 新增 `generic_params: Vec<String>` 字段，`build_function_summary` 收集 `@generic` 注解。
-  - `resolver.rs` 新增 `unify_function_generics()` 函数，实现顶层一级合一：`@param x T` + actual `string` → `T = string`，支持 `T?`（Union with nil）。
-  - `summary_builder::infer_call_return_type` 和 `hover::infer_call_return_fact` 在 plain function call 路径中调用泛型推断。
-  - 测试覆盖：`test_hover.rs` 新增 `hover_generic_function_infers_return_type_string` 和 `hover_generic_function_infers_return_type_number`。
-- **未覆盖（P3 追加）**：嵌套泛型合一（`List<T>` vs `List<string>`）、跨文件泛型函数调用的推断、`signature_help` / `diagnostics` 路径的泛型推断。
+> **已实现**：`FunctionSummary` 新增 `generic_params`，`resolver.rs` 新增 `unify_function_generics()` 实现顶层一级合一。测试覆盖见 `test_hover.rs`。
+>
+> **未覆盖（P3 追加）**：嵌套泛型合一（`List<T>` vs `List<string>`）、跨文件泛型函数调用的推断、`signature_help` / `diagnostics` 路径的泛型推断。
 
 ### 2.3 [P2] `is_named_type_compatible` 忽略泛型实参 → 假阴性
 
@@ -190,22 +168,64 @@
 
 ---
 
-## 3. 推荐落地顺序
+## 3. 内存优化：语法树 & 文件文本 LRU 缓存
 
-按"影响 × 实现成本"排序，先做收益大 / 成本低的：
+### 3.1 [P2] 语法树 / 文件文本不需要常驻内存，可用 LRU 缓存按需持有
 
-1. ~~**1.1 require_by_return 回填**（P1）~~ ✅ 已修复（4 阶段流水线重构）
-2. **1.3 `uri_priority_key` 路径段匹配**（P2）——一小时工作量，修正一个隐藏的行为偏差。
-3. **2.3 泛型 variance 诊断**（P2）——把 `_` 换成递归比较，收益明显。默认 off / warning 降低风险。
-4. **1.2 per-name fingerprint**（P1）——改动较大，但对大型工作区的 cache 命中率有实质提升；排一个 sprint 做。
-5. **1.4 反向图查重数据结构**（P2）——性能优化，在规模到 1 万+ 文件前不紧迫。
-6. **1.5 `collect_affected_names` 扩展**（P2）——正确性修复，随 1.2 一起做。
-7. **2.2 函数级泛型推断**（P2）——用户可见价值高，但合一实现需要认真设计。
-8. 其余 P3 项按需补做。
+- **动机**：当前 `documents: HashMap<Uri, Document>` 为每个工作区文件常驻持有 `text + tree + scope`。在大型项目（数百至上千个 Lua 文件）中，这些数据的内存占用会线性增长，但实际上大部分文件的语法树在大部分时间内并不被访问。由于 Tree-sitter 全量解析一个几千行文件也只需毫秒级，语法树完全可以按需构建、用完释放。
+- **核心思路**：**Summary 常驻，AST 按需缓存。**
+  - `DocumentSummary`（所有文件）→ 常驻内存，这是类型系统和聚合层的基础，体积轻量（KB 级）。
+  - `Document`（text + tree + scope）→ 改为 `LruCache<Uri, Document>`，只保留最近使用的 N 个文件（建议 10~20）。
+- **影响范围**：
+  - `lib.rs` / `document.rs` 中的 `documents` 存储结构
+  - `didOpen` / `didChange` / `didClose` 的文档生命周期管理
+  - 所有需要访问语法树的消费方（diagnostics、find references、rename 等）
+- **各场景影响评估**：
+
+  | 场景 | 影响 | 说明 |
+  |------|------|------|
+  | 当前文件编辑/诊断 | 无 | 当前文件一定在 LRU 中（最近使用） |
+  | Goto / Hover | 无 | 查 Summary 即可，不需要语法树 |
+  | 补全 | 无 | 当前文件语法树 + 其他文件 Summary |
+  | Find References | 轻微 | 需遍历多文件 AST，cache miss 时重新解析，但速度快 |
+  | Rename | 轻微 | 同上 |
+  | 增量解析 | 需权衡 | 被淘汰的文件丢失旧 tree，只能全量解析（但全量也很快） |
+
+- **建议方案**：
+  - (a) `documents` 改为 `LruCache<Uri, Document>`（可用 `lru` crate），容量 10~20。
+  - (b) 提供 `get_or_parse(uri) -> &Document` 方法：cache hit 直接返回；cache miss 时从磁盘读文件 + 全量解析 + 放入 LRU。
+  - (c) `didOpen` / `didChange` 同步的文本直接更新 LRU 条目并提升到头部；`didClose` 后文本可从 LRU 自然淘汰（不必立即释放）。
+  - (d) Find References / Rename 等全局操作临时解析的文件可选择不放入 LRU，避免污染缓存。
+  - (e) 文件 text 也可以不常驻：未打开的文件需要时从磁盘读取即可（IO 也很快）。
+- **关于增量解析的权衡**：
+  - 有旧 tree → `tree.edit()` + `parser.parse()` = 增量解析，O(编辑大小)
+  - 无旧 tree（被 LRU 淘汰）→ 全量解析，O(文件大小)
+  - 但用户正在编辑的文件不会被淘汰（最近使用），被淘汰的文件说明用户很久没碰，下次全量解析完全可接受
+- **验收**：
+  - 压测：500+ 文件工作区，LRU 容量 15，常规编辑 + goto + hover + find references 全流程无功能回归
+  - 内存对比：常驻方案 vs LRU 方案在 500 文件工作区下的 RSS 差异
+  - 增量解析 cache miss 场景的延迟测量（应 < 10ms）
+- **风险**：
+  - 低。行为上对用户完全透明，唯一可感知的差异是极端场景下（如 Find References 遍历大量文件）可能有微小的额外延迟
+  - 需要确保 `get_or_parse` 的并发安全性（当前架构是单线程处理 LSP 请求，风险可控）
 
 ---
 
-## 4. 维护约定
+## 4. 推荐落地顺序
+
+按"影响 × 实现成本"排序，先做收益大 / 成本低的：
+
+1. **1.3 `uri_priority_key` 路径段匹配**（P2）——一小时工作量，修正一个隐藏的行为偏差。
+2. **2.3 泛型 variance 诊断**（P2）——把 `_` 换成递归比较，收益明显。默认 off / warning 降低风险。
+3. **1.2 per-name fingerprint**（P1）——改动较大，但对大型工作区的 cache 命中率有实质提升；排一个 sprint 做。
+4. **1.4 反向图查重数据结构**（P2）——性能优化，在规模到 1 万+ 文件前不紧迫。
+5. **1.5 `collect_affected_names` 扩展**（P2）——正确性修复，随 1.2 一起做。
+6. **3.1 语法树 / 文件文本 LRU 缓存**（P2）——内存优化，Summary 常驻 + AST 按需缓存；对大型工作区内存占用有实质改善，实现成本中等。
+7. 其余 P3 项按需补做。
+
+---
+
+## 5. 维护约定
 
 - 每项落地后，在本文档对应条目下补 “**已完成于 <commit-hash / 日期>**”。
 - 若条目导致 `DocumentSummary` / `TypeCandidate` 等磁盘可序列化结构变化，**必须** bump `lsp/crates/mylua-lsp/src/summary.rs` 的 `CACHE_SCHEMA_VERSION`。
@@ -213,7 +233,7 @@
 
 ---
 
-## 5. 新增能力时的维护清单
+## 6. 新增能力时的维护清单
 
 - **新增诊断类别**：在 `DiagnosticsConfig` 加字段 + 默认 severity；默认开启时需在 fixture 上跑一遍确认不会在真实项目上产生大量噪声
 - **新增 LSP capability**：在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 对应集成测试文件
