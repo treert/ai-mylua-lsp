@@ -52,9 +52,9 @@ impl FileFilter {
 
     /// Returns `true` if a directory should be recursed into.
     /// Skips directories that are themselves matched by an exclude pattern.
-    /// Note: currently only used by `should_index_path` callers; the main
-    /// walk uses `process_read_dir` for pruning.
-    #[allow(dead_code)]
+    /// Currently only used by unit tests; the main walk uses
+    /// `process_read_dir` for pruning.
+    #[cfg(test)]
     pub(crate) fn should_enter_dir(&self, relative_dir: &str) -> bool {
         if is_builtin_cache_path(relative_dir) {
             return false;
@@ -235,16 +235,6 @@ pub fn module_last_segment(module_name: &str) -> &str {
     }
 }
 
-/// Legacy wrapper: convert a file path to module paths (returns a Vec
-/// for backward compatibility, but now always contains 0 or 1 entry).
-pub fn file_to_module_paths(base: &Path, file: &Path, _patterns: &[String]) -> Vec<String> {
-    let _ = base; // no longer used
-    match file_path_to_module_name(file) {
-        Some(name) => vec![name],
-        None => Vec::new(),
-    }
-}
-
 /// Collect all .lua file paths in the workspace (for batch indexing).
 pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
@@ -335,7 +325,7 @@ fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
 ///   in input order.
 ///
 /// Returned paths are suitable to pass as additional roots to
-/// `scan_workspace_lua_files` / `collect_lua_files`.
+/// `scan_and_collect_lua_files` / `collect_lua_files`.
 pub fn resolve_library_roots(
     library: &[String],
     workspace_roots: &[PathBuf],
@@ -520,10 +510,6 @@ mod tests {
     use super::*;
     use std::path::Path;
 
-    fn default_patterns() -> Vec<String> {
-        vec!["?.lua".to_string(), "?/init.lua".to_string()]
-    }
-
     // ── file_path_to_module_name tests ─────────────────────────────
 
     #[test]
@@ -601,24 +587,6 @@ mod tests {
     #[test]
     fn last_segment_single() {
         assert_eq!(module_last_segment("player"), "player");
-    }
-
-    // ── Legacy file_to_module_paths wrapper ────────────────────────
-
-    #[test]
-    fn legacy_wrapper_regular_file() {
-        let base = Path::new("/project");
-        let file = Path::new("/project/game/player.lua");
-        let result = file_to_module_paths(base, file, &default_patterns());
-        assert_eq!(result, vec!["project.game.player"]);
-    }
-
-    #[test]
-    fn legacy_wrapper_init_lua() {
-        let base = Path::new("/project");
-        let file = Path::new("/project/game/init.lua");
-        let result = file_to_module_paths(base, file, &default_patterns());
-        assert_eq!(result, vec!["project.game"]);
     }
 
     #[test]
