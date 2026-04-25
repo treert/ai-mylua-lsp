@@ -26,9 +26,11 @@ lsp/
 
 | 模块 | 职责 |
 |------|------|
-| `lib.rs` | Backend 定义、LSP handler 分发、索引状态机 |
+| `lib.rs` | Backend 定义、模块导出、核心方法（文档同步 / 索引触发） |
+| `handlers.rs` | `impl LanguageServer for Backend`（所有 LSP handler） |
+| `indexing.rs` | 冷启动扫描流水线、诊断消费者循环、辅助函数 |
 | `scope.rs` | 作用域树构建与局部变量解析 |
-| `summary.rs` / `summary_builder.rs` | 文件摘要结构 / AST → 摘要构建 |
+| `summary.rs` / `summary_builder/` | 文件摘要结构 / AST → 摘要构建（7 个子模块） |
 | `aggregation.rs` | 工作区聚合索引（全局符号表） |
 | `workspace_scanner.rs` | 文件扫描 + require 路径解析 + module_index |
 | `emmy.rs` | EmmyLua 注解解析（类型表达式、@class/@field/@param 等） |
