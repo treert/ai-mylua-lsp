@@ -328,9 +328,20 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 visible_after_byte: node.end_byte(),
                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                 selection_range: range,
-                type_fact: Some(type_fact),
+                type_fact: Some(type_fact.clone()),
                 bound_class: None,
             });
+
+            // Traverse anonymous function bodies for scope tree completeness
+            if val.kind() == "function_definition" {
+                if let Some(body) = val.child_by_field_name("body") {
+                    let params = match &type_fact {
+                        TypeFact::Known(KnownType::Function(sig)) => sig.params.clone(),
+                        _ => Vec::new(),
+                    };
+                    visit_function_body(ctx, body, &params, false, "");
+                }
+            }
         }
     }
 }
@@ -474,6 +485,7 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     let fs = build_function_summary(ctx, &name, node, body);
     let func_id = ctx.alloc_function_id();
+    let params = fs.signature.params.clone();
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
@@ -495,6 +507,11 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
         type_fact: Some(TypeFact::Known(KnownType::FunctionRef(func_id))),
         bound_class: None,
     });
+
+    // Traverse function body to populate scope tree with parameters and locals
+    if let Some(b) = body {
+        visit_function_body(ctx, b, &params, false, "");
+    }
 }
 
 fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -507,6 +524,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     let fs = build_function_summary(ctx, &name, node, body);
     let func_id = ctx.alloc_function_id();
+    let params = fs.signature.params.clone();
+    let is_method = name.contains(':');
+    let class_prefix = crate::type_system::class_prefix_of(&name).to_string();
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
@@ -550,6 +570,12 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         }
         false
     };
+
+    // Traverse function body to populate scope tree with parameters and locals
+    // (must happen before the early-return for local table shapes)
+    if let Some(b) = body {
+        visit_function_body(ctx, b, &params, is_method, &class_prefix);
+    }
 
     // Base is a local table → field already written to shape, no global.
     if wrote_to_shape {
@@ -1094,4 +1120,138 @@ fn register_nested_field_write(
     } else {
         false
     }
+}
+
+// ---------------------------------------------------------------------------
+// Function body scope traversal
+// ---------------------------------------------------------------------------
+
+/// Push a FunctionBody scope, register parameters + implicit self, then
+/// recursively visit the body's statements. This populates the scope tree
+/// with function-internal declarations so query-time `resolve_type` works
+/// for locals inside functions.
+fn visit_function_body(
+    ctx: &mut BuildContext,
+    func_body: tree_sitter::Node,
+    params: &[ParamInfo],
+    is_method: bool,
+    class_prefix: &str,
+) {
+    ctx.push_scope(ScopeKind::FunctionBody, func_body.start_byte(), func_body.end_byte());
+
+    // Register implicit self for colon methods (before explicit params)
+    if is_method {
+        let db = func_body.start_byte();
+        let self_type = if !class_prefix.is_empty() {
+            Some(TypeFact::Known(KnownType::EmmyType(class_prefix.to_string())))
+        } else {
+            None
+        };
+        ctx.add_scoped_decl(ScopeDecl {
+            name: "self".to_string(),
+            kind: DefKind::Parameter,
+            decl_byte: db,
+            visible_after_byte: db,
+            range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
+            selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
+            type_fact: self_type,
+            bound_class: None,
+        });
+    }
+
+    // Register parameters from the function_body's parameter list
+    if let Some(param_list) = func_body.child_by_field_name("parameters") {
+        register_params_into_scope(ctx, param_list, params);
+    }
+
+    // Recursively visit the body's statements
+    visit_nested_block(ctx, func_body);
+
+    ctx.pop_scope();
+}
+
+/// Register AST parameters into the current scope, enriching them with
+/// Emmy type facts from `emmy_params` when available.
+fn register_params_into_scope(
+    ctx: &mut BuildContext,
+    param_list: tree_sitter::Node,
+    emmy_params: &[ParamInfo],
+) {
+    for i in 0..param_list.child_count() {
+        let Some(child) = param_list.child(i as u32) else { continue };
+        match child.kind() {
+            "identifier" => {
+                register_single_param(ctx, child, emmy_params);
+            }
+            "name_list" => {
+                for j in 0..child.named_child_count() {
+                    if let Some(id) = child.named_child(j as u32) {
+                        if id.kind() == "identifier" {
+                            register_single_param(ctx, id, emmy_params);
+                        }
+                    }
+                }
+            }
+            "varargs" => {
+                // `...` parameter — register as a vararg decl
+                let db = child.start_byte();
+                ctx.add_scoped_decl(ScopeDecl {
+                    name: "...".to_string(),
+                    kind: DefKind::Parameter,
+                    decl_byte: db,
+                    visible_after_byte: db,
+                    range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
+                    type_fact: emmy_params.iter()
+                        .find(|p| p.name == "...")
+                        .map(|p| p.type_fact.clone())
+                        .filter(|tf| *tf != TypeFact::Unknown),
+                    bound_class: None,
+                });
+            }
+            _ => {
+                // Anonymous `...` token
+                if !child.is_named() && node_text(child, ctx.source) == "..." {
+                    let db = child.start_byte();
+                    ctx.add_scoped_decl(ScopeDecl {
+                        name: "...".to_string(),
+                        kind: DefKind::Parameter,
+                        decl_byte: db,
+                        visible_after_byte: db,
+                        range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
+                        selection_range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
+                        type_fact: emmy_params.iter()
+                            .find(|p| p.name == "...")
+                            .map(|p| p.type_fact.clone())
+                            .filter(|tf| *tf != TypeFact::Unknown),
+                        bound_class: None,
+                    });
+                }
+            }
+        }
+    }
+}
+
+/// Register a single named parameter into the current scope.
+fn register_single_param(
+    ctx: &mut BuildContext,
+    id_node: tree_sitter::Node,
+    emmy_params: &[ParamInfo],
+) {
+    let name = node_text(id_node, ctx.source).to_string();
+    let type_fact = emmy_params.iter()
+        .find(|p| p.name == name)
+        .map(|p| p.type_fact.clone())
+        .filter(|tf| *tf != TypeFact::Unknown);
+    let db = id_node.start_byte();
+    ctx.add_scoped_decl(ScopeDecl {
+        name,
+        kind: DefKind::Parameter,
+        decl_byte: db,
+        visible_after_byte: db,
+        range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
+        selection_range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
+        type_fact,
+        bound_class: None,
+    });
 }
