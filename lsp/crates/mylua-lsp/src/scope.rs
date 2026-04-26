@@ -368,6 +368,14 @@ impl<'a> TreeBuilder<'a> {
 // ---------------------------------------------------------------------------
 
 impl ScopeTree {
+    /// Construct a ScopeTree from a pre-built scope vector.
+    /// Used by `build_file_analysis` which builds scopes during summary construction.
+    pub fn from_scopes(scopes: Vec<Scope>) -> Self {
+        ScopeTree { scopes }
+    }
+}
+
+impl ScopeTree {
     pub fn resolve(&self, byte_offset: usize, name: &str, uri: &Uri) -> Option<Definition> {
         let decl = self.resolve_decl(byte_offset, name)?;
         Some(Definition {

@@ -14,6 +14,7 @@ use crate::summary::*;
 use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::*;
 use crate::util::{node_text, LineIndex};
+use crate::scope::{Scope, ScopeKind, ScopeDecl, ScopeTree};
 
 use call_sites::collect_call_sites;
 use fingerprint::{hash_bytes, compute_signature_fingerprint};
@@ -45,6 +46,8 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
         pending_generic_params: Vec::new(),
         module_return_type: None,
         module_return_range: None,
+        scopes: Vec::new(),
+        scope_stack: Vec::new(),
     };
 
     let root = tree.root_node();
@@ -153,6 +156,10 @@ pub(crate) struct BuildContext<'a> {
     pub(crate) module_return_type: Option<TypeFact>,
     /// Source range of the file-level `return` statement.
     pub(crate) module_return_range: Option<crate::util::ByteRange>,
+    /// Scope stack for building the ScopeTree alongside the summary.
+    pub(crate) scopes: Vec<Scope>,
+    /// Stack of scope indices — top is the current innermost scope.
+    pub(crate) scope_stack: Vec<usize>,
 }
 
 impl<'a> BuildContext<'a> {
@@ -170,5 +177,59 @@ impl<'a> BuildContext<'a> {
 
     pub(crate) fn take_pending_type(&mut self) -> Option<EmmyType> {
         self.pending_type_annotation.take()
+    }
+
+    /// Push a new scope onto the stack. Returns the scope id.
+    pub(crate) fn push_scope(&mut self, kind: ScopeKind, start: usize, end: usize) -> usize {
+        let id = self.scopes.len();
+        let parent = self.scope_stack.last().copied();
+        self.scopes.push(Scope {
+            kind,
+            byte_start: start,
+            byte_end: end,
+            parent,
+            children: Vec::new(),
+            declarations: Vec::new(),
+        });
+        if let Some(pid) = parent {
+            self.scopes[pid].children.push(id);
+        }
+        self.scope_stack.push(id);
+        id
+    }
+
+    /// Pop the current scope from the stack.
+    pub(crate) fn pop_scope(&mut self) {
+        self.scope_stack.pop();
+    }
+
+    /// Add a declaration to the current scope.
+    pub(crate) fn add_scoped_decl(&mut self, decl: ScopeDecl) {
+        if let Some(&scope_id) = self.scope_stack.last() {
+            self.scopes[scope_id].declarations.push(decl);
+        }
+    }
+
+    /// Resolve a name by walking the scope stack from innermost to outermost.
+    /// This is the build-time equivalent of `ScopeTree::resolve_decl`.
+    pub(crate) fn resolve_in_build_scopes(&self, name: &str) -> Option<&ScopeDecl> {
+        for &scope_id in self.scope_stack.iter().rev() {
+            let scope = &self.scopes[scope_id];
+            let mut best: Option<&ScopeDecl> = None;
+            for decl in &scope.declarations {
+                if decl.name == name {
+                    best = Some(decl);
+                }
+            }
+            if best.is_some() {
+                return best;
+            }
+        }
+        None
+    }
+
+    /// Extract the built scopes into a ScopeTree, consuming the scope data.
+    pub(crate) fn take_scope_tree(&mut self) -> ScopeTree {
+        ScopeTree::from_scopes(std::mem::take(&mut self.scopes))
     }
 }
