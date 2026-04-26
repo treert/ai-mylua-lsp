@@ -171,9 +171,4 @@ impl<'a> BuildContext<'a> {
     pub(crate) fn take_pending_type(&mut self) -> Option<EmmyType> {
         self.pending_type_annotation.take()
     }
-
-    /// Look up a function by name and return its ID if it exists.
-    pub(crate) fn get_function_id(&self, name: &str) -> Option<FunctionSummaryId> {
-        self.function_name_to_id.get(name).copied()
-    }
 }
