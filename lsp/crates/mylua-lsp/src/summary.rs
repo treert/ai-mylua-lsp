@@ -199,13 +199,17 @@ pub enum TypeFactSource {
 }
 
 impl DocumentSummary {
-    /// Look up a function summary by name (linear search through all summaries).
-    /// This is the reverse lookup used during resolution when a function name
-    /// is available but we need the `FunctionSummaryId` to query `function_summaries`.
-    ///
-    /// Prefer this over iterating directly: it's a semantic anchor point
-    /// for all name-based lookups across consumers.
+    /// Look up a function summary by name using `function_name_index` (O(1)).
+    /// Falls back to linear scan when the name isn't in the index (e.g. local
+    /// functions looked up by call_hierarchy, or colon-qualified names).
     pub fn get_function_by_name(&self, name: &str) -> Option<&FunctionSummary> {
+        // O(1) path: try the normalized (dot) form in the index first.
+        let normalized = name.replace(':', ".");
+        if let Some(id) = self.function_name_index.get(&normalized) {
+            return self.function_summaries.get(id);
+        }
+        // Fallback: linear scan for non-indexed entries (local functions
+        // during query time when called from call_hierarchy etc.).
         self.function_summaries
             .values()
             .find(|fs| fs.name == name)
