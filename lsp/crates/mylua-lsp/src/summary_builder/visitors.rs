@@ -369,6 +369,15 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let func_id = ctx.alloc_function_id();
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
+
+    // Register in local_type_facts so consumers can discover this function
+    // via type_inference → local_type_facts → FunctionRef(id) path.
+    ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
+        name: name.clone(),
+        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
+        source: TypeFactSource::Assignment,
+        range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+    });
 }
 
 fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -380,7 +389,6 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let body = node.child_by_field_name("body");
 
     let fs = build_function_summary(ctx, &name, node, body);
-    let sig_for_global = fs.signature.clone();
     let func_id = ctx.alloc_function_id();
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
@@ -415,7 +423,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
                     shape.set_field(field_name.to_string(), FieldInfo {
                         name: field_name.to_string(),
-                        type_fact: TypeFact::Known(KnownType::Function(sig_for_global.clone())),
+                        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
                         def_range: Some(ctx.line_index.ts_node_to_byte_range(name_node, ctx.source)),
                         assignment_count: 1,
                     });
@@ -431,12 +439,16 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         return;
     }
 
+    // Global function: write to function_name_index with colon→dot normalization.
+    let normalized = name.replace(':', ".");
+    ctx.function_name_index.insert(normalized, func_id);
+
     // Base is not a local (or bare name) → register as global contribution
     // (e.g. `function Player.new()` where Player is a global).
     ctx.global_contributions.push(GlobalContribution {
         name: name.clone(),
         kind: GlobalContributionKind::Function,
-        type_fact: TypeFact::Known(KnownType::Function(sig_for_global)),
+        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
         selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
     });
