@@ -32,6 +32,10 @@ pub struct ScopeDecl {
     pub visible_after_byte: usize,
     pub range: ByteRange,
     pub selection_range: ByteRange,
+    /// Inferred type for this declaration; None when unknown.
+    pub type_fact: Option<crate::type_system::TypeFact>,
+    /// Class anchor binding for Phase 2; None when not yet resolved.
+    pub bound_class: Option<String>,
 }
 
 #[derive(Debug)]
@@ -197,6 +201,8 @@ impl<'a> TreeBuilder<'a> {
                         visible_after_byte: db,
                         range: self.line_index.ts_node_to_byte_range(node, self.source),
                         selection_range: self.line_index.ts_node_to_byte_range(name_node, self.source),
+                        type_fact: None,
+                        bound_class: None,
                     });
                 }
                 self.visit_children(node, child_scope);
@@ -220,6 +226,8 @@ impl<'a> TreeBuilder<'a> {
                                     visible_after_byte: db,
                                     range: self.line_index.ts_node_to_byte_range(node, self.source),
                                     selection_range: self.line_index.ts_node_to_byte_range(id_node, self.source),
+                                    type_fact: None,
+                                    bound_class: None,
                                 });
                             }
                         }
@@ -259,6 +267,8 @@ impl<'a> TreeBuilder<'a> {
                     visible_after_byte: db,
                     range: self.line_index.ts_node_to_byte_range(node, self.source),
                     selection_range: self.line_index.ts_node_to_byte_range(name_node, self.source),
+                    type_fact: None,
+                    bound_class: None,
                 });
             }
         }
@@ -277,6 +287,8 @@ impl<'a> TreeBuilder<'a> {
                             visible_after_byte: db,
                             range: self.line_index.ts_node_to_byte_range(child, self.source),
                             selection_range: self.line_index.ts_node_to_byte_range(child, self.source),
+                            type_fact: None,
+                            bound_class: None,
                         });
                     } else if child.kind() == "name_list" {
                         for j in 0..child.named_child_count() {
@@ -290,6 +302,8 @@ impl<'a> TreeBuilder<'a> {
                                         visible_after_byte: db,
                                         range: self.line_index.ts_node_to_byte_range(id, self.source),
                                         selection_range: self.line_index.ts_node_to_byte_range(id, self.source),
+                                        type_fact: None,
+                                        bound_class: None,
                                     });
                                 }
                             }
@@ -313,6 +327,8 @@ impl<'a> TreeBuilder<'a> {
                             visible_after_byte: db,
                             range: self.line_index.ts_node_to_byte_range(func_body, self.source),
                             selection_range: self.line_index.ts_node_to_byte_range(func_body, self.source),
+                            type_fact: None,
+                            bound_class: None,
                         });
                     }
                 }
@@ -338,6 +354,8 @@ impl<'a> TreeBuilder<'a> {
                         visible_after_byte: visible_after,
                         range: self.line_index.ts_node_to_byte_range(stmt_node, self.source),
                         selection_range: self.line_index.ts_node_to_byte_range(child, self.source),
+                        type_fact: None,
+                        bound_class: None,
                     });
                 }
             }
@@ -417,6 +435,14 @@ impl ScopeTree {
                 None => return None,
             }
         }
+    }
+
+    pub fn resolve_type(&self, byte_offset: usize, name: &str) -> Option<&crate::type_system::TypeFact> {
+        self.resolve_decl(byte_offset, name)?.type_fact.as_ref()
+    }
+
+    pub fn resolve_bound_class(&self, byte_offset: usize, name: &str) -> Option<&str> {
+        self.resolve_decl(byte_offset, name)?.bound_class.as_deref()
     }
 
     fn innermost_scope(&self, byte_offset: usize) -> Option<usize> {
