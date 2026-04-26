@@ -1,7 +1,9 @@
 use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, parse_type_from_str, EmmyAnnotation, EmmyType};
+use crate::scope::{ScopeKind, ScopeDecl};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape};
 use crate::type_system::*;
+use crate::types::DefKind;
 use crate::util::{node_text, extract_string_literal};
 
 use super::BuildContext;
@@ -14,8 +16,11 @@ use super::fingerprint::{merge_types, hash_function_signature};
 // ---------------------------------------------------------------------------
 
 pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
+    ctx.push_scope(ScopeKind::File, root.start_byte(), root.end_byte());
+
     let mut cursor = root.walk();
     if !cursor.goto_first_child() {
+        ctx.pop_scope();
         return;
     }
     loop {
@@ -60,6 +65,8 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             break;
         }
     }
+
+    ctx.pop_scope();
 }
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -91,8 +98,65 @@ pub(super) fn find_named_child_by_kind<'a>(
 }
 
 fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    let scope_kind = match node.kind() {
+        "do_statement" => Some(ScopeKind::DoBlock),
+        "while_statement" => Some(ScopeKind::WhileBlock),
+        "repeat_statement" => Some(ScopeKind::RepeatBlock),
+        "if_statement" | "if_clause" => Some(ScopeKind::IfThenBlock),
+        "elseif_clause" => Some(ScopeKind::ElseIfBlock),
+        "else_clause" => Some(ScopeKind::ElseBlock),
+        "for_numeric_statement" => Some(ScopeKind::ForNumeric),
+        "for_generic_statement" => Some(ScopeKind::ForGeneric),
+        _ => None,
+    };
+    if let Some(kind) = scope_kind {
+        ctx.push_scope(kind, node.start_byte(), node.end_byte());
+    }
+
+    // Register for-loop variables into scope
+    match node.kind() {
+        "for_numeric_statement" => {
+            if let Some(name_node) = node.child_by_field_name("name") {
+                let db = name_node.start_byte();
+                ctx.add_scoped_decl(ScopeDecl {
+                    name: node_text(name_node, ctx.source).to_string(),
+                    kind: DefKind::ForVariable,
+                    decl_byte: db,
+                    visible_after_byte: db,
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+                    type_fact: None,
+                    bound_class: None,
+                });
+            }
+        }
+        "for_generic_statement" => {
+            if let Some(names_node) = node.child_by_field_name("names") {
+                for i in 0..names_node.named_child_count() {
+                    if let Some(id_node) = names_node.named_child(i as u32) {
+                        if id_node.kind() == "identifier" {
+                            let db = id_node.start_byte();
+                            ctx.add_scoped_decl(ScopeDecl {
+                                name: node_text(id_node, ctx.source).to_string(),
+                                kind: DefKind::ForVariable,
+                                decl_byte: db,
+                                visible_after_byte: db,
+                                range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                                selection_range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
+                                type_fact: None,
+                                bound_class: None,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+
     let mut cursor = node.walk();
     if !cursor.goto_first_child() {
+        if scope_kind.is_some() { ctx.pop_scope(); }
         return;
     }
     loop {
@@ -122,6 +186,8 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
             break;
         }
     }
+
+    if scope_kind.is_some() { ctx.pop_scope(); }
 }
 
 // ---------------------------------------------------------------------------
@@ -169,9 +235,19 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let type_fact = emmy_type_to_fact(type_expr);
                 ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                     name: name.clone(),
-                    type_fact,
+                    type_fact: type_fact.clone(),
                     source: TypeFactSource::EmmyAnnotation,
                     range,
+                });
+                ctx.add_scoped_decl(ScopeDecl {
+                    name: name.clone(),
+                    kind: DefKind::LocalVariable,
+                    decl_byte: name_node.start_byte(),
+                    visible_after_byte: node.end_byte(),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: range,
+                    type_fact: Some(type_fact),
+                    bound_class: None,
                 });
                 continue;
             }
@@ -184,9 +260,19 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             let type_fact = returns.get(i).cloned().unwrap_or(TypeFact::Unknown);
             ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                 name: name.clone(),
-                type_fact,
+                type_fact: type_fact.clone(),
                 source: TypeFactSource::Assignment,
                 range,
+            });
+            ctx.add_scoped_decl(ScopeDecl {
+                name: name.clone(),
+                kind: DefKind::LocalVariable,
+                decl_byte: name_node.start_byte(),
+                visible_after_byte: node.end_byte(),
+                range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                selection_range: range,
+                type_fact: Some(type_fact),
+                bound_class: None,
             });
             continue;
         }
@@ -197,13 +283,24 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         if let Some(val) = value_node {
             if let Some(rb) = try_extract_require(ctx, &name, val) {
                 ctx.require_bindings.push(rb);
+                let require_type_fact = TypeFact::Stub(SymbolicStub::RequireRef {
+                    module_path: ctx.require_bindings.last().unwrap().module_path.clone(),
+                });
                 ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                     name: name.clone(),
-                    type_fact: TypeFact::Stub(SymbolicStub::RequireRef {
-                        module_path: ctx.require_bindings.last().unwrap().module_path.clone(),
-                    }),
+                    type_fact: require_type_fact.clone(),
                     source: TypeFactSource::RequireBinding,
                     range,
+                });
+                ctx.add_scoped_decl(ScopeDecl {
+                    name: name.clone(),
+                    kind: DefKind::LocalVariable,
+                    decl_byte: name_node.start_byte(),
+                    visible_after_byte: node.end_byte(),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: range,
+                    type_fact: Some(require_type_fact),
+                    bound_class: None,
                 });
                 continue;
             }
@@ -220,9 +317,19 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
                 name: name.clone(),
-                type_fact,
+                type_fact: type_fact.clone(),
                 source: TypeFactSource::Assignment,
                 range,
+            });
+            ctx.add_scoped_decl(ScopeDecl {
+                name: name.clone(),
+                kind: DefKind::LocalVariable,
+                decl_byte: name_node.start_byte(),
+                visible_after_byte: node.end_byte(),
+                range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                selection_range: range,
+                type_fact: Some(type_fact),
+                bound_class: None,
             });
         }
     }
@@ -377,6 +484,16 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
         type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
         source: TypeFactSource::Assignment,
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+    });
+    ctx.add_scoped_decl(ScopeDecl {
+        name: name.clone(),
+        kind: DefKind::LocalFunction,
+        decl_byte: name_node.start_byte(),
+        visible_after_byte: name_node.start_byte(),
+        range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+        selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+        type_fact: Some(TypeFact::Known(KnownType::FunctionRef(func_id))),
+        bound_class: None,
     });
 }
 
