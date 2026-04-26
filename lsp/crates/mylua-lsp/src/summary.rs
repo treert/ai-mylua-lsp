@@ -23,6 +23,12 @@ pub struct DocumentSummary {
     /// Note: Must maintain a reverse mapping (name → ID) in callers that need
     /// to look up functions by name. See `summary_builder/mod.rs::BuildContext::function_name_to_id`.
     pub function_summaries: HashMap<FunctionSummaryId, FunctionSummary>,
+    /// Reverse index: function name → FunctionSummaryId.
+    /// Only contains **global** functions. Colon-separated names are normalized
+    /// to dot (e.g. `"Player:new"` → `"Player.new"`).
+    /// Local functions are accessed via `local_type_facts` → `FunctionRef(id)` instead.
+    #[serde(default)]
+    pub function_name_index: HashMap<String, FunctionSummaryId>,
     /// `---@class`, `---@alias`, `---@enum` definitions.
     pub type_definitions: Vec<TypeDefinition>,
     /// Key local variables' inferred type facts.

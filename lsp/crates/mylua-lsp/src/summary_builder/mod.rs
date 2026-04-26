@@ -34,6 +34,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
         global_contributions: Vec::new(),
         function_summaries: HashMap::new(),
         function_name_to_id: HashMap::new(),
+        function_name_index: HashMap::new(),
         type_definitions: Vec::new(),
         local_type_facts: HashMap::new(),
         table_shapes: HashMap::new(),
@@ -60,6 +61,7 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
         require_bindings: ctx.require_bindings,
         global_contributions: ctx.global_contributions,
         function_summaries: ctx.function_summaries,
+        function_name_index: ctx.function_name_index,
         type_definitions: ctx.type_definitions,
         local_type_facts: ctx.local_type_facts,
         table_shapes: ctx.table_shapes,
@@ -131,6 +133,10 @@ pub(crate) struct BuildContext<'a> {
     /// Reverse mapping: function name → FunctionSummaryId.
     /// Built during `visit_top_level` and used by expression type inference.
     pub(crate) function_name_to_id: HashMap<String, FunctionSummaryId>,
+    /// Exported reverse index: global function name (colon→dot normalized) → FunctionSummaryId.
+    /// Populated by `visit_function_declaration` for global functions only.
+    /// Transferred to `DocumentSummary::function_name_index` at build completion.
+    pub(crate) function_name_index: HashMap<String, FunctionSummaryId>,
     pub(crate) type_definitions: Vec<TypeDefinition>,
     pub(crate) local_type_facts: HashMap<String, LocalTypeFact>,
     pub(crate) table_shapes: HashMap<TableShapeId, TableShape>,
