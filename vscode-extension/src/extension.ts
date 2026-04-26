@@ -94,6 +94,7 @@ function collectLspConfig(
       emmyUnknownField: cfg.get('diagnostics.emmyUnknownField'),
       luaFieldError: cfg.get('diagnostics.luaFieldError'),
       luaFieldWarning: cfg.get('diagnostics.luaFieldWarning'),
+      scope: cfg.get('diagnostics.scope'),
     },
     gotoDefinition: {
       strategy: cfg.get('gotoDefinition.strategy'),
