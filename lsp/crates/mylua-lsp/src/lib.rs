@@ -280,7 +280,7 @@ impl Backend {
             None => {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
-                    let scope_tree = scope::build_scope_tree(&old, lua_source.source(), lua_source.line_index());
+                    let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
                     self.documents.lock().unwrap().insert(
                         uri,
                         Document { lua_source, tree: old, scope_tree },
@@ -292,9 +292,9 @@ impl Backend {
 
         {
             let lua_source = util::LuaSource::new(text);
-            let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
             // Library stubs retain their meta treatment across edits.
-            // `summary_builder::build_summary` infers `is_meta` from
+            // `summary_builder::build_file_analysis` infers `is_meta` from
             // `---@meta` headers, and bundled stdlib stubs typically
             // don't carry that header — without the override here, a
             // user navigating to `print`'s definition and editing the
@@ -351,8 +351,6 @@ impl Backend {
                     Vec::new()
                 }
             };
-
-            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
 
             self.documents.lock().unwrap().insert(
                 uri.clone(),
@@ -418,7 +416,7 @@ impl Backend {
         };
         if let Some(tree) = tree {
             let lua_source = util::LuaSource::new(text);
-            let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
             // Keep library files flagged `is_meta=true` across
             // watcher-driven re-indexes. `summary_builder` infers
             // `is_meta` from an explicit `---@meta` header which
@@ -432,7 +430,6 @@ impl Backend {
                 summary.is_meta = true;
             }
             self.index.lock().unwrap().upsert_summary(summary);
-            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
             self.documents
                 .lock()
                 .unwrap()

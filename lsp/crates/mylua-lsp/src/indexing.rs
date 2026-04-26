@@ -18,7 +18,6 @@ use crate::config::LspConfig;
 use crate::diagnostic_scheduler;
 use crate::diagnostics;
 use crate::document::Document;
-use crate::scope;
 use crate::summary;
 use crate::summary_builder;
 use crate::summary_cache;
@@ -285,7 +284,7 @@ pub async fn run_workspace_scan(
                             hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                             let mut parser = new_parser();
                             let tree = parser.parse(lua_source.source(), None)?;
-                            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
+                            let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
                             let mut summary = cached_summary.clone();
                             if is_library {
                                 summary.is_meta = true;
@@ -303,12 +302,11 @@ pub async fn run_workspace_scan(
                     } else {
                         let mut parser = new_parser();
                         let tree = parser.parse(lua_source.source(), None)?;
-                        let mut summary =
-                            summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
+                        let (mut summary, scope_tree) =
+                            summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
                         if is_library {
                             summary.is_meta = true;
                         }
-                        let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
                         (tree, summary, scope_tree)
                     };
 

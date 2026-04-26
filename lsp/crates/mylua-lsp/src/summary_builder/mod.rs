@@ -23,11 +23,16 @@ use visitors::visit_top_level;
 // Re-export the public API so external callers don't need to change.
 pub(crate) use visitors::enclosing_statement_for_function_expr;
 
-/// Build a `DocumentSummary` from a parsed AST.
+/// Build a `DocumentSummary` and `ScopeTree` from a parsed AST.
 ///
 /// This is the core of single-file inference (index-architecture.md §3).
 /// Zero cross-file dependencies: all unresolved references become `SymbolicStub`s.
-pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> DocumentSummary {
+pub fn build_file_analysis(
+    uri: &Uri,
+    tree: &tree_sitter::Tree,
+    source: &[u8],
+    line_index: &LineIndex,
+) -> (DocumentSummary, ScopeTree) {
     let mut ctx = BuildContext {
         source,
         line_index,
@@ -58,7 +63,9 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
     let call_sites = collect_call_sites(root, source, &line_index);
     let (is_meta, meta_name) = detect_meta_annotation(root, source);
 
-    DocumentSummary {
+    let scope_tree = ctx.take_scope_tree();
+
+    let summary = DocumentSummary {
         uri: uri.clone(),
         content_hash,
         require_bindings: ctx.require_bindings,
@@ -74,7 +81,14 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
         call_sites,
         is_meta,
         meta_name,
-    }
+    };
+
+    (summary, scope_tree)
+}
+
+/// Deprecated: use `build_file_analysis` which also returns a ScopeTree.
+pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> DocumentSummary {
+    build_file_analysis(uri, tree, source, line_index).0
 }
 
 /// Scan the first few top-level statements for a `---@meta [name]`
