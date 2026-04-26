@@ -96,7 +96,7 @@ ai-mylua-lsp/
 
 命令：
 - 构建：`cd lsp && cargo build`
-- 测试：`cd lsp && cargo test --tests`（434 条测试）
+- 测试：`cd lsp && cargo test --tests`（460+ 条测试）
 
 > 测试清单见 [`docs/testing.md`](docs/testing.md)
 
@@ -115,7 +115,7 @@ ai-mylua-lsp/
 
 > 完整测试清单见 [`docs/testing.md`](docs/testing.md)
 
-- **集成测试**：28 个测试文件，434 条测试，覆盖所有 LSP 能力
+- **集成测试**：31 个测试文件，460+ 条测试，覆盖所有 LSP 能力
 - **手工端到端**：`tests/lua-root/` + `tests/lua-root2/`（多 workspace 场景）
 - **启动方式**：`.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows）
 
@@ -133,4 +133,3 @@ ai-mylua-lsp/
 | [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md) | LSP 语义能力：语义约定、消费规则 |
 | [`docs/performance-analysis.md`](docs/performance-analysis.md) | 性能现状、瓶颈分析、优化路线图 |
 | [`docs/future-work.md`](docs/future-work.md) | 后续待办与优化方向（索引坑点 + 泛型缺口 + 维护清单） |
-| [`docs/col0-block-end-redesign.md`](docs/col0-block-end-redesign.md) | Column-0 块边界重设计讨论（WIP） |

@@ -61,7 +61,7 @@
 ## 运行
 
 ```bash
-cd lsp && cargo test --tests    # 全部 434 条测试
+cd lsp && cargo test --tests    # 全部 460+ 条测试
 ```
 
 > **注意**：VS Code 扩展运行时会锁住 `mylua-lsp.exe`，可用独立 target 目录：
