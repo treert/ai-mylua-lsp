@@ -47,7 +47,7 @@
      ▼             ▼             ▼
 ┌────────────────────────────────────────┐
 │           工作区聚合层                   │
-│  GlobalShard    name → [候选定义…]      │
+│  GlobalShard    树结构全局名索引        │
 │  TypeShard      name → [候选定义…]      │
 │  RequireByReturn  URI → [依赖方…]      │
 │  TypeDependants   类型反向依赖          │
@@ -60,12 +60,12 @@
 
 | 分片 | 键 → 值 | 更新方式 |
 |------|---------|---------|
-| `GlobalShard` | 全局名 → [候选定义…] | 按名差分：删旧贡献、插新 |
+| `GlobalShard` | 按 `.` / `:` 切段的树（`roots["UE4"].children["FVector"]`），叶/中间节点可挂 `[候选定义…]`；附带 URI→路径反向索引 | `push_candidate` 插入 / `remove_by_uri` 按 URI 精准删除 |
 | `TypeShard` | 类型裸名 → [候选定义…] | 同上 |
 | `RequireByReturn` | 目标 URI → [(来源文件, 局部名)…] | 绑定增删 |
 | `TypeDependants` | 类型名 → [依赖文件…] | 类型变更时失效依赖方缓存 |
 
-更新粒度是**名字级**（不是文件级）：一个文件修改只影响它贡献的那些名字槽。
+更新粒度是**名字级**（不是文件级）：`GlobalShard` 通过 URI 反向索引精准定位一个文件贡献的所有路径，增量更新只触及这些路径上的节点。
 
 ---
 
@@ -112,8 +112,10 @@
 
 ### 4.3 全局 Table 合并
 
-- 跨文件合并时保留两层身份：逐段节点树（`_G.A.B`）+ 完整路径索引
-- 多文件对同一全局路径补字段时做工作区级结构合并，同一字段冲突保留多候选来源
+- `GlobalShard` 以树（trie）存储全局名：根节点对应顶层名（`UE4`、`print`），子节点按 `.` / `:` 切段（`UE4 → FVector → new`）；`.` 和 `:` 统一为同一个 `children` map（colon 只是 self 语法糖，由 `FunctionSignature.params` 区分）
+- 每个节点挂 `Vec<GlobalCandidate>`（多文件贡献同一路径时保留多候选），按 URI 优先级排序
+- 附带反向索引 `uri_to_paths: HashMap<Uri, Vec<String>>`，`remove_by_uri` 按文件精准删除贡献，O(贡献数)
+- 子字段枚举（补全、hover）直接遍历 `node.children`，O(children) 而非 O(全局条目数)
 - 全局链路某节点已绑定 Emmy 类型时，停止 GlobalTable 扩张，改走 Emmy 字段解析
 
 ---

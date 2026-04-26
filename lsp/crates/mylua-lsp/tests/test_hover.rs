@@ -757,7 +757,8 @@ fn hover_chained_lhs_with_call_does_not_pollute_shape() {
 foo().c = 1
 "#;
     let (_doc, _uri, agg) = setup_single_file(src, "call_lhs.lua");
-    let junk: Vec<&String> = agg.global_shard.keys()
+    let junk: Vec<String> = agg.global_shard.iter_all_entries()
+        .into_iter().map(|(k, _)| k)
         .filter(|k| k.contains('('))
         .collect();
     assert!(
@@ -809,7 +810,7 @@ print(a.b)
     assert!(
         !agg.global_shard.contains_key("a.b.c"),
         "bail on local base must not leak into global_shard, got entries: {:?}",
-        agg.global_shard.keys().collect::<Vec<_>>(),
+        agg.global_shard.iter_all_entries().into_iter().map(|(k, _)| k).collect::<Vec<_>>(),
     );
     assert!(
         !agg.global_shard.contains_key("a.b"),
@@ -836,7 +837,8 @@ fn hover_chained_lhs_with_subscript_does_not_pollute_shape() {
 a[1].c = 1
 "#;
     let (_doc, _uri, agg) = setup_single_file(src, "subscript_lhs.lua");
-    let junk: Vec<&String> = agg.global_shard.keys()
+    let junk: Vec<String> = agg.global_shard.iter_all_entries()
+        .into_iter().map(|(k, _)| k)
         .filter(|k| k.contains('[') || k.contains(']'))
         .collect();
     assert!(

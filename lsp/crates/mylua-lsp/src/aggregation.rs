@@ -14,8 +14,8 @@ use crate::util::ByteRange;
 pub struct WorkspaceAggregation {
     /// All file summaries, keyed by URI.
     pub summaries: HashMap<Uri, DocumentSummary>,
-    /// Global name → candidate definitions from all files.
-    pub global_shard: HashMap<String, Vec<GlobalCandidate>>,
+    /// Global name tree — candidate definitions from all files.
+    pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
     pub type_shard: HashMap<String, Vec<TypeCandidate>>,
     /// Target URI → files that `require` it (reverse dependency index).
@@ -49,6 +49,251 @@ pub struct GlobalCandidate {
     pub range: ByteRange,
     pub selection_range: ByteRange,
     pub source_uri: Uri,
+}
+
+// ---------------------------------------------------------------------------
+// GlobalShard — tree-structured global name index
+// ---------------------------------------------------------------------------
+
+/// A node in the global-name trie.
+///
+/// For a path like `"UE4.FVector.new"`, the tree looks like:
+/// ```text
+/// roots["UE4"]
+///   └─ children["FVector"]
+///        └─ children["new"]
+/// ```
+///
+/// Both `.` and `:` are treated as segment separators (colon is just
+/// syntactic sugar for a method with implicit `self`; the colon/dot
+/// distinction is already captured in `FunctionSignature.params`).
+#[derive(Debug, Default)]
+pub struct GlobalNode {
+    /// Candidate definitions at this exact path.
+    /// Empty when this node is a structural-only ancestor of deeper entries.
+    pub candidates: Vec<GlobalCandidate>,
+    /// Child nodes keyed by the next segment name.
+    pub children: HashMap<String, GlobalNode>,
+}
+
+/// Tree-structured global shard, replacing the flat
+/// `HashMap<String, Vec<GlobalCandidate>>`.
+///
+/// Provides O(depth) exact lookup, O(children) direct-child enumeration,
+/// and O(contributions-per-file) URI-based removal via a reverse index.
+#[derive(Debug, Default)]
+pub struct GlobalShard {
+    /// Top-level entries: `"print"`, `"UE4"`, `"Foo"`, etc.
+    roots: HashMap<String, GlobalNode>,
+    /// Reverse index: URI → full-path strings contributed by that URI.
+    /// Maintained by `push_candidate` / `remove_by_uri` / `clear`.
+    uri_to_paths: HashMap<Uri, Vec<String>>,
+}
+
+/// Split a path string on `.` and `:` separators.
+/// Returns `(root, [segment, ...])`.
+///
+/// Examples:
+/// - `"print"` → `("print", [])`
+/// - `"UE4.FVector"` → `("UE4", ["FVector"])`
+/// - `"Foo:bar"` → `("Foo", ["bar"])`
+/// - `"UE4.FVector:normalize"` → `("UE4", ["FVector", "normalize"])`
+fn split_global_path(path: &str) -> (&str, Vec<&str>) {
+    let mut segments = Vec::new();
+    let root_end = path.find(|c: char| c == '.' || c == ':');
+    let Some(root_end) = root_end else {
+        return (path, segments);
+    };
+    let root = &path[..root_end];
+    let mut pos = root_end;
+    while pos < path.len() {
+        pos += 1; // skip separator
+        let next = path[pos..].find(|c: char| c == '.' || c == ':')
+            .map(|off| pos + off)
+            .unwrap_or(path.len());
+        segments.push(&path[pos..next]);
+        pos = next;
+    }
+    (root, segments)
+}
+
+impl GlobalNode {
+    fn new() -> Self {
+        Self::default()
+    }
+
+    /// Recursively sort every node's candidate list.
+    fn sort_all_recursive<F, K>(&mut self, key_fn: &F)
+    where
+        F: Fn(&GlobalCandidate) -> K,
+        K: Ord,
+    {
+        if !self.candidates.is_empty() {
+            self.candidates.sort_by_cached_key(key_fn);
+        }
+        for child in self.children.values_mut() {
+            child.sort_all_recursive(key_fn);
+        }
+    }
+
+    /// DFS collect all entries with non-empty candidates.
+    /// `prefix` is the full path up to (and including) this node.
+    fn collect_entries<'a>(&'a self, prefix: &str, out: &mut Vec<(String, &'a Vec<GlobalCandidate>)>) {
+        if !self.candidates.is_empty() {
+            // Use the candidate's own `name` field to preserve the
+            // original separator (`:` vs `.`). The trie merges both
+            // separator types into a single `children` map, so
+            // reconstructing from the tree would always produce `.`.
+            let key = self.candidates[0].name.clone();
+            out.push((key, &self.candidates));
+        }
+        for (seg, child) in &self.children {
+            let child_path = format!("{}.{}", prefix, seg);
+            child.collect_entries(&child_path, out);
+        }
+    }
+}
+
+impl GlobalShard {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Look up candidates at an exact path.
+    /// Returns `None` if the path doesn't exist or has no candidates.
+    pub fn get(&self, path: &str) -> Option<&Vec<GlobalCandidate>> {
+        let node = self.get_node(path)?;
+        if node.candidates.is_empty() {
+            None
+        } else {
+            Some(&node.candidates)
+        }
+    }
+
+    /// Mutable lookup for candidates at an exact path.
+    pub fn get_mut(&mut self, path: &str) -> Option<&mut Vec<GlobalCandidate>> {
+        let node = self.get_node_mut(path)?;
+        if node.candidates.is_empty() {
+            None
+        } else {
+            Some(&mut node.candidates)
+        }
+    }
+
+    /// Check whether candidates exist at an exact path.
+    pub fn contains_key(&self, path: &str) -> bool {
+        self.get(path).is_some()
+    }
+
+    /// Navigate to a node at the given path.
+    pub fn get_node(&self, path: &str) -> Option<&GlobalNode> {
+        let (root, segments) = split_global_path(path);
+        let mut node = self.roots.get(root)?;
+        for seg in segments {
+            node = node.children.get(seg)?;
+        }
+        Some(node)
+    }
+
+    /// Navigate to a node at the given path (mutable).
+    fn get_node_mut(&mut self, path: &str) -> Option<&mut GlobalNode> {
+        let (root, segments) = split_global_path(path);
+        let mut node = self.roots.get_mut(root)?;
+        for seg in segments {
+            node = node.children.get_mut(seg)?;
+        }
+        Some(node)
+    }
+
+    /// Insert a candidate at the given path, creating intermediate nodes
+    /// as needed. Also updates the reverse URI→path index.
+    pub fn push_candidate(&mut self, path: &str, candidate: GlobalCandidate) {
+        // Update reverse index.
+        self.uri_to_paths
+            .entry(candidate.source_uri.clone())
+            .or_default()
+            .push(path.to_string());
+
+        // Walk/create nodes.
+        let (root, segments) = split_global_path(path);
+        let mut node = self.roots
+            .entry(root.to_string())
+            .or_insert_with(GlobalNode::new);
+        for seg in segments {
+            node = node.children
+                .entry(seg.to_string())
+                .or_insert_with(GlobalNode::new);
+        }
+        node.candidates.push(candidate);
+    }
+
+    /// Sort candidates at a specific path.
+    pub fn sort_at<F, K>(&mut self, path: &str, key_fn: F)
+    where
+        F: Fn(&GlobalCandidate) -> K,
+        K: Ord,
+    {
+        if let Some(candidates) = self.get_mut(path) {
+            candidates.sort_by_cached_key(key_fn);
+        }
+    }
+
+    /// Recursively sort all candidate lists in the tree.
+    pub fn sort_all<F, K>(&mut self, key_fn: F)
+    where
+        F: Fn(&GlobalCandidate) -> K,
+        K: Ord,
+    {
+        for node in self.roots.values_mut() {
+            node.sort_all_recursive(&key_fn);
+        }
+    }
+
+    /// Remove all candidates contributed by a given URI.
+    /// Uses the reverse index for O(contributions-per-file) work.
+    pub fn remove_by_uri(&mut self, uri: &Uri) {
+        let Some(paths) = self.uri_to_paths.remove(uri) else { return };
+        for path in &paths {
+            if let Some(node) = self.get_node_mut(path) {
+                node.candidates.retain(|c| &c.source_uri != uri);
+            }
+        }
+        // Note: we leave empty structural nodes in place.
+        // They are harmless (get() returns None for empty candidates)
+        // and are wiped on the next build_initial() → clear().
+    }
+
+    /// Clear all data.
+    pub fn clear(&mut self) {
+        self.roots.clear();
+        self.uri_to_paths.clear();
+    }
+
+    /// DFS iterate over all entries with non-empty candidates.
+    /// Yields `(full_path, &Vec<GlobalCandidate>)`.
+    pub fn iter_all_entries(&self) -> Vec<(String, &Vec<GlobalCandidate>)> {
+        let mut out = Vec::new();
+        for (root_name, root_node) in &self.roots {
+            root_node.collect_entries(root_name, &mut out);
+        }
+        out
+    }
+
+    /// Iterate entries whose root name starts with `prefix`, collecting
+    /// matching roots and all their descendants.
+    ///
+    /// This is used for global completion: the user types `"UE"` and we
+    /// need to match `"UE4"`, `"UE4.FVector"`, `"UE4.FVector.new"` etc.
+    /// The prefix never contains `.` or `:` (it's a bare identifier prefix).
+    pub fn iter_roots_with_prefix(&self, prefix: &str) -> Vec<(String, &Vec<GlobalCandidate>)> {
+        let mut out = Vec::new();
+        for (root_name, root_node) in &self.roots {
+            if root_name.starts_with(prefix) {
+                root_node.collect_entries(root_name, &mut out);
+            }
+        }
+        out
+    }
 }
 
 /// A single candidate definition for an Emmy type name.
@@ -142,7 +387,7 @@ impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
             summaries: HashMap::new(),
-            global_shard: HashMap::new(),
+            global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
             require_by_return: HashMap::new(),
             type_dependants: HashMap::new(),
@@ -186,10 +431,7 @@ impl WorkspaceAggregation {
             let uri = &summary.uri;
 
             for gc in &summary.global_contributions {
-                let candidates = self.global_shard
-                    .entry(gc.name.clone())
-                    .or_default();
-                candidates.push(GlobalCandidate {
+                self.global_shard.push_candidate(&gc.name, GlobalCandidate {
                     name: gc.name.clone(),
                     kind: gc.kind.clone(),
                     type_fact: gc.type_fact.clone(),
@@ -233,9 +475,7 @@ impl WorkspaceAggregation {
         }
 
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
-        for candidates in self.global_shard.values_mut() {
-            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
-        }
+        self.global_shard.sort_all(|c| uri_priority_key(&c.source_uri));
         for candidates in self.type_shard.values_mut() {
             candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
         }
@@ -270,10 +510,7 @@ impl WorkspaceAggregation {
         self.remove_contributions(&uri);
 
         for gc in &summary.global_contributions {
-            let candidates = self.global_shard
-                .entry(gc.name.clone())
-                .or_default();
-            candidates.push(GlobalCandidate {
+            self.global_shard.push_candidate(&gc.name, GlobalCandidate {
                 name: gc.name.clone(),
                 kind: gc.kind.clone(),
                 type_fact: gc.type_fact.clone(),
@@ -281,7 +518,7 @@ impl WorkspaceAggregation {
                 selection_range: gc.selection_range,
                 source_uri: uri.clone(),
             });
-            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
+            self.global_shard.sort_at(&gc.name, |c| uri_priority_key(&c.source_uri));
         }
 
         for td in &summary.type_definitions {
@@ -393,10 +630,7 @@ impl WorkspaceAggregation {
             return;
         }
 
-        self.global_shard.retain(|_, candidates| {
-            candidates.retain(|c| &c.source_uri != uri);
-            !candidates.is_empty()
-        });
+        self.global_shard.remove_by_uri(uri);
 
         self.type_shard.retain(|_, candidates| {
             candidates.retain(|c| &c.source_uri != uri);

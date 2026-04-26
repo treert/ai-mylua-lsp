@@ -189,26 +189,23 @@ pub fn get_fields_for_type(
     source_uri_hint: Option<&Uri>,
     agg: &mut WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
-    // Collect global_shard prefix-based fields BEFORE resolving, so that
+    // Collect global_shard direct children BEFORE resolving, so that
     // table-extension globals (e.g. `UE4.Foo`) are included even though
     // they live in global_shard rather than in a table shape.
     let mut global_prefix_fields = Vec::new();
     if let TypeFact::Stub(SymbolicStub::GlobalRef { name }) = fact {
-        let prefix = format!("{}.", name);
-        for (gname, candidates) in &agg.global_shard {
-            if let Some(field_name) = gname.strip_prefix(&prefix) {
-                if !field_name.contains('.') {
-                    if let Some(c) = candidates.first() {
-                        let is_func = is_function_type(&c.type_fact)
-                            || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
-                        global_prefix_fields.push(FieldCompletion {
-                            name: field_name.to_string(),
-                            type_display: format!("{}", c.type_fact),
-                            is_function: is_func,
-                            def_uri: Some(c.source_uri.clone()),
-                            def_range: Some(c.selection_range),
-                        });
-                    }
+        if let Some(node) = agg.global_shard.get_node(name) {
+            for (child_name, child_node) in &node.children {
+                if let Some(c) = child_node.candidates.first() {
+                    let is_func = is_function_type(&c.type_fact)
+                        || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
+                    global_prefix_fields.push(FieldCompletion {
+                        name: child_name.clone(),
+                        type_display: format!("{}", c.type_fact),
+                        is_function: is_func,
+                        def_uri: Some(c.source_uri.clone()),
+                        def_range: Some(c.selection_range),
+                    });
                 }
             }
         }
@@ -538,31 +535,29 @@ fn resolve_call_return(
         }
     }
 
-    // Try looking up `base_name.func_name` / `base_name:func_name` as a
-    // qualified global name. Function declarations like `function Foo.bar()`
-    // or `function Foo:bar()` are registered in global_shard as "Foo.bar"
-    // or "Foo:bar" by summary_builder.
+    // Try looking up `base_name.func_name` as a qualified global name.
+    // The tree-structured global_shard merges dot and colon separators,
+    // so a single lookup covers both `function Foo.bar()` and
+    // `function Foo:bar()`.
     for base_name in &candidate_names {
-        for sep in [".", ":"] {
-            let qualified = format!("{}{}{}", base_name, sep, func_name);
-            if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
-                let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
-                if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
-                    if let Some(ret) = sig.returns.first() {
-                        let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
-                        if ret_resolved.def_uri.is_none() {
-                            ret_resolved.def_uri = Some(c.source_uri.clone());
-                            ret_resolved.def_range = Some(c.selection_range);
-                        }
-                        return ret_resolved;
+        let qualified = format!("{}.{}", base_name, func_name);
+        if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
+            let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
+            if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
+                if let Some(ret) = sig.returns.first() {
+                    let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
+                    if ret_resolved.def_uri.is_none() {
+                        ret_resolved.def_uri = Some(c.source_uri.clone());
+                        ret_resolved.def_range = Some(c.selection_range);
                     }
+                    return ret_resolved;
                 }
-                return ResolvedType::with_location(
-                    c.type_fact.clone(),
-                    c.source_uri.clone(),
-                    c.selection_range,
-                );
             }
+            return ResolvedType::with_location(
+                c.type_fact.clone(),
+                c.source_uri.clone(),
+                c.selection_range,
+            );
         }
     }
 
@@ -832,11 +827,11 @@ fn resolve_emmy_field_with_visited(
         );
     }
 
-    // Try both `Type.field` (dot) and `Type:field` (colon) in global_shard.
-    // `function Stack:push()` registers as `Stack:push` while
-    // `function Stack.new()` registers as `Stack.new`.
-    for sep in [".", ":"] {
-        let qualified = format!("{}{}{}", type_name, sep, field);
+    // Try `Type.field` in global_shard (tree merges dot and colon,
+    // so `function Stack:push()` and `function Stack.new()` are both
+    // reachable via a single lookup).
+    {
+        let qualified = format!("{}.{}", type_name, field);
         if let Some(global_candidates) = agg.global_shard.get(&qualified) {
             if let Some(c) = global_candidates.first() {
                 lsp_log!(

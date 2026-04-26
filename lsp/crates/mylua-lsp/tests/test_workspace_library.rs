@@ -56,7 +56,7 @@ fn library_contributes_stdlib_globals() {
         agg.global_shard.contains_key("print"),
         "print must appear in global_shard after library scan; \
          global_shard keys = {:?}",
-        agg.global_shard.keys().take(20).collect::<Vec<_>>()
+        agg.global_shard.iter_all_entries().into_iter().map(|(k, _)| k).take(20).collect::<Vec<_>>()
     );
 }
 

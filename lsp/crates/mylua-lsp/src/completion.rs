@@ -347,8 +347,8 @@ fn collect_global_completions(
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    for (name, candidates) in &index.global_shard {
-        if name.starts_with(prefix) && !seen.contains(name) {
+    for (name, candidates) in index.global_shard.iter_roots_with_prefix(prefix) {
+        if !seen.contains(&name) {
             seen.insert(name.clone());
             let kind = if candidates.iter().any(|c| {
                 matches!(c.kind, crate::summary::GlobalContributionKind::Function)
@@ -360,7 +360,7 @@ fn collect_global_completions(
             items.push(CompletionItem {
                 label: name.clone(),
                 kind: Some(kind),
-                data: Some(resolve_data("global", None, name)),
+                data: Some(resolve_data("global", None, &name)),
                 ..Default::default()
             });
         }

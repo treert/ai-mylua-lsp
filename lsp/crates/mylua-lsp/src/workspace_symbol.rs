@@ -39,8 +39,8 @@ pub fn search_workspace_symbols(
     let mut member_keys: HashSet<(String, Option<String>, String)> = HashSet::new();
 
     // --- global_shard: functions + variables + Class:method splits ---
-    for (name, candidates) in &index.global_shard {
-        let (display_name, container, member_kind) = split_qualified_name(name, candidates);
+    for (name, candidates) in index.global_shard.iter_all_entries() {
+        let (display_name, container, member_kind) = split_qualified_name(&name, candidates);
         if !matches_query(&display_name, &query_lower, query.is_empty()) {
             continue;
         }

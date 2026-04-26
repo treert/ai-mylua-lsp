@@ -259,21 +259,24 @@ fn lookup_overloads_via_global_shard(
     field_name: &str,
     index: &WorkspaceAggregation,
 ) -> Option<(Uri, Vec<FunctionSignature>)> {
-    for sep in [":", "."] {
-        let qualified = format!("{}{}{}", cls, sep, field_name);
-        if let Some(candidate) = index
-            .global_shard
-            .get(&qualified)
-            .and_then(|v| v.first().cloned())
-        {
-            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
-                if let Some(fs) = summary.function_summaries.get(&qualified) {
-                    return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
-                }
+    // The tree-structured global_shard merges dot and colon separators,
+    // so a single lookup covers both `function Cls.field()` and
+    // `function Cls:field()`.
+    let qualified = format!("{}.{}", cls, field_name);
+    if let Some(candidate) = index
+        .global_shard
+        .get(&qualified)
+        .and_then(|v| v.first().cloned())
+    {
+        if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+            // Use the candidate's original name (preserves `:` vs `.`)
+            // for function_summaries lookup, which is still a flat HashMap.
+            if let Some(fs) = summary.function_summaries.get(&candidate.name) {
+                return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
             }
-            if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
-                return Some((candidate.source_uri.clone(), vec![sig]));
-            }
+        }
+        if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
+            return Some((candidate.source_uri.clone(), vec![sig]));
         }
     }
     None
