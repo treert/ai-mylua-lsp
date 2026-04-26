@@ -236,10 +236,20 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 TypeFact::Known(KnownType::Table(shape_id)) => {
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
                         if let Some(fi) = shape.fields.get(&method_name) {
-                            if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
-                                if let Some(ret) = sig.returns.first() {
-                                    return ret.clone();
+                            match &fi.type_fact {
+                                TypeFact::Known(KnownType::Function(ref sig)) => {
+                                    if let Some(ret) = sig.returns.first() {
+                                        return ret.clone();
+                                    }
                                 }
+                                TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
+                                    if let Some(fs) = ctx.function_summaries.get(fid) {
+                                        if let Some(ret) = fs.signature.returns.first() {
+                                            return ret.clone();
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
                         }
                     }
@@ -295,10 +305,20 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                         TypeFact::Known(KnownType::Table(shape_id)) => {
                             if let Some(shape) = ctx.table_shapes.get(shape_id) {
                                 if let Some(fi) = shape.fields.get(&func_name) {
-                                    if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
-                                        if let Some(ret) = sig.returns.first() {
-                                            return ret.clone();
+                                    match &fi.type_fact {
+                                        TypeFact::Known(KnownType::Function(ref sig)) => {
+                                            if let Some(ret) = sig.returns.first() {
+                                                return ret.clone();
+                                            }
                                         }
+                                        TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
+                                            if let Some(fs) = ctx.function_summaries.get(fid) {
+                                                if let Some(ret) = fs.signature.returns.first() {
+                                                    return ret.clone();
+                                                }
+                                            }
+                                        }
+                                        _ => {}
                                     }
                                 }
                             }
