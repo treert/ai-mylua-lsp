@@ -120,8 +120,21 @@ pub(crate) fn resolve_call_signatures(
     // enriched signatures from `infer_expression_type` are picked up.
     let base_fact = type_inference::infer_node_type(callee, source, uri, index);
     let resolved = resolver::resolve_type(&base_fact, index);
-    if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
-        return Some((vec![sig.clone()], false, name));
+    match &resolved.type_fact {
+        TypeFact::Known(KnownType::Function(ref sig)) => {
+            return Some((vec![sig.clone()], false, name));
+        }
+        TypeFact::Known(KnownType::FunctionRef(fid)) => {
+            if let Some(ref def_uri) = resolved.def_uri {
+                if let Some(summary) = index.summaries.get(def_uri) {
+                    if let Some(fs) = summary.function_summaries.get(fid) {
+                        let sigs = primary_plus_overloads(fs);
+                        return Some((sigs, false, name));
+                    }
+                }
+            }
+        }
+        _ => {}
     }
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
@@ -134,6 +147,14 @@ pub(crate) fn resolve_call_signatures(
         }
         if let TypeFact::Known(KnownType::Function(ref sig)) = c.type_fact {
             return Some((vec![sig.clone()], false, name));
+        }
+        if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
+            if let Some(summary) = index.summaries.get(&c.source_uri) {
+                if let Some(fs) = summary.function_summaries.get(fid) {
+                    let sigs = primary_plus_overloads(fs);
+                    return Some((sigs, false, name));
+                }
+            }
         }
     }
 
@@ -235,6 +256,15 @@ fn lookup_function_signatures_by_field(
         // to the single signature we already have from `@field`.
         return vec![sig.clone()];
     }
+    if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
+        if let Some(def_uri) = &resolved.def_uri {
+            if let Some(summary) = index.summaries.get(def_uri) {
+                if let Some(fs) = summary.function_summaries.get(fid) {
+                    return primary_plus_overloads(fs);
+                }
+            }
+        }
+    }
     // The resolver couldn't match the field through the class's declared
     // `@field` list (common when the method is declared as a Lua-side
     // `function Foo:m() end` without an accompanying `@field m fun(...)`).
@@ -277,6 +307,13 @@ fn lookup_overloads_via_global_shard(
         }
         if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
             return Some((candidate.source_uri.clone(), vec![sig]));
+        }
+        if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = candidate.type_fact {
+            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+                if let Some(fs) = summary.function_summaries.get(fid) {
+                    return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
+                }
+            }
         }
     }
     None

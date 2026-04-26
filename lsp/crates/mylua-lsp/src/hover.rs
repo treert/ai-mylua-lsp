@@ -444,8 +444,14 @@ fn format_resolved_type(fact: &TypeFact) -> String {
     // `fun(a: T, b: U): R` signature — the default `Display` for
     // `KnownType::Function` renders just `"function"` which is
     // info-less on the hover "Type:" line.
-    if let TypeFact::Known(crate::type_system::KnownType::Function(sig)) = fact {
-        return format_signature(sig);
+    match fact {
+        TypeFact::Known(crate::type_system::KnownType::Function(sig)) => {
+            return format_signature(sig);
+        }
+        TypeFact::Known(crate::type_system::KnownType::FunctionRef(_)) => {
+            // FunctionRef is an opaque ID; fall through to Display.
+        }
+        _ => {}
     }
     format!("{}", fact)
 }

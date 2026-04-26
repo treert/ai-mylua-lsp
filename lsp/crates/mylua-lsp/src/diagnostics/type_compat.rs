@@ -55,6 +55,7 @@ pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType) -> bool {
         ("__array", KnownType::Table(_)) => true,
         ("__array", KnownType::EmmyGeneric(n, _)) if n == "__array" => true,
         ("function", KnownType::Function(_)) => true,
+        ("function", KnownType::FunctionRef(_)) => true,
         ("any", _) => true,
         (_, KnownType::Nil) => true,
         ("string", KnownType::Number | KnownType::Boolean) => false,
@@ -75,15 +76,15 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
         // __array<T> is compatible with table and vice versa
         (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name == "__array" => true,
         (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name == "__array" => true,
-        (KnownType::Function(_), KnownType::Function(_)) => true,
+        (KnownType::Function(_) | KnownType::FunctionRef(_), KnownType::Function(_) | KnownType::FunctionRef(_)) => true,
         (KnownType::EmmyType(name), actual) | (KnownType::EmmyGeneric(name, _), actual) => {
             is_named_type_compatible(name, actual)
         }
         (KnownType::String, KnownType::Number | KnownType::Integer | KnownType::Boolean) => false,
         (KnownType::Number | KnownType::Integer, KnownType::String | KnownType::Boolean) => false,
         (KnownType::Boolean, KnownType::String | KnownType::Number | KnownType::Integer) => false,
-        (KnownType::Table(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Function(_)) => false,
-        (KnownType::Function(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Table(_)) => false,
+        (KnownType::Table(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Function(_) | KnownType::FunctionRef(_)) => false,
+        (KnownType::Function(_) | KnownType::FunctionRef(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Table(_)) => false,
         _ => true,
     }
 }

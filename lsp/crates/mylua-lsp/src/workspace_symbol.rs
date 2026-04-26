@@ -55,7 +55,7 @@ pub fn search_workspace_symbols(
                 _ => SymbolKind::VARIABLE,
             });
             let effective_kind = if container.is_some()
-                && matches!(candidate.type_fact, TypeFact::Known(KnownType::Function(_)))
+                && matches!(candidate.type_fact, TypeFact::Known(KnownType::Function(_)) | TypeFact::Known(KnownType::FunctionRef(_)))
             {
                 // Promote accessor-of-function to FUNCTION (never FIELD)
                 // unless the caller already pinned it to METHOD (`:`).

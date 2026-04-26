@@ -232,10 +232,24 @@ fn infer_call_return_fact(
             // If the field resolved to a function, extract its first return
             // type (already substituted by resolve_field_chain_in_file's
             // EmmyGeneric branch).
-            if let TypeFact::Known(KnownType::Function(ref sig)) = field_result.type_fact {
-                if let Some(ret) = sig.returns.first() {
-                    return ret.clone();
+            match &field_result.type_fact {
+                TypeFact::Known(KnownType::Function(ref sig)) => {
+                    if let Some(ret) = sig.returns.first() {
+                        return ret.clone();
+                    }
                 }
+                TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                    if let Some(ref uri) = field_result.def_uri {
+                        if let Some(summary) = index.summaries.get(uri) {
+                            if let Some(fs) = summary.function_summaries.get(fid) {
+                                if let Some(ret) = fs.signature.returns.first() {
+                                    return ret.clone();
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             // Fallback: look up the method in function_summaries and
             // substitute generics on the raw return type.

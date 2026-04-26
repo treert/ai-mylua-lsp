@@ -821,6 +821,9 @@ fn collect_referenced_type_names(summary: &DocumentSummary) -> Vec<String> {
                     walk(r, out);
                 }
             }
+            TypeFact::Known(KnownType::FunctionRef(_)) => {
+                // FunctionRef is an opaque ID; type names already collected via function_summaries.
+            }
             TypeFact::Stub(SymbolicStub::TypeRef { name }) => {
                 out.insert(name.clone());
             }

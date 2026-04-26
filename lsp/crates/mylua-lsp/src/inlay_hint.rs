@@ -218,6 +218,7 @@ fn is_interesting_type(fact: &TypeFact) -> bool {
         // the full shape/signature when the user needs it.
         TypeFact::Known(KnownType::Table(_)) => false,
         TypeFact::Known(KnownType::Function(_)) => false,
+        TypeFact::Known(KnownType::FunctionRef(_)) => false,
         _ => true,
     }
 }
