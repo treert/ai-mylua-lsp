@@ -902,65 +902,6 @@ Currently `build_function_summary` calls `collect_return_types` for shallow retu
 **Files:**
 - Modify: `lsp/crates/mylua-lsp/src/summary_builder/visitors.rs:457-556` (build_function_summary)
 
-- [ ] **Step 1: Remove `local_type_facts` from DocumentSummary**
-
-In `summary.rs`, remove:
-- The `local_type_facts` field from `DocumentSummary` (line 35)
-- The `LocalTypeFact` struct (lines 183-189)
-- The `TypeFactSource` enum (lines 192-199)
-
-- [ ] **Step 2: Remove `local_type_facts` from BuildContext**
-
-In `summary_builder/mod.rs`:
-- Remove the `local_type_facts` field from `BuildContext` (line 141)
-- Remove `local_type_facts: HashMap::new()` from initialization (line 39)
-- Remove `local_type_facts: ctx.local_type_facts` from DocumentSummary construction (line 66)
-- Remove the deprecated `build_summary` wrapper function
-
-- [ ] **Step 3: Remove `local_type_facts.insert(...)` calls from visitors.rs**
-
-Remove all `ctx.local_type_facts.insert(...)` calls that were dual-writing alongside `ctx.add_scoped_decl(...)`. There should be 5 sites:
-- `visit_local_declaration` (4 sites: lines 170, 185, 200, 221)
-- `visit_local_function` (1 site: line 375)
-
-Also remove the `backfill_anchor_shape_ids` function's dependency on `local_type_facts` — it should use `ctx.scopes` only.
-
-- [ ] **Step 4: Remove `build_scope_tree` and `TreeBuilder` from scope.rs**
-
-Remove:
-- The `TreeBuilder` struct (lines 68-72) and all its `impl` methods (lines 74-345)
-- The `build_scope_tree` function (lines 56-66)
-
-Keep: all data structures (`ScopeKind`, `ScopeDecl`, `Scope`, `ScopeTree`) and all query methods (`resolve`, `resolve_decl`, `visible_locals`, `all_declarations`, `scope_byte_range_for_def`, `resolve_type`, `resolve_bound_class`).
-
-- [ ] **Step 5: Remove any remaining imports of deleted items**
-
-Search for `build_scope_tree`, `LocalTypeFact`, `TypeFactSource`, `local_type_facts` across all files and remove stale references.
-
-- [ ] **Step 6: Build and run tests**
-
-Run: `cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp && cargo build && cargo test --tests 2>&1`
-Expected: All tests pass. `local_type_facts` is fully removed.
-
-- [ ] **Step 7: Commit**
-
-```bash
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp && git add -A && git commit -m "refactor: remove local_type_facts from DocumentSummary and delete build_scope_tree"
-```
-
----
-
-### Task 9: Remove `local_type_facts` and delete `build_scope_tree`
-
-**Files:**
-- Modify: `lsp/crates/mylua-lsp/src/summary.rs` (remove `local_type_facts` field, `LocalTypeFact`, `TypeFactSource`)
-- Modify: `lsp/crates/mylua-lsp/src/summary_builder/mod.rs` (remove `local_type_facts` from BuildContext)
-- Modify: `lsp/crates/mylua-lsp/src/summary_builder/visitors.rs` (remove all `local_type_facts.insert` calls)
-- Modify: `lsp/crates/mylua-lsp/src/scope.rs` (remove `TreeBuilder`, `build_scope_tree`)
-
-**Files:**
-- Modify: `lsp/crates/mylua-lsp/src/summary_builder/visitors.rs:457-556` (build_function_summary)
-
 - [ ] **Step 1: Register parameters into the FunctionBody scope**
 
 After `build_function_summary` builds the `FunctionSummary` and before it returns, if a `body` node is present, push a `FunctionBody` scope, register parameters, register implicit self (for colon methods), and then do a full `visit_nested_block` pass on the body.
@@ -1089,6 +1030,62 @@ Expected: All tests pass. The scope tree now includes function body internals.
 
 ```bash
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp && git add lsp/crates/mylua-lsp/src/summary_builder/visitors.rs && git commit -m "feat: extend scope tree traversal into function bodies with parameter registration"
+```
+
+---
+
+### Task 9: Remove `local_type_facts` and delete `build_scope_tree`
+
+**Files:**
+- Modify: `lsp/crates/mylua-lsp/src/summary.rs` (remove `local_type_facts` field, `LocalTypeFact`, `TypeFactSource`)
+- Modify: `lsp/crates/mylua-lsp/src/summary_builder/mod.rs` (remove `local_type_facts` from BuildContext)
+- Modify: `lsp/crates/mylua-lsp/src/summary_builder/visitors.rs` (remove all `local_type_facts.insert` calls)
+- Modify: `lsp/crates/mylua-lsp/src/scope.rs` (remove `TreeBuilder`, `build_scope_tree`)
+
+- [ ] **Step 1: Remove `local_type_facts` from DocumentSummary**
+
+In `summary.rs`, remove:
+- The `local_type_facts` field from `DocumentSummary` (line 35)
+- The `LocalTypeFact` struct (lines 183-189)
+- The `TypeFactSource` enum (lines 192-199)
+
+- [ ] **Step 2: Remove `local_type_facts` from BuildContext**
+
+In `summary_builder/mod.rs`:
+- Remove the `local_type_facts` field from `BuildContext` (line 141)
+- Remove `local_type_facts: HashMap::new()` from initialization (line 39)
+- Remove `local_type_facts: ctx.local_type_facts` from DocumentSummary construction (line 66)
+- Remove the deprecated `build_summary` wrapper function
+
+- [ ] **Step 3: Remove `local_type_facts.insert(...)` calls from visitors.rs**
+
+Remove all `ctx.local_type_facts.insert(...)` calls that were dual-writing alongside `ctx.add_scoped_decl(...)`. There should be 5 sites:
+- `visit_local_declaration` (4 sites: lines 170, 185, 200, 221)
+- `visit_local_function` (1 site: line 375)
+
+Also remove the `backfill_anchor_shape_ids` function's dependency on `local_type_facts` — it should use `ctx.scopes` only.
+
+- [ ] **Step 4: Remove `build_scope_tree` and `TreeBuilder` from scope.rs**
+
+Remove:
+- The `TreeBuilder` struct (lines 68-72) and all its `impl` methods (lines 74-345)
+- The `build_scope_tree` function (lines 56-66)
+
+Keep: all data structures (`ScopeKind`, `ScopeDecl`, `Scope`, `ScopeTree`) and all query methods (`resolve`, `resolve_decl`, `visible_locals`, `all_declarations`, `scope_byte_range_for_def`, `resolve_type`, `resolve_bound_class`).
+
+- [ ] **Step 5: Remove any remaining imports of deleted items**
+
+Search for `build_scope_tree`, `LocalTypeFact`, `TypeFactSource`, `local_type_facts` across all files and remove stale references.
+
+- [ ] **Step 6: Build and run tests**
+
+Run: `cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp && cargo build && cargo test --tests 2>&1`
+Expected: All tests pass. `local_type_facts` is fully removed.
+
+- [ ] **Step 7: Commit**
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp && git add -A && git commit -m "refactor: remove local_type_facts from DocumentSummary and delete build_scope_tree"
 ```
 
 ---
