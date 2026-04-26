@@ -534,8 +534,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             break 'shape false;
         }
 
-        if let Some(ltf) = ctx.local_type_facts.get(base_name) {
-            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
+        if let Some(decl) = ctx.resolve_in_build_scopes(base_name) {
+            if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                 let sid = *shape_id;
                 if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
                     shape.set_field(field_name.to_string(), FieldInfo {
@@ -911,7 +911,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 //       a likely user bug and we MUST NOT surface the
                 //       junk path through `global_shard` (the local `a`
                 //       is not a global).
-                if ctx.local_type_facts.contains_key(&chain.base_name) {
+                if ctx.resolve_in_build_scopes(&chain.base_name).is_some() {
                     continue;
                 }
 
@@ -928,8 +928,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "subscript_expression" => {
                 if let Some(base) = var_node.child_by_field_name("object") {
                     let base_text = node_text(base, ctx.source);
-                    if let Some(ltf) = ctx.local_type_facts.get(base_text) {
-                        if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
+                    if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+                        if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                             let sid = *shape_id;
                             if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
                                 shape.mark_open();
@@ -1026,9 +1026,9 @@ fn register_nested_field_write(
     type_fact: TypeFact,
     assign_range: crate::util::ByteRange,
 ) -> bool {
-    let base_shape_id = match ctx.local_type_facts.get(base_name) {
-        Some(ltf) => match &ltf.type_fact {
-            TypeFact::Known(KnownType::Table(sid)) => *sid,
+    let base_shape_id = match ctx.resolve_in_build_scopes(base_name) {
+        Some(decl) => match &decl.type_fact {
+            Some(TypeFact::Known(KnownType::Table(sid))) => *sid,
             _ => return false,
         },
         None => return false,

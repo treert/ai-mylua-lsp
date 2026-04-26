@@ -98,8 +98,10 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
         "variable" | "identifier" => {
             let text = node_text(node, ctx.source);
             // Check if it's a known local
-            if let Some(fact) = ctx.local_type_facts.get(text) {
-                return fact.type_fact.clone();
+            if let Some(decl) = ctx.resolve_in_build_scopes(text) {
+                if let Some(ref tf) = decl.type_fact {
+                    return tf.clone();
+                }
             }
             // Otherwise it's a global reference stub
             TypeFact::Stub(SymbolicStub::GlobalRef {
@@ -149,8 +151,10 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
         "nil" => TypeFact::Known(KnownType::Nil),
         "variable" | "identifier" => {
             let text = node_text(node, ctx.source);
-            if let Some(ltf) = ctx.local_type_facts.get(text) {
-                return ltf.type_fact.clone();
+            if let Some(decl) = ctx.resolve_in_build_scopes(text) {
+                if let Some(ref tf) = decl.type_fact {
+                    return tf.clone();
+                }
             }
             TypeFact::Unknown
         }
@@ -222,18 +226,18 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
         let method_name = node_text(method_node, ctx.source).to_string();
         let callee_text = node_text(callee, ctx.source);
 
-        let (base_stub, generic_args) = if let Some(fact) = ctx.local_type_facts.get(callee_text) {
-            match &fact.type_fact {
-                TypeFact::Stub(s) => (s.clone(), vec![]),
-                TypeFact::Known(KnownType::EmmyType(type_name)) => {
+        let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(callee_text) {
+            match decl.type_fact.as_ref() {
+                Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
+                Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
                     (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
                 }
-                TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+                Some(TypeFact::Known(KnownType::EmmyGeneric(type_name, params))) => {
                     (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
                 }
                 // When the base is a local Table shape, look up the method
                 // directly in the shape or function_summaries.
-                TypeFact::Known(KnownType::Table(shape_id)) => {
+                Some(TypeFact::Known(KnownType::Table(shape_id))) => {
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
                         if let Some(fi) = shape.fields.get(&method_name) {
                             match &fi.type_fact {
@@ -289,20 +293,20 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 let base_text = node_text(base, ctx.source);
                 let func_name = node_text(field, ctx.source).to_string();
 
-                let (base_stub, generic_args) = if let Some(fact) = ctx.local_type_facts.get(base_text) {
-                    match &fact.type_fact {
-                        TypeFact::Stub(s) => (s.clone(), vec![]),
-                        TypeFact::Known(KnownType::EmmyType(type_name)) => {
+                let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+                    match decl.type_fact.as_ref() {
+                        Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
+                        Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
                             (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
                         }
-                        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+                        Some(TypeFact::Known(KnownType::EmmyGeneric(type_name, params))) => {
                             (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
                         }
                         // When the base is a local Table shape (e.g. `local M = {}`),
                         // look up the function field directly in the shape and
                         // return its first declared return type. This avoids
                         // generating a GlobalRef stub for a local variable.
-                        TypeFact::Known(KnownType::Table(shape_id)) => {
+                        Some(TypeFact::Known(KnownType::Table(shape_id))) => {
                             if let Some(shape) = ctx.table_shapes.get(shape_id) {
                                 if let Some(fi) = shape.fields.get(&func_name) {
                                     match &fi.type_fact {
@@ -393,18 +397,20 @@ fn infer_field_expression_type(
     let field_name = node_text(field, ctx.source).to_string();
 
     // If base is a known local with a table shape, look up the field directly
-    if let Some(fact) = ctx.local_type_facts.get(base_text) {
-        if let TypeFact::Known(KnownType::Table(shape_id)) = &fact.type_fact {
+    if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+        if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
             if let Some(shape) = ctx.table_shapes.get(shape_id) {
                 if let Some(fi) = shape.fields.get(&field_name) {
                     return fi.type_fact.clone();
                 }
             }
         }
-        return TypeFact::Stub(SymbolicStub::FieldOf {
-            base: Box::new(fact.type_fact.clone()),
-            field: field_name,
-        });
+        if let Some(ref tf) = decl.type_fact {
+            return TypeFact::Stub(SymbolicStub::FieldOf {
+                base: Box::new(tf.clone()),
+                field: field_name,
+            });
+        }
     }
 
     TypeFact::Stub(SymbolicStub::FieldOf {
