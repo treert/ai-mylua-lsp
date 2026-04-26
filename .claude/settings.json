@@ -1,5 +1,7 @@
 {
+  "skipDangerousModePermissionPrompt": true,
   "permissions": {
+    "defaultMode": "bypassPermissions",
     "allow": [
       "Bash(cargo build *)",
       "Bash(cargo test *)",
