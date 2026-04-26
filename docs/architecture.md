@@ -93,6 +93,22 @@ flowchart TB
 - **调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双优先级队列
 - **配置**：`mylua.diagnostics.scope`（`full` / `openOnly`）控制范围
 
+**模块结构**（`src/diagnostics/`）：
+
+| 文件 | 职责 |
+|------|------|
+| `mod.rs` | 入口函数 `collect_diagnostics` / `collect_semantic_diagnostics`，调度各子检查器 |
+| `syntax.rs` | 语法错误收集（tree-sitter ERROR / MISSING 节点） |
+| `undefined_global.rs` | 未定义全局变量检查 |
+| `field_access.rs` | 字段访问检查（Emmy 类型 + Lua table shape） |
+| `type_mismatch.rs` | 类型不匹配检查（`@type` 声明 vs 赋值） |
+| `type_compat.rs` | 共享类型兼容性工具（`is_type_compatible`、字面量推断等） |
+| `duplicate_key.rs` | 重复 table key 检查 |
+| `unused_local.rs` | 未使用局部变量检查 |
+| `call_args.rs` | 函数调用参数数量/类型检查 |
+| `return_mismatch.rs` | `@return` 声明 vs 实际 return 语句检查 |
+| `suppression.rs` | `---@diagnostic` 抑制指令系统 |
+
 > 详见 [`lsp-capabilities.md`](lsp-capabilities.md)
 
 ### 3.5 外部库（workspace.library）
