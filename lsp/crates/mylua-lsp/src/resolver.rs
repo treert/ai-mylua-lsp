@@ -814,22 +814,20 @@ fn resolve_emmy_field_with_visited(
                         // Fallback: when the class anchor is a local table
                         // (e.g. `local Damageable = {}`), methods defined via
                         // `function Damageable:take_damage()` are written into
-                        // the table shape rather than global_shard. Look up
-                        // the same-named local's shape to find them.
-                        if let Some(ltf) = summary.local_type_facts.get(type_name) {
-                            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
-                                if let Some(shape) = summary.table_shapes.get(shape_id) {
-                                    if let Some(fi) = shape.fields.get(field) {
-                                        lsp_log!(
-                                            "[resolve_emmy_field] found '{}.{}' via local table shape fallback",
-                                            type_name, field
-                                        );
-                                        return ResolvedType {
-                                            type_fact: fi.type_fact.clone(),
-                                            def_uri: Some(candidate.source_uri.clone()),
-                                            def_range: fi.def_range,
-                                        };
-                                    }
+                        // the table shape rather than global_shard. Use the
+                        // pre-computed anchor_shape_id to find them directly.
+                        if let Some(shape_id) = td.anchor_shape_id {
+                            if let Some(shape) = summary.table_shapes.get(&shape_id) {
+                                if let Some(fi) = shape.fields.get(field) {
+                                    lsp_log!(
+                                        "[resolve_emmy_field] found '{}.{}' via anchor_shape_id",
+                                        type_name, field
+                                    );
+                                    return ResolvedType {
+                                        type_fact: fi.type_fact.clone(),
+                                        def_uri: Some(candidate.source_uri.clone()),
+                                        def_range: fi.def_range,
+                                    };
                                 }
                             }
                         }
@@ -969,20 +967,19 @@ fn collect_emmy_fields_recursive(
                         }
 
                         // Also collect fields from the local table shape
-                        // when the class anchor is a local variable.
-                        if let Some(ltf) = summary.local_type_facts.get(type_name) {
-                            if let TypeFact::Known(KnownType::Table(shape_id)) = &ltf.type_fact {
-                                if let Some(shape) = summary.table_shapes.get(shape_id) {
-                                    for (fname, fi) in &shape.fields {
-                                        if !fields.iter().any(|f| f.name == *fname) {
-                                            fields.push(FieldCompletion {
-                                                name: fname.clone(),
-                                                type_display: format!("{}", fi.type_fact),
-                                                is_function: is_function_type(&fi.type_fact),
-                                                def_uri: Some(candidate.source_uri.clone()),
-                                                def_range: fi.def_range,
-                                            });
-                                        }
+                        // when the class anchor is a local variable. Use the
+                        // pre-computed anchor_shape_id to find them directly.
+                        if let Some(shape_id) = td.anchor_shape_id {
+                            if let Some(shape) = summary.table_shapes.get(&shape_id) {
+                                for (fname, fi) in &shape.fields {
+                                    if !fields.iter().any(|f| f.name == *fname) {
+                                        fields.push(FieldCompletion {
+                                            name: fname.clone(),
+                                            type_display: format!("{}", fi.type_fact),
+                                            is_function: is_function_type(&fi.type_fact),
+                                            def_uri: Some(candidate.source_uri.clone()),
+                                            def_range: fi.def_range,
+                                        });
                                     }
                                 }
                             }

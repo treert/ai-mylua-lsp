@@ -155,6 +155,10 @@ pub struct TypeDefinition {
     /// Falls back to `range` for legacy summaries (`#[serde(default)]`).
     #[serde(default)]
     pub name_range: Option<ByteRange>,
+    /// When the `@class` anchors a local table (`local M = {}`), stores the
+    /// shape ID so cross-file consumers can look up fields directly.
+    #[serde(default)]
+    pub anchor_shape_id: Option<crate::table_shape::TableShapeId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

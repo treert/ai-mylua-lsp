@@ -58,6 +58,12 @@ pub fn build_file_analysis(
     let root = tree.root_node();
     visit_top_level(&mut ctx, root);
 
+    // Backfill anchor_shape_id on TypeDefinitions whose anchor is a local
+    // variable with a Table shape. flush_pending_class runs before
+    // visit_local_declaration, so the shape doesn't exist at class creation
+    // time — we scan the scope-registered declarations after traversal.
+    backfill_anchor_shape_ids(&mut ctx);
+
     let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
     let call_sites = collect_call_sites(root, source, &line_index);
@@ -89,6 +95,33 @@ pub fn build_file_analysis(
 /// Deprecated: use `build_file_analysis` which also returns a ScopeTree.
 pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> DocumentSummary {
     build_file_analysis(uri, tree, source, line_index).0
+}
+
+/// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local
+/// variable with a `Table` shape. `flush_pending_class` runs before
+/// `visit_local_declaration`, so the shape doesn't exist at class creation
+/// time — we scan the scope-registered declarations after traversal.
+fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
+    // Collect name → shape_id from scope declarations.
+    let shape_map: HashMap<String, TableShapeId> = ctx.scopes.iter()
+        .flat_map(|s| s.declarations.iter())
+        .filter_map(|decl| {
+            if let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact {
+                Some((decl.name.clone(), *sid))
+            } else {
+                None
+            }
+        })
+        .collect();
+
+    for td in &mut ctx.type_definitions {
+        if td.kind != TypeDefinitionKind::Class || td.anchor_shape_id.is_some() {
+            continue;
+        }
+        if let Some(&sid) = shape_map.get(&td.name) {
+            td.anchor_shape_id = Some(sid);
+        }
+    }
 }
 
 /// Scan the first few top-level statements for a `---@meta [name]`

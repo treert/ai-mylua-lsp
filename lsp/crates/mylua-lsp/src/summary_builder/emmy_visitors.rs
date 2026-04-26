@@ -21,6 +21,7 @@ pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Nod
             generic_params,
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
+            anchor_shape_id: None,
         });
     }
 }
@@ -39,6 +40,7 @@ fn emit_pending_class_as_typedef(
             generic_params: gparams,
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
+            anchor_shape_id: None,
         });
     }
 }
@@ -165,6 +167,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     generic_params: Vec::new(),
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     name_range: Some(name_range),
+                    anchor_shape_id: None,
                 });
             }
             EmmyAnnotation::Enum { name } => {
@@ -187,6 +190,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     generic_params: Vec::new(),
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     name_range: Some(name_range),
+                    anchor_shape_id: None,
                 });
             }
             _ => {}
