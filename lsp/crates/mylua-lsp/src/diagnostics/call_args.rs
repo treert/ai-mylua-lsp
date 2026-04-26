@@ -22,6 +22,7 @@ pub(super) fn check_call_argument_diagnostics(
     source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    scope_tree: &crate::scope::ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     count_severity: Option<DiagnosticSeverity>,
     type_severity: Option<DiagnosticSeverity>,
@@ -36,7 +37,7 @@ pub(super) fn check_call_argument_diagnostics(
 
     for call in calls {
         let Some((sigs, is_method, display)) =
-            crate::signature_help::resolve_call_signatures(call, source, uri, index)
+            crate::signature_help::resolve_call_signatures(call, source, uri, scope_tree, index)
         else {
             continue;
         };
@@ -94,7 +95,7 @@ pub(super) fn check_call_argument_diagnostics(
             // its param slots for typing. If multiple overloads match,
             // prefer the one whose param types align most with the
             // provided literal types (best-effort, non-critical).
-            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, summary) else { continue };
+            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, summary, scope_tree) else { continue };
             let visible_params = visible_params_for(&best_sig, is_method);
             for (i, arg_expr) in arg_exprs.iter().enumerate() {
                 // Vararg param absorbs everything past its position.
@@ -106,7 +107,7 @@ pub(super) fn check_call_argument_diagnostics(
                 if param.name == "..." {
                     break;
                 }
-                let actual = infer_argument_type(*arg_expr, source, summary);
+                let actual = infer_argument_type(*arg_expr, source, summary, scope_tree);
                 if actual == TypeFact::Unknown {
                     continue;
                 }
@@ -215,6 +216,7 @@ fn pick_best_typing_overload(
     is_method: bool,
     source: &[u8],
     summary: &crate::summary::DocumentSummary,
+    scope_tree: &crate::scope::ScopeTree,
 ) -> Option<crate::type_system::FunctionSignature> {
     let actual_count = arg_exprs.len() as u32;
     let candidates: Vec<&crate::type_system::FunctionSignature> = sigs
@@ -233,7 +235,7 @@ fn pick_best_typing_overload(
             if param.name == "..." {
                 break;
             }
-            let actual = infer_argument_type(*arg, source, summary);
+            let actual = infer_argument_type(*arg, source, summary, scope_tree);
             if actual == TypeFact::Unknown {
                 continue;
             }

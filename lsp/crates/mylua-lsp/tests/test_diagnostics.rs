@@ -580,8 +580,20 @@ fn generic_class_field_resolution() {
 ---@type Container<string>
 local c = getContainer()
 "#;
-    let (_doc, uri, mut agg) = setup_single_file(src, "generic.lua");
-    let resolved = resolver::resolve_local_in_file(&uri, "c", &mut agg);
+    // Build with build_file_analysis to get a scope tree that has type facts
+    let mut parser = new_parser();
+    let tree = parser.parse(src.as_bytes(), None).expect("parse failed");
+    let lua_source = mylua_lsp::util::LuaSource::new(src.to_string());
+    let uri = make_uri("generic.lua");
+    let (summary, scope_tree) = mylua_lsp::summary_builder::build_file_analysis(
+        &uri, &tree, lua_source.source(), lua_source.line_index(),
+    );
+    let doc = mylua_lsp::document::Document { lua_source, tree, scope_tree };
+    let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
+    agg.upsert_summary(summary);
+    // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
+    let byte_offset = src.len() - 1;
+    let resolved = resolver::resolve_local_in_file(&uri, "c", byte_offset, &doc.scope_tree, &mut agg);
     let field_result = resolver::resolve_field_chain(
         &resolved.type_fact, &["value".to_string()], &mut agg,
     );

@@ -215,7 +215,7 @@ fn try_dot_completion_ast(
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
     let base_node = find_base_expression_node(doc.tree.root_node(), base_end)?;
-let base_fact = type_inference::infer_node_type(base_node, bytes, uri, index);
+let base_fact = type_inference::infer_node_type(base_node, bytes, uri, &doc.scope_tree, index);
 
     let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
     if fields.is_empty() {

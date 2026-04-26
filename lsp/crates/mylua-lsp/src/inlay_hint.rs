@@ -31,6 +31,7 @@ struct InlayCtx<'a> {
     source: &'a [u8],
     line_index: &'a LineIndex,
     uri: &'a Uri,
+    scope_tree: &'a crate::scope::ScopeTree,
     index: &'a mut WorkspaceAggregation,
     cfg: &'a InlayHintConfig,
     range_start: usize,
@@ -55,7 +56,7 @@ pub fn inlay_hints(
 
     let mut out = Vec::new();
     let mut ctx = InlayCtx {
-        source, line_index: doc.line_index(), uri, index, cfg, range_start, range_end, out: &mut out,
+        source, line_index: doc.line_index(), uri, scope_tree: &doc.scope_tree, index, cfg, range_start, range_end, out: &mut out,
     };
     let mut cursor = doc.tree.root_node().walk();
     walk(&mut cursor, &mut ctx);
@@ -74,10 +75,10 @@ fn walk(
 
     match node.kind() {
         "function_call" if ctx.cfg.parameter_names => {
-            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out, ctx.line_index);
+            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
         }
         "local_declaration" if ctx.cfg.variable_types => {
-            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.index, ctx.out, ctx.line_index);
+            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
         }
         _ => {}
     }
@@ -97,6 +98,7 @@ fn collect_parameter_name_hints(
     call: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
@@ -107,7 +109,7 @@ fn collect_parameter_name_hints(
     // method calls, dot calls, and simple identifier calls are all
     // covered uniformly.
     let Some((sigs, is_method, _name)) =
-        signature_help::resolve_call_signatures(call, source, uri, index)
+        signature_help::resolve_call_signatures(call, source, uri, scope_tree, index)
     else {
         return;
     };
@@ -174,6 +176,7 @@ fn collect_variable_type_hints(
     decl: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
@@ -183,7 +186,6 @@ fn collect_variable_type_hints(
     if preceded_by_type_annotation(decl, source) {
         return;
     }
-    let Some(summary) = index.summaries.get(uri) else { return };
 
     for i in 0..names.named_child_count() {
         let Some(id) = names.named_child(i as u32) else { continue };
@@ -191,14 +193,22 @@ fn collect_variable_type_hints(
             continue;
         }
         let name = node_text(id, source);
-        let Some(ltf) = summary.local_type_facts.get(name) else { continue };
-        if !is_interesting_type(&ltf.type_fact) {
+        // Try scope_tree first, then fallback to local_type_facts
+        let type_fact = scope_tree.resolve_type(id.start_byte(), name)
+            .cloned()
+            .or_else(|| {
+                index.summaries.get(uri)
+                    .and_then(|s| s.local_type_facts.get(name))
+                    .map(|ltf| ltf.type_fact.clone())
+            });
+        let Some(tf) = type_fact else { continue };
+        if !is_interesting_type(&tf) {
             continue;
         }
         let end_pos = line_index.ts_point_to_position(id.end_position(), source);
         out.push(InlayHint {
             position: end_pos,
-            label: InlayHintLabel::String(format!(": {}", ltf.type_fact)),
+            label: InlayHintLabel::String(format!(": {}", tf)),
             kind: Some(InlayHintKind::TYPE),
             text_edits: None,
             tooltip: None,

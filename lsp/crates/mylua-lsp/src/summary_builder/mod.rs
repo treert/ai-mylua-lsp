@@ -71,6 +71,12 @@ pub fn build_file_analysis(
 
     let scope_tree = ctx.take_scope_tree();
 
+    // Collect type names referenced by scope declarations (equivalent to
+    // walking local_type_facts.values()). Pre-computed here so
+    // aggregation::collect_referenced_type_names can use this field
+    // instead of local_type_facts.
+    let referenced_local_type_names = collect_scope_type_names(&scope_tree);
+
     let summary = DocumentSummary {
         uri: uri.clone(),
         content_hash,
@@ -87,9 +93,43 @@ pub fn build_file_analysis(
         call_sites,
         is_meta,
         meta_name,
+        referenced_local_type_names,
     };
 
     (summary, scope_tree)
+}
+
+/// Walk all scope declarations and collect Emmy type names referenced by
+/// their type_facts. Mirrors the `walk` helper in
+/// `aggregation::collect_referenced_type_names` (item 1 — local_type_facts).
+fn collect_scope_type_names(scope_tree: &ScopeTree) -> std::collections::HashSet<String> {
+    use crate::type_system::{KnownType, SymbolicStub, TypeFact};
+    let mut names = std::collections::HashSet::new();
+
+    fn walk(fact: &TypeFact, out: &mut std::collections::HashSet<String>) {
+        match fact {
+            TypeFact::Known(KnownType::EmmyType(n)) => { out.insert(n.clone()); }
+            TypeFact::Known(KnownType::EmmyGeneric(n, params)) => {
+                out.insert(n.clone());
+                for p in params { walk(p, out); }
+            }
+            TypeFact::Known(KnownType::Function(sig)) => {
+                for p in &sig.params { walk(&p.type_fact, out); }
+                for r in &sig.returns { walk(r, out); }
+            }
+            TypeFact::Stub(SymbolicStub::TypeRef { name }) => { out.insert(name.clone()); }
+            TypeFact::Stub(SymbolicStub::FieldOf { base, .. }) => { walk(base, out); }
+            TypeFact::Union(parts) => { for p in parts { walk(p, out); } }
+            _ => {}
+        }
+    }
+
+    for decl in scope_tree.all_declarations() {
+        if let Some(tf) = &decl.type_fact {
+            walk(tf, &mut names);
+        }
+    }
+    names
 }
 
 /// Deprecated: use `build_file_analysis` which also returns a ScopeTree.

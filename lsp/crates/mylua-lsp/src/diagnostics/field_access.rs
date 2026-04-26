@@ -10,6 +10,7 @@ struct FieldDiagCtx<'a> {
     source: &'a [u8],
     line_index: &'a LineIndex,
     uri: &'a Uri,
+    scope_tree: &'a crate::scope::ScopeTree,
     index: &'a mut WorkspaceAggregation,
     diagnostics: &'a mut Vec<Diagnostic>,
     emmy_severity: Option<DiagnosticSeverity>,
@@ -22,6 +23,7 @@ pub(super) fn check_field_access_diagnostics(
     source: &[u8],
     uri: &Uri,
     index: &mut WorkspaceAggregation,
+    scope_tree: &crate::scope::ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     emmy_severity: Option<DiagnosticSeverity>,
     lua_error_severity: Option<DiagnosticSeverity>,
@@ -29,7 +31,7 @@ pub(super) fn check_field_access_diagnostics(
     line_index: &LineIndex,
 ) {
     let mut ctx = FieldDiagCtx {
-        source, line_index, uri, index, diagnostics,
+        source, line_index, uri, scope_tree, index, diagnostics,
         emmy_severity, lua_error_severity, lua_warn_severity,
     };
     let mut cursor = root.walk();
@@ -75,7 +77,7 @@ fn collect_field_diagnostics(
             node.child_by_field_name("object"),
             node.child_by_field_name("field"),
         ) {
-let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.uri, ctx.index);
+let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.uri, ctx.scope_tree, ctx.index);
             let field_name = node_text(field, ctx.source).to_string();
 
             let global_prefix = match &base_fact {

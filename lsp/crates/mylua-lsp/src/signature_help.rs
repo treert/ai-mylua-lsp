@@ -29,7 +29,7 @@ pub fn signature_help(
     // Find the enclosing function call whose argument list contains the cursor.
     let call = find_enclosing_call(doc.tree.root_node(), offset)?;
     let (signatures, is_method, primary_name) =
-        resolve_call_signatures(call, source, uri, index)?;
+        resolve_call_signatures(call, source, uri, &doc.scope_tree, index)?;
     if signatures.is_empty() {
         return None;
     }
@@ -76,6 +76,7 @@ pub(crate) fn resolve_call_signatures(
     call: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
     let callee = call.child_by_field_name("callee")?;
@@ -84,7 +85,7 @@ pub(crate) fn resolve_call_signatures(
     // `obj:method(...)`
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
-        let base_fact = type_inference::infer_node_type(callee, source, uri, index);
+        let base_fact = type_inference::infer_node_type(callee, source, uri, scope_tree, index);
         let sigs = lookup_function_signatures_by_field(uri, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
@@ -97,7 +98,7 @@ pub(crate) fn resolve_call_signatures(
             callee.child_by_field_name("field"),
         ) {
             let field_name = node_text(field, source).to_string();
-            let base_fact = type_inference::infer_node_type(object, source, uri, index);
+            let base_fact = type_inference::infer_node_type(object, source, uri, scope_tree, index);
             let sigs = lookup_function_signatures_by_field(uri, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
@@ -118,7 +119,7 @@ pub(crate) fn resolve_call_signatures(
     // function(a, b) ... end` or cross-file `require` returning a
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
-    let base_fact = type_inference::infer_node_type(callee, source, uri, index);
+    let base_fact = type_inference::infer_node_type(callee, source, uri, scope_tree, index);
     let resolved = resolver::resolve_type(&base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {

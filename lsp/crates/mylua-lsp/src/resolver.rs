@@ -161,21 +161,17 @@ fn resolve_field_chain_inner(
     current
 }
 
-/// Given a file URI and a local variable name, resolve its type from the summary.
+/// Given a file URI and a local variable name, resolve its type via the scope tree.
 pub fn resolve_local_in_file(
-    uri: &Uri,
+    _uri: &Uri,
     local_name: &str,
+    byte_offset: usize,
+    scope_tree: &crate::scope::ScopeTree,
     agg: &mut WorkspaceAggregation,
 ) -> ResolvedType {
-    let fact = {
-        let summary = match agg.summaries.get(uri) {
-            Some(s) => s,
-            None => return ResolvedType::unknown(),
-        };
-        match summary.local_type_facts.get(local_name) {
-            Some(ltf) => ltf.type_fact.clone(),
-            None => return ResolvedType::unknown(),
-        }
+    let fact = match scope_tree.resolve_type(byte_offset, local_name) {
+        Some(tf) => tf.clone(),
+        None => return ResolvedType::unknown(),
     };
     resolve_type(&fact, agg)
 }

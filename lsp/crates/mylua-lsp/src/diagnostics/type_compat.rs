@@ -101,9 +101,14 @@ pub(crate) fn infer_argument_type(
     node: tree_sitter::Node,
     source: &[u8],
     summary: &crate::summary::DocumentSummary,
+    scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
     if matches!(node.kind(), "variable" | "identifier") {
         let text = node_text(node, source);
+        // Try scope_tree first, then fallback to local_type_facts
+        if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
+            return tf.clone();
+        }
         if let Some(ltf) = summary.local_type_facts.get(text) {
             return ltf.type_fact.clone();
         }

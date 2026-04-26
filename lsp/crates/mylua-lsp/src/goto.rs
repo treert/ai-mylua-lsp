@@ -110,7 +110,7 @@ pub fn goto_definition(
 /// Resolution order:
 ///
 /// 1. Identifier at the cursor → scope-resolve to a local declaration
-///    and read `DocumentSummary.local_type_facts[name].type_fact`.
+///    and read its type via `scope_tree.resolve_type(byte_offset, name)`.
 /// 2. If the resolved `TypeFact` names an Emmy type (directly via
 ///    `Known(EmmyType(n))` / `Known(EmmyGeneric(n, _))` / `Stub(TypeRef{n})`,
 ///    or indirectly — a `Stub(GlobalRef)` that `resolve_type` chains
@@ -140,7 +140,7 @@ pub fn goto_type_definition(
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-            if let Some(target) = type_definition_for_local(&def.uri, &def.name, index, strategy, documents) {
+            if let Some(target) = type_definition_for_local(&def.uri, &def.name, byte_offset, &doc.scope_tree, index, strategy, documents) {
                 return Some(target);
             }
         }
@@ -162,20 +162,25 @@ pub fn goto_type_definition(
 }
 
 /// Given a local variable's declaration URI + name, look up its
-/// stored `TypeFact` and map it to a `type_shard` candidate range
+/// stored `TypeFact` via scope_tree and map it to a `type_shard` candidate range
 /// when the fact identifies an Emmy type.
 fn type_definition_for_local(
     def_uri: &Uri,
     local_name: &str,
+    byte_offset: usize,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
     documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
-    let fact = index
-        .summaries
-        .get(def_uri)
-        .and_then(|s| s.local_type_facts.get(local_name))
-        .map(|l| l.type_fact.clone())?;
+    // Try scope_tree first (new path), then fallback to local_type_facts (old path)
+    let fact = if let Some(tf) = scope_tree.resolve_type(byte_offset, local_name) {
+        tf.clone()
+    } else if let Some(ltf) = index.summaries.get(def_uri).and_then(|s| s.local_type_facts.get(local_name)) {
+        ltf.type_fact.clone()
+    } else {
+        return None;
+    };
 
     // Direct name: `---@type Foo local x = ...` stores Foo directly.
     // For `Known(_)` facts the resolver would just return the same
@@ -239,7 +244,7 @@ fn goto_variable_field(
     let source = doc.source();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    goto_field_or_method(base_node, name_node, source, uri, index, documents)
+    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index, documents)
 }
 
 /// AST-driven goto for a method call: `obj:method(...)`. The clicked
@@ -256,7 +261,7 @@ fn goto_method_call(
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    goto_field_or_method(base_node, name_node, source, uri, index, documents)
+    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index, documents)
 }
 
 /// Shared goto helper for dotted field access (`a.b`) and method calls
@@ -267,12 +272,13 @@ fn goto_field_or_method(
     name_node: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
     documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
-let base_fact = crate::type_inference::infer_node_type(base_node, source, uri, index);
+let base_fact = crate::type_inference::infer_node_type(base_node, source, uri, scope_tree, index);
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name], index,
     );

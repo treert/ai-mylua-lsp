@@ -82,7 +82,7 @@ pub fn collect_semantic_diagnostics_with_version(
     let lua_warn_severity = diag_config.lua_field_warning.to_lsp_severity();
     if emmy_severity.is_some() || lua_error_severity.is_some() || lua_warn_severity.is_some() {
         field_access::check_field_access_diagnostics(
-            root, source, uri, index, &mut diagnostics,
+            root, source, uri, index, scope_tree, &mut diagnostics,
             emmy_severity, lua_error_severity, lua_warn_severity, line_index,
         );
     }
@@ -101,7 +101,7 @@ pub fn collect_semantic_diagnostics_with_version(
     let type_sev = diag_config.argument_type_mismatch.to_lsp_severity();
     if count_sev.is_some() || type_sev.is_some() {
         call_args::check_call_argument_diagnostics(
-            root, source, uri, index, &mut diagnostics, count_sev, type_sev, line_index,
+            root, source, uri, index, scope_tree, &mut diagnostics, count_sev, type_sev, line_index,
         );
     }
     if let Some(severity) = diag_config.return_mismatch.to_lsp_severity() {

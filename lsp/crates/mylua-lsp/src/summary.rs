@@ -67,6 +67,12 @@ pub struct DocumentSummary {
     /// informational at present (no require_map mapping yet).
     #[serde(default)]
     pub meta_name: Option<String>,
+    /// Type names referenced by local variable type facts.
+    /// Pre-computed during build so `collect_referenced_type_names` in
+    /// aggregation doesn't need `local_type_facts` — prepares for
+    /// their removal.
+    #[serde(default)]
+    pub referenced_local_type_names: std::collections::HashSet<String>,
 }
 
 /// One `function_call` occurrence recorded during summary build.

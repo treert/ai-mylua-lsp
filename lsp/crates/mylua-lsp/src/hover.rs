@@ -114,7 +114,7 @@ pub fn hover(
     }
 
     if let Some(def) = doc.scope_tree.resolve(byte_offset, ident_text, uri) {
-        let type_info = resolve_local_type_info(uri, ident_text, index);
+        let type_info = resolve_local_type_info(uri, ident_text, byte_offset, &doc.scope_tree, index);
         lsp_log!(
             "[hover] scope resolved '{}', type_info={:?}",
             ident_text,
@@ -343,7 +343,7 @@ fn hover_method_call(
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    build_field_hover(base_node, name_node, "method", source, uri, index, all_docs, doc.line_index())
+    build_field_hover(base_node, name_node, "method", source, uri, &doc.scope_tree, index, all_docs, doc.line_index())
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -360,7 +360,7 @@ fn hover_variable_field(
     let source = doc.source();
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    build_field_hover(base_node, name_node, "field", source, uri, index, all_docs, doc.line_index())
+    build_field_hover(base_node, name_node, "field", source, uri, &doc.scope_tree, index, all_docs, doc.line_index())
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -376,13 +376,14 @@ fn build_field_hover(
     kind_label: &str,
     source: &[u8],
     uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = node_text(name_node, source).to_string();
 
-    let base_fact = infer_node_type(base_node, source, uri, index);
+    let base_fact = infer_node_type(base_node, source, uri, scope_tree, index);
     lsp_log!(
         "[hover_{kind}] base='{}' base_fact={:?} {kind}='{}'",
         node_text(base_node, source),
@@ -428,9 +429,36 @@ fn build_field_hover(
 fn resolve_local_type_info(
     uri: &Uri,
     name: &str,
+    byte_offset: usize,
+    scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
 ) -> Option<String> {
-    let resolved = resolver::resolve_local_in_file(uri, name, index);
+    // FunctionRef hover fix: resolve to readable signature via scope_tree
+    if let Some(type_fact) = scope_tree.resolve_type(byte_offset, name) {
+        if let TypeFact::Known(crate::type_system::KnownType::FunctionRef(id)) = type_fact {
+            if let Some(summary) = index.summaries.get(uri) {
+                if let Some(fs) = summary.function_summaries.get(id) {
+                    return Some(format_signature(&fs.signature));
+                }
+            }
+        }
+    }
+
+    let resolved = resolver::resolve_local_in_file(uri, name, byte_offset, scope_tree, index);
+    // Fallback: if scope_tree didn't resolve (e.g. function body params before Task 8),
+    // try the old local_type_facts path.
+    if resolved.type_fact == TypeFact::Unknown {
+        let fallback_fact = index.summaries.get(uri)
+            .and_then(|s| s.local_type_facts.get(name))
+            .map(|ltf| ltf.type_fact.clone());
+        if let Some(fact) = fallback_fact {
+            let fallback = resolver::resolve_type(&fact, index);
+            let display = format_resolved_type(&fallback.type_fact);
+            if display != "unknown" {
+                return Some(display);
+            }
+        }
+    }
     let display = format_resolved_type(&resolved.type_fact);
     if display == "unknown" {
         None
