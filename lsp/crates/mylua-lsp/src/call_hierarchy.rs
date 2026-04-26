@@ -67,7 +67,7 @@ pub fn prepare_call_hierarchy(
     let li = doc.line_index();
     let src = doc.source();
     if let Some(summary) = index.summaries.get(uri) {
-        if let Some(fs) = summary.function_summaries.get(&name) {
+        if let Some(fs) = summary.get_function_by_name(&name) {
             return vec![build_item(
                 fs.name.clone(),
                 SymbolKind::FUNCTION,
@@ -248,7 +248,7 @@ fn resolve_caller_item(
             range,
         );
     }
-    if let Some(fs) = summary.function_summaries.get(caller_name) {
+    if let Some(fs) = summary.get_function_by_name(caller_name) {
         let kind = if caller_name.contains(':') {
             SymbolKind::METHOD
         } else {
@@ -331,7 +331,7 @@ fn resolve_outgoing_target(
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
             if let Some(summary) = index.summaries.get(&c.source_uri) {
-                if let Some(fs) = summary.function_summaries.get(name) {
+                if let Some(fs) = summary.get_function_by_name(name) {
                     let lsp_range = convert_byte_range(&c.source_uri, fs.range, documents);
                     return build_item(
                         name.to_string(),
@@ -361,7 +361,7 @@ fn resolve_outgoing_target(
     // 2. Fallback: linear scan over all summaries (handles names not
     //    registered in global_shard, e.g. local helpers).
     for (uri, summary) in &index.summaries {
-        if let Some(fs) = summary.function_summaries.get(name) {
+        if let Some(fs) = summary.get_function_by_name(name) {
             let lsp_range = convert_byte_range(uri, fs.range, documents);
             return build_item(
                 name.to_string(),

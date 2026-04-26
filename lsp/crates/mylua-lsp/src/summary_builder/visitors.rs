@@ -279,8 +279,10 @@ fn extract_call_return_types(
 
     // Same-file function summary (covers `local function`, `function`,
     // `function Class:m`, etc.).
-    if let Some(fs) = ctx.function_summaries.get(callee_text) {
-        return Some(fs.signature.returns.clone());
+    if let Some(&func_id) = ctx.function_name_to_id.get(callee_text) {
+        if let Some(fs) = ctx.function_summaries.get(&func_id) {
+            return Some(fs.signature.returns.clone());
+        }
     }
     None
 }
@@ -364,7 +366,9 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let body = node.child_by_field_name("body");
 
     let fs = build_function_summary(ctx, &name, node, body);
-    ctx.function_summaries.insert(name, fs);
+    let func_id = ctx.alloc_function_id();
+    ctx.function_name_to_id.insert(name.clone(), func_id);
+    ctx.function_summaries.insert(func_id, fs);
 }
 
 fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -377,7 +381,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     let fs = build_function_summary(ctx, &name, node, body);
     let sig_for_global = fs.signature.clone();
-    ctx.function_summaries.insert(name.clone(), fs);
+    let func_id = ctx.alloc_function_id();
+    ctx.function_name_to_id.insert(name.clone(), func_id);
+    ctx.function_summaries.insert(func_id, fs);
 
     // `function M.add(a, b)` / `function M:method()` — when the base is a
     // local with a Table shape, register the function as a field on that

@@ -512,14 +512,14 @@ fn resolve_call_return(
             };
 
             // Try bare name first, then qualified `Type:method` / `Type.method`.
-            let mut found = summary.function_summaries.get(func_name)
+            let mut found = summary.get_function_by_name(func_name)
                 .and_then(|fs| fs.signature.returns.first().cloned());
 
             if found.is_none() {
                 'outer_fs: for type_name in &candidate_names {
                     for sep in [":", "."] {
                         let qualified = format!("{}{}{}", type_name, sep, func_name);
-                        if let Some(fs) = summary.function_summaries.get(&qualified) {
+                        if let Some(fs) = summary.get_function_by_name(&qualified) {
                             found = fs.signature.returns.first().cloned();
                             if found.is_some() { break 'outer_fs; }
                         }
@@ -1060,8 +1060,8 @@ pub fn resolve_method_return_with_generics(
         let qualified_dot = format!("{}.{}", type_name, method_name);
 
         let ret = agg.summaries.get(&uri).and_then(|summary| {
-            let fs = summary.function_summaries.get(&qualified_colon)
-                .or_else(|| summary.function_summaries.get(&qualified_dot));
+            let fs = summary.get_function_by_name(&qualified_colon)
+                .or_else(|| summary.get_function_by_name(&qualified_dot));
             // Last-resort fallback: try the bare method name. This can
             // theoretically match a same-named function in the same file
             // that doesn't belong to `type_name`. The risk is low because
@@ -1069,7 +1069,7 @@ pub fn resolve_method_return_with_generics(
             // type's own source file, but log a trace so mismatches are
             // diagnosable.
             let fs = fs.or_else(|| {
-                let hit = summary.function_summaries.get(method_name);
+                let hit = summary.get_function_by_name(method_name);
                 if hit.is_some() {
                     lsp_log!(
                         "[resolve_method_return_with_generics] bare-name fallback: \

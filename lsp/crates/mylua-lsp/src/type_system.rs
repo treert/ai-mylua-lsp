@@ -4,6 +4,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::table_shape::TableShapeId;
 
+/// Stable identity for a function summary within a file.
+/// The inner `u32` is a per-file unique id assigned during summary generation,
+/// mirroring the pattern used by `TableShapeId`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct FunctionSummaryId(pub u32);
+
+impl fmt::Display for FunctionSummaryId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "func_{}", self.0)
+    }
+}
+
 /// A type fact produced by single-file inference.
 ///
 /// `Known` variants are fully resolved within the file.
@@ -25,6 +37,10 @@ pub enum KnownType {
     String,
     Table(TableShapeId),
     Function(FunctionSignature),
+    /// Reference to a function signature by ID (for functions stored in `DocumentSummary.function_summaries`).
+    /// Use this when the function is defined in the same file; it allows looking up the complete
+    /// metadata (overloads, Emmy annotations, etc.) from the summary.
+    FunctionRef(FunctionSummaryId),
     EmmyType(std::string::String),
     EmmyGeneric(std::string::String, Vec<TypeFact>),
 }
@@ -185,6 +201,7 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
             let returns = sig.returns.iter().map(|r| substitute_self(r, class_name)).collect();
             TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
         }
+        TypeFact::Known(KnownType::FunctionRef(_)) => fact.clone(),
         TypeFact::Union(parts) => {
             TypeFact::Union(parts.iter().map(|p| substitute_self(p, class_name)).collect())
         }
@@ -236,6 +253,7 @@ impl fmt::Display for KnownType {
             Self::String => write!(f, "string"),
             Self::Table(id) => write!(f, "table<{}>", id.0),
             Self::Function(_) => write!(f, "function"),
+            Self::FunctionRef(id) => write!(f, "function<{}>", id),
             Self::EmmyType(name) => write!(f, "{}", name),
             Self::EmmyGeneric(name, params) => {
                 if name == "__array" && params.len() == 1 {

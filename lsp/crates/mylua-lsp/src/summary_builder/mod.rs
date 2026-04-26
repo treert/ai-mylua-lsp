@@ -33,10 +33,12 @@ pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_in
         require_bindings: Vec::new(),
         global_contributions: Vec::new(),
         function_summaries: HashMap::new(),
+        function_name_to_id: HashMap::new(),
         type_definitions: Vec::new(),
         local_type_facts: HashMap::new(),
         table_shapes: HashMap::new(),
         next_shape_id: 0,
+        next_function_id: 0,
         pending_type_annotation: None,
         pending_class: None,
         pending_generic_params: Vec::new(),
@@ -125,11 +127,16 @@ pub(crate) struct BuildContext<'a> {
     pub(crate) line_index: &'a LineIndex,
     pub(crate) require_bindings: Vec<RequireBinding>,
     pub(crate) global_contributions: Vec<GlobalContribution>,
-    pub(crate) function_summaries: HashMap<String, FunctionSummary>,
+    pub(crate) function_summaries: HashMap<FunctionSummaryId, FunctionSummary>,
+    /// Reverse mapping: function name → FunctionSummaryId.
+    /// Built during `visit_top_level` and used by expression type inference.
+    pub(crate) function_name_to_id: HashMap<String, FunctionSummaryId>,
     pub(crate) type_definitions: Vec<TypeDefinition>,
     pub(crate) local_type_facts: HashMap<String, LocalTypeFact>,
     pub(crate) table_shapes: HashMap<TableShapeId, TableShape>,
     pub(crate) next_shape_id: u32,
+    /// Counter for allocating unique `FunctionSummaryId`s per file.
+    pub(crate) next_function_id: u32,
     /// `---@type X` annotation pending attachment to the next local declaration.
     pub(crate) pending_type_annotation: Option<EmmyType>,
     /// Class being built across consecutive emmy_comment nodes.
@@ -149,7 +156,18 @@ impl<'a> BuildContext<'a> {
         id
     }
 
+    pub(crate) fn alloc_function_id(&mut self) -> FunctionSummaryId {
+        let id = FunctionSummaryId(self.next_function_id);
+        self.next_function_id += 1;
+        id
+    }
+
     pub(crate) fn take_pending_type(&mut self) -> Option<EmmyType> {
         self.pending_type_annotation.take()
+    }
+
+    /// Look up a function by name and return its ID if it exists.
+    pub(crate) fn get_function_id(&self, name: &str) -> Option<FunctionSummaryId> {
+        self.function_name_to_id.get(name).copied()
     }
 }

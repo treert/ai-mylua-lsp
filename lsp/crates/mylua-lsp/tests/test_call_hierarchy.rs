@@ -80,7 +80,7 @@ fn incoming_calls_cross_file() {
     // Build target item manually against a.lua's lib_fn.
     let target_uri = make_uri("a.lua");
     let summary = agg.summaries.get(&target_uri).expect("a.lua summary");
-    let fs = summary.function_summaries.get("lib_fn").expect("lib_fn summary");
+    let fs = summary.get_function_by_name("lib_fn").expect("lib_fn summary");
     let target_doc = docs.get(&target_uri).expect("a.lua doc");
     let lsp_range = target_doc.line_index().byte_range_to_lsp_range(fs.range, target_doc.source());
     let target_item = tower_lsp_server::ls_types::CallHierarchyItem {

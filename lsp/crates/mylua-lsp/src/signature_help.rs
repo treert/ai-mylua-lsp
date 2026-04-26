@@ -109,7 +109,7 @@ pub(crate) fn resolve_call_signatures(
     // Local function declaration (`local function f() end`) — rich
     // FunctionSummary with overloads registered in `function_summaries`.
     if let Some(summary) = index.summaries.get(uri) {
-        if let Some(fs) = summary.function_summaries.get(&name) {
+        if let Some(fs) = summary.get_function_by_name(&name) {
             let sigs = primary_plus_overloads(fs);
             return Some((sigs, false, name));
         }
@@ -127,7 +127,7 @@ pub(crate) fn resolve_call_signatures(
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
     for c in &candidates {
         if let Some(target_summary) = index.summaries.get(&c.source_uri) {
-            if let Some(fs) = target_summary.function_summaries.get(&name) {
+            if let Some(fs) = target_summary.get_function_by_name(&name) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
             }
@@ -184,7 +184,7 @@ fn lookup_function_signatures_by_field(
                 if let Some(cls) = owner_class.as_ref() {
                     for sep in [":", "."] {
                         let key = format!("{}{}{}", cls, sep, field_name);
-                        if let Some(fs) = summary.function_summaries.get(&key) {
+                        if let Some(fs) = summary.get_function_by_name(&key) {
                             return primary_plus_overloads(fs);
                         }
                     }
@@ -271,7 +271,7 @@ fn lookup_overloads_via_global_shard(
         if let Some(summary) = index.summaries.get(&candidate.source_uri) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
-            if let Some(fs) = summary.function_summaries.get(&candidate.name) {
+            if let Some(fs) = summary.get_function_by_name(&candidate.name) {
                 return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
             }
         }

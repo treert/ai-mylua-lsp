@@ -74,12 +74,12 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
         type_str.hash(&mut hasher);
     }
 
-    // Hash function signatures
-    let mut func_names: Vec<&str> = ctx.function_summaries.keys().map(|k| k.as_str()).collect();
-    func_names.sort();
-    for name in &func_names {
-        name.hash(&mut hasher);
-        if let Some(fs) = ctx.function_summaries.get(*name) {
+    // Hash function signatures by ID (not by name)
+    let mut func_ids: Vec<_> = ctx.function_summaries.keys().copied().collect();
+    func_ids.sort_by_key(|id| id.0);
+    for id in &func_ids {
+        id.0.hash(&mut hasher);
+        if let Some(fs) = ctx.function_summaries.get(id) {
             fs.signature_fingerprint.hash(&mut hasher);
         }
     }

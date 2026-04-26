@@ -221,7 +221,7 @@ pub fn hover(
             let _ = write!(type_info, " ({} definitions)", entry_count);
         }
         if let Some(summary) = index.summaries.get(&source_uri) {
-            if let Some(fs) = summary.function_summaries.get(ident_text) {
+            if let Some(fs) = summary.get_function_by_name(ident_text) {
                 if !fs.overloads.is_empty() {
                     type_info.push_str("\n\nOverloads:");
                     for overload in &fs.overloads {

@@ -69,7 +69,7 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
-    let fs = summary.function_summaries.get("Builder:chain").expect("method");
+    let fs = summary.get_function_by_name("Builder:chain").expect("method");
     assert_eq!(fs.signature.returns.len(), 1);
     match &fs.signature.returns[0] {
         TypeFact::Known(KnownType::EmmyType(n)) => {
@@ -92,7 +92,7 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder_param.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
-    let fs = summary.function_summaries.get("Builder:merge").expect("method");
+    let fs = summary.get_function_by_name("Builder:merge").expect("method");
     let other = fs.signature.params.iter().find(|p| p.name == "other").expect("other param");
     match &other.type_fact {
         TypeFact::Known(KnownType::EmmyType(n)) => {
@@ -113,7 +113,7 @@ local function free() return nil end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "free.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
-    let fs = summary.function_summaries.get("free").expect("func");
+    let fs = summary.get_function_by_name("free").expect("func");
     match &fs.signature.returns[0] {
         TypeFact::Known(KnownType::EmmyType(n)) => {
             assert_eq!(n, "self", "free function keeps `self` literal");
@@ -137,7 +137,7 @@ local function takes(cb) end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "multi_ret_param.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
-    let fs = summary.function_summaries.get("takes").expect("takes");
+    let fs = summary.get_function_by_name("takes").expect("takes");
     let cb = fs.signature.params.iter().find(|p| p.name == "cb").expect("cb");
     match &cb.type_fact {
         TypeFact::Known(KnownType::Function(sig)) => {

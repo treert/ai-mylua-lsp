@@ -246,9 +246,11 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                     // Fallback: qualified name in function_summaries
                     for sep in [":", "."] {
                         let qualified = format!("{}{}{}", callee_text, sep, method_name);
-                        if let Some(fs) = ctx.function_summaries.get(&qualified) {
-                            if let Some(ret) = fs.signature.returns.first() {
-                                return ret.clone();
+                        if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
+                            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                                if let Some(ret) = fs.signature.returns.first() {
+                                    return ret.clone();
+                                }
                             }
                         }
                     }
@@ -302,9 +304,11 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                             }
                             // Fallback: qualified name in function_summaries
                             let qualified = format!("{}.{}", base_text, func_name);
-                            if let Some(fs) = ctx.function_summaries.get(&qualified) {
-                                if let Some(ret) = fs.signature.returns.first() {
-                                    return ret.clone();
+                            if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
+                                if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                                    if let Some(ret) = fs.signature.returns.first() {
+                                        return ret.clone();
+                                    }
                                 }
                             }
                             (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![])
@@ -325,24 +329,26 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
     }
 
     // Simple local/global function call — check local function summaries
-    if let Some(fs) = ctx.function_summaries.get(callee_text) {
-        // Function-level generic inference: if the callee has @generic params,
-        // try to unify them from the actual argument types at the call site.
-        if !fs.generic_params.is_empty() {
-            let actual_arg_types = collect_call_arg_types(ctx, node);
-            if let Some(substituted_returns) = crate::resolver::unify_function_generics(
-                &fs.generic_params,
-                &fs.signature.params,
-                &actual_arg_types,
-                &fs.signature.returns,
-            ) {
-                if let Some(ret) = substituted_returns.first() {
-                    return ret.clone();
+    if let Some(&func_id) = ctx.function_name_to_id.get(callee_text) {
+        if let Some(fs) = ctx.function_summaries.get(&func_id) {
+            // Function-level generic inference: if the callee has @generic params,
+            // try to unify them from the actual argument types at the call site.
+            if !fs.generic_params.is_empty() {
+                let actual_arg_types = collect_call_arg_types(ctx, node);
+                if let Some(substituted_returns) = crate::resolver::unify_function_generics(
+                    &fs.generic_params,
+                    &fs.signature.params,
+                    &actual_arg_types,
+                    &fs.signature.returns,
+                ) {
+                    if let Some(ret) = substituted_returns.first() {
+                        return ret.clone();
+                    }
                 }
             }
-        }
-        if let Some(ret) = fs.signature.returns.first() {
-            return ret.clone();
+            if let Some(ret) = fs.signature.returns.first() {
+                return ret.clone();
+            }
         }
     }
 

@@ -280,7 +280,7 @@ fn infer_call_return_fact(
     // then release the borrow before calling collect_call_arg_types
     // (which needs mutable borrow).
     let fs_data = index.summaries.get(uri).and_then(|summary| {
-        summary.function_summaries.get(callee_text).map(|fs| {
+        summary.get_function_by_name(callee_text).map(|fs| {
             (
                 fs.generic_params.clone(),
                 fs.signature.params.clone(),

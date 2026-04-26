@@ -31,7 +31,12 @@ use crate::summary::DocumentSummary;
 //   (UTF-16) to `ByteRange` (byte offsets + row/byte-column). All
 //   serialized `DocumentSummary` fields now use `ByteRange`, so old
 //   caches are incompatible.
-const SCHEMA_VERSION: u32 = 6;
+// v7 (2025-04): `DocumentSummary.function_summaries` key changed from
+//   `String` (function name) to `FunctionSummaryId(u32)`, aligning with
+//   `TableShapeId` pattern. Introduces `KnownType::FunctionRef(FunctionSummaryId)`
+//   for type-safe function references. Adds `function_name_to_id` reverse
+//   mapping to BuildContext for name-based lookups during build phase.
+const SCHEMA_VERSION: u32 = 7;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

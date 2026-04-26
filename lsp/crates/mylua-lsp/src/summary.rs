@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use tower_lsp_server::ls_types::Uri;
 
 use crate::table_shape::{TableShape, TableShapeId};
-use crate::type_system::{FunctionSignature, TypeFact};
+use crate::type_system::{FunctionSignature, FunctionSummaryId, TypeFact};
 use crate::util::ByteRange;
 
 /// Per-file summary: the "recipe" of type facts produced by single-file inference.
@@ -19,8 +19,10 @@ pub struct DocumentSummary {
     pub require_bindings: Vec<RequireBinding>,
     /// Globals defined/extended by this file.
     pub global_contributions: Vec<GlobalContribution>,
-    /// Top-level and named function summaries.
-    pub function_summaries: HashMap<String, FunctionSummary>,
+    /// Top-level and named function summaries, keyed by `FunctionSummaryId`.
+    /// Note: Must maintain a reverse mapping (name → ID) in callers that need
+    /// to look up functions by name. See `summary_builder/mod.rs::BuildContext::function_name_to_id`.
+    pub function_summaries: HashMap<FunctionSummaryId, FunctionSummary>,
     /// `---@class`, `---@alias`, `---@enum` definitions.
     pub type_definitions: Vec<TypeDefinition>,
     /// Key local variables' inferred type facts.
@@ -188,4 +190,36 @@ pub enum TypeFactSource {
     FieldAccess,
     RequireBinding,
     EmmyAnnotation,
+}
+
+impl DocumentSummary {
+    /// Look up a function summary by name (linear search through all summaries).
+    /// This is the reverse lookup used during resolution when a function name
+    /// is available but we need the `FunctionSummaryId` to query `function_summaries`.
+    ///
+    /// Prefer this over iterating directly: it's a semantic anchor point
+    /// for all name-based lookups across consumers.
+    pub fn get_function_by_name(&self, name: &str) -> Option<&FunctionSummary> {
+        self.function_summaries
+            .values()
+            .find(|fs| fs.name == name)
+    }
+
+    /// Mutable version: look up a function summary by name and return both
+    /// the ID and the mutable reference. Used by code that needs to modify
+    /// the summary during resolution.
+    pub fn get_function_by_name_mut(&mut self, name: &str) -> Option<(FunctionSummaryId, &mut FunctionSummary)> {
+        self.function_summaries
+            .iter_mut()
+            .find(|(_, fs)| fs.name == name)
+            .map(|(id, fs)| (*id, fs))
+    }
+
+    /// Iterate all (ID, FunctionSummary) pairs. Useful for fingerprinting,
+    /// aggregation, and diagnostics that need to examine all functions.
+    pub fn iter_functions(&self) -> impl Iterator<Item = (FunctionSummaryId, &FunctionSummary)> {
+        self.function_summaries
+            .iter()
+            .map(|(id, fs)| (*id, fs))
+    }
 }
