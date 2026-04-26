@@ -473,10 +473,15 @@ fn resolve_call_return(
                 summary.table_shapes.get(shape_id)
                     .and_then(|shape| shape.fields.get(func_name))
                     .and_then(|fi| {
-                        if let TypeFact::Known(KnownType::Function(ref sig)) = fi.type_fact {
-                            sig.returns.first().cloned()
-                        } else {
-                            None
+                        match &fi.type_fact {
+                            TypeFact::Known(KnownType::Function(ref sig)) => {
+                                sig.returns.first().cloned()
+                            }
+                            TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                                summary.function_summaries.get(fid)
+                                    .and_then(|fs| fs.signature.returns.first().cloned())
+                            }
+                            _ => None,
                         }
                     })
             };
@@ -543,15 +548,34 @@ fn resolve_call_return(
         let qualified = format!("{}.{}", base_name, func_name);
         if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
             let resolved = resolve_recursive(&c.type_fact, agg, depth + 1, visited);
-            if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
-                if let Some(ret) = sig.returns.first() {
-                    let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
-                    if ret_resolved.def_uri.is_none() {
-                        ret_resolved.def_uri = Some(c.source_uri.clone());
-                        ret_resolved.def_range = Some(c.selection_range);
+            match &resolved.type_fact {
+                TypeFact::Known(KnownType::Function(ref sig)) => {
+                    if let Some(ret) = sig.returns.first() {
+                        let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
+                        if ret_resolved.def_uri.is_none() {
+                            ret_resolved.def_uri = Some(c.source_uri.clone());
+                            ret_resolved.def_range = Some(c.selection_range);
+                        }
+                        return ret_resolved;
                     }
-                    return ret_resolved;
                 }
+                TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                    if let Some(ref uri) = resolved.def_uri {
+                        if let Some(summary) = agg.summaries.get(uri) {
+                            if let Some(fs) = summary.function_summaries.get(fid) {
+                                if let Some(ret) = fs.signature.returns.first().cloned() {
+                                    let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
+                                    if ret_resolved.def_uri.is_none() {
+                                        ret_resolved.def_uri = Some(c.source_uri.clone());
+                                        ret_resolved.def_range = Some(c.selection_range);
+                                    }
+                                    return ret_resolved;
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
             return ResolvedType::with_location(
                 c.type_fact.clone(),
@@ -1013,6 +1037,7 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
 fn is_function_type(fact: &TypeFact) -> bool {
     match fact {
         TypeFact::Known(KnownType::Function(_))
+        | TypeFact::Known(KnownType::FunctionRef(_))
         | TypeFact::Stub(SymbolicStub::CallReturn { .. }) => true,
         TypeFact::Union(types) => types.iter().any(is_function_type),
         _ => false,
@@ -1092,10 +1117,24 @@ pub fn resolve_method_return_with_generics(
     if let Some(c) = agg.global_shard.get(&qualified).and_then(|v| v.first().cloned()) {
         let mut visited = HashSet::new();
         let resolved = resolve_recursive(&c.type_fact, agg, 0, &mut visited);
-        if let TypeFact::Known(KnownType::Function(ref sig)) = resolved.type_fact {
-            if let Some(ret) = sig.returns.first() {
-                return substitute_generics(ret, type_name, actual_params, agg);
+        match &resolved.type_fact {
+            TypeFact::Known(KnownType::Function(ref sig)) => {
+                if let Some(ret) = sig.returns.first() {
+                    return substitute_generics(ret, type_name, actual_params, agg);
+                }
             }
+            TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                if let Some(ref uri) = resolved.def_uri {
+                    if let Some(summary) = agg.summaries.get(uri) {
+                        if let Some(fs) = summary.function_summaries.get(fid) {
+                            if let Some(ret) = fs.signature.returns.first() {
+                                return substitute_generics(ret, type_name, actual_params, agg);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
 
@@ -1169,6 +1208,7 @@ fn substitute_in_fact(
                 returns,
             }))
         }
+        TypeFact::Known(KnownType::FunctionRef(_)) => fact.clone(),
         _ => fact.clone(),
     }
 }
