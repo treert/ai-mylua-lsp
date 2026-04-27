@@ -126,7 +126,7 @@ fn require_map_survives_upsert() {
     let mod_uri = make_uri("mymod.lua");
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
-    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index());
+    let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.set_require_mapping("mymod".to_string(), mod_uri.clone());
@@ -140,7 +140,7 @@ fn require_map_survives_upsert() {
 
     let new_src = "return { x = 2, y = 3 }";
     let new_doc = parse_doc(&mut parser, new_src);
-    let new_summary = summary_builder::build_summary(&mod_uri, &new_doc.tree, new_doc.source(), new_doc.line_index());
+    let new_summary = summary_builder::build_file_analysis(&mod_uri, &new_doc.tree, new_doc.source(), new_doc.line_index()).0;
     agg.upsert_summary(new_summary);
 
     assert_eq!(

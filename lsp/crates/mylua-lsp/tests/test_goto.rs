@@ -108,16 +108,14 @@ fn goto_require_jumps_to_module_return() {
     let mod_uri = make_uri("mymod.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let mod_scope = scope::build_scope_tree(&mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
+    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
     let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope };
 
     let caller_src = "local m = require(\"mymod\")\nprint(m)";
     let caller_uri = make_uri("caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let caller_summary = summary_builder::build_summary(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
+    let (caller_summary, caller_scope) = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
     let caller_doc = Document { lua_source: caller_lua_source, tree: caller_tree, scope_tree: caller_scope };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
@@ -160,7 +158,7 @@ fn goto_require_with_attribute_before_target() {
     let mod_uri = make_uri("attr_mod.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
+    let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index()).0;
 
     // `y` is the *second* identifier in the names list but it corresponds
     // to `values.named_child(1)` (index 1 among expression values), not
@@ -169,9 +167,8 @@ fn goto_require_with_attribute_before_target() {
     let caller_uri = make_uri("attr_caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let caller_summary =
-        summary_builder::build_summary(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
+    let (caller_summary, caller_scope) =
+        summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
     let caller_doc = Document {
         lua_source: caller_lua_source,
         tree: caller_tree,
@@ -351,8 +348,7 @@ return Player"#;
     let mod_uri = make_uri("player.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let mod_summary = summary_builder::build_summary(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let mod_scope = scope::build_scope_tree(&mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
+    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
     let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope };
 
     // main.lua: require("player") and call Player.new("Alice")
@@ -361,8 +357,8 @@ local hero = Player.new("Alice")"#;
     let caller_uri = make_uri("main.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let caller_summary = summary_builder::build_summary(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
-    let caller_scope = scope::build_scope_tree(&caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
+    let caller_summary = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index()).0;
+    let (_, caller_scope) = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
     let caller_doc = Document {
         lua_source: caller_lua_source,
         tree: caller_tree,

@@ -73,7 +73,7 @@ fn complete_fixture_test4_table_field() {
     let src_with_dot = format!("{}\nabcdefg.", src.trim());
     let mut parser = new_parser();
     let doc2 = parse_doc(&mut parser, &src_with_dot);
-    let summary = mylua_lsp::summary_builder::build_summary(&uri, &doc2.tree, doc2.source(), doc2.line_index());
+    let summary = mylua_lsp::summary_builder::build_file_analysis(&uri, &doc2.tree, doc2.source(), doc2.line_index()).0;
     let mut agg2 = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg2.upsert_summary(summary);
 
@@ -145,9 +145,9 @@ fn complete_require_path_from_index() {
     let caller_src = "local m = require(\"\")";
     let caller_uri = make_uri("caller.lua");
     let caller_doc = parse_doc(&mut parser, caller_src);
-    let caller_summary = summary_builder::build_summary(
+    let caller_summary = summary_builder::build_file_analysis(
         &caller_uri, &caller_doc.tree, caller_doc.source(), caller_doc.line_index(),
-    );
+    ).0;
 
     let mut agg = WorkspaceAggregation::new();
     agg.set_require_mapping("game.player".to_string(), make_uri("player.lua"));

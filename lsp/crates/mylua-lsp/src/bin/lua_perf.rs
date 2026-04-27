@@ -5,8 +5,7 @@
 //!
 //! For each file, it measures:
 //!   - Phase 1: tree-sitter parse
-//!   - Phase 2: build_summary
-//!   - Phase 3: build_scope_tree
+//!   - Phase 2: build_file_analysis (summary + scope tree)
 //! and prints a detailed breakdown with timing and percentages.
 
 use std::time::Instant;
@@ -57,7 +56,7 @@ fn run_perf_breakdown(parser: &mut tree_sitter::Parser, path: &str) {
     let t0 = Instant::now();
     let tree = parser.parse(text.as_bytes(), None).expect("parse failed");
     let parse_ms = t0.elapsed().as_millis();
-    eprintln!("[Phase 1] tree-sitter parse:   {} ms", parse_ms);
+    eprintln!("[Phase 1] tree-sitter parse:      {} ms", parse_ms);
 
     let root = tree.root_node();
     eprintln!("  root node children: {}", root.child_count());
@@ -66,50 +65,36 @@ fn run_perf_breakdown(parser: &mut tree_sitter::Parser, path: &str) {
 
     let lua_source = mylua_lsp::util::LuaSource::new(text);
 
-    // Phase 2: build_summary
+    // Phase 2: build_file_analysis (summary + scope tree in one pass)
     let uri: tower_lsp_server::ls_types::Uri = format!("file:///perf/{}", filename)
         .parse()
         .expect("invalid URI");
     let t1 = Instant::now();
-    let summary = mylua_lsp::summary_builder::build_summary(
+    let (summary, _scope_tree) = mylua_lsp::summary_builder::build_file_analysis(
         &uri,
         &tree,
         lua_source.source(),
         lua_source.line_index(),
     );
-    let summary_ms = t1.elapsed().as_millis();
-    eprintln!("[Phase 2] build_summary:       {} ms", summary_ms);
+    let analysis_ms = t1.elapsed().as_millis();
+    eprintln!("[Phase 2] build_file_analysis:    {} ms", analysis_ms);
     eprintln!("  global_contributions: {}", summary.global_contributions.len());
     eprintln!("  type_definitions: {}", summary.type_definitions.len());
     eprintln!("  table_shapes: {}", summary.table_shapes.len());
     eprintln!("  call_sites: {}", summary.call_sites.len());
     eprintln!("  function_summaries: {}", summary.function_summaries.len());
 
-    // Phase 3: build_scope_tree
-    let t2 = Instant::now();
-    let _scope_tree = mylua_lsp::scope::build_scope_tree(
-        &tree,
-        lua_source.source(),
-        lua_source.line_index(),
-    );
-    let scope_ms = t2.elapsed().as_millis();
-    eprintln!("[Phase 3] build_scope_tree:    {} ms", scope_ms);
-
-    let total_ms = parse_ms + summary_ms + scope_ms;
+    let total_ms = parse_ms + analysis_ms;
     eprintln!();
-    eprintln!("[Total]                        {} ms", total_ms);
+    eprintln!("[Total]                           {} ms", total_ms);
     if total_ms > 0 {
         eprintln!(
-            "  parse:   {:.1}%",
+            "  parse:    {:.1}%",
             parse_ms as f64 / total_ms as f64 * 100.0
         );
         eprintln!(
-            "  summary: {:.1}%",
-            summary_ms as f64 / total_ms as f64 * 100.0
-        );
-        eprintln!(
-            "  scope:   {:.1}%",
-            scope_ms as f64 / total_ms as f64 * 100.0
+            "  analysis: {:.1}%",
+            analysis_ms as f64 / total_ms as f64 * 100.0
         );
     }
     eprintln!("=== End ===");

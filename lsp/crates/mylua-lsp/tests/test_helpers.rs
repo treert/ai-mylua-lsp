@@ -6,7 +6,6 @@ use std::path::PathBuf;
 use mylua_lsp::aggregation::WorkspaceAggregation;
 use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
-use mylua_lsp::scope;
 use mylua_lsp::summary_builder;
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
@@ -54,7 +53,10 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
         .parse(text.as_bytes(), None)
         .expect("parse returned None");
     let lua_source = LuaSource::new(text.to_string());
-    let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
+    let uri: Uri = "file:///test/parse_doc.lua".parse().unwrap();
+    let (_, scope_tree) = summary_builder::build_file_analysis(
+        &uri, &tree, lua_source.source(), lua_source.line_index(),
+    );
     Document {
         lua_source,
         tree,
@@ -91,7 +93,7 @@ pub fn setup_single_file(
     let doc = parse_doc(&mut parser, source);
     let uri = make_uri(filename);
     let mut agg = WorkspaceAggregation::new();
-    let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
+    let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
     // Register module mapping so resolve_module_to_uri works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
         agg.set_require_mapping(module_name, uri.clone());
@@ -112,7 +114,7 @@ pub fn setup_workspace(
     for (filename, source) in files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
+        let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -153,9 +155,8 @@ pub fn setup_workspace_from_dir(
         let tree = parser.parse(text.as_bytes(), None);
         if let Some(tree) = tree {
             let lua_source = LuaSource::new(text);
-            let summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
             agg.upsert_summary(summary);
-            let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
             docs.insert(uri, Document { lua_source, tree, scope_tree });
         }
     }
@@ -185,7 +186,7 @@ pub fn setup_workspace_with_library(
     for (filename, source) in workspace_files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_summary(&uri, &doc.tree, doc.source(), doc.line_index());
+        let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -226,13 +227,12 @@ pub fn setup_workspace_with_library(
             continue;
         };
         let lua_source = LuaSource::new(text);
-        let mut summary = summary_builder::build_summary(&uri, &tree, lua_source.source(), lua_source.line_index());
+        let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
         // Production `run_workspace_scan` does this override for any
         // URI originating from a library root; tests mirror the same
         // contract.
         summary.is_meta = true;
         agg.upsert_summary(summary);
-        let scope_tree = scope::build_scope_tree(&tree, lua_source.source(), lua_source.line_index());
         docs.insert(uri, Document { lua_source, tree, scope_tree });
     }
 

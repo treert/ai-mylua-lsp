@@ -4,7 +4,7 @@ use crate::util::node_text;
 pub(crate) fn infer_literal_type(
     node: tree_sitter::Node,
     source: &[u8],
-    summary: &crate::summary::DocumentSummary,
+    scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
     match node.kind() {
         "number" => TypeFact::Known(KnownType::Number),
@@ -17,9 +17,11 @@ pub(crate) fn infer_literal_type(
         })),
         "variable" | "identifier" => {
             let text = node_text(node, source);
-            if let Some(ltf) = summary.local_type_facts.get(text) {
-                if ltf.source != crate::summary::TypeFactSource::EmmyAnnotation {
-                    return ltf.type_fact.clone();
+            if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
+                if !decl.is_emmy_annotated {
+                    if let Some(ref tf) = decl.type_fact {
+                        return tf.clone();
+                    }
                 }
             }
             TypeFact::Unknown
@@ -100,20 +102,15 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
 pub(crate) fn infer_argument_type(
     node: tree_sitter::Node,
     source: &[u8],
-    summary: &crate::summary::DocumentSummary,
     scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
     if matches!(node.kind(), "variable" | "identifier") {
         let text = node_text(node, source);
-        // Try scope_tree first, then fallback to local_type_facts
         if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
             return tf.clone();
         }
-        if let Some(ltf) = summary.local_type_facts.get(text) {
-            return ltf.type_fact.clone();
-        }
     }
-    infer_literal_type(node, source, summary)
+    infer_literal_type(node, source, scope_tree)
 }
 
 /// Literal-only type inference for return values. Avoids the summary

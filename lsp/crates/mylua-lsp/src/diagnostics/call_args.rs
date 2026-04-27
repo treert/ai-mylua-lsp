@@ -90,12 +90,11 @@ pub(super) fn check_call_argument_diagnostics(
         // A single "any overload matches" check keeps behavior
         // consistent with the count pass.
         if let Some(severity) = type_severity {
-            let Some(summary) = index.summaries.get(uri) else { continue };
             // Find the first overload whose count is compatible; use
             // its param slots for typing. If multiple overloads match,
             // prefer the one whose param types align most with the
             // provided literal types (best-effort, non-critical).
-            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, summary, scope_tree) else { continue };
+            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, scope_tree) else { continue };
             let visible_params = visible_params_for(&best_sig, is_method);
             for (i, arg_expr) in arg_exprs.iter().enumerate() {
                 // Vararg param absorbs everything past its position.
@@ -107,7 +106,7 @@ pub(super) fn check_call_argument_diagnostics(
                 if param.name == "..." {
                     break;
                 }
-                let actual = infer_argument_type(*arg_expr, source, summary, scope_tree);
+                let actual = infer_argument_type(*arg_expr, source, scope_tree);
                 if actual == TypeFact::Unknown {
                     continue;
                 }
@@ -215,7 +214,6 @@ fn pick_best_typing_overload(
     arg_exprs: &[tree_sitter::Node],
     is_method: bool,
     source: &[u8],
-    summary: &crate::summary::DocumentSummary,
     scope_tree: &crate::scope::ScopeTree,
 ) -> Option<crate::type_system::FunctionSignature> {
     let actual_count = arg_exprs.len() as u32;
@@ -235,7 +233,7 @@ fn pick_best_typing_overload(
             if param.name == "..." {
                 break;
             }
-            let actual = infer_argument_type(*arg, source, summary, scope_tree);
+            let actual = infer_argument_type(*arg, source, scope_tree);
             if actual == TypeFact::Unknown {
                 continue;
             }

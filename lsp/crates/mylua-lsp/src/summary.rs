@@ -26,13 +26,11 @@ pub struct DocumentSummary {
     /// Reverse index: function name → FunctionSummaryId.
     /// Only contains **global** functions. Colon-separated names are normalized
     /// to dot (e.g. `"Player:new"` → `"Player.new"`).
-    /// Local functions are accessed via `local_type_facts` → `FunctionRef(id)` instead.
+    /// Local functions are accessed via scope_tree → `FunctionRef(id)` instead.
     #[serde(default)]
     pub function_name_index: HashMap<String, FunctionSummaryId>,
     /// `---@class`, `---@alias`, `---@enum` definitions.
     pub type_definitions: Vec<TypeDefinition>,
-    /// Key local variables' inferred type facts.
-    pub local_type_facts: HashMap<String, LocalTypeFact>,
     /// Table shape instances defined in this file.
     pub table_shapes: HashMap<TableShapeId, TableShape>,
     /// Type of the file-level `return` statement (module export).
@@ -69,8 +67,7 @@ pub struct DocumentSummary {
     pub meta_name: Option<String>,
     /// Type names referenced by local variable type facts.
     /// Pre-computed during build so `collect_referenced_type_names` in
-    /// aggregation doesn't need `local_type_facts` — prepares for
-    /// their removal.
+    /// aggregation can use this field.
     #[serde(default)]
     pub referenced_local_type_names: std::collections::HashSet<String>,
 }
@@ -187,25 +184,6 @@ pub struct TypeFieldDef {
     /// produced by older builds readable.
     #[serde(default)]
     pub name_range: Option<ByteRange>,
-}
-
-/// Inferred type fact for a key local variable, with provenance.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LocalTypeFact {
-    pub name: String,
-    pub type_fact: TypeFact,
-    pub source: TypeFactSource,
-    pub range: ByteRange,
-}
-
-/// Where a local's type information came from.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum TypeFactSource {
-    Assignment,
-    CallReturn,
-    FieldAccess,
-    RequireBinding,
-    EmmyAnnotation,
 }
 
 impl DocumentSummary {

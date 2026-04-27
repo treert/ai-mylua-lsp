@@ -42,7 +42,6 @@ pub fn build_file_analysis(
         function_name_to_id: HashMap::new(),
         function_name_index: HashMap::new(),
         type_definitions: Vec::new(),
-        local_type_facts: HashMap::new(),
         table_shapes: HashMap::new(),
         next_shape_id: 0,
         next_function_id: 0,
@@ -71,10 +70,8 @@ pub fn build_file_analysis(
 
     let scope_tree = ctx.take_scope_tree();
 
-    // Collect type names referenced by scope declarations (equivalent to
-    // walking local_type_facts.values()). Pre-computed here so
-    // aggregation::collect_referenced_type_names can use this field
-    // instead of local_type_facts.
+    // Collect type names referenced by scope declarations. Pre-computed
+    // here so aggregation::collect_referenced_type_names can use this field.
     let referenced_local_type_names = collect_scope_type_names(&scope_tree);
 
     let summary = DocumentSummary {
@@ -85,7 +82,6 @@ pub fn build_file_analysis(
         function_summaries: ctx.function_summaries,
         function_name_index: ctx.function_name_index,
         type_definitions: ctx.type_definitions,
-        local_type_facts: ctx.local_type_facts,
         table_shapes: ctx.table_shapes,
         module_return_type: ctx.module_return_type,
         module_return_range: ctx.module_return_range,
@@ -101,7 +97,7 @@ pub fn build_file_analysis(
 
 /// Walk all scope declarations and collect Emmy type names referenced by
 /// their type_facts. Mirrors the `walk` helper in
-/// `aggregation::collect_referenced_type_names` (item 1 — local_type_facts).
+/// `aggregation::collect_referenced_type_names` (item 1).
 fn collect_scope_type_names(scope_tree: &ScopeTree) -> std::collections::HashSet<String> {
     use crate::type_system::{KnownType, SymbolicStub, TypeFact};
     let mut names = std::collections::HashSet::new();
@@ -130,11 +126,6 @@ fn collect_scope_type_names(scope_tree: &ScopeTree) -> std::collections::HashSet
         }
     }
     names
-}
-
-/// Deprecated: use `build_file_analysis` which also returns a ScopeTree.
-pub fn build_summary(uri: &Uri, tree: &tree_sitter::Tree, source: &[u8], line_index: &LineIndex) -> DocumentSummary {
-    build_file_analysis(uri, tree, source, line_index).0
 }
 
 /// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local
@@ -228,7 +219,6 @@ pub(crate) struct BuildContext<'a> {
     /// Transferred to `DocumentSummary::function_name_index` at build completion.
     pub(crate) function_name_index: HashMap<String, FunctionSummaryId>,
     pub(crate) type_definitions: Vec<TypeDefinition>,
-    pub(crate) local_type_facts: HashMap<String, LocalTypeFact>,
     pub(crate) table_shapes: HashMap<TableShapeId, TableShape>,
     pub(crate) next_shape_id: u32,
     /// Counter for allocating unique `FunctionSummaryId`s per file.

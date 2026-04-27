@@ -192,7 +192,7 @@ pub fn hover(
 
     // Synthesize a `Definition` from the best global candidate so the
     // hover renderer below can reuse `build_hover_for_definition`.
-    // The candidate isn't an AST-local decl (`DocumentSummary.local_type_facts`),
+    // The candidate isn't an AST-local decl (scope_tree),
     // so we fabricate one carrying the candidate's source location +
     // global kind — purely for the shared formatter.
     let global_info = index.global_shard.get(ident_text).and_then(|candidates| {
@@ -445,20 +445,6 @@ fn resolve_local_type_info(
     }
 
     let resolved = resolver::resolve_local_in_file(uri, name, byte_offset, scope_tree, index);
-    // Fallback: if scope_tree didn't resolve (e.g. function body params before Task 8),
-    // try the old local_type_facts path.
-    if resolved.type_fact == TypeFact::Unknown {
-        let fallback_fact = index.summaries.get(uri)
-            .and_then(|s| s.local_type_facts.get(name))
-            .map(|ltf| ltf.type_fact.clone());
-        if let Some(fact) = fallback_fact {
-            let fallback = resolver::resolve_type(&fact, index);
-            let display = format_resolved_type(&fallback.type_fact);
-            if display != "unknown" {
-                return Some(display);
-            }
-        }
-    }
     let display = format_resolved_type(&resolved.type_fact);
     if display == "unknown" {
         None

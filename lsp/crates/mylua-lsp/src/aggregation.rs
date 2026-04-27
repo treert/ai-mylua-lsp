@@ -840,14 +840,9 @@ fn collect_referenced_type_names(summary: &DocumentSummary) -> Vec<String> {
     }
 
     // 1. All local variable type annotations — pre-computed in build_file_analysis
-    // from scope_tree declarations so we don't depend on local_type_facts here.
+    // from scope_tree declarations.
     for name in &summary.referenced_local_type_names {
         names.insert(name.clone());
-    }
-    // Fallback: also walk local_type_facts (for summaries built by the old
-    // build_summary path in tests). Can be removed after Task 9.
-    for ltf in summary.local_type_facts.values() {
-        walk(&ltf.type_fact, &mut names);
     }
 
     // 2. `@class Foo : Parent1, Parent2` — each parent.

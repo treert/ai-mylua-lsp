@@ -127,6 +127,7 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
                     type_fact: None,
                     bound_class: None,
+                    is_emmy_annotated: false,
                 });
             }
         }
@@ -145,6 +146,7 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
                                 selection_range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
                                 type_fact: None,
                                 bound_class: None,
+                    is_emmy_annotated: false,
                             });
                         }
                     }
@@ -233,12 +235,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         if i == 0 {
             if let Some(ref type_expr) = pending_type {
                 let type_fact = emmy_type_to_fact(type_expr);
-                ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
-                    name: name.clone(),
-                    type_fact: type_fact.clone(),
-                    source: TypeFactSource::EmmyAnnotation,
-                    range,
-                });
                 ctx.add_scoped_decl(ScopeDecl {
                     name: name.clone(),
                     kind: DefKind::LocalVariable,
@@ -248,6 +244,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: range,
                     type_fact: Some(type_fact),
                     bound_class: None,
+                    is_emmy_annotated: true,
                 });
                 continue;
             }
@@ -258,12 +255,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         // the signature's return arity stay Unknown.
         if let Some(ref returns) = multi_return_types {
             let type_fact = returns.get(i).cloned().unwrap_or(TypeFact::Unknown);
-            ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
-                name: name.clone(),
-                type_fact: type_fact.clone(),
-                source: TypeFactSource::Assignment,
-                range,
-            });
             ctx.add_scoped_decl(ScopeDecl {
                 name: name.clone(),
                 kind: DefKind::LocalVariable,
@@ -273,6 +264,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 selection_range: range,
                 type_fact: Some(type_fact),
                 bound_class: None,
+                is_emmy_annotated: false,
             });
             continue;
         }
@@ -286,12 +278,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let require_type_fact = TypeFact::Stub(SymbolicStub::RequireRef {
                     module_path: ctx.require_bindings.last().unwrap().module_path.clone(),
                 });
-                ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
-                    name: name.clone(),
-                    type_fact: require_type_fact.clone(),
-                    source: TypeFactSource::RequireBinding,
-                    range,
-                });
                 ctx.add_scoped_decl(ScopeDecl {
                     name: name.clone(),
                     kind: DefKind::LocalVariable,
@@ -301,6 +287,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: range,
                     type_fact: Some(require_type_fact),
                     bound_class: None,
+                    is_emmy_annotated: false,
                 });
                 continue;
             }
@@ -315,12 +302,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     shape.set_owner(name.clone());
                 }
             }
-            ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
-                name: name.clone(),
-                type_fact: type_fact.clone(),
-                source: TypeFactSource::Assignment,
-                range,
-            });
             ctx.add_scoped_decl(ScopeDecl {
                 name: name.clone(),
                 kind: DefKind::LocalVariable,
@@ -330,6 +311,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 selection_range: range,
                 type_fact: Some(type_fact.clone()),
                 bound_class: None,
+                is_emmy_annotated: false,
             });
 
             // Traverse anonymous function bodies for scope tree completeness
@@ -489,14 +471,6 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
-    // Register in local_type_facts so consumers can discover this function
-    // via type_inference → local_type_facts → FunctionRef(id) path.
-    ctx.local_type_facts.insert(name.clone(), LocalTypeFact {
-        name: name.clone(),
-        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
-        source: TypeFactSource::Assignment,
-        range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
-    });
     ctx.add_scoped_decl(ScopeDecl {
         name: name.clone(),
         kind: DefKind::LocalFunction,
@@ -506,6 +480,7 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
         selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
         type_fact: Some(TypeFact::Known(KnownType::FunctionRef(func_id))),
         bound_class: None,
+        is_emmy_annotated: false,
     });
 
     // Traverse function body to populate scope tree with parameters and locals
@@ -1156,6 +1131,7 @@ fn visit_function_body(
             selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             type_fact: self_type,
             bound_class: None,
+            is_emmy_annotated: false,
         });
     }
 
@@ -1207,6 +1183,7 @@ fn register_params_into_scope(
                         .map(|p| p.type_fact.clone())
                         .filter(|tf| *tf != TypeFact::Unknown),
                     bound_class: None,
+                    is_emmy_annotated: false,
                 });
             }
             _ => {
@@ -1225,6 +1202,7 @@ fn register_params_into_scope(
                             .map(|p| p.type_fact.clone())
                             .filter(|tf| *tf != TypeFact::Unknown),
                         bound_class: None,
+                    is_emmy_annotated: false,
                     });
                 }
             }
@@ -1253,5 +1231,6 @@ fn register_single_param(
         selection_range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
         type_fact,
         bound_class: None,
+        is_emmy_annotated: false,
     });
 }

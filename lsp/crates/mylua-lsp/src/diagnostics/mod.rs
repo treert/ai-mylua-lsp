@@ -88,7 +88,7 @@ pub fn collect_semantic_diagnostics_with_version(
     }
     if let Some(severity) = diag_config.emmy_type_mismatch.to_lsp_severity() {
         type_mismatch::check_type_mismatch_diagnostics(
-            root, source, uri, index, scope_tree, &mut diagnostics, severity, line_index,
+            root, source, scope_tree, &mut diagnostics, severity, line_index,
         );
     }
     if let Some(severity) = diag_config.duplicate_table_key.to_lsp_severity() {

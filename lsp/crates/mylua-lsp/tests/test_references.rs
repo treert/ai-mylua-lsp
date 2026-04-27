@@ -133,16 +133,16 @@ fn references_emmy_type_scans_annotations() {
     // identifier AST nodes, so the regular identifier scan misses them.
     // find_references must also scan emmy_comment text for the type name.
     use std::collections::HashMap;
-    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, scope,
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document,
                     summary_builder};
 
     let mut parser = new_parser();
     let defn_src = "---@class Foo\n---@field x number\nFoo = {}";
     let defn_uri = make_uri("defn.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
-    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_scope };
+    let defn_summary = summary_builder::build_file_analysis(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_summary.1 };
+    let defn_summary = defn_summary.0;
 
     // Three distinct Emmy mentions of Foo in different annotation positions.
     let user_src = r#"---@type Foo
@@ -154,9 +154,9 @@ local function use(x) return x end
 Bar = {}"#;
     let user_uri = make_uri("user.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
-    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_scope };
+    let user_result = summary_builder::build_file_analysis(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_result.1 };
+    let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
     agg.upsert_summary(defn_summary);
@@ -201,23 +201,23 @@ Bar = {}"#;
 fn references_emmy_type_word_boundary() {
     // Must not match `FooBar` when the clicked type is `Foo`.
     use std::collections::HashMap;
-    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, scope,
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document,
                     summary_builder};
 
     let mut parser = new_parser();
     let defn_src = "---@class Foo\nFoo = {}";
     let defn_uri = make_uri("d.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
-    let defn_summary = summary_builder::build_summary(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_scope = scope::build_scope_tree(&defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_scope };
+    let defn_summary = summary_builder::build_file_analysis(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_summary.1 };
+    let defn_summary = defn_summary.0;
 
     let user_src = "---@type FooBar\nlocal x = nil";
     let user_uri = make_uri("u.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
-    let user_summary = summary_builder::build_summary(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_scope = scope::build_scope_tree(&user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_scope };
+    let user_result = summary_builder::build_file_analysis(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_result.1 };
+    let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
     agg.upsert_summary(defn_summary);

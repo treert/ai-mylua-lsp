@@ -13,10 +13,11 @@ fn local_binding_anchors_owner() {
     let src = r#"
 local t = { name = "hello" }
 "#;
-    let (_doc, uri, agg) = setup_single_file(src, "owner_local.lua");
+    let (doc, uri, agg) = setup_single_file(src, "owner_local.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
-    let ltf = summary.local_type_facts.get("t").expect("t fact");
-    match &ltf.type_fact {
+    let end_offset = src.len();
+    let tf = doc.scope_tree.resolve_type(end_offset, "t").expect("t type");
+    match tf {
         TypeFact::Known(KnownType::Table(id)) => {
             let shape = summary.table_shapes.get(id).expect("shape");
             assert_eq!(shape.owner_name.as_deref(), Some("t"), "owner should be `t`");
@@ -57,15 +58,19 @@ fn two_shapes_each_know_their_owner() {
 local t1 = { m = function() return 1 end }
 local t2 = { m = function() return "s" end }
 "#;
-    let (_doc, uri, agg) = setup_single_file(src, "owner_two.lua");
+    let (doc, uri, agg) = setup_single_file(src, "owner_two.lua");
     let summary = agg.summaries.get(&uri).expect("summary");
 
-    let id1 = match &summary.local_type_facts.get("t1").unwrap().type_fact {
-        TypeFact::Known(KnownType::Table(id)) => *id,
+    // Use scope_tree to look up the types of t1 and t2
+    // (offset 0 won't resolve because visible_after_byte is at statement end;
+    //  use a large offset to see both declarations)
+    let end_offset = src.len();
+    let id1 = match doc.scope_tree.resolve_type(end_offset, "t1") {
+        Some(TypeFact::Known(KnownType::Table(id))) => *id,
         other => panic!("t1 not a Table, got: {:?}", other),
     };
-    let id2 = match &summary.local_type_facts.get("t2").unwrap().type_fact {
-        TypeFact::Known(KnownType::Table(id)) => *id,
+    let id2 = match doc.scope_tree.resolve_type(end_offset, "t2") {
+        Some(TypeFact::Known(KnownType::Table(id))) => *id,
         other => panic!("t2 not a Table, got: {:?}", other),
     };
     assert_ne!(id1, id2, "shapes must have distinct ids");
@@ -83,11 +88,11 @@ fn non_table_rhs_leaves_shape_untouched() {
     // name.
     let src = r#"local s = "hello"
 "#;
-    let (_doc, uri, agg) = setup_single_file(src, "non_table.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
-    let ltf = summary.local_type_facts.get("s").expect("s fact");
+    let (doc, _uri, _agg) = setup_single_file(src, "non_table.lua");
+    let end_offset = src.len();
+    let tf = doc.scope_tree.resolve_type(end_offset, "s");
     assert!(
-        !matches!(&ltf.type_fact, TypeFact::Known(KnownType::Table(_))),
-        "local string must not be a Table, got: {:?}", ltf.type_fact,
+        !matches!(tf, Some(TypeFact::Known(KnownType::Table(_)))),
+        "local string must not be a Table, got: {:?}", tf,
     );
 }

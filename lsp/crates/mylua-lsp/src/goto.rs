@@ -165,7 +165,7 @@ pub fn goto_type_definition(
 /// stored `TypeFact` via scope_tree and map it to a `type_shard` candidate range
 /// when the fact identifies an Emmy type.
 fn type_definition_for_local(
-    def_uri: &Uri,
+    _def_uri: &Uri,
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
@@ -173,11 +173,9 @@ fn type_definition_for_local(
     strategy: &GotoStrategy,
     documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
-    // Try scope_tree first (new path), then fallback to local_type_facts (old path)
+    // Resolve the local's type via scope_tree
     let fact = if let Some(tf) = scope_tree.resolve_type(byte_offset, local_name) {
         tf.clone()
-    } else if let Some(ltf) = index.summaries.get(def_uri).and_then(|s| s.local_type_facts.get(local_name)) {
-        ltf.type_fact.clone()
     } else {
         return None;
     };

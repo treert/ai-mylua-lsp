@@ -74,14 +74,8 @@ pub fn infer_node_type(
                 if let Some(child) = node.named_child(0) {
                     if child.kind() == "identifier" {
                         let text = node_text(child, source);
-                        // Try scope_tree first, then fall back to local_type_facts
                         if let Some(tf) = scope_tree.resolve_type(child.start_byte(), text) {
                             return tf.clone();
-                        }
-                        if let Some(summary) = index.summaries.get(uri) {
-                            if let Some(ltf) = summary.local_type_facts.get(text) {
-                                return ltf.type_fact.clone();
-                            }
                         }
                         return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                             name: text.to_string(),
@@ -107,14 +101,8 @@ pub fn infer_node_type(
         }
         "identifier" => {
             let text = node_text(node, source);
-            // Try scope_tree first, then fall back to local_type_facts
             if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
                 return tf.clone();
-            }
-            if let Some(summary) = index.summaries.get(uri) {
-                if let Some(ltf) = summary.local_type_facts.get(text) {
-                    return ltf.type_fact.clone();
-                }
             }
             TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                 name: text.to_string(),

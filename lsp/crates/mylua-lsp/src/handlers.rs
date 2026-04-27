@@ -713,7 +713,8 @@ impl LanguageServer for Backend {
         item: CompletionItem,
     ) -> Result<CompletionItem> {
         let idx = self.index.lock().unwrap();
-        Ok(completion::resolve_completion(item, &idx))
+        let docs = self.documents.lock().unwrap();
+        Ok(completion::resolve_completion(item, &idx, &docs))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {

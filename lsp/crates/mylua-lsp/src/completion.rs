@@ -381,6 +381,7 @@ fn collect_global_completions(
 pub fn resolve_completion(
     item: CompletionItem,
     index: &WorkspaceAggregation,
+    documents: &std::collections::HashMap<Uri, Document>,
 ) -> CompletionItem {
     // Extract fields up front (owned Strings) so we can freely
     // hand `item` into the per-kind helpers without clashing with
@@ -400,7 +401,7 @@ pub fn resolve_completion(
             let Ok(uri) = uri_str.parse::<Uri>() else {
                 return item;
             };
-            resolve_local_item(item, index, &uri, &name)
+            resolve_local_item(item, documents, &uri, &name)
         }
         _ => item,
     }
@@ -463,15 +464,22 @@ fn resolve_global_item(
 
 fn resolve_local_item(
     mut item: CompletionItem,
-    index: &WorkspaceAggregation,
+    documents: &std::collections::HashMap<Uri, Document>,
     uri: &Uri,
     name: &str,
 ) -> CompletionItem {
-    let Some(summary) = index.summaries.get(uri) else {
+    let Some(doc) = documents.get(uri) else {
         return item;
     };
-    if let Some(ltf) = summary.local_type_facts.get(name) {
-        item.detail = Some(format!("local {}: {}", name, ltf.type_fact));
+    // Without position context, find the last declaration matching the name
+    // (best-effort — innermost scope wins in declaration order).
+    let type_display = doc.scope_tree.all_declarations()
+        .filter(|d| d.name == name)
+        .last()
+        .and_then(|d| d.type_fact.as_ref())
+        .map(|tf| format!("{}", tf));
+    if let Some(ty) = type_display {
+        item.detail = Some(format!("local {}: {}", name, ty));
     } else {
         item.detail = Some(format!("local {}", name));
     }

@@ -175,9 +175,9 @@ fn emit_param_hint(
 fn collect_variable_type_hints(
     decl: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    _uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &WorkspaceAggregation,
+    _index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
@@ -193,15 +193,7 @@ fn collect_variable_type_hints(
             continue;
         }
         let name = node_text(id, source);
-        // Try scope_tree first, then fallback to local_type_facts
-        let type_fact = scope_tree.resolve_type(id.start_byte(), name)
-            .cloned()
-            .or_else(|| {
-                index.summaries.get(uri)
-                    .and_then(|s| s.local_type_facts.get(name))
-                    .map(|ltf| ltf.type_fact.clone())
-            });
-        let Some(tf) = type_fact else { continue };
+        let Some(tf) = scope_tree.resolve_type(id.start_byte(), name).cloned() else { continue };
         if !is_interesting_type(&tf) {
             continue;
         }
