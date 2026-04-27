@@ -20,7 +20,8 @@
       "Bash(.cursor/scripts/test-extension.sh *)",
       "WebFetch(domain:docs.anthropic.com)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "LSP"
     ]
   }
 }

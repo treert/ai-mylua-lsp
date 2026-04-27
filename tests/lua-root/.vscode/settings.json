@@ -7,5 +7,6 @@
     "mylua.diagnostics.luaFieldError": "error",
     "mylua.diagnostics.luaFieldWarning": "warning",
     "mylua.gotoDefinition.strategy": "auto",
-    "mylua.references.strategy": "best"
+    "mylua.references.strategy": "best",
+    "mylua.diagnostics.scope": "openOnly"
 }

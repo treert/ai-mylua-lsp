@@ -38,5 +38,5 @@ local n = "not a number"                       -- !diag: emmyTypeMismatch (error
 
 -- 语法错误（tree-sitter MISSING/ERROR）
 local broken = function(                       -- !diag: syntax error（缺少 `)` 与函数体）
-
+;
 print(p, closed, open, n, broken)

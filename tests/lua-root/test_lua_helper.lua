@@ -1,43 +1,14 @@
----@class ABC123
----@field a integer
-local ABC = {}
-
--- a local x
----@type ABC123
-local x = 1
-x.a = 1
-x.no_exist = 2
-
-self = 1
-
-function ABC:f1()
-    self.xxxx = print(1)
-    -- local x = self.y1
-    -- self.yy = self.x
-    -- self:f1()
-    -- self.f2()
-    local x = self.xxxx
-    return x
+-- 使用
+---@class ClassA1:BaseCls
+ClassA1 = class("ClassA1")
+function ClassA1:Say()
+    print(self.__class_name .. " say")
 end
 
-function ABC:f2()
-    return 4
-end
-
--- ABC.g1 = 5
-
-function A1213:f()
-    self.ff = 2
-end
-
----@type T3
-local ttt = nil
-
-
--- local ttt1 = ttt:get_t1()
-
--- local _ = ttt1:f3()
----@type ABC
-local ttt1 = UE4.UMiscSystemLibrary.GetAbilitySystemComponentFromActor(Character)
-
-local _ = ttt1:f333()
+---@class ClassA2:ClassA1
+ClassA2 = class("ClassA2",ClassA1)
+ 
+local a1 = ClassA1:new()
+local a2 = ClassA2:new()
+a1:Say() -- ClassA1 say
+a2:Say() -- ClassA2 say
