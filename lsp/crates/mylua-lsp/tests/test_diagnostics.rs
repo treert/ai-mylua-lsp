@@ -38,6 +38,32 @@ fn diagnostics_for_define_test1() {
 }
 
 #[test]
+fn syntax_error_range_does_not_swallow_following_statement() {
+    let src = "local broken = function(\n\nprint(broken)\n";
+    let mut parser = new_parser();
+    let doc = parse_doc(&mut parser, src);
+    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    assert!(!diags.is_empty(), "expected syntax diagnostics");
+    let syntax_errors: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.starts_with("Syntax error"))
+        .collect();
+    assert!(!syntax_errors.is_empty(), "expected syntax error diagnostics: {:?}", diags);
+    assert!(
+        syntax_errors
+            .iter()
+            .all(|d| d.range.start.line == d.range.end.line),
+        "multi-line syntax error diagnostics must be capped to their start line: {:?}",
+        syntax_errors,
+    );
+    assert!(
+        syntax_errors.iter().all(|d| !d.message.contains("print")),
+        "syntax error messages must not quote the following print statement: {:?}",
+        syntax_errors,
+    );
+}
+
+#[test]
 fn semantic_diagnostics_undefined_global() {
     let src = r#"
 local a = 1
