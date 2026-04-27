@@ -531,7 +531,10 @@ fn percent_decode(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{percent_decode, uri_to_path};
+    use super::percent_decode;
+    #[cfg(not(windows))]
+    use super::uri_to_path;
+    #[cfg(not(windows))]
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
