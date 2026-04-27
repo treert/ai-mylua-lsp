@@ -16,6 +16,10 @@ pub fn goto_definition(
     documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
+        return type_definition_for_name(&type_name, index, strategy, documents);
+    }
+
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let name = node_text(ident_node, doc.source());
     lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));

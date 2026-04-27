@@ -153,6 +153,284 @@ pub enum EmmyAnnotation {
     Other { tag: String, text: String },
 }
 
+/// Return the EmmyLua type/definition name under `byte_offset` when the cursor
+/// is inside the structured part of a `---@...` line.
+///
+/// Words in the free-form description section (for example after `@` / `#`)
+/// are ignored so hover/goto do not treat prose as type refs.
+pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<String> {
+    if byte_offset > source.len() {
+        return None;
+    }
+
+    let line_start = source[..byte_offset]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let line_end = source[byte_offset..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|i| byte_offset + i)
+        .unwrap_or(source.len());
+    let line = &source[line_start..line_end];
+    let rel = byte_offset.saturating_sub(line_start).min(line.len());
+
+    let at = line.iter().position(|&b| b == b'@')?;
+    if !line[..at].iter().all(|&b| b == b'-' || b == b' ' || b == b'\t') {
+        return None;
+    }
+
+    let tag_start = at + 1;
+    let tag_end = scan_ident_end(line, tag_start)?;
+    let tag = std::str::from_utf8(&line[tag_start..tag_end]).ok()?;
+    let (word_start, word_end) = word_span_at(line, rel)?;
+    let word = std::str::from_utf8(&line[word_start..word_end]).ok()?;
+
+    let content_start = skip_ws(line, tag_end);
+    let content_end = description_start(line, content_start).unwrap_or(line.len());
+    let in_range = |start: usize, end: usize| word_start >= start && word_end <= end;
+
+    match tag {
+        "class" => {
+            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            if in_range(name_start, name_end) {
+                return Some(word.to_string());
+            }
+            let colon = line[name_end..content_end]
+                .iter()
+                .position(|&b| b == b':')
+                .map(|i| name_end + i)?;
+            let parents_end = type_expr_end(line, skip_ws(line, colon + 1), content_end);
+            if word_start > colon && word_end <= parents_end {
+                Some(word.to_string())
+            } else {
+                None
+            }
+        }
+        "alias" => {
+            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            if in_range(name_start, name_end) {
+                return Some(word.to_string());
+            }
+            let type_start = skip_ws(line, name_end);
+            let type_end = type_expr_end(line, type_start, content_end);
+            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+        }
+        "enum" => {
+            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            in_range(name_start, name_end).then(|| word.to_string())
+        }
+        "type" | "return" | "vararg" | "overload" => {
+            let type_end = type_expr_end(line, content_start, content_end);
+            type_word_in_expr(line, content_start, type_end, word_start, word_end).then(|| word.to_string())
+        }
+        "param" => {
+            let (_, param_end) = read_ident_span(line, content_start)?;
+            let mut type_start = skip_ws(line, param_end);
+            if type_start < content_end && line[type_start] == b'?' {
+                type_start = skip_ws(line, type_start + 1);
+            }
+            let type_end = type_expr_end(line, type_start, content_end);
+            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+        }
+        "field" => {
+            let mut field_start = content_start;
+            let field_end = if content_start < content_end && line[content_start] == b'[' {
+                matching_bracket(line, content_start, content_end)? + 1
+            } else {
+                let (first_start, first_end) = read_ident_span(line, content_start)?;
+                field_start = first_start;
+                if let Ok(first) = std::str::from_utf8(&line[first_start..first_end]) {
+                    if matches!(first, "public" | "private" | "protected" | "package") {
+                        let next_start = skip_ws(line, first_end);
+                        field_start = next_start;
+                        if next_start < content_end && line[next_start] == b'[' {
+                            matching_bracket(line, next_start, content_end)? + 1
+                        } else {
+                            read_ident_span(line, next_start)?.1
+                        }
+                    } else {
+                        first_end
+                    }
+                } else {
+                    return None;
+                }
+            };
+            if field_start < content_end && line[field_start] == b'[' {
+                let key_start = field_start + 1;
+                let key_end = field_end.saturating_sub(1);
+                if type_word_in_expr(line, key_start, key_end, word_start, word_end) {
+                    return Some(word.to_string());
+                }
+            }
+            let type_start = skip_ws(line, field_end);
+            let type_end = type_expr_end(line, type_start, content_end);
+            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+        }
+        _ => None,
+    }
+}
+
+fn description_start(line: &[u8], from: usize) -> Option<usize> {
+    let mut i = from;
+    while i < line.len() {
+        if (line[i] == b'@' || line[i] == b'#') && i > from && line[i - 1].is_ascii_whitespace() {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+fn read_ident_span(line: &[u8], start: usize) -> Option<(usize, usize)> {
+    let start = skip_ws(line, start);
+    let end = scan_ident_end(line, start)?;
+    Some((start, end))
+}
+
+fn type_word_in_expr(
+    line: &[u8],
+    expr_start: usize,
+    expr_end: usize,
+    word_start: usize,
+    word_end: usize,
+) -> bool {
+    word_start >= expr_start
+        && word_end <= expr_end
+        && !word_inside_string_literal(line, expr_start, word_start)
+        && !word_is_key_or_param_name(line, word_end, expr_end)
+}
+
+fn word_inside_string_literal(line: &[u8], expr_start: usize, word_start: usize) -> bool {
+    let mut quote: Option<u8> = None;
+    let mut i = expr_start;
+    while i < word_start && i < line.len() {
+        if quote.is_some() && line[i] == b'\\' {
+            i += 2;
+            continue;
+        }
+        match (quote, line[i]) {
+            (Some(q), b) if b == q => quote = None,
+            (None, b'\'' | b'"') => quote = Some(line[i]),
+            _ => {}
+        }
+        i += 1;
+    }
+    quote.is_some()
+}
+
+fn word_is_key_or_param_name(line: &[u8], word_end: usize, limit: usize) -> bool {
+    let mut cursor = skip_ws(line, word_end);
+    if cursor < limit && line[cursor] == b'?' {
+        cursor = skip_ws(line, cursor + 1);
+    }
+    cursor < limit && line[cursor] == b':'
+}
+
+fn matching_bracket(line: &[u8], start: usize, limit: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    for (i, b) in line.iter().enumerate().take(limit).skip(start) {
+        match *b {
+            b'[' => depth += 1,
+            b']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+fn type_expr_end(line: &[u8], start: usize, limit: usize) -> usize {
+    let mut i = start;
+    let mut depth = 0usize;
+    let mut prev_sig: Option<u8> = None;
+
+    while i < limit {
+        let b = line[i];
+        if (b == b'@' || b == b'#') && i > start && line[i - 1].is_ascii_whitespace() {
+            break;
+        }
+        if b.is_ascii_whitespace() {
+            let next = next_non_ws(line, i, limit);
+            let keep_space = depth > 0
+                || matches!(prev_sig, Some(b'|' | b',' | b'<' | b'(' | b'{' | b'[' | b':'))
+                || matches!(next, Some(b'|' | b',' | b'>' | b')' | b'}' | b']' | b'?'));
+            if keep_space {
+                i += 1;
+                continue;
+            }
+            break;
+        }
+
+        match b {
+            b'<' | b'(' | b'{' | b'[' => depth += 1,
+            b'>' | b')' | b'}' | b']' => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        prev_sig = Some(b);
+        i += 1;
+    }
+
+    trim_trailing_ws(line, start, i)
+}
+
+fn next_non_ws(line: &[u8], mut pos: usize, limit: usize) -> Option<u8> {
+    while pos < limit {
+        if !line[pos].is_ascii_whitespace() {
+            return Some(line[pos]);
+        }
+        pos += 1;
+    }
+    None
+}
+
+fn trim_trailing_ws(line: &[u8], start: usize, mut end: usize) -> usize {
+    while end > start && line[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    end
+}
+
+fn scan_ident_end(line: &[u8], start: usize) -> Option<usize> {
+    if start >= line.len() || !(line[start].is_ascii_alphabetic() || line[start] == b'_') {
+        return None;
+    }
+    let mut end = start + 1;
+    while end < line.len() && (line[end].is_ascii_alphanumeric() || line[end] == b'_') {
+        end += 1;
+    }
+    Some(end)
+}
+
+fn word_span_at(line: &[u8], rel: usize) -> Option<(usize, usize)> {
+    let on_word = |b: u8| b.is_ascii_alphanumeric() || b == b'_';
+    let mut start = rel.min(line.len());
+    while start > 0 && on_word(line[start - 1]) {
+        start -= 1;
+    }
+    let mut end = rel.min(line.len());
+    while end < line.len() && on_word(line[end]) {
+        end += 1;
+    }
+    if start == end || line[start].is_ascii_digit() {
+        None
+    } else {
+        Some((start, end))
+    }
+}
+
+fn skip_ws(line: &[u8], mut pos: usize) -> usize {
+    while pos < line.len() && (line[pos] == b' ' || line[pos] == b'\t') {
+        pos += 1;
+    }
+    pos
+}
+
 // ===========================================================================
 // Tokenizer
 // ===========================================================================

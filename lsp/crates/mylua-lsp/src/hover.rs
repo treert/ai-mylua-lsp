@@ -17,6 +17,10 @@ pub fn hover(
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
+        return hover_type_name(&type_name, index, all_docs);
+    }
+
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let ident_text = node_text(ident_node, doc.source());
 
@@ -231,6 +235,77 @@ pub fn hover(
             }
         }
         return build_hover_for_definition(&synth_def, all_docs, Some(&type_info));
+    }
+
+    None
+}
+
+fn hover_type_name(
+    name: &str,
+    index: &WorkspaceAggregation,
+    all_docs: &std::collections::HashMap<Uri, Document>,
+) -> Option<Hover> {
+    let candidates = index.type_shard.get(name)?;
+    let candidate = candidates.first()?;
+    let summary = index.summaries.get(&candidate.source_uri)?;
+
+    for td in &summary.type_definitions {
+        if td.name != name {
+            continue;
+        }
+
+        let mut parts = Vec::new();
+        let class_header = match td.kind {
+            crate::summary::TypeDefinitionKind::Alias => {
+                let alias_display = td.alias_type.as_ref()
+                    .map(|t| format!("{}", t))
+                    .unwrap_or_else(|| "unknown".to_string());
+                format!("---@alias {} {}", td.name, alias_display)
+            }
+            crate::summary::TypeDefinitionKind::Enum => {
+                format!("---@enum {}", td.name)
+            }
+            _ => {
+                if td.parents.is_empty() {
+                    format!("---@class {}", td.name)
+                } else {
+                    format!("---@class {} : {}", td.name, td.parents.join(", "))
+                }
+            }
+        };
+        parts.push(format!("```lua\n{}\n```", class_header));
+        let kind_label = match td.kind {
+            crate::summary::TypeDefinitionKind::Class => "class",
+            crate::summary::TypeDefinitionKind::Alias => "alias",
+            crate::summary::TypeDefinitionKind::Enum => "enum",
+        };
+        parts.push(format!("*{}*", kind_label));
+        if !td.fields.is_empty() {
+            let fields_md: Vec<String> = td.fields.iter()
+                .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
+                .collect();
+            parts.push(fields_md.join("\n"));
+        }
+        // Include doc comments from the definition site.
+        if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
+            if let Some(def_node) = def_doc.tree.root_node()
+                .descendant_for_byte_range(td.range.start_byte, td.range.start_byte)
+            {
+                let stmt = find_enclosing_statement(def_node);
+                let comment_lines = collect_preceding_comments(stmt, def_doc.source());
+                let doc_text = extract_doc_lines(&comment_lines);
+                if !doc_text.is_empty() {
+                    parts.push(doc_text);
+                }
+            }
+        }
+        return Some(Hover {
+            contents: HoverContents::Markup(MarkupContent {
+                kind: MarkupKind::Markdown,
+                value: parts.join("\n\n"),
+            }),
+            range: None,
+        });
     }
 
     None

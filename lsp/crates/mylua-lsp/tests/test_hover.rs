@@ -1299,3 +1299,148 @@ hero:pick_up("sword")
         "hover on `pick_up` (defined on global Player) should succeed"
     );
 }
+
+#[test]
+fn hover_emmy_comment_parent_type_name() {
+    let src = r#"---@class BaseCls
+---@field id integer
+BaseCls = {}
+
+---@class ClassA1:BaseCls
+ClassA1 = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Hover `BaseCls` in `---@class ClassA1:BaseCls`.
+    let result = hover::hover(doc, &uri, pos(4, 20), &mut agg, &docs)
+        .expect("hover on Emmy parent type should resolve");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@class BaseCls"),
+        "hover should show the BaseCls type definition, got:\n{}", text
+    );
+}
+
+#[test]
+fn hover_emmy_comment_description_word_does_not_resolve_as_type() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class ClassA1 @ BaseCls appears in docs only
+ClassA1 = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_desc_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // The description word `BaseCls` is not part of the type expression.
+    let result = hover::hover(doc, &uri, pos(3, 20), &mut agg, &docs);
+    assert!(
+        result.is_none(),
+        "description words in Emmy comments must not act as type references"
+    );
+}
+
+#[test]
+fn hover_emmy_comment_unmarked_description_words_do_not_resolve_as_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class OtherCls
+OtherCls = {}
+
+---@param x string BaseCls appears in docs only
+function takes(x) end
+
+---@class Child:BaseCls OtherCls appears in docs only
+Child = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_unmarked_desc_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let param_desc = hover::hover(doc, &uri, pos(6, 20), &mut agg, &docs);
+    assert!(
+        param_desc.is_none(),
+        "unmarked @param description words must not act as type references"
+    );
+
+    let class_desc = hover::hover(doc, &uri, pos(9, 25), &mut agg, &docs);
+    assert!(
+        class_desc.is_none(),
+        "unmarked @class description words must not act as type references"
+    );
+}
+
+#[test]
+fn hover_emmy_comment_skips_type_expression_names_that_are_not_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class OtherCls
+OtherCls = {}
+
+---@type {BaseCls: OtherCls}
+local shaped = {}
+
+---@class Holder
+---@field [BaseCls] OtherCls
+Holder = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_type_expr_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let table_key = hover::hover(doc, &uri, pos(6, 11), &mut agg, &docs);
+    assert!(
+        table_key.is_none(),
+        "table field keys in type expressions must not act as type references"
+    );
+
+    let bracket_key = hover::hover(doc, &uri, pos(10, 12), &mut agg, &docs)
+        .expect("bracket field key type should resolve");
+    let text = hover_content_string(&bracket_key);
+    assert!(
+        text.contains("---@class BaseCls"),
+        "hover should show the BaseCls type definition, got:\n{}", text
+    );
+}
+
+#[test]
+fn hover_emmy_comment_string_literal_words_do_not_resolve_as_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@type "BaseCls"
+local literal = nil
+
+---@type {["BaseCls"]: string}
+local keyed = {}
+
+---@type "\"BaseCls"
+local escaped = nil
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_string_literal_hover.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let literal_word = hover::hover(doc, &uri, pos(3, 12), &mut agg, &docs);
+    assert!(
+        literal_word.is_none(),
+        "string literal contents must not act as type references"
+    );
+
+    let key_word = hover::hover(doc, &uri, pos(6, 12), &mut agg, &docs);
+    assert!(
+        key_word.is_none(),
+        "string table keys must not act as type references"
+    );
+
+    let escaped_word = hover::hover(doc, &uri, pos(9, 12), &mut agg, &docs);
+    assert!(
+        escaped_word.is_none(),
+        "escaped quotes must not expose string literal contents as type references"
+    );
+}

@@ -391,3 +391,202 @@ local hero = Player.new("Alice")"#;
         );
     }
 }
+
+#[test]
+fn goto_emmy_comment_parent_type_name() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class ClassA1:BaseCls
+ClassA1 = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_goto.lua");
+
+    // Click `BaseCls` in `---@class ClassA1:BaseCls`.
+    let result = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(3, 20),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    )
+    .expect("goto on Emmy parent type should resolve");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
+        assert_eq!(loc.range.start.line, 1, "should jump to BaseCls anchor");
+    } else {
+        panic!("expected scalar goto response");
+    }
+}
+
+#[test]
+fn goto_emmy_comment_description_word_does_not_resolve_as_type() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class ClassA1 @ BaseCls appears in docs only
+ClassA1 = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_desc_goto.lua");
+
+    // The description word `BaseCls` is not part of the type expression.
+    let result = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(3, 20),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        result.is_none(),
+        "description words in Emmy comments must not act as type references"
+    );
+}
+
+#[test]
+fn goto_emmy_comment_unmarked_description_words_do_not_resolve_as_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class OtherCls
+OtherCls = {}
+
+---@class Child:BaseCls OtherCls appears in docs only
+Child = {}
+
+---@class Holder
+---@field x string BaseCls appears in docs only
+Holder = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_unmarked_desc_goto.lua");
+
+    let class_desc = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(6, 25),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        class_desc.is_none(),
+        "unmarked @class description words must not act as type references"
+    );
+
+    let field_desc = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(10, 20),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        field_desc.is_none(),
+        "unmarked @field description words must not act as type references"
+    );
+}
+
+#[test]
+fn goto_emmy_comment_skips_type_expression_names_that_are_not_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class OtherCls
+OtherCls = {}
+
+---@overload fun(BaseCls: OtherCls): OtherCls
+function f() end
+
+---@class Holder
+---@field [BaseCls] OtherCls
+Holder = {}
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_type_expr_goto.lua");
+
+    let param_name = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(6, 17),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        param_name.is_none(),
+        "function type parameter names must not act as type references"
+    );
+
+    let key_type = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(10, 12),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    )
+    .expect("bracket field key type should resolve");
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = key_type {
+        assert_eq!(loc.range.start.line, 1, "should jump to BaseCls anchor");
+    } else {
+        panic!("expected scalar goto response");
+    }
+}
+
+#[test]
+fn goto_emmy_comment_string_literal_words_do_not_resolve_as_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@type "BaseCls"
+local literal = nil
+
+---@type {["BaseCls"]: string}
+local keyed = {}
+
+---@type "\"BaseCls"
+local escaped = nil
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_string_literal_goto.lua");
+
+    let literal_word = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(3, 12),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        literal_word.is_none(),
+        "string literal contents must not act as type references"
+    );
+
+    let key_word = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(6, 12),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        key_word.is_none(),
+        "string table keys must not act as type references"
+    );
+
+    let escaped_word = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(9, 12),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+    assert!(
+        escaped_word.is_none(),
+        "escaped quotes must not expose string literal contents as type references"
+    );
+}
