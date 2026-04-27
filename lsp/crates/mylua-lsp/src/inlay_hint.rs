@@ -9,7 +9,7 @@
 //!   (`obj:m(1)`) skip the implicit `self` parameter.
 //! - **Variable types** (`inlayHint.variableTypes = true`): after a
 //!   `local x = ...` declaration, show `: Type` when the inferred
-//!   `local_type_facts[x]` carries a non-`Unknown`, non-`Table` /
+//!   `scope_tree` type carries a non-`Unknown`, non-`Table` /
 //!   non-`Function` fact (those render as info-less "table" /
 //!   "function" labels and get filtered out to reduce noise).
 //!

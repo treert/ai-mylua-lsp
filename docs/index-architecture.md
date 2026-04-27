@@ -93,6 +93,23 @@
 
 **关键**：整个 Summary 的生成不需要读取任何其他文件。
 
+### 3.3 ScopeTree — 位置感知的局部类型
+
+`build_file_analysis` 在单次 AST 遍历中同时产出 `DocumentSummary` 和 `ScopeTree`。`ScopeTree` 将局部变量的类型与其 Lua 词法作用域绑定：
+
+| 概念 | 说明 |
+|------|------|
+| `ScopeDecl` | 单个声明：名称、类型（`type_fact`）、可见区间、是否 Emmy 注解 |
+| `Scope` | 词法块（File / FunctionBody / Do / For / If / …），含父子关系和声明列表 |
+| `ScopeTree` | 所有 Scope 组成的扁平数组 + 查询 API |
+
+查询 API：
+- `resolve_type(byte_offset, name)` → 在给定位置按 Lua 词法规则查找局部变量类型
+- `resolve_decl(byte_offset, name)` → 返回完整 `ScopeDecl`
+- `all_declarations()` → 遍历所有声明（供诊断和补全使用）
+
+`build_file_analysis` 替代了之前独立的 `build_summary` + `build_scope_tree` 两阶段流程，避免重复 AST 遍历，且让 scope 声明直接携带类型信息。
+
 ---
 
 ## 4. 类型推断与 Table Shape

@@ -145,7 +145,7 @@ impl LineIndex {
     /// This extracts byte offsets and row/byte-column directly from the
     /// tree-sitter node **without** any UTF-16 conversion, making it
     /// significantly cheaper than `ts_node_to_range` for hot paths like
-    /// `build_summary` and `build_scope_tree`.
+    /// `build_file_analysis`.
     pub fn ts_node_to_byte_range(&self, node: tree_sitter::Node, _source: &[u8]) -> ByteRange {
         let sp = node.start_position();
         let ep = node.end_position();
@@ -250,8 +250,7 @@ impl LuaSource {
 /// Internal byte-oriented range type used throughout the LSP server.
 ///
 /// Stores tree-sitter's native byte offsets and row/byte-column pairs,
-/// avoiding the cost of UTF-16 conversion during `build_summary` and
-/// `build_scope_tree`. Conversion to/from LSP `Range` (UTF-16) happens
+/// avoiding the cost of UTF-16 conversion during `build_file_analysis`. Conversion to/from LSP `Range` (UTF-16) happens
 /// only at the protocol boundary via `LineIndex::byte_range_to_lsp_range`
 /// and `LineIndex::lsp_range_to_byte_range`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]

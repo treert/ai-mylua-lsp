@@ -99,7 +99,7 @@ fn goto_no_result_for_undefined() {
 
 #[test]
 fn goto_require_jumps_to_module_return() {
-    use mylua_lsp::{document::Document, summary_builder, scope};
+    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
 
     let mut parser = new_parser();
@@ -149,7 +149,7 @@ fn goto_require_with_attribute_before_target() {
     // to pick `values.named_child(2)` for `y` (off-by-attribute) and
     // miss the require goto entirely. After fix, clicking `y` must
     // still jump to the required module.
-    use mylua_lsp::{document::Document, summary_builder, scope};
+    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
 
     let mut parser = new_parser();
@@ -332,7 +332,7 @@ end"#;
 /// definition in the module file via `resolve_require_global_name`.
 #[test]
 fn goto_require_returning_global_table_method() {
-    use mylua_lsp::{document::Document, summary_builder, scope};
+    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
 
     let mut parser = new_parser();

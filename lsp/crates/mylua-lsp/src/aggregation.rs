@@ -884,9 +884,8 @@ fn collect_referenced_type_names(summary: &DocumentSummary) -> Vec<String> {
     }
 
     // 7. Global contributions — `---@type Foo G = ...` stores the
-    //    typed annotation on a `GlobalContribution` rather than in
-    //    `local_type_facts`, so we need an explicit pass here to
-    //    not miss it.
+    //    typed annotation on a `GlobalContribution`, so we need an
+    //    explicit pass here to not miss it.
     for gc in &summary.global_contributions {
         walk(&gc.type_fact, &mut names);
     }
