@@ -635,7 +635,7 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
         "async" => Some(EmmyAnnotation::Async),
         "nodiscard" => Some(EmmyAnnotation::Nodiscard),
         "enum" => {
-            let name = tz.eat_name().unwrap_or_default();
+            let name = tz.eat_name()?;
             Some(EmmyAnnotation::Enum { name })
         }
         "see" => Some(EmmyAnnotation::See { path: tz.rest_as_string() }),

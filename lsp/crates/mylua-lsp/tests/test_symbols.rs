@@ -19,6 +19,19 @@ fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
     )
 }
 
+fn assert_no_empty_symbol_names(syms: &[tower_lsp_server::ls_types::DocumentSymbol]) {
+    for sym in syms {
+        assert!(
+            !sym.name.is_empty(),
+            "documentSymbol must not emit empty names: {:?}",
+            syms,
+        );
+        if let Some(children) = sym.children.as_ref() {
+            assert_no_empty_symbol_names(children);
+        }
+    }
+}
+
 #[test]
 fn symbols_function_declarations() {
     let src = r#"
@@ -148,6 +161,30 @@ end
 fn symbols_empty_file() {
     let syms = collect("");
     assert!(syms.is_empty(), "empty file should have no symbols");
+}
+
+#[test]
+fn symbols_malformed_enum_does_not_emit_empty_name() {
+    let src = r#"---@enum
+local x = 1
+"#;
+    let syms = collect(src);
+    assert_no_empty_symbol_names(&syms);
+}
+
+#[test]
+fn symbols_incomplete_local_does_not_emit_empty_name() {
+    let src = r#"---@class ABC123
+---@field a integer
+local ABC = {}
+
+function ABC:init()
+    self.m_a = 111
+end
+
+local "#;
+    let syms = collect(src);
+    assert_no_empty_symbol_names(&syms);
 }
 
 #[test]

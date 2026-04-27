@@ -111,6 +111,9 @@ impl<'a> OutlineBuilder<'a> {
 
         if let Some(summary) = summary {
             for td in &summary.type_definitions {
+                if td.name.is_empty() {
+                    continue;
+                }
                 if class_index.contains_key(&td.name) {
                     continue;
                 }
@@ -122,6 +125,9 @@ impl<'a> OutlineBuilder<'a> {
                 let mut children: Vec<DocumentSymbol> = Vec::new();
                 let mut seen_keys: HashSet<String> = HashSet::new();
                 for fd in &td.fields {
+                    if fd.name.is_empty() {
+                        continue;
+                    }
                     let key = format!("{}:field", fd.name);
                     if !seen_keys.insert(key) {
                         continue;
@@ -202,6 +208,9 @@ impl<'a> OutlineBuilder<'a> {
     fn visit_function_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
         let Some(name_node) = node.child_by_field_name("name") else { return };
         let full_name = node_text(name_node, source).to_string();
+        if full_name.is_empty() {
+            return;
+        }
 
         // Parse `Class:method` / `Class.method` / `a.b.c` out of the
         // `function_name` node. Format is intentionally simple: a
@@ -239,6 +248,9 @@ impl<'a> OutlineBuilder<'a> {
     fn visit_local_function(&mut self, node: tree_sitter::Node, source: &[u8]) {
         let Some(name_node) = node.child_by_field_name("name") else { return };
         let name = node_text(name_node, source).to_string();
+        if name.is_empty() {
+            return;
+        }
         #[allow(deprecated)]
         self.top.push(DocumentSymbol {
             name,
@@ -260,6 +272,9 @@ impl<'a> OutlineBuilder<'a> {
                 continue;
             }
             let name = node_text(id_node, source).to_string();
+            if name.is_empty() {
+                continue;
+            }
             // Skip locals whose name matches a known class; the
             // `local Foo = class()` / `local Foo = {}` pattern is the
             // typical anchor for the class — showing both would
@@ -292,6 +307,9 @@ impl<'a> OutlineBuilder<'a> {
         }
 
         let name = node_text(first_var, source).to_string();
+        if name.is_empty() {
+            return;
+        }
         // Skip assignments whose name matches a class (same "double
         // anchor" logic as for locals).
         if self.class_index.contains_key(&name) {
@@ -319,6 +337,9 @@ impl<'a> OutlineBuilder<'a> {
         selection_node: tree_sitter::Node,
         source: &[u8],
     ) {
+        if member.is_empty() {
+            return;
+        }
         let idx = match self.class_index.get(class_name) {
             Some(&i) => i,
             None => return,
