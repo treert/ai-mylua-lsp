@@ -48,6 +48,8 @@ pub fn build_file_analysis(
         pending_type_annotation: None,
         pending_class: None,
         pending_generic_params: Vec::new(),
+        pending_class_name: None,
+        global_class_bindings: HashMap::new(),
         module_return_type: None,
         module_return_range: None,
         scopes: Vec::new(),
@@ -229,6 +231,14 @@ pub(crate) struct BuildContext<'a> {
     pub(crate) pending_class: Option<PendingClass>,
     /// Buffer for `@generic` params that arrive before `@class`.
     pub(crate) pending_generic_params: Vec<String>,
+    /// Class name from the most recently flushed `@class`, consumed by
+    /// the immediately following `local` or assignment to bind the variable
+    /// to its class definition (Phase 2: class anchor binding).
+    pub(crate) pending_class_name: Option<String>,
+    /// Global variable → class name binding. When `---@class Foo` is followed
+    /// by `Foo = class()` (global assignment), record the binding here so
+    /// `function Foo:method()` can resolve Foo's class and write fields back.
+    pub(crate) global_class_bindings: HashMap<String, String>,
     /// Type of the file-level `return` statement (module export).
     pub(crate) module_return_type: Option<TypeFact>,
     /// Source range of the file-level `return` statement.
@@ -303,6 +313,16 @@ impl<'a> BuildContext<'a> {
             }
         }
         None
+    }
+
+    /// Resolve the `bound_class` for a variable name. Checks locals first
+    /// (via scope stack), then falls back to `global_class_bindings`.
+    /// Implements the strictly-layered lookup from Phase 2 §4.2.
+    pub(crate) fn resolve_bound_class_for(&self, name: &str) -> Option<&str> {
+        if let Some(decl) = self.resolve_in_build_scopes(name) {
+            return decl.bound_class.as_deref();
+        }
+        self.global_class_bindings.get(name).map(|s| s.as_str())
     }
 
     /// Extract the built scopes into a ScopeTree, consuming the scope data.

@@ -32,11 +32,13 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             }
             "local_function_declaration" => {
                 flush_pending_class(ctx, node);
+                ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_local_function(ctx, node);
             }
             "function_declaration" => {
                 flush_pending_class(ctx, node);
+                ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_function_declaration(ctx, node);
             }
@@ -46,6 +48,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             }
             "return_statement" => {
                 flush_pending_class(ctx, node);
+                ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_module_return(ctx, node);
             }
@@ -53,11 +56,13 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
             "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
             | "for_numeric_statement" | "for_generic_statement" => {
                 flush_pending_class(ctx, node);
+                ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_nested_block(ctx, node);
             }
             _ => {
                 flush_pending_class(ctx, node);
+                ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
             }
         }
@@ -202,6 +207,9 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         extract_preceding_type_annotation(node, ctx.source)
     });
 
+    // Phase 2: consume pending_class_name — bind the first local to the class
+    let mut pending_class = ctx.pending_class_name.take();
+
     let names_node = match node.child_by_field_name("names") {
         Some(n) => n,
         None => return,
@@ -231,6 +239,9 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         let name = node_text(name_node, ctx.source).to_string();
         let range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
 
+        // Phase 2: only the first variable gets the class binding
+        let var_bound_class = if i == 0 { pending_class.take() } else { None };
+
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
             if let Some(ref type_expr) = pending_type {
@@ -243,7 +254,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: range,
                     type_fact: Some(type_fact),
-                    bound_class: None,
+                    bound_class: var_bound_class,
                     is_emmy_annotated: true,
                 });
                 continue;
@@ -263,7 +274,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                 selection_range: range,
                 type_fact: Some(type_fact),
-                bound_class: None,
+                bound_class: var_bound_class,
                 is_emmy_annotated: false,
             });
             continue;
@@ -286,7 +297,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: range,
                     type_fact: Some(require_type_fact),
-                    bound_class: None,
+                    bound_class: var_bound_class,
                     is_emmy_annotated: false,
                 });
                 continue;
@@ -310,7 +321,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                 selection_range: range,
                 type_fact: Some(type_fact.clone()),
-                bound_class: None,
+                bound_class: var_bound_class,
                 is_emmy_annotated: false,
             });
 
@@ -505,26 +516,22 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
-    // `function M.add(a, b)` / `function M:method()` — when the base is a
-    // local with a Table shape, register the function as a field on that
-    // shape (so `return M` carries the field through `require()`), and
-    // skip global_contributions (M is local, not global).
-    //
-    // Only when the base is NOT a known local do we fall through to the
-    // global contribution path — mirroring `visit_assignment`'s
-    // `register_nested_field_write` → `continue` pattern.
+    // Determine how the function is anchored:
+    //   1. Local table shape (`local M = {}; function M:foo() ... end`)
+    //      → write field to shape, skip global contribution (it's local)
+    //   2. @class TypeDefinition (Phase 2: `---@class Cls; local M = ...; function M:foo()`)
+    //      → write field to class TypeDefinition (supplemental — does NOT replace
+    //        existing shape write or global contribution)
+    //   3. Global contribution (fallback for non-local bases)
     let wrote_to_shape = 'shape: {
         let (base_name, field_name) = if let Some((b, f)) = name.rsplit_once(':') {
             (b, f)
         } else if let Some((b, f)) = name.rsplit_once('.') {
             (b, f)
         } else {
-            break 'shape false; // bare name, nothing to register
+            break 'shape false;
         };
 
-        // Only single-segment bases (e.g. `M` in `M.add`). Multi-segment
-        // bases like `a.b.c` would need nested shape walking which is
-        // already handled by `register_nested_field_write` for assignments.
         if base_name.contains('.') || base_name.contains(':') {
             break 'shape false;
         }
@@ -545,6 +552,19 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         }
         false
     };
+
+    // Phase 2: write method/field to @class TypeDefinition via bound_class.
+    // This is supplemental — the global contribution still happens for non-local
+    // bases, and the shape write still happens for local table shapes.
+    if let Some((base_name, field_name)) = name.rsplit_once(':').or_else(|| name.rsplit_once('.')) {
+        if !base_name.contains('.') && !base_name.contains(':') {
+            if let Some(class_name) = ctx.resolve_bound_class_for(base_name).map(|s| s.to_string()) {
+                let def_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
+                let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
+                add_field_to_class(ctx, &class_name, field_name, type_fact, def_range);
+            }
+        }
+    }
 
     // Traverse function body to populate scope tree with parameters and locals
     // (must happen before the early-return for local table shapes)
@@ -570,6 +590,31 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
         selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
     });
+}
+
+/// Add a field to an `@class` TypeDefinition. Skips if:
+/// - An `@field` annotation already declares a field with the same name
+/// - A runtime field with the same name was already appended
+fn add_field_to_class(
+    ctx: &mut BuildContext,
+    class_name: &str,
+    field_name: &str,
+    type_fact: TypeFact,
+    def_range: crate::util::ByteRange,
+) {
+    if let Some(td) = ctx.type_definitions.iter_mut().find(|td| {
+        td.kind == TypeDefinitionKind::Class && td.name == class_name
+    }) {
+        if td.fields.iter().any(|f| f.name == field_name) {
+            return;
+        }
+        td.fields.push(TypeFieldDef {
+            name: field_name.to_string(),
+            type_fact,
+            range: def_range,
+            name_range: None,
+        });
+    }
 }
 
 fn build_function_summary(
@@ -804,6 +849,9 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
         extract_preceding_type_annotation(node, ctx.source)
     });
 
+    // Phase 2: consume pending_class_name for global assignment binding
+    let pending_class = ctx.pending_class_name.take();
+
     let left = match node.child_by_field_name("left") {
         Some(n) => n,
         None => return,
@@ -822,6 +870,14 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
+
+                // Phase 2: bind the first simple-identifier LHS to the class
+                if i == 0 {
+                    if let Some(ref class_name) = pending_class {
+                        ctx.global_class_bindings.insert(name.clone(), class_name.clone());
+                    }
+                }
+
                 let type_fact = if i == 0 {
                     if let Some(ref type_expr) = pending_type {
                         emmy_type_to_fact(type_expr)
@@ -898,6 +954,19 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     assign_range,
                 ) {
                     continue;
+                }
+
+                // Phase 2: `self.field = expr` or `ABC.field = expr` where
+                // the base has a bound_class → write field to @class.
+                // This is supplemental — the global contribution still happens
+                // for non-local bases (e.g. `Foo.bar = function() end` where
+                // Foo is a global). The existing local/global check below
+                // decides whether to emit a global contribution.
+                if chain.fields.len() == 1 {
+                    if let Some(class_name) = ctx.resolve_bound_class_for(&chain.base_name).map(|s| s.to_string()) {
+                        let field_name = &chain.fields[0];
+                        add_field_to_class(ctx, &class_name, field_name, type_fact.clone(), assign_range);
+                    }
                 }
 
                 // `register_nested_field_write` returned `false` for one
@@ -1117,11 +1186,27 @@ fn visit_function_body(
     // Register implicit self for colon methods (before explicit params)
     if is_method {
         let db = func_body.start_byte();
-        let self_type = if !class_prefix.is_empty() {
-            Some(TypeFact::Known(KnownType::EmmyType(class_prefix.to_string())))
+
+        // Phase 2: resolve bound_class for self. If the class_prefix
+        // (e.g. "ABC" from "function ABC:method()") has a bound class,
+        // use the class name as self's type and record bound_class.
+        let (self_type, self_bound_class) = if !class_prefix.is_empty() {
+            let bound = ctx.resolve_bound_class_for(class_prefix).map(|s| s.to_string());
+            if let Some(ref class_name) = bound {
+                (
+                    Some(TypeFact::Known(KnownType::EmmyType(class_name.clone()))),
+                    Some(class_name.clone()),
+                )
+            } else {
+                (
+                    Some(TypeFact::Known(KnownType::EmmyType(class_prefix.to_string()))),
+                    None,
+                )
+            }
         } else {
-            None
+            (None, None)
         };
+
         ctx.add_scoped_decl(ScopeDecl {
             name: "self".to_string(),
             kind: DefKind::Parameter,
@@ -1130,7 +1215,7 @@ fn visit_function_body(
             range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             type_fact: self_type,
-            bound_class: None,
+            bound_class: self_bound_class,
             is_emmy_annotated: false,
         });
     }

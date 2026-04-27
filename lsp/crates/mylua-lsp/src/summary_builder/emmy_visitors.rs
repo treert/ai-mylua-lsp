@@ -10,8 +10,11 @@ use super::BuildContext;
 
 /// Flush any pending @class definition into type_definitions.
 /// Called when a non-emmy_comment node is encountered.
+/// Stores the class name in `pending_class_name` so the immediately
+/// following statement can bind the variable to this class.
 pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if let Some((cname, parents, fields, generic_params, name_range)) = ctx.pending_class.take() {
+        ctx.pending_class_name = Some(cname.clone());
         ctx.type_definitions.push(TypeDefinition {
             name: cname,
             kind: TypeDefinitionKind::Class,
