@@ -55,6 +55,15 @@ pub enum SymbolicStub {
     CallReturn {
         base: Box<SymbolicStub>,
         func_name: std::string::String,
+        /// Whether the call used Lua's colon method syntax (`obj:m(...)`).
+        /// Colon calls receive an implicit `self` argument, while dotted calls
+        /// (`obj.m(...)`) do not.
+        #[serde(default)]
+        is_method_call: bool,
+        /// Inferred actual argument types at the call site. For colon method
+        /// calls, this starts with the receiver type as the implicit `self`.
+        #[serde(default)]
+        call_arg_types: Vec<TypeFact>,
         /// Actual generic type arguments from the base expression.
         /// E.g. for `sstack:pop()` where `sstack` is `Stack<string>`,
         /// this carries `[string]` so the resolver can substitute

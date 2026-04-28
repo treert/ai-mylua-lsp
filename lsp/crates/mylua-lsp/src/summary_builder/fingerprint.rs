@@ -41,14 +41,117 @@ pub(super) fn hash_bytes(data: &[u8]) -> u64 {
 
 pub(super) fn hash_function_signature(sig: &FunctionSignature) -> u64 {
     let mut hasher = DefaultHasher::new();
+    hash_signature(sig, &mut hasher);
+    hasher.finish()
+}
+
+fn hash_signature(sig: &FunctionSignature, hasher: &mut impl Hasher) {
     for p in &sig.params {
-        p.name.hash(&mut hasher);
-        format!("{}", p.type_fact).hash(&mut hasher);
+        p.name.hash(hasher);
+        hash_type_fact(&p.type_fact, hasher);
     }
     for r in &sig.returns {
-        format!("{}", r).hash(&mut hasher);
+        hash_type_fact(r, hasher);
     }
-    hasher.finish()
+}
+
+fn hash_type_fact(fact: &TypeFact, hasher: &mut impl Hasher) {
+    match fact {
+        TypeFact::Known(known) => {
+            "known".hash(hasher);
+            hash_known_type(known, hasher);
+        }
+        TypeFact::Stub(stub) => {
+            "stub".hash(hasher);
+            hash_symbolic_stub(stub, hasher);
+        }
+        TypeFact::Union(parts) => {
+            "union".hash(hasher);
+            parts.len().hash(hasher);
+            for part in parts {
+                hash_type_fact(part, hasher);
+            }
+        }
+        TypeFact::Unknown => {
+            "unknown".hash(hasher);
+        }
+    }
+}
+
+fn hash_known_type(known: &KnownType, hasher: &mut impl Hasher) {
+    match known {
+        KnownType::Nil => "nil".hash(hasher),
+        KnownType::Boolean => "boolean".hash(hasher),
+        KnownType::Number => "number".hash(hasher),
+        KnownType::Integer => "integer".hash(hasher),
+        KnownType::String => "string".hash(hasher),
+        KnownType::Table(shape_id) => {
+            "table".hash(hasher);
+            shape_id.0.hash(hasher);
+        }
+        KnownType::Function(sig) => {
+            "function".hash(hasher);
+            hash_signature(sig, hasher);
+        }
+        KnownType::FunctionRef(fid) => {
+            "function_ref".hash(hasher);
+            fid.0.hash(hasher);
+        }
+        KnownType::EmmyType(name) => {
+            "emmy_type".hash(hasher);
+            name.hash(hasher);
+        }
+        KnownType::EmmyGeneric(name, params) => {
+            "emmy_generic".hash(hasher);
+            name.hash(hasher);
+            params.len().hash(hasher);
+            for param in params {
+                hash_type_fact(param, hasher);
+            }
+        }
+    }
+}
+
+fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
+    match stub {
+        SymbolicStub::RequireRef { module_path } => {
+            "require_ref".hash(hasher);
+            module_path.hash(hasher);
+        }
+        SymbolicStub::CallReturn {
+            base,
+            func_name,
+            is_method_call,
+            call_arg_types,
+            generic_args,
+        } => {
+            "call_return".hash(hasher);
+            hash_symbolic_stub(base, hasher);
+            func_name.hash(hasher);
+            is_method_call.hash(hasher);
+            call_arg_types.len().hash(hasher);
+            for arg in call_arg_types {
+                hash_type_fact(arg, hasher);
+            }
+            generic_args.len().hash(hasher);
+            for arg in generic_args {
+                hash_type_fact(arg, hasher);
+            }
+        }
+        SymbolicStub::GlobalRef { name } => {
+            "global_ref".hash(hasher);
+            name.hash(hasher);
+        }
+        SymbolicStub::TypeRef { name } => {
+            "type_ref".hash(hasher);
+            name.hash(hasher);
+        }
+        SymbolicStub::FieldOf { base, field } => {
+            "field_of".hash(hasher);
+            hash_type_fact(base, hasher);
+            field.hash(hasher);
+        }
+    }
 }
 
 pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
@@ -65,13 +168,15 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     }
 
     // Hash global contributions including their type facts
-    let mut globals: Vec<_> = ctx.global_contributions.iter()
-        .map(|g| (g.name.as_str(), format!("{}", g.type_fact)))
-        .collect();
-    globals.sort();
-    for (name, type_str) in &globals {
-        name.hash(&mut hasher);
-        type_str.hash(&mut hasher);
+    let mut globals: Vec<_> = ctx.global_contributions.iter().collect();
+    globals.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| a.selection_range.start_byte.cmp(&b.selection_range.start_byte))
+    });
+    for global in &globals {
+        global.name.hash(&mut hasher);
+        hash_type_fact(&global.type_fact, &mut hasher);
     }
 
     // Hash function signatures by ID (not by name)
@@ -80,38 +185,44 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     for id in &func_ids {
         id.0.hash(&mut hasher);
         if let Some(fs) = ctx.function_summaries.get(id) {
+            fs.generic_params.hash(&mut hasher);
             fs.signature_fingerprint.hash(&mut hasher);
         }
     }
 
     // Hash type definitions: kind, parents, alias, fields
-    let mut type_defs: Vec<_> = ctx.type_definitions.iter()
-        .map(|t| {
-            let fields_str: String = t.fields.iter()
-                .map(|f| format!("{}:{}", f.name, f.type_fact))
-                .collect::<Vec<_>>()
-                .join(",");
-            let alias_str = t.alias_type.as_ref()
-                .map(|a| format!("{}", a))
-                .unwrap_or_default();
-            let parents_str = t.parents.join(",");
-            let kind_str = format!("{:?}", t.kind);
-            (t.name.as_str(), kind_str, parents_str, alias_str, fields_str)
-        })
-        .collect();
-    type_defs.sort();
-    for (name, kind, parents, alias, fields) in &type_defs {
-        name.hash(&mut hasher);
-        kind.hash(&mut hasher);
-        parents.hash(&mut hasher);
-        alias.hash(&mut hasher);
-        fields.hash(&mut hasher);
+    let mut type_defs: Vec<_> = ctx.type_definitions.iter().collect();
+    type_defs.sort_by(|a, b| {
+        a.name
+            .cmp(&b.name)
+            .then_with(|| format!("{:?}", a.kind).cmp(&format!("{:?}", b.kind)))
+            .then_with(|| a.range.start_byte.cmp(&b.range.start_byte))
+    });
+    for type_def in &type_defs {
+        type_def.name.hash(&mut hasher);
+        format!("{:?}", type_def.kind).hash(&mut hasher);
+        type_def.parents.hash(&mut hasher);
+        type_def.generic_params.hash(&mut hasher);
+        if let Some(alias) = &type_def.alias_type {
+            "alias".hash(&mut hasher);
+            hash_type_fact(alias, &mut hasher);
+        }
+        let mut fields: Vec<_> = type_def.fields.iter().collect();
+        fields.sort_by(|a, b| {
+            a.name
+                .cmp(&b.name)
+                .then_with(|| a.range.start_byte.cmp(&b.range.start_byte))
+        });
+        for field in fields {
+            field.name.hash(&mut hasher);
+            hash_type_fact(&field.type_fact, &mut hasher);
+        }
     }
 
     // Hash module return type
     if let Some(ref ret) = ctx.module_return_type {
         "module_return".hash(&mut hasher);
-        format!("{}", ret).hash(&mut hasher);
+        hash_type_fact(ret, &mut hasher);
     }
 
     hasher.finish()

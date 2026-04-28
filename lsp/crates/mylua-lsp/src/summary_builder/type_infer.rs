@@ -140,6 +140,25 @@ fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> V
         .collect()
 }
 
+fn function_return_with_call_args(
+    fs: &crate::summary::FunctionSummary,
+    call_arg_types: &[TypeFact],
+) -> Option<TypeFact> {
+    if !fs.generic_params.is_empty() && !call_arg_types.is_empty() {
+        if let Some(substituted_returns) = crate::resolver::unify_function_generics(
+            &fs.generic_params,
+            &fs.signature.params,
+            call_arg_types,
+            &fs.signature.returns,
+        ) {
+            if let Some(ret) = substituted_returns.first() {
+                return Some(ret.clone());
+            }
+        }
+    }
+    fs.signature.returns.first().cloned()
+}
+
 /// Lightweight type inference for call arguments — only handles literals
 /// and local variable lookups. Sufficient for function-level generic
 /// unification (e.g. `identity("abc")` → `T = string`).
@@ -225,6 +244,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
     if let Some(method_node) = node.child_by_field_name("method") {
         let method_name = node_text(method_node, ctx.source).to_string();
         let callee_text = node_text(callee, ctx.source);
+        let explicit_arg_types = collect_call_arg_types(ctx, node);
 
         let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(callee_text) {
             match decl.type_fact.as_ref() {
@@ -238,6 +258,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 // When the base is a local Table shape, look up the method
                 // directly in the shape or function_summaries.
                 Some(TypeFact::Known(KnownType::Table(shape_id))) => {
+                    let mut call_arg_types = Vec::with_capacity(explicit_arg_types.len() + 1);
+                    call_arg_types.push(TypeFact::Known(KnownType::Table(*shape_id)));
+                    call_arg_types.extend(explicit_arg_types.clone());
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
                         if let Some(fi) = shape.fields.get(&method_name) {
                             match &fi.type_fact {
@@ -248,7 +271,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                                 }
                                 TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
                                     if let Some(fs) = ctx.function_summaries.get(fid) {
-                                        if let Some(ret) = fs.signature.returns.first() {
+                                        if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
                                             return ret.clone();
                                         }
                                     }
@@ -262,7 +285,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                         let qualified = format!("{}{}{}", callee_text, sep, method_name);
                         if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
                             if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                                if let Some(ret) = fs.signature.returns.first() {
+                                if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
                                     return ret.clone();
                                 }
                             }
@@ -276,9 +299,14 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
             (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![])
         };
 
+        let mut call_arg_types = Vec::with_capacity(1);
+        call_arg_types.push(TypeFact::Stub(base_stub.clone()));
+        call_arg_types.extend(explicit_arg_types);
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
             func_name: method_name,
+            is_method_call: true,
+            call_arg_types,
             generic_args,
         });
     }
@@ -292,6 +320,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
             if let Some(field) = callee.child_by_field_name("field") {
                 let base_text = node_text(base, ctx.source);
                 let func_name = node_text(field, ctx.source).to_string();
+                let explicit_arg_types = collect_call_arg_types(ctx, node);
 
                 let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
                     match decl.type_fact.as_ref() {
@@ -317,7 +346,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                                         }
                                         TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
                                             if let Some(fs) = ctx.function_summaries.get(fid) {
-                                                if let Some(ret) = fs.signature.returns.first() {
+                                                if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
                                                     return ret.clone();
                                                 }
                                             }
@@ -330,7 +359,7 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                             let qualified = format!("{}.{}", base_text, func_name);
                             if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
                                 if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                                    if let Some(ret) = fs.signature.returns.first() {
+                                    if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
                                         return ret.clone();
                                     }
                                 }
@@ -346,6 +375,8 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 return TypeFact::Stub(SymbolicStub::CallReturn {
                     base: Box::new(base_stub),
                     func_name,
+                    is_method_call: false,
+                    call_arg_types: explicit_arg_types,
                     generic_args,
                 });
             }

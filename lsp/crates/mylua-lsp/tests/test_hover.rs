@@ -1074,6 +1074,62 @@ print(s)
 }
 
 #[test]
+fn hover_dotted_generic_function_uses_explicit_argument_not_receiver() {
+    let src = r#"Foo = {}
+
+---@generic T
+---@param x T
+---@return T
+function Foo.id(x)
+    return x
+end
+
+local s = Foo.id("abc")
+print(s)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "generic_dotted_call.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs)
+        .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("Type: `string`"),
+        "dotted generic function should infer from explicit argument, not receiver, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_local_table_dotted_generic_function_uses_explicit_argument() {
+    let src = r#"local Foo = {}
+
+---@generic T
+---@param x T
+---@return T
+function Foo.id(x)
+    return x
+end
+
+local s = Foo.id("abc")
+print(s)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "generic_local_table_dotted_call.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs)
+        .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("Type: `string`"),
+        "local table dotted generic function should infer from explicit argument, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_generic_function_infers_return_type_number() {
     // Function-level generic: `identity(123)` should infer T = number.
     let src = r#"---@generic T
@@ -1368,6 +1424,36 @@ local a1 = ClassA1:new()"#;
     assert!(
         text.contains("BaseCls:new") || text.contains("function BaseCls:new"),
         "hover on inherited `new` should jump to BaseCls:new, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_method_self_generic_return_uses_receiver_class() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@generic T
+---@param self T
+---@return T
+function BaseCls:new()
+    return self
+end
+
+---@class ClassA1:BaseCls
+ClassA1 = class("ClassA1")
+
+local a1 = ClassA1:new()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_method_self_generic.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(13, 6), &mut agg, &docs);
+    assert!(result.is_some(), "hover on a1 should return a result");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("Type: `ClassA1`"),
+        "ClassA1:new() should bind self generic T to ClassA1, got:\n{}",
         text
     );
 }

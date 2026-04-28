@@ -324,7 +324,7 @@ pub enum CacheKey {
     Global { name: String },
     /// Resolve an Emmy type name itself (not a field on it).
     Type { name: String },
-    CallReturn { base_key: Box<CacheKey>, func_name: String },
+    CallReturn { base_key: Box<CacheKey>, func_name: String, is_method_call: bool },
     FieldAccess { base_key: Box<CacheKey>, field: String },
 }
 

@@ -302,8 +302,8 @@ fn resolve_stub(
             resolve_emmy_type(name, agg)
         }
 
-        SymbolicStub::CallReturn { base, func_name, generic_args } => {
-            resolve_call_return(base, func_name, generic_args, agg, depth, visited)
+        SymbolicStub::CallReturn { base, func_name, generic_args, call_arg_types, .. } => {
+            resolve_call_return(base, func_name, generic_args, call_arg_types, agg, depth, visited)
         }
 
         SymbolicStub::FieldOf { base, field } => {
@@ -430,6 +430,7 @@ fn resolve_call_return(
     base: &SymbolicStub,
     func_name: &str,
     generic_args: &[TypeFact],
+    call_arg_types: &[TypeFact],
     agg: &mut WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
@@ -462,7 +463,11 @@ fn resolve_call_return(
     // Emmy class type and use the same field lookup path as method hover.
     if let TypeFact::Known(KnownType::EmmyType(ref type_name)) = base_resolved.type_fact {
         let field_result = resolve_emmy_field(type_name, func_name, agg);
-        if let Some(ret) = first_function_return(&field_result, agg) {
+        if let Some(ret) = first_function_return_with_call_args(
+            &field_result,
+            call_arg_types,
+            agg,
+        ) {
             return resolve_recursive(&ret, agg, depth + 1, visited);
         }
     }
@@ -485,7 +490,7 @@ fn resolve_call_return(
                             }
                             TypeFact::Known(KnownType::FunctionRef(fid)) => {
                                 summary.function_summaries.get(fid)
-                                    .and_then(|fs| fs.signature.returns.first().cloned())
+                                    .and_then(|fs| function_return_with_call_args(fs, call_arg_types))
                             }
                             _ => None,
                         }
@@ -524,14 +529,14 @@ fn resolve_call_return(
 
             // Try bare name first, then qualified `Type:method` / `Type.method`.
             let mut found = summary.get_function_by_name(func_name)
-                .and_then(|fs| fs.signature.returns.first().cloned());
+                .and_then(|fs| function_return_with_call_args(fs, call_arg_types));
 
             if found.is_none() {
                 'outer_fs: for type_name in &candidate_names {
                     for sep in [":", "."] {
                         let qualified = format!("{}{}{}", type_name, sep, func_name);
                         if let Some(fs) = summary.get_function_by_name(&qualified) {
-                            found = fs.signature.returns.first().cloned();
+                            found = function_return_with_call_args(fs, call_arg_types);
                             if found.is_some() { break 'outer_fs; }
                         }
                     }
@@ -569,7 +574,7 @@ fn resolve_call_return(
                     if let Some(ref uri) = resolved.def_uri {
                         if let Some(summary) = agg.summaries.get(uri) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
-                                if let Some(ret) = fs.signature.returns.first().cloned() {
+                                if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
                                     let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
                                     if ret_resolved.def_uri.is_none() {
                                         ret_resolved.def_uri = Some(c.source_uri.clone());
@@ -594,17 +599,40 @@ fn resolve_call_return(
     ResolvedType::unknown()
 }
 
-fn first_function_return(result: &ResolvedType, agg: &WorkspaceAggregation) -> Option<TypeFact> {
+fn first_function_return_with_call_args(
+    result: &ResolvedType,
+    call_arg_types: &[TypeFact],
+    agg: &WorkspaceAggregation,
+) -> Option<TypeFact> {
     match &result.type_fact {
         TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
             let uri = result.def_uri.as_ref()?;
             let summary = agg.summaries.get(uri)?;
             let fs = summary.function_summaries.get(fid)?;
-            fs.signature.returns.first().cloned()
+            function_return_with_call_args(fs, call_arg_types)
         }
         _ => None,
     }
+}
+
+fn function_return_with_call_args(
+    fs: &crate::summary::FunctionSummary,
+    call_arg_types: &[TypeFact],
+) -> Option<TypeFact> {
+    if !fs.generic_params.is_empty() && !call_arg_types.is_empty() {
+        if let Some(substituted_returns) = unify_function_generics(
+            &fs.generic_params,
+            &fs.signature.params,
+            call_arg_types,
+            &fs.signature.returns,
+        ) {
+            if let Some(ret) = substituted_returns.first() {
+                return Some(ret.clone());
+            }
+        }
+    }
+    fs.signature.returns.first().cloned()
 }
 
 /// Extract the base name from a `SymbolicStub` for qualified name lookups.
@@ -1037,11 +1065,15 @@ fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
                 None
             }
         }
-        SymbolicStub::CallReturn { base, func_name, .. } => {
+        SymbolicStub::CallReturn { base, func_name, is_method_call, call_arg_types, generic_args } => {
+            if !call_arg_types.is_empty() || !generic_args.is_empty() {
+                return None;
+            }
             let base_key = stub_to_cache_key(base)?;
             Some(CacheKey::CallReturn {
                 base_key: Box::new(base_key),
                 func_name: func_name.clone(),
+                is_method_call: *is_method_call,
             })
         }
         SymbolicStub::TypeRef { name } => {

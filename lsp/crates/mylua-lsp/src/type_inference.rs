@@ -262,9 +262,14 @@ fn infer_call_return_fact(
         }
 
         let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, callee, source);
+        let mut call_arg_types = Vec::with_capacity(1);
+        call_arg_types.push(base_fact.clone());
+        call_arg_types.extend(collect_call_arg_types(node, source, uri, scope_tree, index));
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
             func_name: method_name,
+            is_method_call: true,
+            call_arg_types,
             generic_args,
         });
     }
@@ -278,9 +283,12 @@ fn infer_call_return_fact(
             let func_name = node_text(field_node, source).to_string();
             let base_fact = infer_node_type(base_node, source, uri, scope_tree, index);
             let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
+            let call_arg_types = collect_call_arg_types(node, source, uri, scope_tree, index);
             return TypeFact::Stub(SymbolicStub::CallReturn {
                 base: Box::new(base_stub),
                 func_name,
+                is_method_call: false,
+                call_arg_types,
                 generic_args,
             });
         }
