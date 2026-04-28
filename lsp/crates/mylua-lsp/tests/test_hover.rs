@@ -1340,6 +1340,69 @@ hero:pick_up("sword")
 }
 
 #[test]
+fn hover_inherited_method_from_global_class_value() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@generic T
+---@param self T
+---@return T
+function BaseCls:new()
+    return self
+end
+
+---@class ClassA1:BaseCls
+ClassA1 = class("ClassA1")
+
+local a1 = ClassA1:new()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_global_class_inherited_method.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(13, 19), &mut agg, &docs);
+    assert!(
+        result.is_some(),
+        "hover on inherited `new` from BaseCls should succeed"
+    );
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("BaseCls:new") || text.contains("function BaseCls:new"),
+        "hover on inherited `new` should jump to BaseCls:new, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_global_class_value_requires_explicit_class_binding() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@return BaseCls
+function BaseCls:new()
+    return self
+end
+
+---@class Phantom:BaseCls
+Other = {}
+
+Phantom = make_value()
+
+local value = Phantom:new()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_global_class_requires_binding.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(13, 22), &mut agg, &docs);
+    assert!(result.is_some(), "hover should still produce fallback method hover");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        !text.contains("BaseCls:new") && !text.contains("function BaseCls:new"),
+        "same-name global should not resolve through Phantom's parent without explicit class binding, got:\n{}",
+        text
+    );
+}
+
+#[test]
 fn hover_emmy_comment_parent_type_name() {
     let src = r#"---@class BaseCls
 ---@field id integer

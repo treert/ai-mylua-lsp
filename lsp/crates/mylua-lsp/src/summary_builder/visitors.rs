@@ -933,6 +933,8 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let type_fact = if i == 0 {
                     if let Some(ref type_expr) = pending_type {
                         emmy_type_to_fact(type_expr)
+                    } else if let Some(ref class_name) = pending_class {
+                        TypeFact::Known(KnownType::EmmyType(class_name.clone()))
                     } else {
                         value_node
                             .map(|v| infer_expression_type(ctx, v, 0))
