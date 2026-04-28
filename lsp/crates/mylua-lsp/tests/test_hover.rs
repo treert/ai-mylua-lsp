@@ -56,6 +56,35 @@ fn hover_emmy_class_return_type() {
 }
 
 #[test]
+fn hover_local_call_return_from_function_body_local() {
+    let src = r#"---@class ClassA1
+ClassA1 = {}
+---@return ClassA1
+function ClassA1:test() end
+---@return ClassA1
+local function get_a1() end
+local function test()
+    local a1 = get_a1()
+    return a1:test()
+end
+local a1_test = test()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_function_body_local.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs);
+    assert!(result.is_some(), "hover on a1_test should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("ClassA1"),
+            "a1_test hover should mention ClassA1, got: {}",
+            content
+        );
+    }
+}
+
+#[test]
 fn hover_chain_call() {
     let src = read_fixture("hover/hover1.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover1.lua");

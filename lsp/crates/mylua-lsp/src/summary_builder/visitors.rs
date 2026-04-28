@@ -103,6 +103,15 @@ pub(super) fn find_named_child_by_kind<'a>(
 }
 
 fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    let mut return_types = None;
+    visit_nested_block_inner(ctx, node, &mut return_types);
+}
+
+fn visit_nested_block_inner(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+    return_types: &mut Option<&mut Vec<TypeFact>>,
+) {
     let scope_kind = match node.kind() {
         "do_statement" => Some(ScopeKind::DoBlock),
         "while_statement" => Some(ScopeKind::WhileBlock),
@@ -172,7 +181,7 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "block" | "if_clause" | "elseif_clause" | "else_clause"
             | "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
             | "for_numeric_statement" | "for_generic_statement" => {
-                visit_nested_block(ctx, child);
+                visit_nested_block_inner(ctx, child, return_types);
             }
             "function_declaration" => {
                 visit_function_declaration(ctx, child);
@@ -185,6 +194,11 @@ fn visit_nested_block(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
             "local_function_declaration" => {
                 visit_local_function(ctx, child);
+            }
+            "return_statement" => {
+                if let Some(returns) = return_types.as_deref_mut() {
+                    collect_return_statement_types(ctx, child, returns);
+                }
             }
             "emmy_comment" => visit_emmy_comment(ctx, child),
             _ => {}
@@ -332,7 +346,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         TypeFact::Known(KnownType::Function(sig)) => sig.params.clone(),
                         _ => Vec::new(),
                     };
-                    visit_function_body(ctx, body, &params, false, "");
+                    visit_function_body(ctx, body, &params, false, "", None);
                 }
             }
         }
@@ -476,9 +490,10 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let name = node_text(name_node, ctx.source).to_string();
     let body = node.child_by_field_name("body");
 
-    let fs = build_function_summary(ctx, &name, node, body);
     let func_id = ctx.alloc_function_id();
+    let fs = build_function_summary(ctx, &name, node, body, false);
     let params = fs.signature.params.clone();
+    let should_infer_returns = should_infer_body_returns(&fs);
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
@@ -496,7 +511,12 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     // Traverse function body to populate scope tree with parameters and locals
     if let Some(b) = body {
-        visit_function_body(ctx, b, &params, false, "");
+        let mut returns = Vec::new();
+        let return_target = if should_infer_returns { Some(&mut returns) } else { None };
+        visit_function_body(ctx, b, &params, false, "", return_target);
+        if should_infer_returns {
+            update_function_returns(ctx, func_id, returns);
+        }
     }
 }
 
@@ -508,9 +528,10 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let name = node_text(name_node, ctx.source).to_string();
     let body = node.child_by_field_name("body");
 
-    let fs = build_function_summary(ctx, &name, node, body);
     let func_id = ctx.alloc_function_id();
+    let fs = build_function_summary(ctx, &name, node, body, false);
     let params = fs.signature.params.clone();
+    let should_infer_returns = should_infer_body_returns(&fs);
     let is_method = name.contains(':');
     let class_prefix = crate::type_system::class_prefix_of(&name).to_string();
     ctx.function_name_to_id.insert(name.clone(), func_id);
@@ -569,7 +590,12 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // Traverse function body to populate scope tree with parameters and locals
     // (must happen before the early-return for local table shapes)
     if let Some(b) = body {
-        visit_function_body(ctx, b, &params, is_method, &class_prefix);
+        let mut returns = Vec::new();
+        let return_target = if should_infer_returns { Some(&mut returns) } else { None };
+        visit_function_body(ctx, b, &params, is_method, &class_prefix, return_target);
+        if should_infer_returns {
+            update_function_returns(ctx, func_id, returns);
+        }
     }
 
     // Base is a local table → field already written to shape, no global.
@@ -622,6 +648,7 @@ fn build_function_summary(
     name: &str,
     decl_node: tree_sitter::Node,
     body: Option<tree_sitter::Node>,
+    infer_body_returns: bool,
 ) -> FunctionSummary {
     let emmy_comments = collect_preceding_comments(decl_node, ctx.source);
     let emmy_text = emmy_comments.join("\n");
@@ -672,7 +699,7 @@ fn build_function_summary(
     }
 
     // If no Emmy return, try to infer from return statements
-    if returns.is_empty() && !emmy_annotated {
+    if infer_body_returns && returns.is_empty() && !emmy_annotated {
         if let Some(b) = body {
             collect_return_types(ctx, b, &mut returns, 0);
         }
@@ -715,6 +742,24 @@ fn build_function_summary(
         emmy_annotated,
         overloads,
         generic_params: func_generic_params,
+    }
+}
+
+fn should_infer_body_returns(fs: &FunctionSummary) -> bool {
+    !fs.emmy_annotated && fs.signature.returns.is_empty()
+}
+
+fn update_function_returns(
+    ctx: &mut BuildContext,
+    func_id: FunctionSummaryId,
+    returns: Vec<TypeFact>,
+) {
+    if returns.is_empty() {
+        return;
+    }
+    if let Some(fs) = ctx.function_summaries.get_mut(&func_id) {
+        fs.signature.returns = returns;
+        fs.signature_fingerprint = hash_function_signature(&fs.signature);
     }
 }
 
@@ -813,20 +858,7 @@ pub(super) fn collect_return_types(
         let child = cursor.node();
         match child.kind() {
             "return_statement" => {
-                if let Some(values) = find_named_child_by_kind(child, "expression_list") {
-                    for i in 0..values.named_child_count() {
-                        if let Some(expr) = values.named_child(i as u32) {
-                            let tf = infer_expression_type(ctx, expr, 0);
-                            if returns.len() <= i {
-                                returns.push(tf);
-                            } else {
-                                // Merge with existing (union)
-                                let existing = returns[i].clone();
-                                returns[i] = merge_types(existing, tf);
-                            }
-                        }
-                    }
-                }
+                collect_return_statement_types(ctx, child, returns);
             }
             // Don't recurse into nested function bodies
             "function_body" | "function_declaration" | "local_function_declaration" => {}
@@ -836,6 +868,26 @@ pub(super) fn collect_return_types(
         }
         if !cursor.goto_next_sibling() {
             break;
+        }
+    }
+}
+
+fn collect_return_statement_types(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+    returns: &mut Vec<TypeFact>,
+) {
+    if let Some(values) = find_named_child_by_kind(node, "expression_list") {
+        for i in 0..values.named_child_count() {
+            if let Some(expr) = values.named_child(i as u32) {
+                let tf = infer_expression_type(ctx, expr, 0);
+                if returns.len() <= i {
+                    returns.push(tf);
+                } else {
+                    let existing = returns[i].clone();
+                    returns[i] = merge_types(existing, tf);
+                }
+            }
         }
     }
 }
@@ -1180,6 +1232,7 @@ fn visit_function_body(
     params: &[ParamInfo],
     is_method: bool,
     class_prefix: &str,
+    mut return_types: Option<&mut Vec<TypeFact>>,
 ) {
     ctx.push_scope(ScopeKind::FunctionBody, func_body.start_byte(), func_body.end_byte());
 
@@ -1225,8 +1278,9 @@ fn visit_function_body(
         register_params_into_scope(ctx, param_list, params);
     }
 
-    // Recursively visit the body's statements
-    visit_nested_block(ctx, func_body);
+    // Recursively visit the body's statements. When requested, collect
+    // return types during the walk so earlier local declarations are visible.
+    visit_nested_block_inner(ctx, func_body, &mut return_types);
 
     ctx.pop_scope();
 }
