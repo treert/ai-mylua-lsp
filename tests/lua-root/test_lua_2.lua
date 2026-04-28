@@ -1,21 +1,7 @@
-function ABC:fy()
-    self.yyyy = 1
-    -- local x = self.y1
-    -- self.yy = self.x
-    -- self:f1()
-    -- self.f2()
-end
-
-
-ABC.g1 = 4
-ABC.g1 = 5
-
-
-ABC_123.sd = 34
-
 print("hello world")
 
--- local xxx = ABC.g1
--- xxx.g1 = 7
+local a1 = utils.get_a1()
+a1:Say()
 
-utils2.hello()
+local a2 = utils.get_a2()
+a2:Say()
