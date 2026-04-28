@@ -1218,6 +1218,16 @@ local name = hero:getName()
         text2.contains("Player"),
         "hover on `hero` should show Player type, got:\n{}", text2,
     );
+
+    // hover on `name` — should preserve the return type through
+    // `hero` (a call return) and then `hero:getName()` (a method return).
+    let result3 = hover::hover(main_doc, &main_uri, pos(2, 6), &mut agg, &docs);
+    assert!(result3.is_some(), "hover on `name` should succeed");
+    let text3 = hover_content_string(result3.as_ref().unwrap());
+    assert!(
+        text3.contains("string"),
+        "hover on `name` should show string type, got:\n{}", text3,
+    );
 }
 
 /// When a parent class in the inheritance chain is anchored by a *local*

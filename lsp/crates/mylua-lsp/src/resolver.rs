@@ -457,6 +457,16 @@ fn resolve_call_return(
         }
     }
 
+    // When the base itself is the result of another call, the original
+    // `base` stub has no useful qualified name. Continue from the resolved
+    // Emmy class type and use the same field lookup path as method hover.
+    if let TypeFact::Known(KnownType::EmmyType(ref type_name)) = base_resolved.type_fact {
+        let field_result = resolve_emmy_field(type_name, func_name, agg);
+        if let Some(ret) = first_function_return(&field_result, agg) {
+            return resolve_recursive(&ret, agg, depth + 1, visited);
+        }
+    }
+
     // When the base resolves to a Table shape (e.g. `local M = {}` returned
     // via `require()`), look up the function field directly in the shape.
     if let TypeFact::Known(KnownType::Table(shape_id)) = &base_resolved.type_fact {
@@ -582,6 +592,19 @@ fn resolve_call_return(
     }
 
     ResolvedType::unknown()
+}
+
+fn first_function_return(result: &ResolvedType, agg: &WorkspaceAggregation) -> Option<TypeFact> {
+    match &result.type_fact {
+        TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
+        TypeFact::Known(KnownType::FunctionRef(fid)) => {
+            let uri = result.def_uri.as_ref()?;
+            let summary = agg.summaries.get(uri)?;
+            let fs = summary.function_summaries.get(fid)?;
+            fs.signature.returns.first().cloned()
+        }
+        _ => None,
+    }
 }
 
 /// Extract the base name from a `SymbolicStub` for qualified name lookups.
