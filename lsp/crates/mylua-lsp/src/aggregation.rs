@@ -366,15 +366,18 @@ fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
 }
 
 /// Priority key for sorting candidates (smaller = higher priority):
-/// 1. Paths containing "annotation" (case-insensitive) come first
+/// 1. More occurrences of "annotation" (case-insensitive) in the path = higher priority
 /// 2. Shallower paths (fewer `/` segments) win
 /// 3. Shorter total path length as tiebreaker
 /// 4. Lexicographic URI string for full determinism
-fn uri_priority_key(uri: &Uri) -> (u8, usize, usize, String) {
+fn uri_priority_key(uri: &Uri) -> (usize, usize, usize, String) {
     let path = uri.to_string();
-    let has_annotation = if path.to_ascii_lowercase().contains("annotation") { 0 } else { 1 };
+    let lower = path.to_ascii_lowercase();
+    let annotation_count = lower.matches("annotation").count();
+    // Negate: more occurrences → smaller key → higher priority
+    let annotation_key = usize::MAX - annotation_count;
     let depth = path.matches('/').count();
-    (has_annotation, depth, path.len(), path)
+    (annotation_key, depth, path.len(), path)
 }
 
 impl Default for WorkspaceAggregation {
