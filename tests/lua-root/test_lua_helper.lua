@@ -5,6 +5,15 @@ function ClassA1:Say()
     print(self.__class_name .. " say")
 end
 
+---@return string
+function ClassA1:test()
+    return "test"
+end
+
+function ClassA1:get_a2()
+    return ClassA2:new()
+end
+
 ---@class ClassA2:ClassA1
 ClassA2 = class("ClassA2",ClassA1)
  
