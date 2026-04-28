@@ -54,6 +54,7 @@ pub fn build_file_analysis(
         module_return_range: None,
         scopes: Vec::new(),
         scope_stack: Vec::new(),
+        last_emmy_end_row: None,
     };
 
     let root = tree.root_node();
@@ -247,6 +248,10 @@ pub(crate) struct BuildContext<'a> {
     pub(crate) scopes: Vec<Scope>,
     /// Stack of scope indices — top is the current innermost scope.
     pub(crate) scope_stack: Vec<usize>,
+    /// End row of the last emmy_comment node visited in `visit_top_level`.
+    /// Used to detect blank-line gaps between annotations and the following
+    /// statement — when a gap exists, pending class/type bindings are cleared.
+    pub(crate) last_emmy_end_row: Option<u32>,
 }
 
 impl<'a> BuildContext<'a> {

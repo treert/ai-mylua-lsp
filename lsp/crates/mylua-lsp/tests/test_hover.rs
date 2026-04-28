@@ -1632,3 +1632,47 @@ local escaped = nil
         "escaped quotes must not expose string literal contents as type references"
     );
 }
+
+#[test]
+fn hover_blank_line_between_class_and_variable() {
+    // A blank line between `---@class Foo` and the following variable must
+    // prevent the class from binding to that variable.
+    let src = r#"---@class MyClass
+
+my_m = {}
+print(my_m)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "blank_class_gap.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `my_m` at the usage site (line 3, col 6)
+    let result = hover::hover(doc, &uri, pos(3, 6), &mut agg, &docs);
+    assert!(result.is_some(), "hover on my_m should return a result");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        !text.contains("MyClass"),
+        "blank line should prevent @class from binding; got:\n{}", text,
+    );
+}
+
+#[test]
+fn hover_no_blank_line_class_binds() {
+    // Without a blank line, `---@class Foo` should bind to the next variable.
+    let src = r#"---@class MyClass
+my_m = {}
+print(my_m)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "no_blank_class.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `my_m` at the usage site (line 2, col 6)
+    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs);
+    assert!(result.is_some(), "hover on my_m should return a result");
+    let text = hover_content_string(result.as_ref().unwrap());
+    assert!(
+        text.contains("MyClass"),
+        "without blank line, @class should bind to variable; got:\n{}", text,
+    );
+}

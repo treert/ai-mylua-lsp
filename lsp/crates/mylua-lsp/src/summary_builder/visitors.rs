@@ -27,40 +27,50 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
         let node = cursor.node();
         match node.kind() {
             "local_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_local_declaration(ctx, node);
             }
             "local_function_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_local_function(ctx, node);
             }
             "function_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_function_declaration(ctx, node);
             }
             "assignment_statement" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_assignment(ctx, node);
             }
             "return_statement" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_module_return(ctx, node);
             }
-            "emmy_comment" => visit_emmy_comment(ctx, node),
+            "emmy_comment" => {
+                visit_emmy_comment(ctx, node);
+                ctx.last_emmy_end_row = Some(node.end_position().row as u32);
+            }
             "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
             | "for_numeric_statement" | "for_generic_statement" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_nested_block(ctx, node);
             }
             _ => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
@@ -72,6 +82,21 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
     }
 
     ctx.pop_scope();
+}
+
+/// If there is a blank-line gap between the last `emmy_comment` and `node`,
+/// discard pending annotation state so that `---@class` / `---@type` does
+/// not leak across the gap.
+fn clear_pending_on_blank_line_gap(ctx: &mut BuildContext, node: tree_sitter::Node) {
+    if let Some(emmy_end_row) = ctx.last_emmy_end_row.take() {
+        let node_start_row = node.start_position().row as u32;
+        if node_start_row > emmy_end_row + 1 {
+            // Blank line gap — drop all pending bindings.
+            ctx.pending_class = None;
+            ctx.pending_class_name = None;
+            ctx.pending_type_annotation = None;
+        }
+    }
 }
 
 fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
@@ -181,27 +206,38 @@ fn visit_nested_block_inner(
             "block" | "if_clause" | "elseif_clause" | "else_clause"
             | "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
             | "for_numeric_statement" | "for_generic_statement" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_nested_block_inner(ctx, child, return_types);
             }
             "function_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_function_declaration(ctx, child);
             }
             "assignment_statement" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_assignment(ctx, child);
             }
             "local_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_declaration(ctx, child);
             }
             "local_function_declaration" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_function(ctx, child);
             }
             "return_statement" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 if let Some(returns) = return_types.as_deref_mut() {
                     collect_return_statement_types(ctx, child, returns);
                 }
             }
-            "emmy_comment" => visit_emmy_comment(ctx, child),
-            _ => {}
+            "emmy_comment" => {
+                visit_emmy_comment(ctx, child);
+                ctx.last_emmy_end_row = Some(child.end_position().row as u32);
+            }
+            _ => {
+                clear_pending_on_blank_line_gap(ctx, child);
+            }
         }
         if !cursor.goto_next_sibling() {
             break;
