@@ -12,3 +12,5 @@ end
 function utils.get_a2()
     return ClassA2:new()
 end
+
+utils.test_const = require('test_const')

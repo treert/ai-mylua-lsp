@@ -17,3 +17,12 @@ end
 local function my_Print(self, ...)
     print("my_print")
 end
+
+local XX = UE4.Class()
+
+function encodeString(s)
+    local s = tostring(s)
+    return s:gsub(".", function(c) return escapeList[c] end)
+end
+
+print(utils.test_const.A, utils.test_const.B, utils.test_const.C)
