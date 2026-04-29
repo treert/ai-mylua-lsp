@@ -101,7 +101,7 @@
 | Incremental edit latency | `did_change` → `publishDiagnostics` 日志时间差 |
 | References query latency | client 侧请求→响应时间 |
 
-另有独立 CLI 性能分析工具，见 [`../lsp/README.md`](../lsp/README.md) 中 `mylua-perf` 说明。
+另有独立 CLI 性能分析工具，见 [`../lsp/README.md`](../lsp/README.md) 中 `lua-perf` 说明。
 
 ---
 

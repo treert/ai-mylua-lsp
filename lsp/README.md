@@ -70,7 +70,7 @@ cd lsp && cargo test --tests
 
 ## CLI 工具：`lua-perf`
 
-独立命令行工具，分析 Lua 文件在各解析阶段（tree-sitter parse → build_summary → build_scope_tree）的耗时。
+独立命令行工具，分析 Lua 文件在各解析阶段（tree-sitter parse → build_file_analysis）的耗时，也可导出单文件 `DocumentSummary` JSON 方便检查索引摘要。
 
 ```bash
 # 构建（必须 release 模式，debug 下耗时无参考意义）
@@ -80,7 +80,14 @@ cd lsp && cargo build --release --bin lua-perf
 cargo run --release --bin lua-perf -- /path/to/file.lua
 cargo run --release --bin lua-perf -- file1.lua file2.lua  # 多文件
 ./target/release/lua-perf /path/to/file.lua                # 直接运行
+
+# 导出 DocumentSummary
+cargo run --release --bin lua-perf -- --summary /path/to/file.lua
+cargo run --release --bin lua-perf -- --summary-out target/lua-summary /path/to/file.lua
+cargo run --release --bin lua-perf -- --summary-stdout /path/to/file.lua
 ```
+
+`--summary` 默认写入 `target/lua-summary/`，输出文件名由输入路径转义并追加稳定 hash 得到，例如 `tests/lua-root/diagnostics.lua` 会写为 `target/lua-summary/tests_lua-root_diagnostics.lua.<hash>.summary.json`，避免多文件模式下同名覆盖。`--summary-out <dir>` 可指定目录；`--summary-stdout` 仅支持单个输入文件。
 
 ## 与 `grammar/` 的边界
 
