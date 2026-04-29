@@ -64,8 +64,12 @@ fn count_identifier_references(
     ref_count: &mut std::collections::HashMap<(String, usize), usize>,
 ) {
     let node = cursor.node();
-    if node.kind() == "identifier" {
-        let name = node_text(node, source);
+    if matches!(node.kind(), "identifier" | "varargs" | "vararg_expression") {
+        let name = if matches!(node.kind(), "varargs" | "vararg_expression") {
+            "..."
+        } else {
+            node_text(node, source)
+        };
         let byte = node.start_byte();
         if let Some(decl) = scope_tree.resolve_decl(byte, name) {
             // Skip if this identifier IS the declaration itself —

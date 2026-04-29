@@ -740,6 +740,46 @@ fn unused_local_counts_reference_in_expression() {
 }
 
 #[test]
+fn unused_local_counts_vararg_reference() {
+    let src = r#"
+local function f(...)
+    print(...)
+end
+f()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "used_vararg.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Unused local '...'")),
+        "used varargs should not trigger unused-local, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn unused_local_reports_unused_vararg() {
+    let src = r#"
+local function f(...)
+    print("hello")
+end
+f()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "unused_vararg.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("Unused local '...'")),
+        "unused varargs should still trigger unused-local, got: {:?}", diags,
+    );
+}
+
+#[test]
 fn unused_local_skips_implicit_method_self() {
     let src = r#"
 local t = {}
