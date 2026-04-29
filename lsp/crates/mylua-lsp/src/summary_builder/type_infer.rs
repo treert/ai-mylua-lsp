@@ -98,7 +98,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
         "variable" | "identifier" => {
             let text = node_text(node, ctx.source);
             // Check if it's a known local
-            if let Some(decl) = ctx.resolve_in_build_scopes(text) {
+            if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
                 if let Some(ref tf) = decl.type_fact {
                     return tf.clone();
                 }
@@ -170,7 +170,7 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
         "nil" => TypeFact::Known(KnownType::Nil),
         "variable" | "identifier" => {
             let text = node_text(node, ctx.source);
-            if let Some(decl) = ctx.resolve_in_build_scopes(text) {
+            if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
                 if let Some(ref tf) = decl.type_fact {
                     return tf.clone();
                 }
@@ -246,7 +246,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
         let callee_text = node_text(callee, ctx.source);
         let explicit_arg_types = collect_call_arg_types(ctx, node);
 
-        let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(callee_text) {
+        let (base_stub, generic_args) = if let Some(decl) =
+            ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte())
+        {
             match decl.type_fact.as_ref() {
                 Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
                 Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
@@ -322,7 +324,9 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 let func_name = node_text(field, ctx.source).to_string();
                 let explicit_arg_types = collect_call_arg_types(ctx, node);
 
-                let (base_stub, generic_args) = if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+                let (base_stub, generic_args) = if let Some(decl) =
+                    ctx.resolve_visible_in_build_scopes(base_text, base.start_byte())
+                {
                     match decl.type_fact.as_ref() {
                         Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
                         Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
@@ -428,7 +432,7 @@ fn infer_field_expression_type(
     let field_name = node_text(field, ctx.source).to_string();
 
     // If base is a known local with a table shape, look up the field directly
-    if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+    if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
         if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
             if let Some(shape) = ctx.table_shapes.get(shape_id) {
                 if let Some(fi) = shape.fields.get(&field_name) {

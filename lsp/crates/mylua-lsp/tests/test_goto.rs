@@ -71,6 +71,144 @@ end"#;
 }
 
 #[test]
+fn class_assignment_does_not_bind_preexisting_local() {
+    let src = r#"local Foo
+---@class Foo
+Foo = class()
+function Foo:bar()
+end"#;
+    let (_doc, uri, agg) = setup_single_file(src, "local_class_assignment.lua");
+    let summary = agg.summaries.get(&uri).expect("summary");
+    let class = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.name == "Foo")
+        .expect("Foo class");
+
+    assert!(
+        class.fields.iter().all(|field| field.name != "bar"),
+        "`---@class Foo` should not bind to a local declared before the comment block",
+    );
+    assert!(
+        agg.global_shard.get("Foo").is_none(),
+        "assignment to existing local `Foo` must not be indexed as a global",
+    );
+    assert!(
+        agg.global_shard.get("Foo.bar").is_none(),
+        "method on local-bound class `Foo` must not be indexed as a global",
+    );
+}
+
+#[test]
+fn class_binds_immediately_following_local_declaration_with_value() {
+    let src = r#"---@class Foo
+local M = {}
+function M:bar()
+end"#;
+    let (_doc, uri, agg) = setup_single_file(src, "immediate_local_class.lua");
+    let summary = agg.summaries.get(&uri).expect("summary");
+    let class = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.name == "Foo")
+        .expect("Foo class");
+
+    assert!(
+        class.fields.iter().any(|field| field.name == "bar"),
+        "`---@class Foo` should bind to the immediately following `local M = ...`",
+    );
+    assert!(
+        class.anchor_shape_id.is_some(),
+        "`---@class Foo` bound to `local M = {{}}` should use M's table shape as anchor",
+    );
+}
+
+#[test]
+fn class_binds_immediately_following_local_without_value() {
+    let src = r#"---@class Foo
+local M
+function M:bar()
+end"#;
+    let (_doc, uri, agg) = setup_single_file(src, "local_class_without_value.lua");
+    let summary = agg.summaries.get(&uri).expect("summary");
+    let class = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.name == "Foo")
+        .expect("Foo class");
+
+    assert!(
+        class.fields.iter().any(|field| field.name == "bar"),
+        "`---@class Foo` should bind to the immediately following `local M` even without an initializer",
+    );
+    assert!(
+        class.anchor_shape_id.is_none(),
+        "`local M` without an initializer has no table shape anchor",
+    );
+}
+
+#[test]
+fn bare_function_declaration_assigning_visible_local_is_not_global() {
+    let src = r#"local make
+function make()
+end"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "local_function_assignment.lua");
+
+    assert!(
+        agg.global_shard.get("make").is_none(),
+        "`function make()` should assign the visible local, not create a global",
+    );
+}
+
+#[test]
+fn function_declaration_inside_local_initializer_does_not_see_local_name() {
+    let src = r#"local make = function()
+    function make()
+    end
+end"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "initializer_visibility_function.lua");
+
+    assert!(
+        agg.global_shard.get("make").is_some(),
+        "`function make()` inside local make's initializer should assign global make",
+    );
+}
+
+#[test]
+fn assignment_inside_local_initializer_does_not_see_local_name() {
+    let src = r#"local Foo = function()
+Foo = class()
+end"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "initializer_visibility_assignment.lua");
+
+    assert!(
+        agg.global_shard.get("Foo").is_some(),
+        "`Foo = class()` inside local Foo's initializer should assign global Foo",
+    );
+}
+
+#[test]
+fn class_anchor_shape_backfill_uses_bound_local_not_same_name_shadow() {
+    let src = r#"---@class Foo
+Foo = {}
+do
+    local Foo = { shadow_only = 1 }
+end"#;
+    let (_doc, uri, agg) = setup_single_file(src, "class_anchor_shadow.lua");
+    let summary = agg.summaries.get(&uri).expect("summary");
+    let class = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.name == "Foo")
+        .expect("Foo class");
+
+    assert!(
+        class.anchor_shape_id.is_none(),
+        "global class Foo must not borrow a same-named local table shape as its anchor",
+    );
+}
+
+#[test]
 fn goto_nested_chained_field_jumps_to_assignment_site() {
     // P2 / future-work §0 (AST chained assign): after `a.b.c = 1`
     // registers `c` on the inner `a.b` shape (AST-driven, not splitn),

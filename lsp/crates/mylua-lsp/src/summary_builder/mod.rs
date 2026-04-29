@@ -136,15 +136,16 @@ fn collect_scope_type_names(scope_tree: &ScopeTree) -> std::collections::HashSet
 /// `visit_local_declaration`, so the shape doesn't exist at class creation
 /// time — we scan the scope-registered declarations after traversal.
 fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
-    // Collect name → shape_id from scope declarations.
+    // Collect class name → shape_id from local declarations that were
+    // explicitly bound by the immediately preceding `---@class`.
     let shape_map: HashMap<String, TableShapeId> = ctx.scopes.iter()
         .flat_map(|s| s.declarations.iter())
         .filter_map(|decl| {
-            if let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact {
-                Some((decl.name.clone(), *sid))
-            } else {
-                None
-            }
+            let class_name = decl.bound_class.as_ref()?;
+            let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact else {
+                return None;
+            };
+            Some((class_name.clone(), *sid))
         })
         .collect();
 
@@ -302,14 +303,16 @@ impl<'a> BuildContext<'a> {
         }
     }
 
-    /// Resolve a name by walking the scope stack from innermost to outermost.
-    /// This is the build-time equivalent of `ScopeTree::resolve_decl`.
-    pub(crate) fn resolve_in_build_scopes(&self, name: &str) -> Option<&ScopeDecl> {
+    pub(crate) fn resolve_visible_in_build_scopes(
+        &self,
+        name: &str,
+        byte_offset: usize,
+    ) -> Option<&ScopeDecl> {
         for &scope_id in self.scope_stack.iter().rev() {
             let scope = &self.scopes[scope_id];
             let mut best: Option<&ScopeDecl> = None;
             for decl in &scope.declarations {
-                if decl.name == name {
+                if decl.name == name && is_decl_visible_at(decl, byte_offset) {
                     best = Some(decl);
                 }
             }
@@ -320,11 +323,28 @@ impl<'a> BuildContext<'a> {
         None
     }
 
+    pub(crate) fn resolve_visible_in_build_scopes_mut(
+        &mut self,
+        name: &str,
+        byte_offset: usize,
+    ) -> Option<&mut ScopeDecl> {
+        for &scope_id in self.scope_stack.iter().rev() {
+            if let Some(idx) = self.scopes[scope_id]
+                .declarations
+                .iter()
+                .rposition(|decl| decl.name == name && is_decl_visible_at(decl, byte_offset))
+            {
+                return self.scopes[scope_id].declarations.get_mut(idx);
+            }
+        }
+        None
+    }
+
     /// Resolve the `bound_class` for a variable name. Checks locals first
     /// (via scope stack), then falls back to `global_class_bindings`.
     /// Implements the strictly-layered lookup from Phase 2 §4.2.
-    pub(crate) fn resolve_bound_class_for(&self, name: &str) -> Option<&str> {
-        if let Some(decl) = self.resolve_in_build_scopes(name) {
+    pub(crate) fn resolve_bound_class_for_at(&self, name: &str, byte_offset: usize) -> Option<&str> {
+        if let Some(decl) = self.resolve_visible_in_build_scopes(name, byte_offset) {
             return decl.bound_class.as_deref();
         }
         self.global_class_bindings.get(name).map(|s| s.as_str())
@@ -334,4 +354,10 @@ impl<'a> BuildContext<'a> {
     pub(crate) fn take_scope_tree(&mut self) -> ScopeTree {
         ScopeTree::from_scopes(std::mem::take(&mut self.scopes))
     }
+}
+
+fn is_decl_visible_at(decl: &ScopeDecl, byte_offset: usize) -> bool {
+    let on_decl_name = byte_offset >= decl.decl_byte
+        && byte_offset < decl.decl_byte + decl.name.len();
+    on_decl_name || decl.visible_after_byte <= byte_offset
 }

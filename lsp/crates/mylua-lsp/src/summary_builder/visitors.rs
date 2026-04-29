@@ -289,7 +289,10 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         let name = node_text(name_node, ctx.source).to_string();
         let range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
 
-        // Phase 2: only the first variable gets the class binding
+        let value_node = values_node
+            .and_then(|v| v.named_child(i as u32));
+        // Phase 2: only the first local immediately following the class
+        // comment gets the binding, even when it has no initializer.
         let var_bound_class = if i == 0 { pending_class.take() } else { None };
 
         // If we have an explicit @type annotation, it takes priority
@@ -329,9 +332,6 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             });
             continue;
         }
-
-        let value_node = values_node
-            .and_then(|v| v.named_child(i as u32));
 
         if let Some(val) = value_node {
             if let Some(rb) = try_extract_require(ctx, &name, val) {
@@ -385,7 +385,20 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     visit_function_body(ctx, body, &params, false, "", None);
                 }
             }
+            continue;
         }
+
+        ctx.add_scoped_decl(ScopeDecl {
+            name: name.clone(),
+            kind: DefKind::LocalVariable,
+            decl_byte: name_node.start_byte(),
+            visible_after_byte: node.end_byte(),
+            range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+            selection_range: range,
+            type_fact: None,
+            bound_class: var_bound_class,
+            is_emmy_annotated: false,
+        });
     }
 }
 
@@ -573,6 +586,17 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.function_name_to_id.insert(name.clone(), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
+    let local_bare_function = if !name.contains('.') && !name.contains(':') {
+        if let Some(decl) = ctx.resolve_visible_in_build_scopes_mut(&name, name_node.start_byte()) {
+            decl.type_fact = Some(TypeFact::Known(KnownType::FunctionRef(func_id)));
+            true
+        } else {
+            false
+        }
+    } else {
+        false
+    };
+
     // Determine how the function is anchored:
     //   1. Local table shape (`local M = {}; function M:foo() ... end`)
     //      → write field to shape, skip global contribution (it's local)
@@ -593,7 +617,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             break 'shape false;
         }
 
-        if let Some(decl) = ctx.resolve_in_build_scopes(base_name) {
+        if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_name, name_node.start_byte()) {
             if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                 let sid = *shape_id;
                 if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
@@ -610,12 +634,25 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         false
     };
 
+    let has_local_base = name
+        .rsplit_once(':')
+        .or_else(|| name.rsplit_once('.'))
+        .map(|(base_name, _)| {
+            !base_name.contains('.')
+                && !base_name.contains(':')
+                && ctx.resolve_visible_in_build_scopes(base_name, name_node.start_byte()).is_some()
+        })
+        .unwrap_or(false);
+
     // Phase 2: write method/field to @class TypeDefinition via bound_class.
     // This is supplemental — the global contribution still happens for non-local
     // bases, and the shape write still happens for local table shapes.
     if let Some((base_name, field_name)) = name.rsplit_once(':').or_else(|| name.rsplit_once('.')) {
         if !base_name.contains('.') && !base_name.contains(':') {
-            if let Some(class_name) = ctx.resolve_bound_class_for(base_name).map(|s| s.to_string()) {
+            if let Some(class_name) = ctx
+                .resolve_bound_class_for_at(base_name, name_node.start_byte())
+                .map(|s| s.to_string())
+            {
                 let def_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
                 let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
                 add_field_to_class(ctx, &class_name, field_name, type_fact, def_range);
@@ -634,8 +671,21 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         }
     }
 
+    // Bare `function f()` assigns an existing visible local `f` when one
+    // exists; it is not a global definition in that case.
+    if local_bare_function {
+        return;
+    }
+
     // Base is a local table → field already written to shape, no global.
     if wrote_to_shape {
+        return;
+    }
+
+    // Base is a visible local but not a table shape. The declaration may
+    // still have attached to an @class via bound_class above, but it must
+    // not be exported through global_shard.
+    if has_local_base {
         return;
     }
 
@@ -958,7 +1008,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
-                if ctx.resolve_in_build_scopes(&name).is_some() {
+                if ctx.resolve_visible_in_build_scopes(&name, var_node.start_byte()).is_some() {
                     continue;
                 }
 
@@ -1056,7 +1106,10 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // Foo is a global). The existing local/global check below
                 // decides whether to emit a global contribution.
                 if chain.fields.len() == 1 {
-                    if let Some(class_name) = ctx.resolve_bound_class_for(&chain.base_name).map(|s| s.to_string()) {
+                    if let Some(class_name) = ctx
+                        .resolve_bound_class_for_at(&chain.base_name, var_node.start_byte())
+                        .map(|s| s.to_string())
+                    {
                         let field_name = &chain.fields[0];
                         add_field_to_class(ctx, &class_name, field_name, type_fact.clone(), assign_range);
                     }
@@ -1074,7 +1127,10 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 //       a likely user bug and we MUST NOT surface the
                 //       junk path through `global_shard` (the local `a`
                 //       is not a global).
-                if ctx.resolve_in_build_scopes(&chain.base_name).is_some() {
+                if ctx
+                    .resolve_visible_in_build_scopes(&chain.base_name, var_node.start_byte())
+                    .is_some()
+                {
                     continue;
                 }
 
@@ -1091,7 +1147,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "subscript_expression" => {
                 if let Some(base) = var_node.child_by_field_name("object") {
                     let base_text = node_text(base, ctx.source);
-                    if let Some(decl) = ctx.resolve_in_build_scopes(base_text) {
+                    if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
                         if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                             let sid = *shape_id;
                             if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
@@ -1189,7 +1245,7 @@ fn register_nested_field_write(
     type_fact: TypeFact,
     assign_range: crate::util::ByteRange,
 ) -> bool {
-    let base_shape_id = match ctx.resolve_in_build_scopes(base_name) {
+    let base_shape_id = match ctx.resolve_visible_in_build_scopes(base_name, assign_range.start_byte) {
         Some(decl) => match &decl.type_fact {
             Some(TypeFact::Known(KnownType::Table(sid))) => *sid,
             _ => return false,
@@ -1285,7 +1341,9 @@ fn visit_function_body(
         // (e.g. "ABC" from "function ABC:method()") has a bound class,
         // use the class name as self's type and record bound_class.
         let (self_type, self_bound_class) = if !class_prefix.is_empty() {
-            let bound = ctx.resolve_bound_class_for(class_prefix).map(|s| s.to_string());
+            let bound = ctx
+                .resolve_bound_class_for_at(class_prefix, func_body.start_byte())
+                .map(|s| s.to_string());
             if let Some(ref class_name) = bound {
                 (
                     Some(TypeFact::Known(KnownType::EmmyType(class_name.clone()))),
