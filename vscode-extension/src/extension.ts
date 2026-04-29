@@ -94,6 +94,11 @@ function collectLspConfig(
       emmyUnknownField: cfg.get('diagnostics.emmyUnknownField'),
       luaFieldError: cfg.get('diagnostics.luaFieldError'),
       luaFieldWarning: cfg.get('diagnostics.luaFieldWarning'),
+      duplicateTableKey: cfg.get('diagnostics.duplicateTableKey'),
+      unusedLocal: cfg.get('diagnostics.unusedLocal'),
+      argumentCountMismatch: cfg.get('diagnostics.argumentCountMismatch'),
+      argumentTypeMismatch: cfg.get('diagnostics.argumentTypeMismatch'),
+      returnMismatch: cfg.get('diagnostics.returnMismatch'),
       scope: cfg.get('diagnostics.scope'),
     },
     gotoDefinition: {

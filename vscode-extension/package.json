@@ -144,19 +144,19 @@
         "mylua.diagnostics.emmyTypeMismatch": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "error",
+          "default": "warning",
           "description": "Severity when a value doesn't match its Emmy type annotation."
         },
         "mylua.diagnostics.emmyUnknownField": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "error",
+          "default": "warning",
           "description": "Severity for accessing an unknown field on an Emmy-typed value."
         },
         "mylua.diagnostics.luaFieldError": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "error",
+          "default": "warning",
           "description": "Severity for high-confidence Lua field errors (e.g. indexing nil)."
         },
         "mylua.diagnostics.luaFieldWarning": {
@@ -174,25 +174,25 @@
         "mylua.diagnostics.unusedLocal": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "off",
+          "default": "warning",
           "description": "Severity for local variables declared but never read. `_`/`_prefix` names are always skipped."
         },
         "mylua.diagnostics.argumentCountMismatch": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "off",
+          "default": "warning",
           "description": "Severity when a call passes a different number of arguments than the resolved signature expects. Vararg (`...`) absorbs extras; any `---@overload` matching the count suppresses the diagnostic."
         },
         "mylua.diagnostics.argumentTypeMismatch": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "off",
+          "default": "warning",
           "description": "Severity when an argument literal type doesn't match the resolved parameter's declared `---@param` type. Unknown-typed arguments are skipped silently."
         },
         "mylua.diagnostics.returnMismatch": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "off",
+          "default": "warning",
           "description": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries."
         },
         "mylua.diagnostics.scope": {

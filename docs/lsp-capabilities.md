@@ -126,13 +126,13 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 |------|--------|------|
 | 未定义全局变量 | `undefinedGlobal` | Warning |
 | Emmy 类型未知字段 | `unknownField` | Warning |
-| Table shape 未知字段 | `luaFieldError`/`luaFieldWarning` | 可配置 |
-| 类型不匹配 | `emmyTypeMismatch` | 可配置 |
+| Table shape 未知字段 | `luaFieldError`/`luaFieldWarning` | Warning |
+| 类型不匹配 | `emmyTypeMismatch` | Warning |
 | 重复 table key | `duplicateTableKey` | Warning |
-| 未使用 local | `unusedLocal` | Off |
-| 参数个数不匹配 | `argumentCountMismatch` | Off |
-| 参数类型不匹配 | `argumentTypeMismatch` | Off |
-| return 不匹配 | `returnMismatch` | Off |
+| 未使用 local | `unusedLocal` | Warning |
+| 参数个数不匹配 | `argumentCountMismatch` | Warning |
+| 参数类型不匹配 | `argumentTypeMismatch` | Warning |
+| return 不匹配 | `returnMismatch` | Warning |
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。

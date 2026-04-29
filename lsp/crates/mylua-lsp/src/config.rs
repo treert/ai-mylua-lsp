@@ -159,9 +159,8 @@ pub struct DiagnosticsConfig {
     /// constructor, e.g. `{ a = 1, a = 2 }`.
     #[serde(rename = "duplicateTableKey")]
     pub duplicate_table_key: DiagnosticSeverityOption,
-    /// P2-3: report locals that are declared but never read. Off by
-    /// default to avoid flagging intentional `local _ = ...`
-    /// placeholders; opt-in via config.
+    /// P2-3: report locals that are declared but never read. `_` /
+    /// `_prefix` names are skipped by the diagnostic implementation.
     #[serde(rename = "unusedLocal")]
     pub unused_local: DiagnosticSeverityOption,
     /// P2-3 continued: call-site arg count vs FunctionSummary params
@@ -189,20 +188,15 @@ impl Default for DiagnosticsConfig {
         Self {
             enable: true,
             undefined_global: DiagnosticSeverityOption::Warning,
-            emmy_type_mismatch: DiagnosticSeverityOption::Error,
-            emmy_unknown_field: DiagnosticSeverityOption::Error,
-            lua_field_error: DiagnosticSeverityOption::Error,
+            emmy_type_mismatch: DiagnosticSeverityOption::Warning,
+            emmy_unknown_field: DiagnosticSeverityOption::Warning,
+            lua_field_error: DiagnosticSeverityOption::Warning,
             lua_field_warning: DiagnosticSeverityOption::Warning,
             duplicate_table_key: DiagnosticSeverityOption::Warning,
-            // Unused-local is noisy (every `for _, v in pairs(t)` uses
-            // `_` which is legitimate). Default off.
-            unused_local: DiagnosticSeverityOption::Off,
-            // Arg/return checks are OFF by default to avoid flooding
-            // first-run users with warnings on code that predates the
-            // feature; opt in via config.
-            argument_count_mismatch: DiagnosticSeverityOption::Off,
-            argument_type_mismatch: DiagnosticSeverityOption::Off,
-            return_mismatch: DiagnosticSeverityOption::Off,
+            unused_local: DiagnosticSeverityOption::Warning,
+            argument_count_mismatch: DiagnosticSeverityOption::Warning,
+            argument_type_mismatch: DiagnosticSeverityOption::Warning,
+            return_mismatch: DiagnosticSeverityOption::Warning,
             scope: DiagnosticScope::Full,
         }
     }

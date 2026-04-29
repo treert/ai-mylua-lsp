@@ -91,15 +91,15 @@
 
 | 情况 | 默认 severity |
 |------|-------------|
-| 字段赋值类型不兼容 | `error`（`emmyTypeMismatch`） |
-| 字段不存在 | `error`（`emmyUnknownField`） |
+| 字段赋值类型不兼容 | `warning`（`emmyTypeMismatch`） |
+| 字段不存在 | `warning`（`emmyUnknownField`） |
 
 **Lua 路径**：
 
 | 情况 | 默认 severity |
 |------|-------------|
-| 显式 `nil` / 非对象值成员访问 | `error`（`luaFieldError`） |
-| closed shape 上不存在的字段 | `error`（`luaFieldError`） |
+| 显式 `nil` / 非对象值成员访问 | `warning`（`luaFieldError`） |
+| closed shape 上不存在的字段 | `warning`（`luaFieldError`） |
 | 开放结构上的未知字段 | `warning`（`luaFieldWarning`） |
 | 字段赋值类型与 shape 冲突 | `warning`（`luaFieldWarning`） |
 
@@ -125,15 +125,15 @@
 | `diagnostics.enable` | boolean | `true` | 总开关 |
 | `diagnostics.scope` | `"full"` \| `"openOnly"` | `"full"` | 诊断范围 |
 | `diagnostics.undefinedGlobal` | severity | `"warning"` | 未定义全局变量 |
-| `diagnostics.emmyTypeMismatch` | severity | `"error"` | Emmy 类型不匹配 |
-| `diagnostics.emmyUnknownField` | severity | `"error"` | Emmy 未知字段 |
-| `diagnostics.luaFieldError` | severity | `"error"` | Lua 高确定性字段错误 |
+| `diagnostics.emmyTypeMismatch` | severity | `"warning"` | Emmy 类型不匹配 |
+| `diagnostics.emmyUnknownField` | severity | `"warning"` | Emmy 未知字段 |
+| `diagnostics.luaFieldError` | severity | `"warning"` | Lua 高确定性字段错误 |
 | `diagnostics.luaFieldWarning` | severity | `"warning"` | Lua 保守字段警告 |
 | `diagnostics.duplicateTableKey` | severity | `"warning"` | 重复 table key |
-| `diagnostics.unusedLocal` | severity | `"off"` | 未使用局部变量 |
-| `diagnostics.argumentCountMismatch` | severity | `"off"` | 参数数量不匹配 |
-| `diagnostics.argumentTypeMismatch` | severity | `"off"` | 参数类型不匹配 |
-| `diagnostics.returnMismatch` | severity | `"off"` | 返回值不匹配 |
+| `diagnostics.unusedLocal` | severity | `"warning"` | 未使用局部变量 |
+| `diagnostics.argumentCountMismatch` | severity | `"warning"` | 参数数量不匹配 |
+| `diagnostics.argumentTypeMismatch` | severity | `"warning"` | 参数类型不匹配 |
+| `diagnostics.returnMismatch` | severity | `"warning"` | 返回值不匹配 |
 | `gotoDefinition.strategy` | `"auto"` \| `"single"` \| `"list"` | `"auto"` | 多候选跳转策略 |
 | `references.strategy` | `"best"` \| `"merge"` \| `"select"` | `"best"` | 多候选引用策略 |
 
