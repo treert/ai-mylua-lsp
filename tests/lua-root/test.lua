@@ -9,3 +9,11 @@ my_m = {}
 function my_m:hello_b()
     print("hello")
 end
+
+local function my_Print(self, ...)
+    print("my_print", ...)
+end
+
+local function my_Print(self, ...)
+    print("my_print")
+end
