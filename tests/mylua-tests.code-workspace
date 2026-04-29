@@ -10,13 +10,6 @@
 	"settings": {
 		"mylua.debug.fileLog": true,
 		"mylua.diagnostics.enable": true,
-		"mylua.diagnostics.undefinedGlobal": "warning",
-		"mylua.diagnostics.emmyTypeMismatch": "error",
-		"mylua.diagnostics.emmyUnknownField": "error",
-		"mylua.diagnostics.luaFieldError": "error",
-		"mylua.diagnostics.luaFieldWarning": "warning",
-		"mylua.gotoDefinition.strategy": "auto",
-		"mylua.references.strategy": "best",
-		"mylua.workspace.indexMode": "merged"
+		"mylua.diagnostics.scope": "openOnly"
 	}
 }
