@@ -77,7 +77,7 @@ fn collect_field_diagnostics(
             node.child_by_field_name("object"),
             node.child_by_field_name("field"),
         ) {
-let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.uri, ctx.scope_tree, ctx.index);
+            let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.uri, ctx.scope_tree, ctx.index);
             let field_name = node_text(field, ctx.source).to_string();
 
             let global_prefix = match &base_fact {
@@ -164,6 +164,50 @@ let base_fact = crate::type_inference::infer_node_type(object, ctx.source, ctx.u
                     }
                 }
                 _ => {}
+            }
+        }
+    }
+
+    if node.kind() == "function_call" {
+        if let (Some(callee), Some(method)) = (
+            node.child_by_field_name("callee"),
+            node.child_by_field_name("method"),
+        ) {
+            let base_fact = crate::type_inference::infer_node_type(
+                callee,
+                ctx.source,
+                ctx.uri,
+                ctx.scope_tree,
+                ctx.index,
+            );
+            let field_name = node_text(method, ctx.source).to_string();
+            let resolved_base = resolver::resolve_type(&base_fact, ctx.index);
+
+            if let TypeFact::Known(KnownType::EmmyType(type_name)) = &resolved_base.type_fact {
+                if let Some(severity) = ctx.emmy_severity {
+                    let field_resolved = resolver::resolve_field_chain(
+                        &resolved_base.type_fact,
+                        std::slice::from_ref(&field_name),
+                        ctx.index,
+                    );
+                    if field_resolved.type_fact == TypeFact::Unknown
+                        && field_resolved.def_uri.is_none()
+                    {
+                        let qualified = format!("{}.{}", type_name, field_name);
+                        if !ctx.index.global_shard.contains_key(&qualified) {
+                            ctx.diagnostics.push(Diagnostic {
+                                range: ctx.line_index.ts_node_to_range(method, ctx.source),
+                                severity: Some(severity),
+                                source: Some("mylua".to_string()),
+                                message: format!(
+                                    "Unknown field '{}' on type '{}'",
+                                    field_name, type_name
+                                ),
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
             }
         }
     }

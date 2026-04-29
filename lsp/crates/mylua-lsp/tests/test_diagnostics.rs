@@ -1499,3 +1499,42 @@ hero:describe()
         unknown,
     );
 }
+
+#[test]
+fn emmy_unknown_field_reports_missing_colon_method() {
+    let src = r#"
+---@class ClassA1
+local ClassA1 = {}
+
+function ClassA1:Say()
+end
+
+---@class ClassA2:ClassA1
+local ClassA2 = {}
+
+---@type ClassA2
+local a = {}
+
+a:Say()
+a:Say1()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "missing_colon_method.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        !unknown.iter().any(|d| d.message.contains("'Say'")),
+        "existing inherited colon method must not be flagged, got: {:?}",
+        unknown,
+    );
+    assert!(
+        unknown.iter().any(|d| d.message.contains("'Say1'")),
+        "missing colon method must be diagnosed as Unknown field, got: {:?}",
+        diags,
+    );
+}
