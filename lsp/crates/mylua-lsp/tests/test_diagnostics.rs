@@ -86,6 +86,56 @@ print(undefined_var)
 }
 
 #[test]
+fn undefined_global_ignores_anonymous_function_parameters() {
+    let src = r#"
+escapeList = {}
+
+function encodeString(s)
+    return s:gsub(".", function(c) return escapeList[c] end)
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "callback_param.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("Undefined global 'c'")),
+        "anonymous function parameter 'c' must resolve as local. diags={:?}",
+        diags
+    );
+}
+
+#[test]
+fn undefined_global_ignores_top_level_callback_parameters() {
+    let src = r#"
+handler(function(c) return c end)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "top_level_callback_param.lua");
+    let diag_config = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("Undefined global 'c'")),
+        "top-level callback parameter 'c' must resolve as local. diags={:?}",
+        diags
+    );
+}
+
+#[test]
 fn undefined_global_on_method_declaration_base() {
     // `function A1213:f()` at the top level is equivalent to
     // `A1213.f = function(self, ...) end` — it *reads* `A1213` as an

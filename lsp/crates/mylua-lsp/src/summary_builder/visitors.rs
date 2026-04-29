@@ -56,6 +56,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_module_return(ctx, node);
+                visit_anonymous_function_definitions_in_node(ctx, node);
             }
             "emmy_comment" => {
                 visit_emmy_comment(ctx, node);
@@ -74,6 +75,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
+                visit_anonymous_function_definitions_in_node(ctx, node);
             }
         }
         if !cursor.goto_next_sibling() {
@@ -230,6 +232,7 @@ fn visit_nested_block_inner(
                 if let Some(returns) = return_types.as_deref_mut() {
                     collect_return_statement_types(ctx, child, returns);
                 }
+                visit_anonymous_function_definitions_in_node(ctx, child);
             }
             "emmy_comment" => {
                 visit_emmy_comment(ctx, child);
@@ -237,6 +240,7 @@ fn visit_nested_block_inner(
             }
             _ => {
                 clear_pending_on_blank_line_gap(ctx, child);
+                visit_anonymous_function_definitions_in_node(ctx, child);
             }
         }
         if !cursor.goto_next_sibling() {
@@ -384,6 +388,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     };
                     visit_function_body(ctx, body, &params, false, "", None);
                 }
+            } else {
+                visit_anonymous_function_definitions_in_node(ctx, val);
             }
             continue;
         }
@@ -1003,6 +1009,9 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
         };
 
         let value_node = right.and_then(|r| r.named_child(i as u32));
+        if let Some(value) = value_node {
+            visit_anonymous_function_definitions_in_node(ctx, value);
+        }
 
         match var_node.kind() {
             // Simple global: `foo = expr`
@@ -1313,6 +1322,44 @@ fn register_nested_field_write(
     } else {
         false
     }
+}
+
+fn visit_anonymous_function_definitions_in_node(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+) {
+    if node.kind() == "function_definition" {
+        visit_anonymous_function_definition(ctx, node);
+        return;
+    }
+
+    let mut cursor = node.walk();
+    if !cursor.goto_first_child() {
+        return;
+    }
+
+    loop {
+        visit_anonymous_function_definitions_in_node(ctx, cursor.node());
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
+}
+
+fn visit_anonymous_function_definition(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+) {
+    let Some(body) = node.child_by_field_name("body") else {
+        return;
+    };
+
+    let mut params = Vec::new();
+    if let Some(param_list) = body.child_by_field_name("parameters") {
+        extract_ast_params(&mut params, param_list, ctx.source);
+    }
+
+    visit_function_body(ctx, body, &params, false, "", None);
 }
 
 // ---------------------------------------------------------------------------
