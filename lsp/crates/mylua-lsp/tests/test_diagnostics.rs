@@ -682,18 +682,16 @@ fn duplicate_table_key_off_via_config() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unused_local_off_by_default() {
+fn unused_local_reports_by_default() {
     let src = "local x = 1\n";
     let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
     );
-    // Default config has unused_local = Off; no such diagnostic.
-    assert!(
-        diags.iter().all(|d| !d.message.contains("Unused local")),
-        "unused_local default off, got: {:?}", diags,
-    );
+    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
+    assert_eq!(unused.len(), 1, "unused_local defaults to warning, got: {:?}", diags);
+    assert!(unused[0].message.contains("'x'"));
 }
 
 #[test]
@@ -738,6 +736,45 @@ fn unused_local_counts_reference_in_expression() {
     assert!(
         diags.iter().all(|d| !d.message.contains("Unused local")),
         "x is used in return expression, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn unused_local_skips_implicit_method_self() {
+    let src = r#"
+local t = {}
+function t:hello()
+    print("hello")
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "method_self.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Unused local 'self'")),
+        "implicit method self should not trigger unused-local, got: {:?}", diags,
+    );
+}
+
+#[test]
+fn unused_local_reports_explicit_self_parameter() {
+    let src = r#"
+function f(self)
+    print("hello")
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "explicit_self.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("Unused local 'self'")),
+        "explicit self parameter should still trigger unused-local, got: {:?}", diags,
     );
 }
 

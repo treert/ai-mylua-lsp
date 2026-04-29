@@ -1,5 +1,6 @@
 use tower_lsp_server::ls_types::*;
-use crate::scope::ScopeTree;
+use crate::scope::{ScopeDecl, ScopeTree};
+use crate::types::DefKind;
 use crate::util::{node_text, LineIndex};
 
 /// Warn on locals that are declared but never referenced. Uses the
@@ -28,6 +29,9 @@ pub(super) fn check_unused_locals(
         if decl.name == "_" || decl.name.starts_with('_') {
             continue;
         }
+        if is_implicit_method_self_decl(decl, source) {
+            continue;
+        }
         let key = (decl.name.clone(), decl.decl_byte);
         if ref_count.get(&key).copied().unwrap_or(0) == 0 {
             diagnostics.push(Diagnostic {
@@ -39,6 +43,18 @@ pub(super) fn check_unused_locals(
             });
         }
     }
+}
+
+fn is_implicit_method_self_decl(decl: &ScopeDecl, source: &[u8]) -> bool {
+    if decl.kind != DefKind::Parameter || decl.name != "self" {
+        return false;
+    }
+
+    // Colon-method `self` is synthesized by scope building and has no
+    // identifier span in the source. Explicit `function f(self)` params
+    // still have selection text "self" and should be diagnosed normally.
+    let range = decl.selection_range;
+    source.get(range.start_byte..range.end_byte) != Some(b"self")
 }
 
 fn count_identifier_references(
