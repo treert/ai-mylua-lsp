@@ -5,6 +5,72 @@ use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
 
 #[test]
+fn goto_unresolved_dotted_field_does_not_fallback_to_bare_global_name() {
+    let main_src = "local XX = UE4.Class()";
+    let other_src = r#"function foo()
+    local Class = Actor:GetClass()
+    Class = Actor.ParentClass
+end"#;
+    let (docs, mut agg, _) = setup_workspace(&[
+        ("main.lua", main_src),
+        ("other.lua", other_src),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main doc");
+
+    let result = goto::goto_definition(
+        main_doc,
+        &main_uri,
+        pos(0, 15),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &docs,
+    );
+
+    assert!(
+        result.is_none(),
+        "unresolved `UE4.Class` field must not fall back to unrelated bare `Class` globals: {:?}",
+        result,
+    );
+}
+
+#[test]
+fn goto_unresolved_dotted_field_does_not_fallback_to_visible_local_name() {
+    let src = r#"local Class = 1
+local XX = UE4.Class()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_name_collision.lua");
+
+    let result = goto::goto_definition(
+        &doc,
+        &uri,
+        pos(1, 15),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &empty_docs(),
+    );
+
+    assert!(
+        result.is_none(),
+        "unresolved `UE4.Class` field must not fall back to visible local `Class`: {:?}",
+        result,
+    );
+}
+
+#[test]
+fn local_reassignment_is_not_indexed_as_global_contribution() {
+    let src = r#"function foo()
+    local Class = Actor:GetClass()
+    Class = Actor.ParentClass
+end"#;
+    let (_doc, _uri, agg) = setup_single_file(src, "local_reassign.lua");
+
+    assert!(
+        agg.global_shard.get("Class").is_none(),
+        "assignment to visible local `Class` must not be indexed as a global",
+    );
+}
+
+#[test]
 fn goto_nested_chained_field_jumps_to_assignment_site() {
     // P2 / future-work §0 (AST chained assign): after `a.b.c = 1`
     // registers `c` on the inner `a.b` shape (AST-driven, not splitn),

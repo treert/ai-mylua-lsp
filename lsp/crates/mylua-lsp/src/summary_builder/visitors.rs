@@ -958,6 +958,9 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
+                if ctx.resolve_in_build_scopes(&name).is_some() {
+                    continue;
+                }
 
                 // Phase 2: bind the first simple-identifier LHS to the class
                 if i == 0 {

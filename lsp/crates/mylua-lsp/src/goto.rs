@@ -31,14 +31,6 @@ pub fn goto_definition(
         return Some(target);
     }
 
-    if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-        let lsp_range = br_to_range(&def.uri, def.selection_range, documents);
-        return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: def.uri,
-            range: lsp_range,
-        }));
-    }
-
     // Dotted-access goto: walk ancestors to find a `variable` /
     // `field_expression` node whose `field` is this identifier, then
     // resolve via the AST-driven infer chain (supports `a[1].b`,
@@ -71,11 +63,18 @@ pub fn goto_definition(
         }
         None
     }) {
-        if result.is_some() {
-            return result;
-        }
-        // Found the dotted access but the recursive resolve gave up;
-        // fall through to the scope / type_shard / global_shard paths.
+        // Found a dotted field / method context. If recursive field
+        // resolution gives up, do not reinterpret the clicked field as a
+        // standalone local/type/global name.
+        return result;
+    }
+
+    if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
+        let lsp_range = br_to_range(&def.uri, def.selection_range, documents);
+        return Some(GotoDefinitionResponse::Scalar(Location {
+            uri: def.uri,
+            range: lsp_range,
+        }));
     }
 
     // Check if ident is a type name → jump to its definition
@@ -280,7 +279,8 @@ fn goto_field_or_method(
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
-let base_fact = crate::type_inference::infer_node_type(base_node, source, uri, scope_tree, index);
+    let base_fact =
+        crate::type_inference::infer_node_type(base_node, source, uri, scope_tree, index);
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name], index,
     );
