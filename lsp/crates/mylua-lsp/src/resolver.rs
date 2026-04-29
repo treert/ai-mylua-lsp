@@ -106,7 +106,7 @@ fn resolve_field_chain_inner(
         _ => None,
     };
 
-    for field in fields {
+    for (idx, field) in fields.iter().enumerate() {
         // When a URI hint is present, resolve Table shapes directly via
         // resolve_table_field (which needs the source_uri). Without the
         // hint we always go through the generic resolve_field_access.
@@ -124,7 +124,9 @@ fn resolve_field_chain_inner(
         if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
             if let Some(ref prefix) = global_prefix {
                 let qualified = format!("{}.{}", prefix, field);
-                let fallback = try_global_shard_qualified(&qualified, agg, 0, &mut visited);
+                let is_chain_tail = idx + 1 == fields.len();
+                let fallback =
+                    try_global_shard_qualified(&qualified, agg, 0, &mut visited, !is_chain_tail);
                 if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
                     current = fallback;
                     global_prefix = Some(qualified);
@@ -393,6 +395,7 @@ fn try_global_shard_qualified(
     agg: &mut WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
+    preserve_resolved_location: bool,
 ) -> ResolvedType {
     let candidate = match agg.global_shard.get(qualified) {
         Some(c) if !c.is_empty() => c[0].clone(),
@@ -405,8 +408,10 @@ fn try_global_shard_qualified(
         depth + 1,
         visited,
     );
-    resolved.def_uri = Some(candidate.source_uri.clone());
-    resolved.def_range = Some(candidate.selection_range);
+    if !preserve_resolved_location || resolved.def_uri.is_none() {
+        resolved.def_uri = Some(candidate.source_uri.clone());
+        resolved.def_range = Some(candidate.selection_range);
+    }
     resolved
 }
 

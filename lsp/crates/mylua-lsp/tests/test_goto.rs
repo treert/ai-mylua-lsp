@@ -597,6 +597,57 @@ local hero = Player.new("Alice")"#;
 }
 
 #[test]
+fn goto_nested_require_returned_local_table_field() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"print(utils.test_const.B)"#,
+        ),
+        (
+            "utils.lua",
+            r#"utils = {}
+utils.test_const = require("test_const")"#,
+        ),
+        (
+            "test_const.lua",
+            r#"local test_const = {
+    A = 1,
+    B = "B",
+    C = "CC",
+}
+
+return test_const"#,
+        ),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main doc");
+    let target_uri = make_uri("test_const.lua");
+    agg.set_require_mapping("test_const".to_string(), target_uri.clone());
+
+    let result = goto::goto_definition(
+        main_doc,
+        &main_uri,
+        pos(0, 23),
+        &mut agg,
+        &GotoStrategy::Auto,
+        &docs,
+    )
+    .expect("goto on utils.test_const.B should resolve");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
+        assert_eq!(loc.uri, target_uri, "should jump to test_const.lua");
+        assert_eq!(
+            loc.range.start.line, 2,
+            "should land on field B in the returned local table, got: {:?}",
+            loc.range,
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", result);
+    }
+}
+
+#[test]
 fn goto_emmy_comment_parent_type_name() {
     let src = r#"---@class BaseCls
 BaseCls = {}

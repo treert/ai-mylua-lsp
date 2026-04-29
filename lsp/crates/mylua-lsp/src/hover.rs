@@ -6,7 +6,7 @@ use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
 use crate::type_inference::infer_node_type;
-use crate::util::{node_text, find_node_at_position, walk_ancestors, LineIndex};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
@@ -433,6 +433,22 @@ fn hover_variable_field(
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.source();
+    if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
+        let name_node = var_node.child_by_field_name("field")?;
+        return build_field_chain_hover(
+            base_node,
+            fields,
+            name_node,
+            "field",
+            source,
+            uri,
+            &doc.scope_tree,
+            index,
+            all_docs,
+            doc.line_index(),
+        );
+    }
+
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
     build_field_hover(base_node, name_node, "field", source, uri, &doc.scope_tree, index, all_docs, doc.line_index())
@@ -457,17 +473,44 @@ fn build_field_hover(
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = node_text(name_node, source).to_string();
+    build_field_chain_hover(
+        base_node,
+        vec![field_name],
+        name_node,
+        kind_label,
+        source,
+        uri,
+        scope_tree,
+        index,
+        all_docs,
+        line_index,
+    )
+}
+
+fn build_field_chain_hover(
+    base_node: tree_sitter::Node,
+    fields: Vec<String>,
+    name_node: tree_sitter::Node,
+    kind_label: &str,
+    source: &[u8],
+    uri: &Uri,
+    scope_tree: &crate::scope::ScopeTree,
+    index: &mut WorkspaceAggregation,
+    all_docs: &std::collections::HashMap<Uri, Document>,
+    line_index: &LineIndex,
+) -> Option<Hover> {
+    let field_name = fields.last()?.clone();
 
     let base_fact = infer_node_type(base_node, source, uri, scope_tree, index);
     lsp_log!(
-        "[hover_{kind}] base='{}' base_fact={:?} {kind}='{}'",
+        "[hover_{kind}] base='{}' base_fact={:?} fields={:?}",
         node_text(base_node, source),
         base_fact,
-        field_name,
+        fields,
         kind = kind_label,
     );
     let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, std::slice::from_ref(&field_name), index,
+        uri, &base_fact, &fields, index,
     );
     lsp_log!("[hover_{kind}] resolved={:?}", resolved.type_fact, kind = kind_label);
 

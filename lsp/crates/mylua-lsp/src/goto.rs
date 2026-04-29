@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, ByteRange};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain, ByteRange};
 use std::collections::HashMap;
 
 pub fn goto_definition(
@@ -243,6 +243,14 @@ fn goto_variable_field(
     documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
+    if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
+        let base_fact =
+            crate::type_inference::infer_node_type(base_node, source, uri, &doc.scope_tree, index);
+        let resolved =
+            resolver::resolve_field_chain_in_file(uri, &base_fact, &fields, index);
+        return resolved_to_goto(resolved, documents);
+    }
+
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
     goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index, documents)
@@ -285,6 +293,13 @@ fn goto_field_or_method(
         uri, &base_fact, &[field_name], index,
     );
 
+    resolved_to_goto(resolved, documents)
+}
+
+fn resolved_to_goto(
+    resolved: resolver::ResolvedType,
+    documents: &HashMap<Uri, Document>,
+) -> Option<GotoDefinitionResponse> {
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri.clone(),

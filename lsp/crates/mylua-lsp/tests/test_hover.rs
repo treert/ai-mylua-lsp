@@ -358,6 +358,44 @@ obj.qux = 1"#;
 }
 
 #[test]
+fn hover_nested_require_returned_local_table_field() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"print(utils.test_const.B)"#,
+        ),
+        (
+            "utils.lua",
+            r#"utils = {}
+utils.test_const = require("test_const")"#,
+        ),
+        (
+            "test_const.lua",
+            r#"local test_const = {
+    A = 1,
+    B = "B",
+    C = "CC",
+}
+
+return test_const"#,
+        ),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main doc");
+    agg.set_require_mapping("test_const".to_string(), make_uri("test_const.lua"));
+
+    let result = hover::hover(main_doc, &main_uri, pos(0, 23), &mut agg, &docs)
+        .expect("hover on utils.test_const.B should resolve");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("Type: `string`"),
+        "hover should show returned table field B as string, got: {}",
+        content,
+    );
+}
+
+#[test]
 fn hover_on_method_decl_base_falls_through_to_variable() {
     // `function ABC:f1()` — hover on `ABC` (the base) must NOT show
     // the function declaration; it should resolve `ABC` as a local.

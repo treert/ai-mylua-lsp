@@ -367,6 +367,29 @@ pub fn find_node_at_position<'a>(
     Some(node)
 }
 
+pub fn extract_field_chain<'a>(
+    mut node: tree_sitter::Node<'a>,
+    source: &[u8],
+) -> Option<(tree_sitter::Node<'a>, Vec<String>)> {
+    let mut fields = Vec::new();
+
+    while matches!(node.kind(), "variable" | "field_expression") {
+        let Some(field) = node.child_by_field_name("field") else {
+            break;
+        };
+        let object = node.child_by_field_name("object")?;
+        fields.push(node_text(field, source).to_string());
+        node = object;
+    }
+
+    if fields.is_empty() {
+        return None;
+    }
+
+    fields.reverse();
+    Some((node, fields))
+}
+
 /// Hard ceiling for "walk ancestors looking for X" loops across the
 /// codebase. Lua AST ancestor chains for the patterns we inspect
 /// (variable / field_expression / function_name / function_call)
