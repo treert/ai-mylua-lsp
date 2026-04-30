@@ -102,7 +102,7 @@ impl LineIndex {
     /// O(line_length) UTF-16 → byte column conversion.
     pub fn position_to_byte_offset(&self, source: &[u8], pos: Position) -> Option<usize> {
         let line_start = self.byte_offset_of_line(pos.line as usize)?;
-        let line_bytes = line_bytes_after(source, line_start);
+        let line_bytes = self.line_bytes_for_row(source, pos.line as usize);
         let col_byte = utf16_col_to_byte_col(line_bytes, pos.character);
         let abs = line_start + col_byte;
         if abs <= source.len() {
@@ -206,7 +206,7 @@ impl LineIndex {
     /// already in the negotiated encoding).
     pub fn lsp_range_to_byte_range(&self, range: Range, source: &[u8]) -> ByteRange {
         let start_line_start = self.byte_offset_of_line(range.start.line as usize).unwrap_or(0);
-        let start_line_bytes = line_bytes_after(source, start_line_start);
+        let start_line_bytes = self.line_bytes_for_row(source, range.start.line as usize);
         let start_col_byte = if crate::position_encoding_is_utf8() {
             range.start.character as usize
         } else {
@@ -215,7 +215,7 @@ impl LineIndex {
         let start_byte = start_line_start + start_col_byte;
 
         let end_line_start = self.byte_offset_of_line(range.end.line as usize).unwrap_or(0);
-        let end_line_bytes = line_bytes_after(source, end_line_start);
+        let end_line_bytes = self.line_bytes_for_row(source, range.end.line as usize);
         let end_col_byte = if crate::position_encoding_is_utf8() {
             range.end.character as usize
         } else {
@@ -340,17 +340,6 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
-
-
-/// Return the slice of `source` from `start` up to (but not including) the
-/// next `\n` or the end of input.
-fn line_bytes_after(source: &[u8], start: usize) -> &[u8] {
-    let mut end = start;
-    while end < source.len() && source[end] != b'\n' {
-        end += 1;
-    }
-    &source[start..end]
-}
 
 /// Convert a byte column within `line_bytes` (UTF-8) to a UTF-16 code-unit
 /// column. `byte_col` past the end is clamped to the line's UTF-16 length.
