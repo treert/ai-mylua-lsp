@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain, ByteRange};
+use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
 use std::collections::HashMap;
 
 pub fn goto_definition(
@@ -70,10 +70,9 @@ pub fn goto_definition(
     }
 
     if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-        let lsp_range = br_to_range(&def.uri, def.selection_range, documents);
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def.uri,
-            range: lsp_range,
+            range: def.selection_range.into(),
         }));
     }
 
@@ -82,7 +81,7 @@ pub fn goto_definition(
         if let Some(candidate) = candidates.first() {
             return Some(GotoDefinitionResponse::Scalar(Location {
                 uri: candidate.source_uri.clone(),
-                range: br_to_range(&candidate.source_uri, candidate.range, documents),
+                range: candidate.range.into(),
             }));
         }
     }
@@ -92,7 +91,7 @@ pub fn goto_definition(
             .iter()
             .map(|c| Location {
                 uri: c.source_uri.clone(),
-                range: br_to_range(&c.source_uri, c.selection_range, documents),
+                range: c.selection_range.into(),
             })
             .collect();
 
@@ -216,7 +215,7 @@ fn type_definition_for_name(
     name: &str,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let candidates = index.type_shard.get(name)?;
     if candidates.is_empty() {
@@ -226,7 +225,7 @@ fn type_definition_for_name(
         .iter()
         .map(|c| Location {
             uri: c.source_uri.clone(),
-            range: br_to_range(&c.source_uri, c.range, documents),
+            range: c.range.into(),
         })
         .collect();
     Some(apply_goto_strategy(locations, strategy))
@@ -298,12 +297,12 @@ fn goto_field_or_method(
 
 fn resolved_to_goto(
     resolved: resolver::ResolvedType,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri.clone(),
-            range: br_to_range(&def_uri, def_range, documents),
+            range: def_range.into(),
         }));
     }
 
@@ -314,7 +313,7 @@ fn try_require_goto(
     doc: &Document,
     ident_node: tree_sitter::Node,
     index: &WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     // Walk up to the enclosing local_declaration if the clicked identifier
     // is one of its LHS names (directly, or nested inside `name_list`).
@@ -369,7 +368,7 @@ fn try_require_goto(
             s.module_return_range
                 .or_else(|| s.global_contributions.first().map(|gc| gc.selection_range))
         })
-        .map(|br| br_to_range(&target_uri, br, documents))
+        .map(|br| Range::from(br))
         .unwrap_or_default();
 
     Some(GotoDefinitionResponse::Scalar(Location {
@@ -417,23 +416,6 @@ fn apply_goto_strategy(
             } else {
                 GotoDefinitionResponse::Array(locations)
             }
-        }
-    }
-}
-
-/// Convert a `ByteRange` to an LSP `Range` using the document's source.
-/// Falls back to using row/col directly if the document is not available.
-fn br_to_range(
-    uri: &Uri,
-    br: ByteRange,
-    documents: &HashMap<Uri, Document>,
-) -> Range {
-    if let Some(doc) = documents.get(uri) {
-        doc.line_index().byte_range_to_lsp_range(br)
-    } else {
-        Range {
-            start: Position { line: br.start_row, character: br.start_col },
-            end: Position { line: br.end_row, character: br.end_col },
         }
     }
 }

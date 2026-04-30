@@ -180,24 +180,6 @@ impl LineIndex {
         }
     }
 
-    /// Convert an internal `ByteRange` to an LSP `Range`.
-    ///
-    /// Since `ByteRange` column offsets are already stored in the
-    /// negotiated encoding (UTF-16 by default), this is a trivial
-    /// field copy — no source text is needed.
-    pub fn byte_range_to_lsp_range(&self, br: ByteRange) -> Range {
-        Range {
-            start: Position {
-                line: br.start_row,
-                character: br.start_col,
-            },
-            end: Position {
-                line: br.end_row,
-                character: br.end_col,
-            },
-        }
-    }
-
     /// Convert an LSP `Range` to an internal `ByteRange`.
     ///
     /// This is the **inbound** conversion used when VS Code sends a
@@ -292,6 +274,15 @@ pub struct ByteRange {
     pub start_col: u32,
     pub end_row: u32,
     pub end_col: u32,
+}
+
+impl From<ByteRange> for Range {
+    fn from(br: ByteRange) -> Self {
+        Range {
+            start: Position { line: br.start_row, character: br.start_col },
+            end: Position { line: br.end_row, character: br.end_col },
+        }
+    }
 }
 
 impl ByteRange {
@@ -981,7 +972,7 @@ mod tests {
         let idx = LineIndex::new(src.as_bytes());
         let number = root.descendant_for_byte_range(10, 10).expect("number");
         let br = idx.ts_node_to_byte_range(number, src.as_bytes());
-        let lsp_range = idx.byte_range_to_lsp_range(br);
+        let lsp_range: Range = br.into();
         let expected = idx.ts_node_to_range(number, src.as_bytes());
         assert_eq!(lsp_range, expected, "ASCII: byte_range_to_lsp_range must match ts_node_to_range");
     }
@@ -996,7 +987,7 @@ mod tests {
         // Find the string node.
         let string_node = root.descendant_for_byte_range(11, 11).expect("string");
         let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
-        let lsp_range = idx.byte_range_to_lsp_range(br);
+        let lsp_range: Range = br.into();
         let expected = idx.ts_node_to_range(string_node, src.as_bytes());
         assert_eq!(lsp_range, expected, "Chinese: byte_range_to_lsp_range must match ts_node_to_range");
     }
@@ -1009,7 +1000,7 @@ mod tests {
         let idx = LineIndex::new(src.as_bytes());
         let string_node = root.descendant_for_byte_range(11, 11).expect("string");
         let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
-        let lsp_range = idx.byte_range_to_lsp_range(br);
+        let lsp_range: Range = br.into();
         let back = idx.lsp_range_to_byte_range(lsp_range, src.as_bytes());
         assert_eq!(back, br, "roundtrip: lsp_range_to_byte_range(byte_range_to_lsp_range(br)) must equal br");
     }

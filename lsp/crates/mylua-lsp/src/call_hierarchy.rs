@@ -31,7 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
-use crate::util::{is_ancestor_or_equal, node_text, ByteRange, LineIndex};
+use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
 // Prepare
@@ -42,7 +42,7 @@ pub fn prepare_call_hierarchy(
     uri: &Uri,
     position: Position,
     index: &WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyItem> {
     let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
@@ -64,18 +64,14 @@ pub fn prepare_call_hierarchy(
     // Case 2: the cursor is on some other identifier occurrence (e.g.
     // a call site). Resolve the name through the local summary's
     // function_summaries first, then the workspace global_shard.
-    let li = doc.line_index();
     if let Some(summary) = index.summaries.get(uri) {
         if let Some(fs) = summary.get_function_by_name(&name) {
             return vec![build_item(
                 fs.name.clone(),
                 SymbolKind::FUNCTION,
                 uri.clone(),
-                li.byte_range_to_lsp_range(fs.range),
-                // Best-effort: declaration `range` already encloses
-                // the header; clients accept the same range as
-                // selection_range when no finer info exists.
-                li.byte_range_to_lsp_range(fs.range),
+                fs.range.into(),
+                fs.range.into(),
             )];
         }
     }
@@ -86,8 +82,8 @@ pub fn prepare_call_hierarchy(
             } else {
                 SymbolKind::VARIABLE
             };
-            let r = convert_byte_range(&c.source_uri, c.range, documents);
-            let sr = convert_byte_range(&c.source_uri, c.selection_range, documents);
+            let r: Range = c.range.into();
+            let sr: Range = c.selection_range.into();
             return vec![build_item(
                 name,
                 kind,
@@ -206,7 +202,7 @@ pub fn incoming_calls(
                 continue;
             }
             let caller_item = resolve_caller_item(uri, &cs.caller_name, summary, documents);
-            let lsp_range = convert_byte_range(uri, cs.range, documents);
+            let lsp_range: Range = cs.range.into();
             let key = (uri.clone(), cs.caller_name.clone());
             groups
                 .entry(key)
@@ -232,7 +228,7 @@ fn resolve_caller_item(
     uri: &Uri,
     caller_name: &str,
     summary: &DocumentSummary,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> CallHierarchyItem {
     if caller_name.is_empty() {
         let range = Range {
@@ -253,7 +249,7 @@ fn resolve_caller_item(
         } else {
             SymbolKind::FUNCTION
         };
-        let lsp_range = convert_byte_range(uri, fs.range, documents);
+        let lsp_range: Range = fs.range.into();
         return build_item(
             caller_name.to_string(),
             kind,
@@ -295,7 +291,7 @@ pub fn outgoing_calls(
             continue;
         }
         let target_name = last_segment(&cs.callee_name).to_string();
-        let lsp_range = convert_byte_range(&item.uri, cs.range, documents);
+        let lsp_range: Range = cs.range.into();
         let to_item = resolve_outgoing_target(&target_name, index, &item.uri, lsp_range, documents);
         groups
             .entry(target_name.clone())
@@ -322,7 +318,7 @@ fn resolve_outgoing_target(
     index: &WorkspaceAggregation,
     fallback_uri: &Uri,
     fallback_range: Range,
-    documents: &HashMap<Uri, Document>,
+    _documents: &HashMap<Uri, Document>,
 ) -> CallHierarchyItem {
     // 1. O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
@@ -331,7 +327,7 @@ fn resolve_outgoing_target(
             // the candidate's source file.
             if let Some(summary) = index.summaries.get(&c.source_uri) {
                 if let Some(fs) = summary.get_function_by_name(name) {
-                    let lsp_range = convert_byte_range(&c.source_uri, fs.range, documents);
+                    let lsp_range: Range = fs.range.into();
                     return build_item(
                         name.to_string(),
                         SymbolKind::FUNCTION,
@@ -346,8 +342,8 @@ fn resolve_outgoing_target(
             } else {
                 SymbolKind::VARIABLE
             };
-            let r = convert_byte_range(&c.source_uri, c.range, documents);
-            let sr = convert_byte_range(&c.source_uri, c.selection_range, documents);
+            let r: Range = c.range.into();
+            let sr: Range = c.selection_range.into();
             return build_item(
                 name.to_string(),
                 kind,
@@ -361,7 +357,7 @@ fn resolve_outgoing_target(
     //    registered in global_shard, e.g. local helpers).
     for (uri, summary) in &index.summaries {
         if let Some(fs) = summary.get_function_by_name(name) {
-            let lsp_range = convert_byte_range(uri, fs.range, documents);
+            let lsp_range: Range = fs.range.into();
             return build_item(
                 name.to_string(),
                 SymbolKind::FUNCTION,
@@ -388,24 +384,6 @@ fn resolve_outgoing_target(
 /// Return the last dot-or-colon-separated segment of a (possibly
 /// qualified) callee name. `m.sub.foo` → `foo`; `obj:bar` → `bar`;
 /// `baz` → `baz`.
-/// Convert a `ByteRange` to an LSP `Range` using the document's
-/// source and line index. Falls back to a zero-range if the document
-/// is not available (e.g. file was closed).
-fn convert_byte_range(
-    uri: &Uri,
-    br: ByteRange,
-    documents: &HashMap<Uri, Document>,
-) -> Range {
-    if let Some(doc) = documents.get(uri) {
-        doc.line_index().byte_range_to_lsp_range(br)
-    } else {
-        Range {
-            start: Position { line: br.start_row, character: br.start_col },
-            end: Position { line: br.end_row, character: br.end_col },
-        }
-    }
-}
-
 fn last_segment(name: &str) -> &str {
     if let Some(idx) = name.rfind(['.', ':']) {
         &name[idx + 1..]

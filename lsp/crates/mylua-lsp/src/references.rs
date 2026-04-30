@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
 use crate::document::Document;
-use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
+use crate::util::{node_text, find_node_at_position, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn find_references(
@@ -77,7 +77,7 @@ fn find_local_references(
     if include_declaration {
         locations.push(Location {
             uri: uri.clone(),
-            range: doc.line_index().byte_range_to_lsp_range(def.selection_range),
+            range: def.selection_range.into(),
         });
     }
 
@@ -200,7 +200,7 @@ fn find_global_references(
                     if let Some(best) = candidates.first() {
                         locations.push(Location {
                             uri: best.source_uri.clone(),
-                            range: br_to_range(&best.source_uri, best.selection_range, all_docs),
+                            range: best.selection_range.into(),
                         });
                     }
                 }
@@ -208,7 +208,7 @@ fn find_global_references(
                     if let Some(best) = candidates.first() {
                         locations.push(Location {
                             uri: best.source_uri.clone(),
-                            range: br_to_range(&best.source_uri, best.range, all_docs),
+                            range: best.range.into(),
                         });
                     }
                 }
@@ -218,7 +218,7 @@ fn find_global_references(
                     for candidate in candidates {
                         locations.push(Location {
                             uri: candidate.source_uri.clone(),
-                            range: br_to_range(&candidate.source_uri, candidate.selection_range, all_docs),
+                            range: candidate.selection_range.into(),
                         });
                     }
                 }
@@ -226,7 +226,7 @@ fn find_global_references(
                     for candidate in candidates {
                         locations.push(Location {
                             uri: candidate.source_uri.clone(),
-                            range: br_to_range(&candidate.source_uri, candidate.range, all_docs),
+                            range: candidate.range.into(),
                         });
                     }
                 }
@@ -411,21 +411,5 @@ fn collect_global_name_occurrences(
             }
         }
         cursor.goto_parent();
-    }
-}
-
-/// Convert a `ByteRange` to an LSP `Range` using the document's source.
-fn br_to_range(
-    uri: &Uri,
-    br: ByteRange,
-    documents: &HashMap<Uri, Document>,
-) -> Range {
-    if let Some(doc) = documents.get(uri) {
-        doc.line_index().byte_range_to_lsp_range(br)
-    } else {
-        Range {
-            start: Position { line: br.start_row, character: br.start_col },
-            end: Position { line: br.end_row, character: br.end_col },
-        }
     }
 }

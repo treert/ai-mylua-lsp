@@ -2,7 +2,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use mylua_lsp::call_hierarchy;
-use tower_lsp_server::ls_types::SymbolKind;
+use tower_lsp_server::ls_types::{Range, SymbolKind};
 
 #[test]
 fn prepare_on_function_declaration_name() {
@@ -67,7 +67,7 @@ end
 
 #[test]
 fn incoming_calls_cross_file() {
-    let (docs, agg, _parser) = setup_workspace(&[
+    let (_docs, agg, _parser) = setup_workspace(&[
         (
             "a.lua",
             "function lib_fn() return 1 end\n",
@@ -81,8 +81,7 @@ fn incoming_calls_cross_file() {
     let target_uri = make_uri("a.lua");
     let summary = agg.summaries.get(&target_uri).expect("a.lua summary");
     let fs = summary.get_function_by_name("lib_fn").expect("lib_fn summary");
-    let target_doc = docs.get(&target_uri).expect("a.lua doc");
-    let lsp_range = target_doc.line_index().byte_range_to_lsp_range(fs.range);
+    let lsp_range: Range = fs.range.into();
     let target_item = tower_lsp_server::ls_types::CallHierarchyItem {
         name: "lib_fn".to_string(),
         kind: SymbolKind::FUNCTION,

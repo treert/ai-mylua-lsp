@@ -26,7 +26,7 @@ pub(super) fn check_type_mismatch_diagnostics(
         }
         if !is_type_compatible(declared, &actual) {
             diagnostics.push(Diagnostic {
-                range: line_index.byte_range_to_lsp_range(decl.range),
+                range: decl.range.into(),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
                 message: format!(
