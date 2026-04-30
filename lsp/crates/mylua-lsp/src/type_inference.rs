@@ -117,7 +117,7 @@ pub fn infer_node_type(
         "table_constructor" => {
             // For array-like table literals `{ 1, 2, 3 }`, infer the
             // element type so generic unification can bind `T` in `T[]`.
-            infer_table_array_element_type(node, source)
+            infer_table_array_element_type(node)
         }
         _ => TypeFact::Unknown,
     }
@@ -128,7 +128,6 @@ pub fn infer_node_type(
 /// with a uniform literal type, otherwise returns `Unknown`.
 fn infer_table_array_element_type(
     constructor: tree_sitter::Node,
-    _source: &[u8],
 ) -> TypeFact {
     let mut elem_type: Option<TypeFact> = None;
     for i in 0..constructor.named_child_count() {

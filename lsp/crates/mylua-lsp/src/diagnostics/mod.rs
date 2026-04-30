@@ -95,7 +95,7 @@ pub fn collect_semantic_diagnostics_with_version(
         duplicate_key::check_duplicate_table_keys(root, source, &mut diagnostics, severity, line_index);
     }
     if let Some(severity) = diag_config.unused_local.to_lsp_severity() {
-        unused_local::check_unused_locals(root, source, scope_tree, &mut diagnostics, severity, line_index);
+        unused_local::check_unused_locals(root, source, scope_tree, &mut diagnostics, severity);
     }
     let count_sev = diag_config.argument_count_mismatch.to_lsp_severity();
     let type_sev = diag_config.argument_type_mismatch.to_lsp_severity();

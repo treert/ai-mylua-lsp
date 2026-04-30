@@ -1,7 +1,7 @@
 use tower_lsp_server::ls_types::*;
 use crate::scope::{ScopeDecl, ScopeTree};
 use crate::types::DefKind;
-use crate::util::{node_text, LineIndex};
+use crate::util::node_text;
 
 /// Warn on locals that are declared but never referenced. Uses the
 /// `ScopeTree` to find every declaration, then scans the file for
@@ -14,7 +14,6 @@ pub(super) fn check_unused_locals(
     scope_tree: &ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     severity: DiagnosticSeverity,
-    _line_index: &LineIndex,
 ) {
     // Count references per (name, decl_byte) by walking the tree
     // and resolving each identifier through the scope tree.

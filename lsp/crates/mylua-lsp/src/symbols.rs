@@ -33,7 +33,7 @@ pub fn collect_document_symbols(
     summary: Option<&DocumentSummary>,
     line_index: &LineIndex,
 ) -> Vec<DocumentSymbol> {
-    let mut builder = OutlineBuilder::new(summary, line_index, source);
+    let mut builder = OutlineBuilder::new(summary, line_index);
     builder.visit_top_level(root, source);
     let mut symbols = builder.finalize();
     normalize_ranges(&mut symbols);
@@ -104,7 +104,7 @@ struct OutlineBuilder<'a> {
 }
 
 impl<'a> OutlineBuilder<'a> {
-    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex, _source: &[u8]) -> Self {
+    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex) -> Self {
         let mut class_index = HashMap::new();
         let mut class_nodes: Vec<DocumentSymbol> = Vec::new();
         let mut class_child_keys: HashMap<String, HashSet<String>> = HashMap::new();
