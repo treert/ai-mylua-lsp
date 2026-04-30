@@ -194,9 +194,9 @@ impl Default for DiagnosticsConfig {
             lua_field_warning: DiagnosticSeverityOption::Warning,
             duplicate_table_key: DiagnosticSeverityOption::Warning,
             unused_local: DiagnosticSeverityOption::Warning,
-            argument_count_mismatch: DiagnosticSeverityOption::Warning,
+            argument_count_mismatch: DiagnosticSeverityOption::Off,
             argument_type_mismatch: DiagnosticSeverityOption::Warning,
-            return_mismatch: DiagnosticSeverityOption::Warning,
+            return_mismatch: DiagnosticSeverityOption::Off,
             scope: DiagnosticScope::Full,
         }
     }
