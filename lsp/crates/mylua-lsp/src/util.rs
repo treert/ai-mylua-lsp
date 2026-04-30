@@ -285,36 +285,6 @@ impl From<ByteRange> for Range {
     }
 }
 
-impl ByteRange {
-    /// Returns `true` if the given byte offset falls within this range
-    /// (inclusive start, exclusive end).
-    #[inline]
-    pub fn contains_byte(&self, offset: usize) -> bool {
-        offset >= self.start_byte && offset < self.end_byte
-    }
-
-    /// Returns `true` if the given byte offset falls within this range
-    /// (inclusive start, inclusive end).
-    #[inline]
-    pub fn contains_byte_inclusive(&self, offset: usize) -> bool {
-        offset >= self.start_byte && offset <= self.end_byte
-    }
-
-    /// Start position as `(row, col)` tuple.
-    /// Column is in the negotiated encoding (UTF-16 by default).
-    #[inline]
-    pub fn start_position(&self) -> (u32, u32) {
-        (self.start_row, self.start_col)
-    }
-
-    /// End position as `(row, col)` tuple.
-    /// Column is in the negotiated encoding (UTF-16 by default).
-    #[inline]
-    pub fn end_position(&self) -> (u32, u32) {
-        (self.end_row, self.end_col)
-    }
-}
-
 pub fn node_text<'a>(node: tree_sitter::Node<'a>, source: &'a [u8]) -> &'a str {
     node.utf8_text(source).unwrap_or("<error>")
 }
@@ -1003,19 +973,6 @@ mod tests {
         let lsp_range: Range = br.into();
         let back = idx.lsp_range_to_byte_range(lsp_range, src.as_bytes());
         assert_eq!(back, br, "roundtrip: lsp_range_to_byte_range(byte_range_to_lsp_range(br)) must equal br");
-    }
-
-    #[test]
-    fn byte_range_contains() {
-        let br = ByteRange {
-            start_byte: 10, end_byte: 20,
-            start_row: 0, start_col: 10, end_row: 0, end_col: 20,
-        };
-        assert!(br.contains_byte(10));
-        assert!(br.contains_byte(15));
-        assert!(!br.contains_byte(20)); // exclusive end
-        assert!(br.contains_byte_inclusive(20)); // inclusive end
-        assert!(!br.contains_byte(9));
     }
 
     #[test]
