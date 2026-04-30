@@ -1,6 +1,6 @@
 use crate::emmy::{parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation, EmmyTableFieldKey, EmmyType};
 use crate::summary::*;
-use crate::util::{byte_col_to_utf16_col, node_text, LineIndex};
+use crate::util::{encode_col, node_text, LineIndex};
 
 use super::BuildContext;
 
@@ -311,23 +311,12 @@ fn byte_span_to_byte_range(
     let end_line_start = line_index.byte_offset_of_line(end_row).unwrap_or(0);
     let end_col_byte = end_byte - end_line_start;
 
-    let (start_col, end_col) = if crate::position_encoding_is_utf8() {
-        (start_col_byte as u32, end_col_byte as u32)
-    } else {
-        let start_line_bytes = line_index.line_bytes_for_row(source, start_row);
-        let end_line_bytes = line_index.line_bytes_for_row(source, end_row);
-        (
-            byte_col_to_utf16_col(start_line_bytes, start_col_byte),
-            byte_col_to_utf16_col(end_line_bytes, end_col_byte),
-        )
-    };
-
     crate::util::ByteRange {
         start_byte,
         end_byte,
         start_row: start_row as u32,
-        start_col,
+        start_col: encode_col(line_index.line_bytes_for_row(source, start_row), start_col_byte),
         end_row: end_row as u32,
-        end_col,
+        end_col: encode_col(line_index.line_bytes_for_row(source, end_row), end_col_byte),
     }
 }

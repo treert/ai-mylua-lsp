@@ -93,17 +93,17 @@ impl LineIndex {
         };
         let line_start = self.line_starts[row];
         let col_bytes = byte_offset - line_start;
-        let line_slice = &source[line_start..line_start + col_bytes];
-        let character = byte_col_to_utf16_col(line_slice, col_bytes);
+        let line_bytes = self.line_bytes_for_row(source, row);
+        let character = encode_col(line_bytes, col_bytes);
         Some(Position { line: row as u32, character })
     }
 
     /// Convert an LSP `Position` to a byte offset. O(1) line lookup +
-    /// O(line_length) UTF-16 → byte column conversion.
+    /// O(line_length) column → byte column conversion.
     pub fn position_to_byte_offset(&self, source: &[u8], pos: Position) -> Option<usize> {
         let line_start = self.byte_offset_of_line(pos.line as usize)?;
         let line_bytes = self.line_bytes_for_row(source, pos.line as usize);
-        let col_byte = utf16_col_to_byte_col(line_bytes, pos.character);
+        let col_byte = decode_col(line_bytes, pos.character);
         let abs = line_start + col_byte;
         if abs <= source.len() {
             Some(abs)
@@ -135,11 +135,10 @@ impl LineIndex {
     pub fn ts_point_to_position(&self, point: tree_sitter::Point, source: &[u8]) -> Position {
         let row = point.row;
         let byte_col = point.column;
-        let line_bytes = self.line_bytes_for_row(source, row);
-        let utf16_col = byte_col_to_utf16_col(line_bytes, byte_col);
+        let character = encode_col(self.line_bytes_for_row(source, row), byte_col);
         Position {
             line: row as u32,
-            character: utf16_col,
+            character,
         }
     }
 
@@ -160,23 +159,13 @@ impl LineIndex {
     pub fn ts_node_to_byte_range(&self, node: tree_sitter::Node, source: &[u8]) -> ByteRange {
         let sp = node.start_position();
         let ep = node.end_position();
-        let (start_col, end_col) = if crate::position_encoding_is_utf8() {
-            (sp.column as u32, ep.column as u32)
-        } else {
-            let start_line = self.line_bytes_for_row(source, sp.row);
-            let end_line = self.line_bytes_for_row(source, ep.row);
-            (
-                byte_col_to_utf16_col(start_line, sp.column),
-                byte_col_to_utf16_col(end_line, ep.column),
-            )
-        };
         ByteRange {
             start_byte: node.start_byte(),
             end_byte: node.end_byte(),
             start_row: sp.row as u32,
-            start_col,
+            start_col: encode_col(self.line_bytes_for_row(source, sp.row), sp.column),
             end_row: ep.row as u32,
-            end_col,
+            end_col: encode_col(self.line_bytes_for_row(source, ep.row), ep.column),
         }
     }
 
@@ -189,20 +178,12 @@ impl LineIndex {
     pub fn lsp_range_to_byte_range(&self, range: Range, source: &[u8]) -> ByteRange {
         let start_line_start = self.byte_offset_of_line(range.start.line as usize).unwrap_or(0);
         let start_line_bytes = self.line_bytes_for_row(source, range.start.line as usize);
-        let start_col_byte = if crate::position_encoding_is_utf8() {
-            range.start.character as usize
-        } else {
-            utf16_col_to_byte_col(start_line_bytes, range.start.character)
-        };
+        let start_col_byte = decode_col(start_line_bytes, range.start.character);
         let start_byte = start_line_start + start_col_byte;
 
         let end_line_start = self.byte_offset_of_line(range.end.line as usize).unwrap_or(0);
         let end_line_bytes = self.line_bytes_for_row(source, range.end.line as usize);
-        let end_col_byte = if crate::position_encoding_is_utf8() {
-            range.end.character as usize
-        } else {
-            utf16_col_to_byte_col(end_line_bytes, range.end.character)
-        };
+        let end_col_byte = decode_col(end_line_bytes, range.end.character);
         let end_byte = end_line_start + end_col_byte;
 
         ByteRange {
@@ -301,6 +282,30 @@ pub fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+
+/// Encode a byte column to the negotiated position encoding.
+/// In UTF-8 mode, returns the byte column as-is; in UTF-16 mode,
+/// performs the byte→UTF-16 conversion.
+#[inline]
+pub fn encode_col(line_bytes: &[u8], byte_col: usize) -> u32 {
+    if crate::position_encoding_is_utf8() {
+        byte_col as u32
+    } else {
+        byte_col_to_utf16_col(line_bytes, byte_col)
+    }
+}
+
+/// Decode a column in the negotiated encoding back to a byte column.
+/// In UTF-8 mode, returns the column as-is; in UTF-16 mode,
+/// performs the UTF-16→byte conversion.
+#[inline]
+pub fn decode_col(line_bytes: &[u8], col: u32) -> usize {
+    if crate::position_encoding_is_utf8() {
+        col as usize
+    } else {
+        utf16_col_to_byte_col(line_bytes, col)
+    }
+}
 
 /// Convert a byte column within `line_bytes` (UTF-8) to a UTF-16 code-unit
 /// column. `byte_col` past the end is clamped to the line's UTF-16 length.
