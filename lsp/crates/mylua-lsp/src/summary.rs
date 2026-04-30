@@ -27,7 +27,6 @@ pub struct DocumentSummary {
     /// Only contains **global** functions. Colon-separated names are normalized
     /// to dot (e.g. `"Player:new"` → `"Player.new"`).
     /// Local functions are accessed via scope_tree → `FunctionRef(id)` instead.
-    #[serde(default)]
     pub function_name_index: HashMap<String, FunctionSummaryId>,
     /// `---@class`, `---@alias`, `---@enum` definitions.
     pub type_definitions: Vec<TypeDefinition>,
@@ -39,7 +38,6 @@ pub struct DocumentSummary {
     /// Source range of the file-level `return` statement, used by `require`
     /// goto-definition to jump to the module's export. `None` if the file
     /// has no top-level return.
-    #[serde(default)]
     pub module_return_range: Option<ByteRange>,
     /// Fingerprint of all externally-visible type signatures.
     /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
@@ -47,9 +45,7 @@ pub struct DocumentSummary {
     /// Call sites captured from this file's function bodies (and
     /// top-level code). Feeds `call_hierarchy` incoming/outgoing
     /// queries without requiring the tree to be re-parsed at query
-    /// time. `#[serde(default)]` keeps cached summaries produced by
-    /// older builds readable.
-    #[serde(default)]
+    /// time.
     pub call_sites: Vec<CallSite>,
     /// `true` when this file carries a top-level `---@meta` annotation.
     /// Meta files are treated as stub / definition sources per the
@@ -59,16 +55,13 @@ pub struct DocumentSummary {
     /// inside the meta file itself — meta files often reference
     /// runtime-provided symbols that don't have a declaration in the
     /// workspace.
-    #[serde(default)]
     pub is_meta: bool,
     /// Optional module name supplied via `---@meta <name>`; purely
     /// informational at present (no require_map mapping yet).
-    #[serde(default)]
     pub meta_name: Option<String>,
     /// Type names referenced by local variable type facts.
     /// Pre-computed during build so `collect_referenced_type_names` in
     /// aggregation can use this field.
-    #[serde(default)]
     pub referenced_local_type_names: std::collections::HashSet<String>,
 }
 
@@ -130,7 +123,6 @@ pub struct FunctionSummary {
     /// Function-level generic type parameter names from `---@generic T, K`.
     /// Empty for non-generic functions. Used by the resolver to perform
     /// call-site generic argument inference (unification).
-    #[serde(default)]
     pub generic_params: Vec<String>,
 }
 
@@ -143,7 +135,6 @@ pub struct TypeDefinition {
     pub fields: Vec<TypeFieldDef>,
     pub alias_type: Option<TypeFact>,
     /// Names of generic type parameters (from `---@generic T, K`).
-    #[serde(default)]
     pub generic_params: Vec<String>,
     /// Full range of the declaration anchor — for a class this is the
     /// following statement that anchors the class value (`Foo = {}`);
@@ -155,12 +146,10 @@ pub struct TypeDefinition {
     /// `selection_range` in `documentSymbol` and as the highlight
     /// target in `workspace/symbol` so that clicking the outline entry
     /// jumps precisely to the type name rather than the whole line.
-    /// Falls back to `range` for legacy summaries (`#[serde(default)]`).
-    #[serde(default)]
+    /// Falls back to `range` when absent.
     pub name_range: Option<ByteRange>,
     /// When the `@class` anchors a local table (`local M = {}`), stores the
     /// shape ID so cross-file consumers can look up fields directly.
-    #[serde(default)]
     pub anchor_shape_id: Option<crate::table_shape::TableShapeId>,
 }
 
@@ -180,9 +169,7 @@ pub struct TypeFieldDef {
     pub range: ByteRange,
     /// Range of just the field name token (`bar` within
     /// `---@field bar integer`). When `None`, clients should fall
-    /// back to `range`. `#[serde(default)]` keeps cached summaries
-    /// produced by older builds readable.
-    #[serde(default)]
+    /// back to `range`.
     pub name_range: Option<ByteRange>,
 }
 
