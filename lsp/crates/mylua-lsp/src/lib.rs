@@ -38,7 +38,28 @@ pub(crate) mod indexing;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
+
+// ---------------------------------------------------------------------------
+// Position encoding negotiation
+// ---------------------------------------------------------------------------
+
+/// Negotiated position encoding for column offsets stored in `ByteRange`.
+///
+/// 0 = UTF-16 (LSP default, VS Code), 1 = UTF-8.
+/// Set once during `initialize` based on client capability negotiation.
+/// All `ByteRange` construction sites read this to decide how to encode
+/// `start_col` / `end_col`.
+static POSITION_ENCODING: AtomicU8 = AtomicU8::new(0);
+
+/// Returns `true` when the negotiated position encoding is UTF-8
+/// (i.e. column offsets in `ByteRange` are byte columns).
+/// When `false` (the default), columns are UTF-16 code-unit offsets.
+#[inline]
+pub fn position_encoding_is_utf8() -> bool {
+    POSITION_ENCODING.load(Ordering::Relaxed) == 1
+}
 
 use tower_lsp_server::ls_types::notification::Notification;
 use tower_lsp_server::ls_types::*;

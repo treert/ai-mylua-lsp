@@ -65,18 +65,17 @@ pub fn prepare_call_hierarchy(
     // a call site). Resolve the name through the local summary's
     // function_summaries first, then the workspace global_shard.
     let li = doc.line_index();
-    let src = doc.source();
     if let Some(summary) = index.summaries.get(uri) {
         if let Some(fs) = summary.get_function_by_name(&name) {
             return vec![build_item(
                 fs.name.clone(),
                 SymbolKind::FUNCTION,
                 uri.clone(),
-                li.byte_range_to_lsp_range(fs.range, src),
+                li.byte_range_to_lsp_range(fs.range),
                 // Best-effort: declaration `range` already encloses
                 // the header; clients accept the same range as
                 // selection_range when no finer info exists.
-                li.byte_range_to_lsp_range(fs.range, src),
+                li.byte_range_to_lsp_range(fs.range),
             )];
         }
     }
@@ -398,9 +397,8 @@ fn convert_byte_range(
     documents: &HashMap<Uri, Document>,
 ) -> Range {
     if let Some(doc) = documents.get(uri) {
-        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+        doc.line_index().byte_range_to_lsp_range(br)
     } else {
-        // Fallback: use row/col directly (byte col == utf16 col for ASCII).
         Range {
             start: Position { line: br.start_row, character: br.start_col },
             end: Position { line: br.end_row, character: br.end_col },

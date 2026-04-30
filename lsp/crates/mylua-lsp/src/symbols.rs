@@ -104,7 +104,7 @@ struct OutlineBuilder<'a> {
 }
 
 impl<'a> OutlineBuilder<'a> {
-    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex, source: &[u8]) -> Self {
+    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex, _source: &[u8]) -> Self {
         let mut class_index = HashMap::new();
         let mut class_nodes: Vec<DocumentSymbol> = Vec::new();
         let mut class_child_keys: HashMap<String, HashSet<String>> = HashMap::new();
@@ -139,7 +139,7 @@ impl<'a> OutlineBuilder<'a> {
                     // the full `---@field` line range if the summary
                     // was produced before the precise range was tracked.
                     let selection_range = line_index.byte_range_to_lsp_range(
-                        fd.name_range.unwrap_or(fd.range), source);
+                        fd.name_range.unwrap_or(fd.range));
                     #[allow(deprecated)]
                     children.push(DocumentSymbol {
                         name: fd.name.clone(),
@@ -147,7 +147,7 @@ impl<'a> OutlineBuilder<'a> {
                         kind: SymbolKind::FIELD,
                         tags: None,
                         deprecated: None,
-                        range: line_index.byte_range_to_lsp_range(fd.range, source),
+                        range: line_index.byte_range_to_lsp_range(fd.range),
                         selection_range,
                         children: None,
                     });
@@ -155,7 +155,7 @@ impl<'a> OutlineBuilder<'a> {
                 // Same rationale as fields: use the `---@class <Name>`
                 // identifier token for the outline's selection target.
                 let selection_range = line_index.byte_range_to_lsp_range(
-                    td.name_range.unwrap_or(td.range), source);
+                    td.name_range.unwrap_or(td.range));
                 #[allow(deprecated)]
                 class_nodes.push(DocumentSymbol {
                     name: td.name.clone(),
@@ -163,7 +163,7 @@ impl<'a> OutlineBuilder<'a> {
                     kind,
                     tags: None,
                     deprecated: None,
-                    range: line_index.byte_range_to_lsp_range(td.range, source),
+                    range: line_index.byte_range_to_lsp_range(td.range),
                     selection_range,
                     children: Some(children),
                 });

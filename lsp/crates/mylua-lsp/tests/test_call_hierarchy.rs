@@ -82,7 +82,7 @@ fn incoming_calls_cross_file() {
     let summary = agg.summaries.get(&target_uri).expect("a.lua summary");
     let fs = summary.get_function_by_name("lib_fn").expect("lib_fn summary");
     let target_doc = docs.get(&target_uri).expect("a.lua doc");
-    let lsp_range = target_doc.line_index().byte_range_to_lsp_range(fs.range, target_doc.source());
+    let lsp_range = target_doc.line_index().byte_range_to_lsp_range(fs.range);
     let target_item = tower_lsp_server::ls_types::CallHierarchyItem {
         name: "lib_fn".to_string(),
         kind: SymbolKind::FUNCTION,

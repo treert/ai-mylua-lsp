@@ -36,7 +36,10 @@ use crate::summary::DocumentSummary;
 //   `TableShapeId` pattern. Introduces `KnownType::FunctionRef(FunctionSummaryId)`
 //   for type-safe function references. Adds `function_name_to_id` reverse
 //   mapping to BuildContext for name-based lookups during build phase.
-const SCHEMA_VERSION: u32 = 7;
+// v8 (2025-04): `ByteRange` column offsets changed from byte-column
+//   (UTF-8) to negotiated position encoding (UTF-16 by default). Old
+//   caches store byte columns and are incompatible.
+const SCHEMA_VERSION: u32 = 8;
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

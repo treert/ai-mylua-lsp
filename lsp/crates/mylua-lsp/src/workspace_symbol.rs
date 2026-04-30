@@ -228,7 +228,7 @@ fn br_to_range(
     documents: &HashMap<Uri, Document>,
 ) -> Range {
     if let Some(doc) = documents.get(uri) {
-        doc.line_index().byte_range_to_lsp_range(br, doc.source())
+        doc.line_index().byte_range_to_lsp_range(br)
     } else {
         Range {
             start: Position { line: br.start_row, character: br.start_col },

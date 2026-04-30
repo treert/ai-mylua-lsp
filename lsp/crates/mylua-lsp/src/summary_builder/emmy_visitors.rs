@@ -1,6 +1,6 @@
 use crate::emmy::{parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation, EmmyTableFieldKey, EmmyType};
 use crate::summary::*;
-use crate::util::{node_text, LineIndex};
+use crate::util::{byte_col_to_utf16_col, node_text, LineIndex};
 
 use super::BuildContext;
 
@@ -289,10 +289,11 @@ fn read_identifier(bytes: &[u8], start: usize) -> Option<(String, usize)> {
 }
 
 /// Build a `ByteRange` from an absolute byte span, using the
-/// file-level `LineIndex` to compute row / byte-column.
+/// file-level `LineIndex` to compute row and column. Column offsets
+/// are encoded according to the negotiated position encoding.
 fn byte_span_to_byte_range(
     line_index: &LineIndex,
-    _source: &[u8],
+    source: &[u8],
     start_byte: usize,
     end_byte: usize,
 ) -> crate::util::ByteRange {
@@ -301,21 +302,32 @@ fn byte_span_to_byte_range(
         Err(ins) => ins.saturating_sub(1),
     };
     let start_line_start = line_index.byte_offset_of_line(start_row).unwrap_or(0);
-    let start_col = start_byte - start_line_start;
+    let start_col_byte = start_byte - start_line_start;
 
     let end_row = match line_index.line_starts().binary_search(&end_byte) {
         Ok(exact) => exact,
         Err(ins) => ins.saturating_sub(1),
     };
     let end_line_start = line_index.byte_offset_of_line(end_row).unwrap_or(0);
-    let end_col = end_byte - end_line_start;
+    let end_col_byte = end_byte - end_line_start;
+
+    let (start_col, end_col) = if crate::position_encoding_is_utf8() {
+        (start_col_byte as u32, end_col_byte as u32)
+    } else {
+        let start_line_bytes = line_index.line_bytes_for_row(source, start_row);
+        let end_line_bytes = line_index.line_bytes_for_row(source, end_row);
+        (
+            byte_col_to_utf16_col(start_line_bytes, start_col_byte),
+            byte_col_to_utf16_col(end_line_bytes, end_col_byte),
+        )
+    };
 
     crate::util::ByteRange {
         start_byte,
         end_byte,
         start_row: start_row as u32,
-        start_col: start_col as u32,
+        start_col,
         end_row: end_row as u32,
-        end_col: end_col as u32,
+        end_col,
     }
 }

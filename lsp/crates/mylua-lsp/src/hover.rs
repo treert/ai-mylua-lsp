@@ -654,7 +654,7 @@ fn build_hover_for_definition(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(doc.line_index().byte_range_to_lsp_range(def.selection_range, doc.source())),
+        range: Some(doc.line_index().byte_range_to_lsp_range(def.selection_range)),
     })
 }
 

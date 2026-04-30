@@ -35,7 +35,7 @@ pub(super) fn check_unused_locals(
         let key = (decl.name.clone(), decl.decl_byte);
         if ref_count.get(&key).copied().unwrap_or(0) == 0 {
             diagnostics.push(Diagnostic {
-                range: line_index.byte_range_to_lsp_range(decl.selection_range, source),
+                range: line_index.byte_range_to_lsp_range(decl.selection_range),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
                 message: format!("Unused local '{}'", decl.name),
