@@ -29,7 +29,7 @@ use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{
     indexing, semantic_tokens_legend, start_diagnostic_consumer, uri_to_path, Backend,
-    POSITION_ENCODING,
+    ColEncoding, POSITION_ENCODING,
 };
 use std::sync::atomic::Ordering;
 
@@ -99,7 +99,8 @@ impl LanguageServer for Backend {
             .unwrap_or(PositionEncodingKind::UTF16);
 
         let is_utf8 = negotiated_encoding == PositionEncodingKind::UTF8;
-        POSITION_ENCODING.store(if is_utf8 { 1 } else { 0 }, Ordering::Relaxed);
+        let enc = if is_utf8 { ColEncoding::Utf8 } else { ColEncoding::Utf16 };
+        POSITION_ENCODING.store(enc as u8, Ordering::Relaxed);
         lsp_log!(
             "[mylua-lsp] position encoding: {}",
             negotiated_encoding.as_str()

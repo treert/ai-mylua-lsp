@@ -45,20 +45,29 @@ use std::sync::{Arc, Mutex};
 // Position encoding negotiation
 // ---------------------------------------------------------------------------
 
+/// Wire-format column encoding negotiated during `initialize`.
+#[repr(u8)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ColEncoding {
+    /// UTF-16 code-unit offsets (LSP default, VS Code).
+    Utf16 = 0,
+    /// Byte (UTF-8) offsets.
+    Utf8 = 1,
+}
+
 /// Negotiated position encoding for column offsets stored in `ByteRange`.
 ///
-/// 0 = UTF-16 (LSP default, VS Code), 1 = UTF-8.
 /// Set once during `initialize` based on client capability negotiation.
 /// All `ByteRange` construction sites read this to decide how to encode
 /// `start_col` / `end_col`.
-pub(crate) static POSITION_ENCODING: AtomicU8 = AtomicU8::new(0);
+pub(crate) static POSITION_ENCODING: AtomicU8 = AtomicU8::new(ColEncoding::Utf16 as u8);
 
 /// Returns `true` when the negotiated position encoding is UTF-8
 /// (i.e. column offsets in `ByteRange` are byte columns).
 /// When `false` (the default), columns are UTF-16 code-unit offsets.
 #[inline]
 pub fn position_encoding_is_utf8() -> bool {
-    POSITION_ENCODING.load(Ordering::Relaxed) == 1
+    POSITION_ENCODING.load(Ordering::Relaxed) == ColEncoding::Utf8 as u8
 }
 
 use tower_lsp_server::ls_types::notification::Notification;
