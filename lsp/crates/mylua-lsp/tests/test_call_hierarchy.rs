@@ -10,7 +10,7 @@ fn prepare_on_function_declaration_name() {
     let src = "function hello()\n    return 1\nend\n";
     let (doc, uri, agg) = setup_single_file(src, "f.lua");
     // `hello` starts at column 9 of line 0. Cursor at column 10 (inside).
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(0, 10), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(0, 10), &agg);
     assert_eq!(items.len(), 1, "expect one item, got: {:?}", items);
     assert_eq!(items[0].name, "hello");
     assert_eq!(items[0].kind, SymbolKind::FUNCTION);
@@ -22,7 +22,7 @@ fn prepare_on_call_site_resolves_to_target() {
     let src = "local function bar() return 1 end\nlocal x = bar()\n";
     let (doc, uri, agg) = setup_single_file(src, "call.lua");
     // `bar` call is on line 1 around column 11.
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(1, 11), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(1, 11), &agg);
     assert_eq!(items.len(), 1, "expect one item, got: {:?}", items);
     assert_eq!(items[0].name, "bar");
 }
@@ -31,7 +31,7 @@ fn prepare_on_call_site_resolves_to_target() {
 fn prepare_returns_empty_for_non_function_identifier() {
     let src = "local x = 1\n";
     let (doc, uri, agg) = setup_single_file(src, "var.lua");
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(0, 6), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(0, 6), &agg);
     assert!(items.is_empty(), "cursor on a plain local variable is not a function, got: {:?}", items);
 }
 
@@ -51,12 +51,12 @@ end
 "#;
     let (doc, uri, agg) = setup_single_file(src, "incoming.lua");
     // Prepare via cursor on target's declaration (line 1, col 15 inside `target`).
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(1, 16), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(1, 16), &agg);
     assert!(!items.is_empty(), "prepare returned empty for target");
     let target_item = items[0].clone();
     assert_eq!(target_item.name, "target");
 
-    let incoming = call_hierarchy::incoming_calls(&target_item, &agg, &empty_docs());
+    let incoming = call_hierarchy::incoming_calls(&target_item, &agg);
     // Two distinct callers. caller_a has 1 call, caller_b has 2 calls.
     assert_eq!(incoming.len(), 2, "two callers expected, got: {:?}", incoming);
     let a = incoming.iter().find(|c| c.from.name == "caller_a").expect("caller_a missing");
@@ -93,7 +93,7 @@ fn incoming_calls_cross_file() {
         data: None,
     };
 
-    let incoming = call_hierarchy::incoming_calls(&target_item, &agg, &empty_docs());
+    let incoming = call_hierarchy::incoming_calls(&target_item, &agg);
     assert_eq!(incoming.len(), 1, "expected one cross-file caller, got: {:?}", incoming);
     assert_eq!(incoming[0].from.name, "use_fn");
     // The caller URI must be b.lua, not a.lua.
@@ -117,10 +117,10 @@ end
 "#;
     let (doc, uri, agg) = setup_single_file(src, "outgoing.lua");
     // Prepare on `driver` declaration.
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(4, 16), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(4, 16), &agg);
     let driver = items.into_iter().find(|i| i.name == "driver").expect("driver");
 
-    let outgoing = call_hierarchy::outgoing_calls(&driver, &agg, &empty_docs());
+    let outgoing = call_hierarchy::outgoing_calls(&driver, &agg);
     // Two distinct targets: helper_a (2 calls) and helper_b (1 call).
     assert_eq!(outgoing.len(), 2, "two distinct targets, got: {:?}", outgoing);
     let a = outgoing.iter().find(|c| c.to.name == "helper_a").expect("helper_a");
@@ -143,10 +143,10 @@ local function driver()
 end
 "#;
     let (doc, uri, agg) = setup_single_file(src, "dot_method.lua");
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(6, 16), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(6, 16), &agg);
     let driver = items.into_iter().find(|i| i.name == "driver").expect("driver");
 
-    let outgoing = call_hierarchy::outgoing_calls(&driver, &agg, &empty_docs());
+    let outgoing = call_hierarchy::outgoing_calls(&driver, &agg);
     let target_names: Vec<&str> = outgoing.iter().map(|c| c.to.name.as_str()).collect();
     assert!(
         target_names.contains(&"foo"),
@@ -174,10 +174,10 @@ local function outer()
 end
 "#;
     let (doc, uri, agg) = setup_single_file(src, "nested.lua");
-    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(3, 16), &agg, &empty_docs());
+    let items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(3, 16), &agg);
     let outer = items.into_iter().find(|i| i.name == "outer").expect("outer");
 
-    let outgoing = call_hierarchy::outgoing_calls(&outer, &agg, &empty_docs());
+    let outgoing = call_hierarchy::outgoing_calls(&outer, &agg);
     let helper_ranges = outgoing
         .iter()
         .find(|c| c.to.name == "helper")

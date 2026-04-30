@@ -15,7 +15,7 @@ Foo = {}
 "#;
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("bar", &agg, &docs);
+    let results = search_workspace_symbols("bar", &agg);
     let field = results
         .iter()
         .find(|s| s.name == "bar" && s.kind == SymbolKind::FIELD)
@@ -38,7 +38,7 @@ Bar = {}
 "#);
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
 
-    let results = search_workspace_symbols("bar", &agg, &docs);
+    let results = search_workspace_symbols("bar", &agg);
     let bar_fields: Vec<_> = results
         .iter()
         .filter(|s| s.name == "bar" && s.kind == SymbolKind::FIELD)
@@ -62,7 +62,7 @@ function Foo:myMethod() end
 "#;
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("myMethod", &agg, &docs);
+    let results = search_workspace_symbols("myMethod", &agg);
     let m = results
         .iter()
         .find(|s| s.name == "myMethod" && s.kind == SymbolKind::METHOD)
@@ -86,7 +86,7 @@ function Foo.bar() end
 "#;
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("bar", &agg, &docs);
+    let results = search_workspace_symbols("bar", &agg);
     let entry = results
         .iter()
         .find(|s| s.name == "bar")
@@ -106,7 +106,7 @@ Foo.bar = function() end
 "#;
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("bar", &agg, &docs);
+    let results = search_workspace_symbols("bar", &agg);
     let entry = results
         .iter()
         .find(|s| s.name == "bar" && s.container_name.as_deref() == Some("Foo"));
@@ -137,7 +137,7 @@ fn workspace_symbol_global_function_still_listed() {
     let src = "function helper() end\n";
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("helper", &agg, &docs);
+    let results = search_workspace_symbols("helper", &agg);
     let h = results
         .iter()
         .find(|s| s.name == "helper")
@@ -152,7 +152,7 @@ fn workspace_symbol_class_itself_surfaces() {
     let src = "---@class MyClass\nMyClass = {}\n";
     let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
-    let results = search_workspace_symbols("MyClass", &agg, &docs);
+    let results = search_workspace_symbols("MyClass", &agg);
     assert!(
         results
             .iter()

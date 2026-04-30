@@ -5,7 +5,6 @@ use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
-use std::collections::HashMap;
 
 pub fn goto_definition(
     doc: &Document,
@@ -13,11 +12,10 @@ pub fn goto_definition(
     position: Position,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
-        return type_definition_for_name(&type_name, index, strategy, documents);
+        return type_definition_for_name(&type_name, index, strategy);
     }
 
     let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
@@ -27,7 +25,7 @@ pub fn goto_definition(
     // If clicking on the LHS name of `local x = require("mod")`, prefer
     // jumping to the required module's `return` statement over resolving
     // to the (same) local declaration itself.
-    if let Some(target) = try_require_goto(doc, ident_node, index, documents) {
+    if let Some(target) = try_require_goto(doc, ident_node, index) {
         return Some(target);
     }
 
@@ -46,7 +44,7 @@ pub fn goto_definition(
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
-                return Some(goto_variable_field(p, doc, uri, index, documents));
+                return Some(goto_variable_field(p, doc, uri, index));
             }
         }
         // `obj:method(...)` — the `method` identifier on a `function_call`
@@ -58,7 +56,7 @@ pub fn goto_definition(
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
-                return Some(goto_method_call(p, doc, uri, index, documents));
+                return Some(goto_method_call(p, doc, uri, index));
             }
         }
         None
@@ -130,7 +128,6 @@ pub fn goto_type_definition(
     position: Position,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
@@ -142,7 +139,7 @@ pub fn goto_type_definition(
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-            if let Some(target) = type_definition_for_local(&def.uri, &def.name, byte_offset, &doc.scope_tree, index, strategy, documents) {
+            if let Some(target) = type_definition_for_local(&def.uri, &def.name, byte_offset, &doc.scope_tree, index, strategy) {
                 return Some(target);
             }
         }
@@ -151,7 +148,7 @@ pub fn goto_type_definition(
         // collision (`local Foo` in a workspace that also declares
         // `@class Foo`) must not jump us to the class. Fall back to
         // plain `goto_definition` instead.
-        return goto_definition(doc, uri, position, index, strategy, documents);
+        return goto_definition(doc, uri, position, index, strategy);
     }
 
     // Word-extraction fallback — cursor is inside an `emmy_line` text
@@ -160,7 +157,7 @@ pub fn goto_type_definition(
     // directly. If not found, returning None is correct (there's no
     // Lua-side definition to fall back to).
     let word = crate::references::extract_word_at(doc.text(), byte_offset)?;
-    type_definition_for_name(&word, index, strategy, documents)
+    type_definition_for_name(&word, index, strategy)
 }
 
 /// Given a local variable's declaration URI + name, look up its
@@ -173,7 +170,6 @@ fn type_definition_for_local(
     scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
     strategy: &GotoStrategy,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     // Resolve the local's type via scope_tree
     let fact = if let Some(tf) = scope_tree.resolve_type(byte_offset, local_name) {
@@ -186,7 +182,7 @@ fn type_definition_for_local(
     // For `Known(_)` facts the resolver would just return the same
     // fact, so skip the redundant pass.
     if let Some(type_name) = type_name_of(&fact) {
-        return type_definition_for_name(&type_name, index, strategy, documents);
+        return type_definition_for_name(&type_name, index, strategy);
     }
     // Indirect: `local x = someGlobalReturningFoo()` / `require("mod")`
     // with Emmy module return type — let the resolver chase stubs
@@ -194,7 +190,7 @@ fn type_definition_for_local(
     // resolved fact.
     let resolved_fact = resolver::resolve_type(&fact, index).type_fact;
     if let Some(type_name) = type_name_of(&resolved_fact) {
-        return type_definition_for_name(&type_name, index, strategy, documents);
+        return type_definition_for_name(&type_name, index, strategy);
     }
     None
 }
@@ -215,7 +211,6 @@ fn type_definition_for_name(
     name: &str,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
-    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let candidates = index.type_shard.get(name)?;
     if candidates.is_empty() {
@@ -239,7 +234,6 @@ fn goto_variable_field(
     doc: &Document,
     uri: &Uri,
     index: &mut WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
@@ -247,12 +241,12 @@ fn goto_variable_field(
             crate::type_inference::infer_node_type(base_node, source, uri, &doc.scope_tree, index);
         let resolved =
             resolver::resolve_field_chain_in_file(uri, &base_fact, &fields, index);
-        return resolved_to_goto(resolved, documents);
+        return resolved_to_goto(resolved);
     }
 
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index, documents)
+    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index)
 }
 
 /// AST-driven goto for a method call: `obj:method(...)`. The clicked
@@ -264,12 +258,11 @@ fn goto_method_call(
     doc: &Document,
     uri: &Uri,
     index: &mut WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index, documents)
+    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index)
 }
 
 /// Shared goto helper for dotted field access (`a.b`) and method calls
@@ -282,7 +275,6 @@ fn goto_field_or_method(
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
     index: &mut WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
@@ -292,12 +284,11 @@ fn goto_field_or_method(
         uri, &base_fact, &[field_name], index,
     );
 
-    resolved_to_goto(resolved, documents)
+    resolved_to_goto(resolved)
 }
 
 fn resolved_to_goto(
     resolved: resolver::ResolvedType,
-    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
         return Some(GotoDefinitionResponse::Scalar(Location {
@@ -313,7 +304,6 @@ fn try_require_goto(
     doc: &Document,
     ident_node: tree_sitter::Node,
     index: &WorkspaceAggregation,
-    _documents: &HashMap<Uri, Document>,
 ) -> Option<GotoDefinitionResponse> {
     // Walk up to the enclosing local_declaration if the clicked identifier
     // is one of its LHS names (directly, or nested inside `name_list`).

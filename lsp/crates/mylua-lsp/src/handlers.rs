@@ -583,7 +583,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, position, &idx, &docs);
+        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, position, &idx);
         if items.is_empty() {
             Ok(None)
         } else {
@@ -595,9 +595,8 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyIncomingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyIncomingCall>>> {
-        let docs = self.documents.lock().unwrap();
         let idx = self.index.lock().unwrap();
-        let calls = call_hierarchy::incoming_calls(&params.item, &idx, &docs);
+        let calls = call_hierarchy::incoming_calls(&params.item, &idx);
         Ok(Some(calls))
     }
 
@@ -605,9 +604,8 @@ impl LanguageServer for Backend {
         &self,
         params: CallHierarchyOutgoingCallsParams,
     ) -> Result<Option<Vec<CallHierarchyOutgoingCall>>> {
-        let docs = self.documents.lock().unwrap();
         let idx = self.index.lock().unwrap();
-        let calls = call_hierarchy::outgoing_calls(&params.item, &idx, &docs);
+        let calls = call_hierarchy::outgoing_calls(&params.item, &idx);
         Ok(Some(calls))
     }
 
@@ -661,7 +659,7 @@ impl LanguageServer for Backend {
         };
         let mut idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        let result = goto::goto_definition(doc, uri, position, &mut idx, &strategy, &docs);
+        let result = goto::goto_definition(doc, uri, position, &mut idx, &strategy);
         match &result {
             Some(GotoDefinitionResponse::Scalar(loc)) => {
                 lsp_log!("[goto] result: {:?} {}:{}-{}:{}", loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
@@ -693,7 +691,7 @@ impl LanguageServer for Backend {
         };
         let mut idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_type_definition(doc, uri, position, &mut idx, &strategy, &docs))
+        Ok(goto::goto_type_definition(doc, uri, position, &mut idx, &strategy))
     }
 
     /// Lua has no distinct forward-declaration concept: "declaration"
@@ -712,7 +710,7 @@ impl LanguageServer for Backend {
         };
         let mut idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy, &docs))
+        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -802,8 +800,7 @@ impl LanguageServer for Backend {
         params: WorkspaceSymbolParams,
     ) -> Result<Option<WorkspaceSymbolResponse>> {
         let idx = self.index.lock().unwrap();
-        let docs = self.documents.lock().unwrap();
-        let results = workspace_symbol::search_workspace_symbols(&params.query, &idx, &docs);
+        let results = workspace_symbol::search_workspace_symbols(&params.query, &idx);
         Ok(Some(WorkspaceSymbolResponse::Flat(results)))
     }
 

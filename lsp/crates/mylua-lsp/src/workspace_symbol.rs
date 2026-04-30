@@ -12,19 +12,17 @@
 //!   search e.g. `ba` and find `Foo.bar` and `Bar.bar` as two separate
 //!   entries with different `container_name`.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::document::Document;
 use crate::summary::{GlobalContributionKind, TypeDefinitionKind};
 use crate::type_system::{KnownType, TypeFact};
 
 pub fn search_workspace_symbols(
     query: &str,
     index: &WorkspaceAggregation,
-    _documents: &HashMap<Uri, Document>,
 ) -> Vec<SymbolInformation> {
     let query_lower = query.to_lowercase();
     let mut results = Vec::new();

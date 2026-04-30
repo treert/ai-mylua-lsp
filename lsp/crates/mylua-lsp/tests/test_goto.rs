@@ -23,9 +23,7 @@ end"#;
         &main_uri,
         pos(0, 15),
         &mut agg,
-        &GotoStrategy::Auto,
-        &docs,
-    );
+        &GotoStrategy::Auto) ;
 
     assert!(
         result.is_none(),
@@ -45,9 +43,7 @@ local XX = UE4.Class()"#;
         &uri,
         pos(1, 15),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
 
     assert!(
         result.is_none(),
@@ -223,7 +219,7 @@ print(a.b.c)
     let (doc, uri, mut agg) = setup_single_file(src, "nested_goto.lua");
 
     // Line 2 `print(a.b.c)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
-    let result = goto::goto_definition(&doc, &uri, pos(2, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(2, 10), &mut agg, &GotoStrategy::Auto);
     assert!(
         result.is_some(),
         "goto on chained .c should jump to the assignment site, got None",
@@ -237,7 +233,7 @@ print(myVar)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `myVar` on line 1, col 6
-    let result = goto::goto_definition(&doc, &uri, pos(1, 6), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(1, 6), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of `myVar`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "myVar defined on line 0");
@@ -253,7 +249,7 @@ local x = foo()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `foo` on line 3, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of `foo`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "foo defined on line 0");
@@ -268,7 +264,7 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `param1` on line 1, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of parameter `param1`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "param1 defined on line 0");
@@ -283,7 +279,7 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `i` on line 1, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find for-variable `i`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "for-variable i defined on line 0");
@@ -296,7 +292,7 @@ fn goto_no_result_for_undefined() {
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // on `totally_undefined_name_xyz`
-    let result = goto::goto_definition(&doc, &uri, pos(0, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(0, 10), &mut agg, &GotoStrategy::Auto);
     // May or may not find something (globals index etc.), but should not panic
     let _ = result;
 }
@@ -330,8 +326,7 @@ fn goto_require_jumps_to_module_return() {
     // Click on `m` (line 0 col 6) in caller.lua — should jump to mymod.lua's
     // `return M` (line 2, column 0).
     let result = mylua_lsp::goto::goto_definition(
-        &caller_doc, &caller_uri, pos(0, 6), &mut agg, &GotoStrategy::Auto, &empty_docs(),
-    )
+        &caller_doc, &caller_uri, pos(0, 6), &mut agg, &GotoStrategy::Auto) 
     .expect("require goto should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -386,7 +381,7 @@ fn goto_require_with_attribute_before_target() {
 
     // `y` is at column 17 in `local x <const>, y = ...`
     let result =
-        goto::goto_definition(&caller_doc, &caller_uri, pos(0, 17), &mut agg, &GotoStrategy::Auto, &empty_docs())
+        goto::goto_definition(&caller_doc, &caller_uri, pos(0, 17), &mut agg, &GotoStrategy::Auto)
             .expect("goto on `y` should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -426,7 +421,7 @@ fn goto_position_with_chinese_comment_on_same_line() {
     let (doc, uri, mut agg) = setup_single_file(src, "utf16.lua");
 
     // `myVar` in print(myVar) at line 2 col 6 (ASCII line, utf-16 == byte)
-    let result = goto::goto_definition(&doc, &uri, pos(2, 6), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(2, 6), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should resolve myVar");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 1, "myVar declared on line 1");
@@ -517,14 +512,14 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `inner` at line 3, col 10 -> should go to line 2
-    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find `inner` in nested scope");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 2, "inner defined on line 2");
     }
 
     // `outer` at line 4, col 10 -> should go to line 0
-    let result2 = goto::goto_definition(&doc, &uri, pos(4, 10), &mut agg, &GotoStrategy::Auto, &empty_docs());
+    let result2 = goto::goto_definition(&doc, &uri, pos(4, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result2.is_some(), "goto should find `outer` from parent scope");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result2 {
         assert_eq!(loc.range.start.line, 0, "outer defined on line 0");
@@ -576,8 +571,7 @@ local hero = Player.new("Alice")"#;
 
     // Click on `new` in `Player.new("Alice")` — line 1, col 20
     let result = goto::goto_definition(
-        &caller_doc, &caller_uri, pos(1, 20), &mut agg, &GotoStrategy::Auto, &empty_docs(),
-    );
+        &caller_doc, &caller_uri, pos(1, 20), &mut agg, &GotoStrategy::Auto) ;
     assert!(
         result.is_some(),
         "goto on `new` in `Player.new(\"Alice\")` should resolve \
@@ -630,9 +624,7 @@ return test_const"#,
         &main_uri,
         pos(0, 23),
         &mut agg,
-        &GotoStrategy::Auto,
-        &docs,
-    )
+        &GotoStrategy::Auto) 
     .expect("goto on utils.test_const.B should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -663,9 +655,7 @@ ClassA1 = {}
         &uri,
         pos(3, 20),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    )
+        &GotoStrategy::Auto) 
     .expect("goto on Emmy parent type should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
@@ -691,9 +681,7 @@ ClassA1 = {}
         &uri,
         pos(3, 20),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         result.is_none(),
         "description words in Emmy comments must not act as type references"
@@ -722,9 +710,7 @@ Holder = {}
         &uri,
         pos(6, 25),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         class_desc.is_none(),
         "unmarked @class description words must not act as type references"
@@ -735,9 +721,7 @@ Holder = {}
         &uri,
         pos(10, 20),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         field_desc.is_none(),
         "unmarked @field description words must not act as type references"
@@ -766,9 +750,7 @@ Holder = {}
         &uri,
         pos(6, 17),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         param_name.is_none(),
         "function type parameter names must not act as type references"
@@ -779,9 +761,7 @@ Holder = {}
         &uri,
         pos(10, 12),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    )
+        &GotoStrategy::Auto) 
     .expect("bracket field key type should resolve");
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = key_type {
         assert_eq!(loc.range.start.line, 1, "should jump to BaseCls anchor");
@@ -811,9 +791,7 @@ local escaped = nil
         &uri,
         pos(3, 12),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         literal_word.is_none(),
         "string literal contents must not act as type references"
@@ -824,9 +802,7 @@ local escaped = nil
         &uri,
         pos(6, 12),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         key_word.is_none(),
         "string table keys must not act as type references"
@@ -837,9 +813,7 @@ local escaped = nil
         &uri,
         pos(9, 12),
         &mut agg,
-        &GotoStrategy::Auto,
-        &empty_docs(),
-    );
+        &GotoStrategy::Auto) ;
     assert!(
         escaped_word.is_none(),
         "escaped quotes must not expose string literal contents as type references"

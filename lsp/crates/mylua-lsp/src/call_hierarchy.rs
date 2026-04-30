@@ -42,7 +42,6 @@ pub fn prepare_call_hierarchy(
     uri: &Uri,
     position: Position,
     index: &WorkspaceAggregation,
-    _documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyItem> {
     let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
@@ -190,7 +189,6 @@ fn build_item(
 pub fn incoming_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyIncomingCall> {
     let target = last_segment(&item.name);
     // Map from (caller_uri, caller_name) → accumulated call ranges.
@@ -201,7 +199,7 @@ pub fn incoming_calls(
             if last_segment(&cs.callee_name) != target {
                 continue;
             }
-            let caller_item = resolve_caller_item(uri, &cs.caller_name, summary, documents);
+            let caller_item = resolve_caller_item(uri, &cs.caller_name, summary);
             let lsp_range: Range = cs.range.into();
             let key = (uri.clone(), cs.caller_name.clone());
             groups
@@ -228,7 +226,6 @@ fn resolve_caller_item(
     uri: &Uri,
     caller_name: &str,
     summary: &DocumentSummary,
-    _documents: &HashMap<Uri, Document>,
 ) -> CallHierarchyItem {
     if caller_name.is_empty() {
         let range = Range {
@@ -279,7 +276,6 @@ fn file_name_hint(uri: &Uri) -> String {
 pub fn outgoing_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
-    documents: &HashMap<Uri, Document>,
 ) -> Vec<CallHierarchyOutgoingCall> {
     let Some(summary) = index.summaries.get(&item.uri) else { return Vec::new() };
 
@@ -292,7 +288,7 @@ pub fn outgoing_calls(
         }
         let target_name = last_segment(&cs.callee_name).to_string();
         let lsp_range: Range = cs.range.into();
-        let to_item = resolve_outgoing_target(&target_name, index, &item.uri, lsp_range, documents);
+        let to_item = resolve_outgoing_target(&target_name, index, &item.uri, lsp_range);
         groups
             .entry(target_name.clone())
             .or_insert_with(|| (to_item, Vec::new()))
@@ -318,7 +314,6 @@ fn resolve_outgoing_target(
     index: &WorkspaceAggregation,
     fallback_uri: &Uri,
     fallback_range: Range,
-    _documents: &HashMap<Uri, Document>,
 ) -> CallHierarchyItem {
     // 1. O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
