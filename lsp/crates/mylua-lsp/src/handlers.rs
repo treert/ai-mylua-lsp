@@ -29,7 +29,9 @@ use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{
     indexing, semantic_tokens_legend, start_diagnostic_consumer, uri_to_path, Backend,
+    POSITION_ENCODING,
 };
+use std::sync::atomic::Ordering;
 
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
@@ -77,6 +79,32 @@ impl LanguageServer for Backend {
 
         *self.workspace_roots.lock().unwrap() = roots;
 
+        // ---------------------------------------------------------------
+        // Position encoding negotiation (LSP 3.17)
+        // ---------------------------------------------------------------
+        // Prefer UTF-8 if the client advertises support; otherwise
+        // fall back to UTF-16 (the mandatory LSP default).
+        let negotiated_encoding = params
+            .capabilities
+            .general
+            .as_ref()
+            .and_then(|g| g.position_encodings.as_ref())
+            .and_then(|encs| {
+                if encs.iter().any(|e| *e == PositionEncodingKind::UTF8) {
+                    Some(PositionEncodingKind::UTF8)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(PositionEncodingKind::UTF16);
+
+        let is_utf8 = negotiated_encoding == PositionEncodingKind::UTF8;
+        POSITION_ENCODING.store(if is_utf8 { 1 } else { 0 }, Ordering::Relaxed);
+        lsp_log!(
+            "[mylua-lsp] position encoding: {}",
+            negotiated_encoding.as_str()
+        );
+
         // Boot the diagnostic scheduler consumer. It waits on an
         // `index_state == Ready` gate internally, so it's safe to
         // start before `initialized` fires / workspace scan completes.
@@ -92,6 +120,7 @@ impl LanguageServer for Backend {
 
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
+                position_encoding: Some(negotiated_encoding),
                 text_document_sync: Some(TextDocumentSyncCapability::Kind(
                     TextDocumentSyncKind::INCREMENTAL,
                 )),

@@ -5,46 +5,18 @@ use serde::{Deserialize, Serialize};
 
 use crate::summary::DocumentSummary;
 
-// Schema version bump history:
-// v2 (2025-04): `extract_table_shape` now actually populates
-//   `TableShape.fields` (previously the wrapping `field_list` grammar
-//   node was skipped, so every cached shape was `{ fields: {},
-//   is_closed: true }`). Bumping the schema forces a one-time rebuild
-//   so users don't keep seeing false-positive `Unknown field`
-//   diagnostics from stale caches.
-// v3 (2025-04): CacheMeta records `exe_mtime_ns` so that any
-//   `cargo build` / extension upgrade invalidates the cache
-//   automatically, without requiring a manual schema bump. Old v2
-//   meta.json fails `deny_unknown_fields` deserialization → cache is
-//   wiped → one-time rebuild.
-// v4 (2025-04): dropped `crate_version` — subsumed by `exe_mtime_ns`
-//   (every new release writes a new binary with a new mtime). Kept
-//   `deny_unknown_fields` so any lingering v3 meta.json is rejected
-//   and wiped.
-// v5 (2025-04): dropped `config_fingerprint` — it only covered
-//   `require.paths` and `require.aliases`, which affect the global
-//   `require_map` / module resolution layer, not the per-file
-//   `DocumentSummary` that the cache stores. Since the global index
-//   is rebuilt from scratch on every session, the fingerprint was
-//   redundant.
-// v6 (2025-04): internal position storage changed from LSP `Range`
-//   (UTF-16) to `ByteRange` (byte offsets + row/byte-column). All
-//   serialized `DocumentSummary` fields now use `ByteRange`, so old
-//   caches are incompatible.
-// v7 (2025-04): `DocumentSummary.function_summaries` key changed from
-//   `String` (function name) to `FunctionSummaryId(u32)`, aligning with
-//   `TableShapeId` pattern. Introduces `KnownType::FunctionRef(FunctionSummaryId)`
-//   for type-safe function references. Adds `function_name_to_id` reverse
-//   mapping to BuildContext for name-based lookups during build phase.
-// v8 (2025-04): `ByteRange` column offsets changed from byte-column
-//   (UTF-8) to negotiated position encoding (UTF-16 by default). Old
-//   caches store byte columns and are incompatible.
-const SCHEMA_VERSION: u32 = 8;
+// Cache invalidation relies on two mechanisms:
+// 1. `exe_mtime_ns` — any recompile / extension upgrade changes the
+//    binary mtime and automatically invalidates the cache.
+// 2. `deny_unknown_fields` — adding or removing fields in `CacheMeta`
+//    causes old meta.json to fail deserialization → cache is wiped.
+//
+// Previous versions carried a manual `schema_version` counter, but it
+// was fully subsumed by the above two mechanisms and removed.
 
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CacheMeta {
-    schema_version: u32,
     /// mtime (nanoseconds since UNIX epoch) of the currently running
     /// `mylua-lsp` executable. Bumps automatically whenever the binary
     /// is relinked (local `cargo build`) or replaced (extension
@@ -52,9 +24,13 @@ struct CacheMeta {
     /// the cache without manual intervention. Nanosecond precision
     /// avoids same-second collisions in tight rebuild-then-restart
     /// loops. Falls back to `0` if `current_exe()` / metadata is
-    /// unavailable, in which case invalidation relies on
-    /// `schema_version` alone.
+    /// unavailable.
     exe_mtime_ns: u64,
+    /// Whether the negotiated position encoding is UTF-8. When `true`,
+    /// cached `ByteRange` columns are byte offsets; when `false` they
+    /// are UTF-16 code-unit offsets. A mismatch means the cache was
+    /// built under a different encoding and must be rebuilt.
+    position_encoding_utf8: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -231,24 +207,24 @@ fn uri_to_cache_filename(uri: &str) -> String {
 
 fn build_expected_meta() -> CacheMeta {
     CacheMeta {
-        schema_version: SCHEMA_VERSION,
         exe_mtime_ns: current_exe_mtime_ns().unwrap_or(0),
+        position_encoding_utf8: crate::position_encoding_is_utf8(),
     }
 }
 
 /// Returns `Some(human_readable_reason)` when the on-disk meta is
 /// stale relative to the currently running binary, else `None`.
 fn meta_mismatch_reason(on_disk: &CacheMeta, expected: &CacheMeta) -> Option<String> {
-    if on_disk.schema_version != expected.schema_version {
-        return Some(format!(
-            "schema_version {} != {}",
-            on_disk.schema_version, expected.schema_version
-        ));
-    }
     if on_disk.exe_mtime_ns != expected.exe_mtime_ns {
         return Some(format!(
             "exe_mtime_ns {} != {}",
             on_disk.exe_mtime_ns, expected.exe_mtime_ns
+        ));
+    }
+    if on_disk.position_encoding_utf8 != expected.position_encoding_utf8 {
+        return Some(format!(
+            "position_encoding_utf8 {} != {}",
+            on_disk.position_encoding_utf8, expected.position_encoding_utf8
         ));
     }
     None

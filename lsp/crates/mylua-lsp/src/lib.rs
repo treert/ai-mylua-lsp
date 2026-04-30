@@ -51,7 +51,7 @@ use std::sync::{Arc, Mutex};
 /// Set once during `initialize` based on client capability negotiation.
 /// All `ByteRange` construction sites read this to decide how to encode
 /// `start_col` / `end_col`.
-static POSITION_ENCODING: AtomicU8 = AtomicU8::new(0);
+pub(crate) static POSITION_ENCODING: AtomicU8 = AtomicU8::new(0);
 
 /// Returns `true` when the negotiated position encoding is UTF-8
 /// (i.e. column offsets in `ByteRange` are byte columns).
