@@ -26,7 +26,7 @@ pub struct WorkspaceAggregation {
     /// `@type`s / `@param`s / inherits from / has fields typed as
     /// the changed class needs its semantic diagnostics recomputed,
     /// even if it doesn't `require()` the defining file.
-    pub type_dependants: HashMap<String, Vec<Uri>>,
+    pub type_dependants: HashMap<String, HashSet<Uri>>,
     /// Resolved cross-file type cache; entries are lazily populated and
     /// marked dirty on upstream signature changes.
     pub resolution_cache: HashMap<CacheKey, CachedResolution>,
@@ -422,15 +422,17 @@ impl WorkspaceAggregation {
         self.type_dependants.clear();
         self.resolution_cache.clear();
 
-        // 1. Insert all summaries first so `resolve_module_to_uri`
+        // 1. Insert all summaries first (consuming the owned Vec to avoid
+        //    deep-cloning every DocumentSummary) so `resolve_module_to_uri`
         //    fallback path (scanning `self.summaries.keys()`) works
         //    for every file.
-        for s in &summaries {
-            self.summaries.insert(s.uri.clone(), s.clone());
+        for s in summaries {
+            let uri = s.uri.clone();
+            self.summaries.insert(uri, s);
         }
 
         // 2. Build all shards in a single pass.
-        for summary in &summaries {
+        for summary in self.summaries.values() {
             let uri = &summary.uri;
 
             for gc in &summary.global_contributions {
@@ -469,10 +471,8 @@ impl WorkspaceAggregation {
             }
 
             for type_name in &summary.referenced_type_names {
-                let uris = self.type_dependants.entry(type_name.clone()).or_default();
-                if !uris.iter().any(|u| u == uri) {
-                    uris.push(uri.clone());
-                }
+                self.type_dependants.entry(type_name.clone()).or_default()
+                    .insert(uri.clone());
             }
         }
 
@@ -552,10 +552,8 @@ impl WorkspaceAggregation {
         // (built during `build_file_analysis`) instead of re-walking every
         // TypeFact on each upsert.
         for type_name in &summary.referenced_type_names {
-            let uris = self.type_dependants.entry(type_name.clone()).or_default();
-            if !uris.iter().any(|u| u == &uri) {
-                uris.push(uri.clone());
-            }
+            self.type_dependants.entry(type_name.clone()).or_default()
+                .insert(uri.clone());
         }
 
         let fingerprint_changed = old_fingerprint != Some(summary.signature_fingerprint);
@@ -648,7 +646,7 @@ impl WorkspaceAggregation {
         // Prune this URI from every type_dependants bucket (file may
         // be re-indexed with a different set of referenced types).
         self.type_dependants.retain(|_, uris| {
-            uris.retain(|u| u != uri);
+            uris.remove(uri);
             !uris.is_empty()
         });
     }
