@@ -78,9 +78,10 @@ fn type_dependants_registers_field_type_and_alias() {
 }
 
 #[test]
-fn type_dependants_excludes_self_defining_file() {
-    // `a.lua` defines `Foo` itself — it must NOT list itself as a
-    // dependant (avoid pointless self-invalidation loops).
+fn type_dependants_includes_self_defining_file() {
+    // `a.lua` defines `Foo` and references it via `---@field inner Foo`.
+    // Self-references are intentionally kept — cycles (self and indirect)
+    // are expected in the dependency graph and must be handled by consumers.
     let a = (
         "a.lua",
         "---@class Foo\n---@field inner Foo\nFoo = {}\n",
@@ -88,15 +89,12 @@ fn type_dependants_excludes_self_defining_file() {
     let (_docs, agg, _parser) = setup_workspace(&[a]);
     let a_uri = make_uri("a.lua");
 
-    // `Foo` should either have no entry at all (all refs were self-
-    // references, filtered out), or an entry that does NOT contain
-    // a.lua itself.
-    if let Some(deps) = agg.type_dependants.get("Foo") {
-        assert!(
-            !deps.iter().any(|u| u == &a_uri),
-            "self-defining file must be excluded from its own dependants, got: {:?}", deps,
-        );
-    }
+    // `Foo` should have an entry containing a.lua (self-reference is kept).
+    let deps = agg.type_dependants.get("Foo").expect("Foo deps should exist");
+    assert!(
+        deps.iter().any(|u| u == &a_uri),
+        "self-defining file should appear in its own dependants (self-references kept), got: {:?}", deps,
+    );
 }
 
 #[test]
