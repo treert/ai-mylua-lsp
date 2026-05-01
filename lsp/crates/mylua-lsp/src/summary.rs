@@ -6,6 +6,51 @@ use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::{FunctionSignature, FunctionSummaryId, TypeFact};
 use crate::util::ByteRange;
 
+/// External global names referenced by a file, stored as a trie.
+///
+/// `"ModuleA.utils.func"` + `"ModuleA.utils.abc"` + `"print"` →
+/// ```text
+/// roots: {
+///   "ModuleA": { children: { "utils": { children: { "func": {}, "abc": {} } } } },
+///   "print": {},
+/// }
+/// ```
+///
+/// Leaf nodes (`children.is_empty()`) indicate "referenced at this level";
+/// they also implicitly mean "anything below may affect me" when the deeper
+/// path couldn't be statically resolved.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GlobalRefTree {
+    pub roots: HashMap<String, GlobalRefNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GlobalRefNode {
+    pub children: HashMap<String, GlobalRefNode>,
+}
+
+impl GlobalRefTree {
+    /// Insert a global reference path into the trie.
+    /// `segments` is e.g. `["ModuleA", "utils", "func"]`.
+    pub fn insert(&mut self, segments: &[String]) {
+        if segments.is_empty() {
+            return;
+        }
+        let mut node = self.roots
+            .entry(segments[0].clone())
+            .or_default();
+        for seg in &segments[1..] {
+            node = node.children
+                .entry(seg.clone())
+                .or_default();
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.roots.is_empty()
+    }
+}
+
 /// Per-file summary: the "recipe" of type facts produced by single-file inference.
 ///
 /// Contains everything needed to participate in the workspace aggregation layer
@@ -63,6 +108,18 @@ pub struct DocumentSummary {
     /// Pre-computed during build so `collect_referenced_type_names` in
     /// aggregation can use this field.
     pub referenced_local_type_names: std::collections::HashSet<String>,
+    /// External global names referenced by this file, stored as a trie.
+    /// Extracted from `FieldOf`/`GlobalRef` chains in all TypeFacts.
+    /// Self-contributions (names in `global_contributions`) are excluded.
+    #[serde(default)]
+    pub global_ref_tree: GlobalRefTree,
+    /// All Emmy type names referenced by this file (scope declarations +
+    /// function signatures + class fields + global contributions + module
+    /// return type). Pre-computed during build; aggregation can use this
+    /// directly instead of re-walking every TypeFact on each upsert.
+    /// Self-defined types and generic params are excluded.
+    #[serde(default)]
+    pub referenced_type_names: std::collections::HashSet<String>,
 }
 
 /// One `function_call` occurrence recorded during summary build.

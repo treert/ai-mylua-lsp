@@ -468,9 +468,8 @@ impl WorkspaceAggregation {
                 }
             }
 
-            let referenced_types = collect_referenced_type_names(summary);
-            for type_name in referenced_types {
-                let uris = self.type_dependants.entry(type_name).or_default();
+            for type_name in &summary.referenced_type_names {
+                let uris = self.type_dependants.entry(type_name.clone()).or_default();
                 if !uris.iter().any(|u| u == uri) {
                     uris.push(uri.clone());
                 }
@@ -549,12 +548,11 @@ impl WorkspaceAggregation {
             }
         }
 
-        // Collect every Emmy type name this file references — in its
-        // local type facts, class parents/fields, function sigs, etc.
-        // — and register `this_file` as a dependant of each.
-        let referenced_types = collect_referenced_type_names(&summary);
-        for type_name in referenced_types {
-            let uris = self.type_dependants.entry(type_name).or_default();
+        // Use the pre-computed referenced type names from the summary
+        // (built during `build_file_analysis`) instead of re-walking every
+        // TypeFact on each upsert.
+        for type_name in &summary.referenced_type_names {
+            let uris = self.type_dependants.entry(type_name.clone()).or_default();
             if !uris.iter().any(|u| u == &uri) {
                 uris.push(uri.clone());
             }
@@ -797,122 +795,3 @@ impl WorkspaceAggregation {
     }
 }
 
-/// Walk `summary` for every Emmy type name it references (a shape
-/// table / primitive / function type without an Emmy name is
-/// ignored). Returns a sorted + deduped `Vec<String>` — used by
-/// `upsert_summary` to populate `type_dependants`.
-fn collect_referenced_type_names(summary: &DocumentSummary) -> Vec<String> {
-    use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-    let mut names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-
-    fn walk(fact: &TypeFact, out: &mut std::collections::BTreeSet<String>) {
-        match fact {
-            TypeFact::Known(KnownType::EmmyType(n)) => {
-                out.insert(n.clone());
-            }
-            TypeFact::Known(KnownType::EmmyGeneric(n, params)) => {
-                out.insert(n.clone());
-                for p in params {
-                    walk(p, out);
-                }
-            }
-            TypeFact::Known(KnownType::Function(sig)) => {
-                for p in &sig.params {
-                    walk(&p.type_fact, out);
-                }
-                for r in &sig.returns {
-                    walk(r, out);
-                }
-            }
-            TypeFact::Known(KnownType::FunctionRef(_)) => {
-                // FunctionRef is an opaque ID; type names already collected via function_summaries.
-            }
-            TypeFact::Stub(SymbolicStub::TypeRef { name }) => {
-                out.insert(name.clone());
-            }
-            TypeFact::Stub(SymbolicStub::FieldOf { base, .. }) => {
-                walk(base, out);
-            }
-            TypeFact::Union(parts) => {
-                for p in parts {
-                    walk(p, out);
-                }
-            }
-            _ => {}
-        }
-    }
-
-    // 1. All local variable type annotations — pre-computed in build_file_analysis
-    // from scope_tree declarations.
-    for name in &summary.referenced_local_type_names {
-        names.insert(name.clone());
-    }
-
-    // 2. `@class Foo : Parent1, Parent2` — each parent.
-    for td in &summary.type_definitions {
-        for parent in &td.parents {
-            names.insert(parent.clone());
-        }
-        // 3. Every `@field` type.
-        for f in &td.fields {
-            walk(&f.type_fact, &mut names);
-        }
-        // 4. `@alias Foo = Bar | Baz` target type.
-        if let Some(alias_fact) = &td.alias_type {
-            walk(alias_fact, &mut names);
-        }
-    }
-
-    // 5. Function param & return types.
-    for fs in summary.function_summaries.values() {
-        for p in &fs.signature.params {
-            walk(&p.type_fact, &mut names);
-        }
-        for r in &fs.signature.returns {
-            walk(r, &mut names);
-        }
-        for overload in &fs.overloads {
-            for p in &overload.params {
-                walk(&p.type_fact, &mut names);
-            }
-            for r in &overload.returns {
-                walk(r, &mut names);
-            }
-        }
-    }
-
-    // 6. Module return type (for files that `return X` at top level).
-    if let Some(mrt) = &summary.module_return_type {
-        walk(mrt, &mut names);
-    }
-
-    // 7. Global contributions — `---@type Foo G = ...` stores the
-    //    typed annotation on a `GlobalContribution`, so we need an
-    //    explicit pass here to not miss it.
-    for gc in &summary.global_contributions {
-        walk(&gc.type_fact, &mut names);
-    }
-
-    // Drop self-references and generic parameter names:
-    // - Self-references: a file shouldn't list itself as a dependant
-    //   of its own class.
-    // - Generic params: `---@class Foo<T>` + `---@field x T` treats
-    //   `T` as an EmmyType during walk; `T` is NOT a real type in
-    //   the workspace (unless the user happened to name a class `T`,
-    //   which we then falsely cross-wire). Filter them out.
-    let self_defined: std::collections::HashSet<&str> = summary
-        .type_definitions
-        .iter()
-        .map(|td| td.name.as_str())
-        .collect();
-    let generic_params: std::collections::HashSet<&str> = summary
-        .type_definitions
-        .iter()
-        .flat_map(|td| td.generic_params.iter().map(|s| s.as_str()))
-        .collect();
-    names
-        .into_iter()
-        .filter(|n| !self_defined.contains(n.as_str()))
-        .filter(|n| !generic_params.contains(n.as_str()))
-        .collect()
-}

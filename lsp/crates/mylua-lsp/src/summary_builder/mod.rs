@@ -77,7 +77,7 @@ pub fn build_file_analysis(
     // here so aggregation::collect_referenced_type_names can use this field.
     let referenced_local_type_names = collect_scope_type_names(&scope_tree);
 
-    let summary = DocumentSummary {
+    let mut summary = DocumentSummary {
         uri: uri.clone(),
         content_hash,
         require_bindings: ctx.require_bindings,
@@ -93,7 +93,15 @@ pub fn build_file_analysis(
         is_meta,
         meta_name,
         referenced_local_type_names,
+        global_ref_tree: GlobalRefTree::default(),
+        referenced_type_names: std::collections::HashSet::new(),
     };
+
+    // Pre-compute external references from all TypeFacts in the summary.
+    let (global_ref_tree, referenced_type_names) =
+        collect_external_refs(&summary, &scope_tree);
+    summary.global_ref_tree = global_ref_tree;
+    summary.referenced_type_names = referenced_type_names;
 
     (summary, scope_tree)
 }
@@ -129,6 +137,165 @@ fn collect_scope_type_names(scope_tree: &ScopeTree) -> std::collections::HashSet
         }
     }
     names
+}
+
+/// Collect both global reference paths (as a trie) and Emmy type names from
+/// all TypeFacts in the summary and scope_tree. Produces a `GlobalRefTree`
+/// (external global refs) and a `HashSet<String>` (all referenced type names,
+/// with self-defined types and generic params excluded).
+fn collect_external_refs(
+    summary: &DocumentSummary,
+    scope_tree: &ScopeTree,
+) -> (GlobalRefTree, std::collections::HashSet<String>) {
+    let mut tree = GlobalRefTree::default();
+    let mut type_names: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    // --- helpers ---
+
+    /// Split a GlobalRef name (which may contain dots, e.g. `"ModuleA.utils.func"`)
+    /// into segments for trie insertion.
+    fn global_ref_segments(name: &str) -> Vec<String> {
+        name.split('.').map(|s| s.to_string()).collect()
+    }
+
+    /// Extract a global reference path from a TypeFact's FieldOf/GlobalRef chain.
+    /// Returns `None` when the root is not a `GlobalRef`.
+    fn extract_global_path(fact: &TypeFact) -> Option<Vec<String>> {
+        match fact {
+            TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(global_ref_segments(name)),
+            TypeFact::Stub(SymbolicStub::FieldOf { base, field }) => {
+                extract_global_path(base).map(|mut segs| { segs.push(field.clone()); segs })
+            }
+            _ => None,
+        }
+    }
+
+    /// Extract a global reference path from a SymbolicStub (for CallReturn.base).
+    fn extract_global_path_from_stub(stub: &SymbolicStub) -> Option<Vec<String>> {
+        match stub {
+            SymbolicStub::GlobalRef { name } => Some(global_ref_segments(name)),
+            SymbolicStub::CallReturn { base, func_name, .. } => {
+                extract_global_path_from_stub(base).map(|mut segs| { segs.push(func_name.clone()); segs })
+            }
+            _ => None,
+        }
+    }
+
+    /// Walk a TypeFact, collecting Emmy type names and global ref paths.
+    fn walk(
+        fact: &TypeFact,
+        type_out: &mut std::collections::BTreeSet<String>,
+        global_out: &mut GlobalRefTree,
+    ) {
+        match fact {
+            // Emmy type names
+            TypeFact::Known(KnownType::EmmyType(n)) => { type_out.insert(n.clone()); }
+            TypeFact::Known(KnownType::EmmyGeneric(n, params)) => {
+                type_out.insert(n.clone());
+                for p in params { walk(p, type_out, global_out); }
+            }
+            TypeFact::Known(KnownType::Function(sig)) => {
+                for p in &sig.params { walk(&p.type_fact, type_out, global_out); }
+                for r in &sig.returns { walk(r, type_out, global_out); }
+            }
+            TypeFact::Stub(SymbolicStub::TypeRef { name }) => { type_out.insert(name.clone()); }
+
+            // Global ref paths: GlobalRef name may contain dots (e.g. "A.B.C")
+            TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
+                global_out.insert(&global_ref_segments(name));
+            }
+            TypeFact::Stub(SymbolicStub::FieldOf { base, .. }) => {
+                if let Some(segs) = extract_global_path(fact) {
+                    global_out.insert(&segs);
+                } else {
+                    // Root is not GlobalRef; recurse into base for type names.
+                    walk(base, type_out, global_out);
+                }
+            }
+            TypeFact::Stub(SymbolicStub::CallReturn { base, call_arg_types, generic_args, .. }) => {
+                if let Some(segs) = extract_global_path_from_stub(base) {
+                    global_out.insert(&segs);
+                }
+                for arg in call_arg_types { walk(arg, type_out, global_out); }
+                for arg in generic_args { walk(arg, type_out, global_out); }
+            }
+
+            TypeFact::Union(parts) => {
+                for p in parts { walk(p, type_out, global_out); }
+            }
+            _ => {}
+        }
+    }
+
+    // --- walk all sources (mirrors aggregation::collect_referenced_type_names) ---
+
+    // 1. Scope declarations (local variable type facts).
+    for name in &summary.referenced_local_type_names {
+        type_names.insert(name.clone());
+    }
+    for decl in scope_tree.all_declarations() {
+        if let Some(tf) = &decl.type_fact {
+            walk(tf, &mut type_names, &mut tree);
+        }
+    }
+
+    // 2. Class parents, fields, alias types.
+    for td in &summary.type_definitions {
+        for parent in &td.parents {
+            type_names.insert(parent.clone());
+        }
+        for f in &td.fields {
+            walk(&f.type_fact, &mut type_names, &mut tree);
+        }
+        if let Some(alias_fact) = &td.alias_type {
+            walk(alias_fact, &mut type_names, &mut tree);
+        }
+    }
+
+    // 3. Function param & return types (including overloads).
+    for fs in summary.function_summaries.values() {
+        for p in &fs.signature.params { walk(&p.type_fact, &mut type_names, &mut tree); }
+        for r in &fs.signature.returns { walk(r, &mut type_names, &mut tree); }
+        for overload in &fs.overloads {
+            for p in &overload.params { walk(&p.type_fact, &mut type_names, &mut tree); }
+            for r in &overload.returns { walk(r, &mut type_names, &mut tree); }
+        }
+    }
+
+    // 4. Module return type.
+    if let Some(mrt) = &summary.module_return_type {
+        walk(mrt, &mut type_names, &mut tree);
+    }
+
+    // 5. Global contributions (`---@type Foo G = ...`).
+    for gc in &summary.global_contributions {
+        walk(&gc.type_fact, &mut type_names, &mut tree);
+    }
+
+    // NOTE: We intentionally do NOT exclude self-defined types or
+    // self-contributed globals. A file that defines `---@class Foo` and
+    // also references `Foo` will list "Foo" in both contributions and
+    // references — this creates a self-referencing entry in the
+    // dependency graph, which is harmless. Even without self-references,
+    // indirect dependencies (A → B → A) can form cycles anyway, so
+    // consumers of the dependency graph must already handle cycles.
+    // Keeping self-references simplifies this code and avoids edge-case
+    // bugs from mismatched exclusion granularity (e.g. trie root
+    // "Player" vs contribution "Player.new").
+    //
+    // Generic type parameters (from `---@generic T`) are still excluded
+    // because they are not real workspace types — they are local to the
+    // class/function definition and would create false dependency edges.
+    let generic_params: std::collections::HashSet<&str> = summary
+        .type_definitions.iter()
+        .flat_map(|td| td.generic_params.iter().map(|s| s.as_str()))
+        .collect();
+    let filtered_type_names: std::collections::HashSet<String> = type_names
+        .into_iter()
+        .filter(|n| !generic_params.contains(n.as_str()))
+        .collect();
+
+    (tree, filtered_type_names)
 }
 
 /// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local
@@ -360,4 +527,125 @@ fn is_decl_visible_at(decl: &ScopeDecl, byte_offset: usize) -> bool {
     let on_decl_name = byte_offset >= decl.decl_byte
         && byte_offset < decl.decl_byte + decl.name.len();
     on_decl_name || decl.visible_after_byte <= byte_offset
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse_source(src: &str) -> tree_sitter::Tree {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_mylua::LANGUAGE.into())
+            .expect("mylua grammar");
+        parser.parse(src, None).expect("parse")
+    }
+
+    fn build(src: &str) -> DocumentSummary {
+        let tree = parse_source(src);
+        let lua_source = crate::util::LuaSource::new(src.to_string());
+        let uri: tower_lsp_server::ls_types::Uri = "file:///test.lua".parse().unwrap();
+        let (summary, _) = build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+        summary
+    }
+
+    // --- GlobalRefTree tests ---
+
+    #[test]
+    fn global_ref_tree_simple_global() {
+        // `local x = print` → print is a global, assigned to a local,
+        // so GlobalRef { name: "print" } ends up in scope_tree.
+        let s = build("local x = print");
+        assert!(s.global_ref_tree.roots.contains_key("print"),
+            "expected 'print' in global_ref_tree, got: {:?}", s.global_ref_tree.roots.keys().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn global_ref_tree_dotted_path() {
+        // `local x = ModuleA.utils.func` → trie: ModuleA → utils → func
+        let s = build("local x = ModuleA.utils.func");
+        let module_a = s.global_ref_tree.roots.get("ModuleA")
+            .expect("expected 'ModuleA' root");
+        let utils = module_a.children.get("utils")
+            .expect("expected 'utils' child");
+        assert!(utils.children.contains_key("func"),
+            "expected 'func' under 'ModuleA.utils', got: {:?}", utils.children.keys().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn global_ref_tree_self_contributions_kept() {
+        // File defines `Foo` as a global — self-references are intentionally
+        // kept (consumers handle cycles).
+        let s = build("Foo = 42\nlocal x = Foo");
+        assert!(s.global_ref_tree.roots.contains_key("Foo"),
+            "self-contributed 'Foo' should still appear in global_ref_tree");
+    }
+
+    #[test]
+    fn global_ref_tree_locals_excluded() {
+        // `local x = 1; print(x)` → x is local, should not appear
+        let s = build("local x = 1\nprint(x)");
+        assert!(!s.global_ref_tree.roots.contains_key("x"),
+            "'x' is local, should not appear in global_ref_tree");
+    }
+
+    #[test]
+    fn global_ref_tree_multiple_refs_merge() {
+        // Two paths under same root: ModuleA.foo and ModuleA.bar
+        let s = build("local a = ModuleA.foo\nlocal b = ModuleA.bar");
+        let module_a = s.global_ref_tree.roots.get("ModuleA")
+            .expect("expected 'ModuleA' root");
+        assert!(module_a.children.contains_key("foo"), "expected 'foo'");
+        assert!(module_a.children.contains_key("bar"), "expected 'bar'");
+    }
+
+    // --- referenced_type_names tests ---
+
+    #[test]
+    fn referenced_type_names_from_type_annotation() {
+        let s = build("---@type MyClass\nlocal x");
+        assert!(s.referenced_type_names.contains("MyClass"),
+            "expected 'MyClass' in referenced_type_names, got: {:?}", s.referenced_type_names);
+    }
+
+    #[test]
+    fn referenced_type_names_from_param_annotation() {
+        let s = build("---@param x Foo\nfunction bar(x) end");
+        assert!(s.referenced_type_names.contains("Foo"),
+            "expected 'Foo' in referenced_type_names");
+    }
+
+    #[test]
+    fn referenced_type_names_self_defined_kept() {
+        // File defines `---@class Baz` and references it via `---@field` etc.
+        // Self-defined types are intentionally kept (consumers handle cycles).
+        let s = build("---@class Baz\n---@field x Baz\nlocal b = {}");
+        assert!(s.referenced_type_names.contains("Baz"),
+            "self-defined 'Baz' should still appear in referenced_type_names");
+    }
+
+    #[test]
+    fn referenced_type_names_class_parent() {
+        // `---@class Child : Parent` → both 'Parent' and 'Child' present
+        // (self-references kept; only generic params excluded)
+        let s = build("---@class Child : Parent\nlocal x = {}");
+        assert!(s.referenced_type_names.contains("Parent"),
+            "expected 'Parent' in referenced_type_names");
+    }
+
+    #[test]
+    fn referenced_type_names_excludes_generic_params() {
+        // `---@generic T` + `---@class Container` + `---@field items T`
+        // → 'T' is a generic param, should NOT appear in referenced_type_names
+        let s = build("---@generic T\n---@class Container\n---@field items T\nlocal x = {}");
+        assert!(!s.referenced_type_names.contains("T"),
+            "'T' is a generic param, should not appear in referenced_type_names");
+    }
+
+    #[test]
+    fn referenced_type_names_from_return_annotation() {
+        let s = build("---@return Widget\nfunction make() end");
+        assert!(s.referenced_type_names.contains("Widget"),
+            "expected 'Widget' in referenced_type_names");
+    }
 }
