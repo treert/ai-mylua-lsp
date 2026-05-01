@@ -1714,3 +1714,52 @@ print(my_m)
         "without blank line, @class should bind to variable; got:\n{}", text,
     );
 }
+
+/// Regression test: hover on method calls for local class instances.
+/// Global class (`ClassC1`) hover works; local class (`ClassC2`) must also work.
+#[test]
+fn hover_local_class_method_via_class_call() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@generic T
+---@param self T
+---@return T
+function BaseCls:new()
+    return self
+end
+
+---@class ClassC1:BaseCls
+ClassC1 = class("ClassC1")
+
+function ClassC1:test_c1()
+end
+
+---@class ClassC2:BaseCls
+local ClassC2 = class("ClassC2")
+function ClassC2:test_c2()
+end
+
+local c1 = ClassC1:new()
+local c2 = ClassC2:new()
+c1:test_c1()
+c2:test_c2()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_local_class_call.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // hover on `test_c1` in `c1:test_c1()` — line 23, col 4
+    let result_global = hover::hover(doc, &uri, pos(23, 4), &mut agg, &docs);
+    assert!(
+        result_global.is_some(),
+        "hover on global class instance method `c1:test_c1()` should succeed"
+    );
+
+    // hover on `test_c2` in `c2:test_c2()` — line 24, col 4
+    let result_local = hover::hover(doc, &uri, pos(24, 4), &mut agg, &docs);
+    assert!(
+        result_local.is_some(),
+        "hover on local class instance method `c2:test_c2()` should succeed (regression: local class)"
+    );
+}
