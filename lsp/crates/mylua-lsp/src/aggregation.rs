@@ -477,9 +477,26 @@ impl WorkspaceAggregation {
         }
 
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
-        self.global_shard.sort_all(|c| uri_priority_key(&c.source_uri));
+        //    Pre-compute URI priority so each URI is evaluated only once
+        //    (avoids repeated String allocations inside sort comparisons).
+        let uri_priority: HashMap<&Uri, (usize, usize, usize)> = self.summaries.keys()
+            .map(|uri| {
+                let path = uri.as_str();
+                let lower = path.to_ascii_lowercase();
+                let ann = lower.matches("annotation").count();
+                let depth = path.matches('/').count();
+                (uri, (usize::MAX - ann, depth, path.len()))
+            })
+            .collect();
+        let default_priority = (usize::MAX, usize::MAX, usize::MAX);
+
+        self.global_shard.sort_all(|c| {
+            *uri_priority.get(&c.source_uri).unwrap_or(&default_priority)
+        });
         for candidates in self.type_shard.values_mut() {
-            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
+            candidates.sort_by_cached_key(|c| {
+                *uri_priority.get(&c.source_uri).unwrap_or(&default_priority)
+            });
         }
     }
 
