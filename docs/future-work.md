@@ -26,13 +26,20 @@
 - **方案**：value 改为 `HashSet<Uri>`；引入 `per_uri_contributions` 反查表，删除时只动相关桶。
 - **验收**：10,000 文件工作区，upsert 耗时从 O(all buckets) 降到 O(本文件贡献数)。
 
-### 1.4 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
+### 1.4 [P4] 诊断路径请求级局部缓存（resolve_type local_cache）
+
+- **问题**：全局 `resolution_cache` 已移除（因 `&mut` 约束和失效 bug），但诊断遍历同一文件时可能对相同 base 重复解析。例如 `cfg.width`、`cfg.height`、`cfg.title` 各自独立 resolve `RequireRef("config")`。
+- **方案**：给 `resolve_type` 增加 `cache: Option<&mut HashMap<CacheKey, ResolvedType>>` 参数。诊断入口创建临时 HashMap，遍历完即丢弃；goto/hover 等传 `None`。无需失效逻辑——每次请求都是新 cache。
+- **优先级**：低。当前解析链都是 O(1) HashMap 查表，单次微秒级。仅在大文件（数千个字段访问）出现可测量延迟时再实施。
+- **验收**：大文件诊断耗时有可测量下降（profiling 对比）。
+
+### 1.5 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
 
 - **问题**：不含 fields / parents，消费方需回查 `summaries[uri].type_definitions` 做 `find()` 线扫。
 - **方案**：`type_definitions` 改为 `HashMap<String, TypeDefinition>`，O(1) 查询。注意同文件多同名 class 的去重。
 - **验收**：hover 热路径的"候选 → 详情"查找耗时下降。
 
-### 1.5 [P2] `find_global_references` 全量 AST 扫描不区分 global/local
+### 1.6 [P2] `find_global_references` 全量 AST 扫描不区分 global/local
 
 - **问题**：`references.rs::find_global_references` 遍历所有文件 AST，匹配 `identifier` 节点名字。但不使用 `scope_tree` 判断该标识符是全局还是同名 local，导致 `local Mgr = {}; Mgr.init()` 也被当作全局引用收进结果（误报）。`collect_emmy_type_references` 同理走纯文本匹配。
 - **方案**：扫描时用 `scope_tree.resolve()` 判断标识符是否为 local 声明，过滤掉同名 local。需要 `parse_temp` 同时建 scope_tree，或先完成 1.4（引用反向索引）缩小扫描范围后再处理。
