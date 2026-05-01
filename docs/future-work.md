@@ -43,6 +43,12 @@
 - **问题**：函数名暗示"一键级联失效"，实际只改 `resolution_cache` dirty 位。
 - **方案**：重命名为 `mark_resolution_cache_dirty_for`，或提供 `cascade_invalidate` facade 收敛职责。
 
+### 1.7 [P2] `find_global_references` 全量 AST 扫描不区分 global/local
+
+- **问题**：`references.rs::find_global_references` 遍历所有文件 AST，匹配 `identifier` 节点名字。但不使用 `scope_tree` 判断该标识符是全局还是同名 local，导致 `local Mgr = {}; Mgr.init()` 也被当作全局引用收进结果（误报）。`collect_emmy_type_references` 同理走纯文本匹配。
+- **方案**：扫描时用 `scope_tree.resolve()` 判断标识符是否为 local 声明，过滤掉同名 local。需要 `parse_temp` 同时建 scope_tree，或先完成 1.4（引用反向索引）缩小扫描范围后再处理。
+- **验收**：`local Mgr = {}; Mgr.init()` 不出现在全局 `Mgr` 的 references 结果中。
+
 ---
 
 ## 2. 泛型支持缺口
@@ -80,13 +86,11 @@
 
 ### 3.1 [P2] 语法树 / 文件文本 LRU 缓存
 
-- **问题**：`documents` 为每个文件常驻 `text + tree + scope`，大型项目内存线性增长，但大部分语法树不被频繁访问。
-- **核心思路**：**Summary 常驻，AST 按需缓存。** `Document` 改为 `LruCache<Uri, Document>`（容量 10~20），cache miss 时从磁盘读 + 全量解析。
-- **关键点**：
-  - 用户正在编辑的文件不会被淘汰（最近使用）
-  - 被淘汰文件丢失旧 tree，只能全量解析（但全量也很快，毫秒级）
-  - Find References / Rename 等全局操作临时解析的文件可不放入 LRU
-- **验收**：500+ 文件工作区，LRU 容量 15，全流程无功能回归；内存 RSS 对比有明显下降。
+- **设计文档**：[`superpowers/specs/2026-05-01-ast-lru-cache-design.md`](superpowers/specs/2026-05-01-ast-lru-cache-design.md)
+- **问题**：`documents` 为每个文件常驻 `LuaSource + tree + scope_tree`，大型项目内存线性增长（2 万文件工作区 ~6.5GB），但大部分语法树不被频繁访问。
+- **核心思路**：拆分 `DocumentStore`——`LuaSource` 常驻，`tree + scope_tree` 走 LRU 缓存（`astCacheCapacity` 可配置）。慢文件（`slow_pinned`）和打开文件（`open_pinned`）双 pin 集合互不干扰。
+- **阻塞因素**：`references.rs` 和 `rename.rs` 全量遍历所有文件 AST（`find_global_references` / `collect_emmy_type_references`），summary 层无引用反向索引，无法缩小扫描范围。LRU 淘汰的文件会被频繁 `parse_temp` 重建，收益受限。**建议先完成 1.4（引用反向索引），再实施 LRU。**
+- **验收**：2 万文件工作区，AST 缓存容量 200，全流程无功能回归；内存 RSS 显著下降（预估释放 1.2~1.8GB）。
 
 ---
 
@@ -95,10 +99,11 @@
 1. **1.2** `uri_priority_key` 路径段匹配 — 工作量小，修正隐藏偏差
 2. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
 3. **1.1** per-name fingerprint — 改动较大，对大型工作区 cache 命中率有实质提升
-4. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-5. **1.4** `collect_affected_names` 扩展 — 正确性修复，随 1.1 一起做
-6. **3.1** 语法树 LRU 缓存 — 内存优化，实现成本中等
-7. 其余 P3 项按需补做
+4. **1.4** `collect_affected_names` 扩展 — 正确性修复，随 1.1 一起做；**3.1 和 1.7 的前置依赖**
+5. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
+6. **1.7** references 全量扫描误报修复 — 依赖 1.4 引用反向索引缩小扫描范围
+7. **3.1** 语法树 LRU 缓存 — 依赖 1.4 引用反向索引，否则淘汰收益受限
+8. 其余 P3 项按需补做
 
 ---
 
