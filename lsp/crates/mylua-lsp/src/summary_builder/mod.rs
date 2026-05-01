@@ -68,7 +68,7 @@ pub fn build_file_analysis(
 
     let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
-    let call_sites = collect_call_sites(root, source, &line_index);
+    let call_sites = collect_call_sites(root, source, &line_index, &ctx.function_name_to_id);
     let (is_meta, meta_name) = detect_meta_annotation(root, source);
 
     let scope_tree = ctx.take_scope_tree();

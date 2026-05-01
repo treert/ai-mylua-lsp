@@ -31,6 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
+use crate::type_system::FunctionSummaryId;
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
@@ -61,9 +62,24 @@ pub fn prepare_call_hierarchy(
     }
 
     // Case 2: the cursor is on some other identifier occurrence (e.g.
-    // a call site). Resolve the name through the local summary's
-    // function_summaries first, then the workspace global_shard.
+    // a call site). Try scope tree first (handles local functions via
+    // FunctionRef(id)), then global function_name_index, then global_shard.
     if let Some(summary) = index.summaries.get(uri) {
+        // Local function via scope tree → FunctionRef(id)
+        if let Some(crate::type_system::TypeFact::Known(
+            crate::type_system::KnownType::FunctionRef(fid),
+        )) = doc.scope_tree.resolve_type(byte_offset, &name) {
+            if let Some(fs) = summary.function_summaries.get(fid) {
+                return vec![build_item(
+                    fs.name.clone(),
+                    SymbolKind::FUNCTION,
+                    uri.clone(),
+                    fs.range.into(),
+                    fs.range.into(),
+                )];
+            }
+        }
+        // Global function via function_name_index
         if let Some(fs) = summary.get_function_by_name(&name) {
             return vec![build_item(
                 fs.name.clone(),
@@ -199,7 +215,7 @@ pub fn incoming_calls(
             if last_segment(&cs.callee_name) != target {
                 continue;
             }
-            let caller_item = resolve_caller_item(uri, &cs.caller_name, summary);
+            let caller_item = resolve_caller_item(uri, cs, summary);
             let lsp_range: Range = cs.range.into();
             let key = (uri.clone(), cs.caller_name.clone());
             groups
@@ -224,10 +240,10 @@ pub fn incoming_calls(
 /// return a "module-scope" item using the file URI as the handle.
 fn resolve_caller_item(
     uri: &Uri,
-    caller_name: &str,
+    cs: &CallSite,
     summary: &DocumentSummary,
 ) -> CallHierarchyItem {
-    if caller_name.is_empty() {
+    if cs.caller_name.is_empty() {
         let range = Range {
             start: Position { line: 0, character: 0 },
             end: Position { line: 0, character: 0 },
@@ -240,28 +256,48 @@ fn resolve_caller_item(
             range,
         );
     }
-    if let Some(fs) = summary.get_function_by_name(caller_name) {
-        let kind = if caller_name.contains(':') {
+    // Prefer caller_id — avoids name-based ambiguity between local and
+    // global functions.
+    if let Some(id) = cs.caller_id {
+        if let Some(fs) = summary.function_summaries.get(&id) {
+            let kind = if cs.caller_name.contains(':') {
+                SymbolKind::METHOD
+            } else {
+                SymbolKind::FUNCTION
+            };
+            let lsp_range: Range = fs.range.into();
+            return build_item(
+                cs.caller_name.clone(),
+                kind,
+                uri.clone(),
+                lsp_range,
+                lsp_range,
+            );
+        }
+    }
+    // Fallback for global functions whose caller_id wasn't set.
+    if let Some(fs) = summary.get_function_by_name(&cs.caller_name) {
+        let kind = if cs.caller_name.contains(':') {
             SymbolKind::METHOD
         } else {
             SymbolKind::FUNCTION
         };
         let lsp_range: Range = fs.range.into();
         return build_item(
-            caller_name.to_string(),
+            cs.caller_name.clone(),
             kind,
             uri.clone(),
             lsp_range,
             lsp_range,
         );
     }
-    // Fallback: unknown caller name (shouldn't happen for a
-    // well-formed summary, but stay robust).
+    // Last resort: unknown caller (shouldn't happen for a well-formed
+    // summary, but stay robust).
     let range = Range {
         start: Position { line: 0, character: 0 },
         end: Position { line: 0, character: 0 },
     };
-    build_item(caller_name.to_string(), SymbolKind::FUNCTION, uri.clone(), range, range)
+    build_item(cs.caller_name.clone(), SymbolKind::FUNCTION, uri.clone(), range, range)
 }
 
 fn file_name_hint(uri: &Uri) -> String {
@@ -306,16 +342,16 @@ pub fn outgoing_calls(
 }
 
 /// Build a `CallHierarchyItem` for an outgoing-call target. Tries
-/// (in order): same-file function_summaries, workspace global_shard.
-/// When nothing matches, synthesize a minimal item anchored at the
-/// call site itself so the client still has something clickable.
+/// the workspace `global_shard` for O(1) lookup. When nothing
+/// matches, synthesize a minimal item anchored at the call site
+/// itself so the client still has something clickable.
 fn resolve_outgoing_target(
     name: &str,
     index: &WorkspaceAggregation,
     fallback_uri: &Uri,
     fallback_range: Range,
 ) -> CallHierarchyItem {
-    // 1. O(1) lookup via global_shard — preferred path.
+    // O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
         if let Some(c) = candidates.first() {
             // Try to refine with the precise FunctionSummary range from
@@ -348,21 +384,7 @@ fn resolve_outgoing_target(
             );
         }
     }
-    // 2. Fallback: linear scan over all summaries (handles names not
-    //    registered in global_shard, e.g. local helpers).
-    for (uri, summary) in &index.summaries {
-        if let Some(fs) = summary.get_function_by_name(name) {
-            let lsp_range: Range = fs.range.into();
-            return build_item(
-                name.to_string(),
-                SymbolKind::FUNCTION,
-                uri.clone(),
-                lsp_range,
-                lsp_range,
-            );
-        }
-    }
-    // 3. Unknown callee — anchor at the call site itself.
+    // Unknown callee — anchor at the call site itself.
     build_item(
         name.to_string(),
         SymbolKind::FUNCTION,
@@ -395,6 +417,7 @@ pub fn extract_call_site(
     call: tree_sitter::Node,
     source: &[u8],
     caller_name: &str,
+    caller_id: Option<FunctionSummaryId>,
     line_index: &LineIndex,
 ) -> Option<CallSite> {
     let callee = call.child_by_field_name("callee")?;
@@ -423,6 +446,7 @@ pub fn extract_call_site(
     Some(CallSite {
         callee_name,
         caller_name: caller_name.to_string(),
+        caller_id,
         range,
     })
 }

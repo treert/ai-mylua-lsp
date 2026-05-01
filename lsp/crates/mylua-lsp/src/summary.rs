@@ -76,6 +76,11 @@ pub struct CallSite {
     /// Enclosing function's (possibly qualified) name. Empty string
     /// when the call is at file top level.
     pub caller_name: String,
+    /// `FunctionSummaryId` of the enclosing function. `None` when the
+    /// call is at file top level. Prefer this over `caller_name` for
+    /// looking up the caller's `FunctionSummary` — it avoids name-based
+    /// ambiguity between local and global functions.
+    pub caller_id: Option<FunctionSummaryId>,
     /// Range of the callee identifier / final segment — not the
     /// whole `function_call` node. Preferred by clients as the
     /// highlight target.
@@ -174,30 +179,17 @@ pub struct TypeFieldDef {
 }
 
 impl DocumentSummary {
-    /// Look up a function summary by name using `function_name_index` (O(1)).
-    /// Falls back to linear scan when the name isn't in the index (e.g. local
-    /// functions looked up by call_hierarchy, or colon-qualified names).
+    /// Look up a **global** function summary by name using
+    /// `function_name_index` (O(1)). Colon-qualified names are
+    /// normalized to dot form before lookup.
+    ///
+    /// This intentionally does NOT search local functions — those
+    /// should be accessed via `scope_tree → FunctionRef(id)` →
+    /// `function_summaries[id]` instead.
     pub fn get_function_by_name(&self, name: &str) -> Option<&FunctionSummary> {
-        // O(1) path: try the normalized (dot) form in the index first.
         let normalized = name.replace(':', ".");
-        if let Some(id) = self.function_name_index.get(&normalized) {
-            return self.function_summaries.get(id);
-        }
-        // Fallback: linear scan for non-indexed entries (local functions
-        // during query time when called from call_hierarchy etc.).
-        self.function_summaries
-            .values()
-            .find(|fs| fs.name == name)
-    }
-
-    /// Mutable version: look up a function summary by name and return both
-    /// the ID and the mutable reference. Used by code that needs to modify
-    /// the summary during resolution.
-    pub fn get_function_by_name_mut(&mut self, name: &str) -> Option<(FunctionSummaryId, &mut FunctionSummary)> {
-        self.function_summaries
-            .iter_mut()
-            .find(|(_, fs)| fs.name == name)
-            .map(|(id, fs)| (*id, fs))
+        self.function_name_index.get(&normalized)
+            .and_then(|id| self.function_summaries.get(id))
     }
 
     /// Iterate all (ID, FunctionSummary) pairs. Useful for fingerprinting,

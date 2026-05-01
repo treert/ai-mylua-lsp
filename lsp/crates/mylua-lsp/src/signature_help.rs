@@ -107,9 +107,19 @@ pub(crate) fn resolve_call_signatures(
 
     // Simple identifier / variable callee: `foo(...)`
     let name = node_text(callee, source).to_string();
-    // Local function declaration (`local function f() end`) — rich
-    // FunctionSummary with overloads registered in `function_summaries`.
     if let Some(summary) = index.summaries.get(uri) {
+        // Local function via scope tree → FunctionRef(id) → rich summary
+        // with overloads. Must be checked before the global path because
+        // a local `f` shadows any global `f`.
+        if let Some(crate::type_system::TypeFact::Known(
+            crate::type_system::KnownType::FunctionRef(fid),
+        )) = scope_tree.resolve_type(callee.start_byte(), &name) {
+            if let Some(fs) = summary.function_summaries.get(fid) {
+                let sigs = primary_plus_overloads(fs);
+                return Some((sigs, false, name));
+            }
+        }
+        // Global function via function_name_index (O(1)).
         if let Some(fs) = summary.get_function_by_name(&name) {
             let sigs = primary_plus_overloads(fs);
             return Some((sigs, false, name));

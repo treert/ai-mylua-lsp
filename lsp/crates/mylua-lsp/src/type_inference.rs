@@ -300,7 +300,22 @@ fn infer_call_return_fact(
     // Extract function summary data first (immutable borrow of index),
     // then release the borrow before calling collect_call_arg_types
     // (which needs mutable borrow).
+    // Try scope tree first for local functions, then function_name_index
+    // for globals.
     let fs_data = index.summaries.get(uri).and_then(|summary| {
+        // Local function via scope tree → FunctionRef(id)
+        if let Some(crate::type_system::TypeFact::Known(
+            crate::type_system::KnownType::FunctionRef(fid),
+        )) = scope_tree.resolve_type(callee.start_byte(), callee_text) {
+            if let Some(fs) = summary.function_summaries.get(fid) {
+                return Some((
+                    fs.generic_params.clone(),
+                    fs.signature.params.clone(),
+                    fs.signature.returns.clone(),
+                ));
+            }
+        }
+        // Global function via function_name_index
         summary.get_function_by_name(callee_text).map(|fs| {
             (
                 fs.generic_params.clone(),
