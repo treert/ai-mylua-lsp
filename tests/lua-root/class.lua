@@ -18,6 +18,8 @@ function BaseCls:new()
     return o
 end
 
+---@param class_name string
+---@param super? BaseCls
 function class(class_name,super)
     local cls = {
         __class_name = class_name;
