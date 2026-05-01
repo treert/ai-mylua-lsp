@@ -173,3 +173,51 @@ fn workspace_hover_require_resolution() {
         let _ = result;
     }
 }
+
+/// Test that uri_priority_key only matches "annotation" as a separate path segment,
+/// not as a substring within a directory name (e.g., "my-annotation-helper").
+#[test]
+fn workspace_global_priority_annotation_path_segment() {
+    // Case 1: Pure "annotation" directory should be highest priority
+    let annotation_file = (
+        "annotation/module.lua",
+        "---@type SubClass\nGLOBAL.Foo = nil\n",
+    );
+    
+    // Case 2: "my-annotation-helper" contains substring but is NOT a segment match
+    let helper_file = (
+        "my-annotation-helper/module.lua",
+        "---@type BaseClass\nGLOBAL.Foo = nil\n",
+    );
+    
+    // Case 3: Regular file for baseline
+    let normal_file = (
+        "normal/module.lua",
+        "---@type OtherClass\nGLOBAL.Foo = nil\n",
+    );
+
+    // Setup with all three files
+    let (_docs, agg, _parser) = setup_workspace(&[helper_file, normal_file, annotation_file]);
+
+    let candidates = agg.global_shard.get("GLOBAL.Foo")
+        .expect("GLOBAL.Foo should be in global_shard");
+    
+    assert_eq!(candidates.len(), 3, "should have three candidates");
+    
+    // The first candidate should be from annotation/ directory (exact segment match)
+    let first_candidate = &candidates[0].source_uri.to_string();
+    assert!(
+        first_candidate.contains("annotation/module.lua"),
+        "annotation/module.lua should be first (highest priority), but got: {}",
+        first_candidate
+    );
+    
+    // The my-annotation-helper should NOT be prioritized (substring doesn't count)
+    // It should be ordered by depth (same depth as normal), so either order is OK
+    // but definitely not first
+    let helper_candidate = candidates.iter().position(|c| c.source_uri.to_string().contains("my-annotation-helper"));
+    assert_ne!(
+        helper_candidate, Some(0),
+        "my-annotation-helper should NOT be first (not a segment match)"
+    );
+}

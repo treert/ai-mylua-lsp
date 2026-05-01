@@ -375,7 +375,7 @@ fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
     // Count only "annotation" as a separate path segment, not substring
     let annotation_count = lower
         .split('/')
-        .filter(|segment| *segment == "annotation")
+        .filter(|segment| segment == "annotation")
         .count();
     
     // Negate: more occurrences → smaller key → higher priority
