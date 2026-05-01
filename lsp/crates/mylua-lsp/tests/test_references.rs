@@ -263,3 +263,157 @@ print(myvar)"#;
         );
     }
 }
+
+#[test]
+fn references_field_same_type_different_variable() {
+    // Two local variables typed as the same class: references to a field
+    // on one should include accesses on the other.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, summary_builder};
+
+    let mut parser = new_parser();
+    let src = r#"---@class Player
+---@field hp number
+---@field name string
+
+---@type Player
+local a = {}
+a.hp = 100
+
+---@type Player
+local b = {}
+b.hp = 50
+print(b.name)"#;
+    let uri = make_uri("field_ref.lua");
+    let tree = parser.parse(src.as_bytes(), None).unwrap();
+    let result = summary_builder::build_file_analysis(
+        &uri, &tree, src.as_bytes(), &mylua_lsp::util::LineIndex::new(src.as_bytes()),
+    );
+    let doc = Document {
+        lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
+        tree,
+        scope_tree: result.1,
+    };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(result.0);
+
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Click on `hp` in `a.hp = 100` (line 6, col 2)
+    let locs = references::find_references(
+        doc, &uri, pos(6, 2), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find field references for hp");
+
+    // Should find: declaration (@field hp), a.hp, b.hp — at least 3
+    assert!(
+        locs.len() >= 3,
+        "expected at least 3 references to field `hp` (decl + a.hp + b.hp), got {}: {:?}",
+        locs.len(), locs,
+    );
+
+    // b.name should NOT be included
+    let name_refs: Vec<_> = locs.iter().filter(|l| {
+        let line = src.lines().nth(l.range.start.line as usize).unwrap_or("");
+        line.contains("name")
+    }).collect();
+    assert!(name_refs.is_empty(), "hp references must not include 'name' accesses: {:?}", name_refs);
+}
+
+#[test]
+fn references_field_inference_fails_no_false_positive() {
+    // When the base type cannot be inferred, the field should not be reported.
+    let src = r#"local unknown = getStuff()
+unknown.foo = 1
+
+local other = getOther()
+other.foo = 2"#;
+    let (doc, uri, agg) = setup_single_file(src, "no_type.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Click on `foo` in `unknown.foo` (line 1, col 8)
+    let result = references::find_references(
+        doc, &uri, pos(1, 8), true, &agg, &docs, &ReferencesStrategy::Best,
+    );
+    // Should return Some (can still be a global identity or produce empty
+    // results) — the key assertion is it must NOT panic and must NOT include
+    // `other.foo` as a reference (different unresolved base).
+    if let Some(locs) = result {
+        // Since neither base resolves to a known type, identify_at_cursor
+        // should fall through to Global or return None. Either way, we
+        // should not get cross-variable matches.
+        for l in &locs {
+            // Verify no match on line 4 (other.foo)
+            if l.range.start.line == 4 {
+                // This is acceptable ONLY if the identity was Global (name="foo")
+                // which should not happen because `foo` is in field position.
+                panic!(
+                    "field ref with unresolved base should not cross-match: {:?}",
+                    locs
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn references_field_via_inheritance() {
+    // A field declared on a parent class should be found when accessed on a child.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, summary_builder};
+
+    let mut parser = new_parser();
+    let src = r#"---@class Animal
+---@field legs number
+
+---@class Dog : Animal
+Dog = {}
+
+---@type Animal
+local a = {}
+a.legs = 4
+
+---@type Dog
+local d = {}
+d.legs = 4"#;
+    let uri = make_uri("inherit.lua");
+    let tree = parser.parse(src.as_bytes(), None).unwrap();
+    let result = summary_builder::build_file_analysis(
+        &uri, &tree, src.as_bytes(), &mylua_lsp::util::LineIndex::new(src.as_bytes()),
+    );
+    let doc = Document {
+        lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
+        tree,
+        scope_tree: result.1,
+    };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(result.0);
+
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Click on `legs` in `a.legs = 4` (line 8, col 2)
+    let locs = references::find_references(
+        doc, &uri, pos(8, 2), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find field references for legs");
+
+    // Should find: @field legs declaration, a.legs, d.legs — at least 3
+    assert!(
+        locs.len() >= 3,
+        "expected at least 3 references to `legs` (decl + a.legs + d.legs), got {}: {:?}",
+        locs.len(), locs,
+    );
+
+    // Verify d.legs is included (line 12)
+    let dog_ref = locs.iter().find(|l| l.range.start.line == 12);
+    assert!(
+        dog_ref.is_some(),
+        "d.legs (Dog inherits Animal.legs) should be included: {:?}",
+        locs,
+    );
+}
