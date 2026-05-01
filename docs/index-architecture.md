@@ -30,9 +30,11 @@
 |------|------|
 | `GlobalContributions` | 全局名贡献：名称、类属、定义区间 |
 | `TypeDefinitions` | Emmy 类型定义（`@class`/`@enum`/`@alias`） |
-| `FunctionSummary` | 参数、返回类型、关联 Emmy 注解 |
+| `FunctionSummary` | 参数、返回类型、关联 Emmy 注解；以 `FunctionSummaryId(u32)` 为 key 存储（对称于 `TableShapeId`），附带 `function_name_index`（name → ID）反查索引 |
 | `TableShape` | 字段名 → 字段类型、注解、定义位置 |
 | `CallSites` | 函数调用点信息 |
+
+`TypeFact` 通过 `Known(FunctionRef(FunctionSummaryId))` 间接引用函数签名（同一文件内定义的函数），与 `Known(Table(TableShapeId))` 模式对称。Emmy 注解直接声明的函数类型仍使用内联 `Known(Function(FunctionSignature))` variant。
 
 ### 2.2 工作区聚合层
 

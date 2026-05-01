@@ -1,6 +1,6 @@
 # Future Work — 后续待办
 
-> 只保留**真正还没做**的方向；已实现的不再列在这里。
+> **本文件只保留尚未实现的方向。** 已完成的条目应从本文件中删除；如果完成项涉及架构或数据结构变更，需在同一次提交中同步更新 [`index-architecture.md`](index-architecture.md)、[`architecture.md`](architecture.md) 等相关文档。
 >
 > 关联文档：[index-architecture.md](index-architecture.md)、[performance-analysis.md](performance-analysis.md)
 
@@ -42,25 +42,6 @@
 
 - **问题**：函数名暗示"一键级联失效"，实际只改 `resolution_cache` dirty 位。
 - **方案**：重命名为 `mark_resolution_cache_dirty_for`，或提供 `cascade_invalidate` facade 收敛职责。
-
-### 1.7 [P2] 函数签名 ID 化——对齐 `TableShape` 的间接引用模式
-
-**✅ 已完成于 2026-04-26**
-
-- **问题**：`TableShape` 通过 `TableShapeId(u32)` 唯一定位，`TypeFact::Known(Table(id))` 指向 `summary.table_shapes[id]`。但函数签名直接内联在 `TypeFact::Known(Function(FunctionSignature))` 中，没有 ID 回查机制。导致：
-  - 同一个函数被多处引用时，签名数据重复存储
-  - 无法通过 `TypeFact` 回查函数的完整元信息（overload、Emmy 注解、定义位置）
-  - local function 赋值给 table field / Emmy class member 时（如 `M.process = helper`），外部只能拿到内联签名副本，丢失了与原始 `FunctionSummary` 的关联
-  - 外部消费方（hover、signature_help、completion、call_hierarchy、resolver）被迫用函数名字符串直接查 `function_summaries`，绕过了类型系统的间接引用
-- **方案**：引入 `FunctionSummaryId(u32)`，对齐 `TableShapeId` 模式：
-  - `function_summaries` key 从函数名字符串改为 `FunctionSummaryId`，成为纯粹的签名仓库（与 `table_shapes` 对称）
-  - `TypeFact` 新增 `Known(FunctionRef(FunctionSummaryId))` variant，`GlobalContribution.type_fact` 和 `TypeFieldDef.type_fact` 等处通过 ID 引用函数签名
-  - summary_builder 为每个函数分配递增 ID
-  - 消费端通过 `def_uri + FunctionSummaryId` 查完整签名，**不再需要按名字直接访问 `function_summaries`**
-  - 保留内联 `Known(Function(FunctionSignature))` 作为轻量 variant（Emmy 注解直接声明的函数类型无文件归属，不走 ID）
-- **影响范围**：`type_system.rs`（TypeFact variant）、`summary.rs`（字段类型）、`summary_builder/`（ID 分配 + 写入）、`resolver.rs`（间接查找）、`hover.rs`、`signature_help.rs`、`completion.rs`、`call_hierarchy.rs`（消费端全部改为通过 ID 查签名，消除按名字直接访问 `function_summaries` 的模式）
-- **依赖**：无前置依赖
-- **验收**：`local function helper(); M.process = helper`，外部 hover `obj.process` 能查到 `helper` 的完整签名和 overload；`function_summaries` key 为 `FunctionSummaryId`，无名字冲突；外部消费方不再按名字直接查 `function_summaries`
 
 ---
 
@@ -114,17 +95,16 @@
 1. **1.2** `uri_priority_key` 路径段匹配 — 工作量小，修正隐藏偏差
 2. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
 3. **1.1** per-name fingerprint — 改动较大，对大型工作区 cache 命中率有实质提升
-4. **1.7** 函数签名 ID 化 — 对齐 TableShape 模式，消除名字冲突与按名直接访问
-5. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-6. **1.4** `collect_affected_names` 扩展 — 正确性修复，随 1.1 一起做
-7. **3.1** 语法树 LRU 缓存 — 内存优化，实现成本中等
-8. 其余 P3 项按需补做
+4. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
+5. **1.4** `collect_affected_names` 扩展 — 正确性修复，随 1.1 一起做
+6. **3.1** 语法树 LRU 缓存 — 内存优化，实现成本中等
+7. 其余 P3 项按需补做
 
 ---
 
 ## 5. 维护约定
 
-- 落地后在对应条目补 "**✅ 已完成于 \<日期\>**"，随后迁移到已完成区或删除。
+- 已完成的条目直接从本文件删除；如涉及架构变更，同一次提交更新相关文档（`index-architecture.md`、`architecture.md` 等）。
 - 涉及 `DocumentSummary` / `TypeCandidate` 等可序列化结构变化时，bump `CACHE_SCHEMA_VERSION`。
 - 新增条目模板：
 
