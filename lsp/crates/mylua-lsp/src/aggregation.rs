@@ -370,14 +370,14 @@ fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
 /// 2. Shallower paths (fewer `/` segments) win
 /// 3. Shorter total path length as tiebreaker
 /// 4. Lexicographic URI string for full determinism
-fn uri_priority_key(uri: &Uri) -> (usize, usize, usize, String) {
-    let path = uri.to_string();
+fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
+    let path = uri.as_str();
     let lower = path.to_ascii_lowercase();
     let annotation_count = lower.matches("annotation").count();
     // Negate: more occurrences → smaller key → higher priority
     let annotation_key = usize::MAX - annotation_count;
     let depth = path.matches('/').count();
-    (annotation_key, depth, path.len(), path)
+    (annotation_key, depth, path.len())
 }
 
 impl Default for WorkspaceAggregation {
@@ -480,13 +480,7 @@ impl WorkspaceAggregation {
         //    Pre-compute URI priority so each URI is evaluated only once
         //    (avoids repeated String allocations inside sort comparisons).
         let uri_priority: HashMap<&Uri, (usize, usize, usize)> = self.summaries.keys()
-            .map(|uri| {
-                let path = uri.as_str();
-                let lower = path.to_ascii_lowercase();
-                let ann = lower.matches("annotation").count();
-                let depth = path.matches('/').count();
-                (uri, (usize::MAX - ann, depth, path.len()))
-            })
+            .map(|uri| (uri, uri_priority_key(uri)))
             .collect();
         let default_priority = (usize::MAX, usize::MAX, usize::MAX);
 
