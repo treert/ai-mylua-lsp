@@ -695,14 +695,14 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         return;
     }
 
-    // Global function: write to function_name_index with colon→dot normalization.
+    // Global function: colon→dot normalization for both index and contribution.
     let normalized = name.replace(':', ".");
-    ctx.function_name_index.insert(normalized, func_id);
+    ctx.function_name_index.insert(normalized.clone(), func_id);
 
     // Base is not a local (or bare name) → register as global contribution
     // (e.g. `function Player.new()` where Player is a global).
     ctx.global_contributions.push(GlobalContribution {
-        name: name.clone(),
+        name: normalized,
         kind: GlobalContributionKind::Function,
         type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
