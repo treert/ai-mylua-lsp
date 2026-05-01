@@ -733,7 +733,7 @@ fn duplicate_table_key_off_via_config() {
 
 #[test]
 fn unused_local_reports_by_default() {
-    let src = "local x = 1\n";
+    let src = "local function f()\n  local x = 1\nend\nf()\n";
     let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
@@ -746,7 +746,7 @@ fn unused_local_reports_by_default() {
 
 #[test]
 fn unused_local_reports_when_enabled() {
-    let src = "local x = 1\nlocal y = 2\nprint(y)\n";
+    let src = "local function g()\n  local x = 1\n  local y = 2\n  print(y)\nend\ng()\n";
     let (doc, uri, mut agg) = setup_single_file(src, "unused_on.lua");
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
@@ -871,6 +871,26 @@ end
 // ---------------------------------------------------------------------------
 // P2-3 — @type follow-up assignment mismatch
 // ---------------------------------------------------------------------------
+
+#[test]
+fn unused_local_skips_empty_method_params() {
+    // Colon-method with empty body — params should be exempt.
+    let src = r#"
+local utils = {}
+function utils:empty_func(arg1, arg2) end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "empty_method.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.unused_local = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
+    assert!(
+        unused.is_empty(),
+        "params in empty method should not trigger unused-local, got: {:?}", unused,
+    );
+}
 
 #[test]
 fn emmy_type_mismatch_on_reassignment() {

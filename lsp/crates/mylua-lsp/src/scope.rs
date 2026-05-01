@@ -180,5 +180,14 @@ impl ScopeTree {
         }
         best
     }
+
+    /// Returns `true` if `decl_byte` falls inside a file-level (top) scope.
+    pub fn is_file_level_decl(&self, decl_byte: usize) -> bool {
+        let Some(scope_id) = self.innermost_scope(decl_byte) else {
+            return false;
+        };
+        self.scopes[scope_id].kind == ScopeKind::File
+    }
+
 }
 

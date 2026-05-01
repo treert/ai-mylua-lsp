@@ -31,6 +31,16 @@ pub(super) fn check_unused_locals(
         if is_implicit_method_self_decl(decl, source) {
             continue;
         }
+        // Exempt file-level locals (top-level variables/functions).
+        if scope_tree.is_file_level_decl(decl.decl_byte) {
+            continue;
+        }
+        // Exempt parameters in empty function bodies (stub/interface functions).
+        if decl.kind == DefKind::Parameter
+            && is_param_in_empty_function_body(root, decl.decl_byte)
+        {
+            continue;
+        }
         let key = (decl.name.clone(), decl.decl_byte);
         if ref_count.get(&key).copied().unwrap_or(0) == 0 {
             diagnostics.push(Diagnostic {
@@ -98,4 +108,29 @@ fn count_identifier_references(
         }
         cursor.goto_parent();
     }
+}
+
+/// Check whether `decl_byte` is inside a function body that has no statements.
+/// Walks up the AST from the deepest node at `decl_byte` to find the enclosing
+/// `function_body` and checks whether it contains any statement children.
+fn is_param_in_empty_function_body(root: tree_sitter::Node, decl_byte: usize) -> bool {
+    // Find the deepest node at decl_byte, then walk up to find function_body.
+    let mut node = root.descendant_for_byte_range(decl_byte, decl_byte);
+    while let Some(n) = node {
+        if n.kind() == "function_body" {
+            // function_body children: `parameter_list`, statements, `word_end`.
+            // If only non-statement children are present, the body is empty.
+            for i in 0..n.named_child_count() {
+                if let Some(child) = n.named_child(i as u32) {
+                    match child.kind() {
+                        "parameter_list" | "word_end" => {}
+                        _ => return false,
+                    }
+                }
+            }
+            return true;
+        }
+        node = n.parent();
+    }
+    false
 }
