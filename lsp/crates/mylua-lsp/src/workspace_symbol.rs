@@ -37,32 +37,19 @@ pub fn search_workspace_symbols(
 
     // --- global_shard: functions + variables + Class:method splits ---
     for (name, candidates) in index.global_shard.iter_all_entries() {
-        let (display_name, container, member_kind) = split_qualified_name(&name, candidates);
+        let (display_name, container) = split_qualified_name(&name);
         if !matches_query(&display_name, &query_lower, query.is_empty()) {
             continue;
         }
         for candidate in candidates {
-            // For dotted accessors, a value that IS a function should
-            // show up as FUNCTION regardless of whether the contribution
-            // kind is `Function` or `TableExtension` — equivalent
-            // Lua idioms (`function Foo.m()` vs `Foo.m = function()`)
-            // must present identically.
-            let kind = member_kind.unwrap_or(match candidate.kind {
-                GlobalContributionKind::Function => SymbolKind::FUNCTION,
-                _ => SymbolKind::VARIABLE,
-            });
-            let effective_kind = if container.is_some()
-                && matches!(candidate.type_fact, TypeFact::Known(KnownType::Function(_)) | TypeFact::Known(KnownType::FunctionRef(_)))
-            {
-                // Promote accessor-of-function to FUNCTION (never FIELD)
-                // unless the caller already pinned it to METHOD (`:`).
-                if kind == SymbolKind::METHOD {
-                    SymbolKind::METHOD
-                } else {
-                    SymbolKind::FUNCTION
-                }
+            let effective_kind = if container.is_some() {
+                // Qualified name: determine kind from the function signature.
+                candidate_symbol_kind(candidate, index)
             } else {
-                kind
+                match candidate.kind {
+                    GlobalContributionKind::Function => SymbolKind::FUNCTION,
+                    _ => SymbolKind::VARIABLE,
+                }
             };
             if container.is_some() {
                 let key = (
@@ -181,28 +168,47 @@ fn matches_query(name: &str, query_lower: &str, query_is_empty: bool) -> bool {
     query_is_empty || name.to_lowercase().contains(query_lower)
 }
 
-/// Parse an entry name from `global_shard` into `(display, container, kind_override)`.
-/// Non-qualified names (no `:` / `.`) return `(name, None, None)` —
-/// callers fall back to the candidate's own kind.
-fn split_qualified_name(
-    name: &str,
-    candidates: &[crate::aggregation::GlobalCandidate],
-) -> (String, Option<String>, Option<SymbolKind>) {
+/// Parse an entry name from `global_shard` into `(display, container)`.
+/// Non-qualified names (no `.`) return `(name, None)`.
+fn split_qualified_name(name: &str) -> (String, Option<String>) {
     if let Some((class, member)) = name.rsplit_once('.') {
         if !class.is_empty() && !member.is_empty() {
-            // If any candidate was originally a colon-method, use METHOD kind.
-            let kind = if candidates.iter().any(|c| c.is_method) {
-                SymbolKind::METHOD
-            } else if candidates
-                .iter()
-                .any(|c| matches!(c.kind, GlobalContributionKind::Function))
-            {
-                SymbolKind::FUNCTION
-            } else {
-                SymbolKind::FIELD
-            };
-            return (member.to_string(), Some(class.to_string()), Some(kind));
+            return (member.to_string(), Some(class.to_string()));
         }
     }
-    (name.to_string(), None, None)
+    (name.to_string(), None)
+}
+
+/// Determine the SymbolKind for a qualified global candidate by inspecting
+/// the function signature. A colon-method (`function Foo:m()`) is METHOD;
+/// a dot-function is FUNCTION; anything else is FIELD.
+fn candidate_symbol_kind(
+    candidate: &crate::aggregation::GlobalCandidate,
+    index: &WorkspaceAggregation,
+) -> SymbolKind {
+    let func_id = match &candidate.type_fact {
+        TypeFact::Known(KnownType::FunctionRef(id)) => Some(*id),
+        TypeFact::Known(KnownType::Function(_)) => {
+            return SymbolKind::FUNCTION;
+        }
+        _ => None,
+    };
+
+    if let Some(id) = func_id {
+        if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+            if let Some(func) = summary.function_summaries.get(&id) {
+                // FunctionSummary.name preserves the original colon form
+                // (e.g. "Foo:myMethod"), while GlobalContribution.name is
+                // normalized to dot. Check for colon in the name.
+                return if func.name.contains(':') {
+                    SymbolKind::METHOD
+                } else {
+                    SymbolKind::FUNCTION
+                };
+            }
+        }
+        return SymbolKind::FUNCTION;
+    }
+
+    SymbolKind::FIELD
 }
