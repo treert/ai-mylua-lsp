@@ -14,13 +14,7 @@
 - **方案**：改为 **per-name fingerprint**（`HashMap<String, u64>`），按名字逐个 diff，只标脏变化的名字。文件级 hash 保留作 quick check。
 - **验收**：改一个 class 的单个 field，其他 class 的 cache 不被标脏。
 
-### 1.3 [P2] `type_dependants` 线性查重 + 全桶 retain
-
-- **问题**：写入侧 `iter().any()` 线性查重；删除侧对每个 bucket 全量 `retain`，复杂度 `O(Σ buckets)`。
-- **方案**：value 改为 `HashSet<Uri>`；引入 `per_uri_contributions` 反查表，删除时只动相关桶。
-- **验收**：10,000 文件工作区，upsert 耗时从 O(all buckets) 降到 O(本文件贡献数)。
-
-### 1.4 [P4] 诊断路径请求级局部缓存（resolve_type local_cache）
+### 1.3 [P4] 诊断路径请求级局部缓存（resolve_type local_cache）
 
 - **问题**：全局 `resolution_cache` 已移除（因 `&mut` 约束和失效 bug），但诊断遍历同一文件时可能对相同 base 重复解析。例如 `cfg.width`、`cfg.height`、`cfg.title` 各自独立 resolve `RequireRef("config")`。
 - **方案**：给 `resolve_type` 增加 `cache: Option<&mut HashMap<CacheKey, ResolvedType>>` 参数。诊断入口创建临时 HashMap，遍历完即丢弃；goto/hover 等传 `None`。无需失效逻辑——每次请求都是新 cache。
@@ -58,11 +52,6 @@
 
 - **问题**：`substitute_in_fact` 无深度保护，病态递归输入可能栈溢出。
 - **方案**：加深度计数器，超阈值（如 32）停止递归返回原 fact。
-
-### 2.5 [P3] `type_dependants` 泛型参数过滤是全局并集
-
-- **问题**：class A 的泛型参数 `T` 会把 class B 里引用真类 `T` 的边也过滤掉。
-- **方案**：改为作用域感知，只排除当前 class 自身的 generic_params。
 
 ---
 

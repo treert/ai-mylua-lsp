@@ -18,15 +18,6 @@ pub struct WorkspaceAggregation {
     pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
     pub type_shard: HashMap<String, Vec<TypeCandidate>>,
-    /// Target URI → files that `require` it (reverse dependency index).
-    pub require_by_return: HashMap<Uri, Vec<RequireDependant>>,
-    /// Emmy type name → URIs whose summaries reference that type
-    /// (P1-7 reverse type-dependency graph). Enables cascade
-    /// invalidation when a class definition changes — any file that
-    /// `@type`s / `@param`s / inherits from / has fields typed as
-    /// the changed class needs its semantic diagnostics recomputed,
-    /// even if it doesn't `require()` the defining file.
-    pub type_dependants: HashMap<String, HashSet<Uri>>,
 
     /// Module index: last_segment → Vec<(full_module_name, Uri)>.
     /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
@@ -302,13 +293,6 @@ pub struct TypeCandidate {
     pub range: ByteRange,
 }
 
-/// A file that depends on a given URI via `require`.
-#[derive(Debug, Clone)]
-pub struct RequireDependant {
-    pub source_uri: Uri,
-    pub local_name: String,
-}
-
 /// Priority key for sorting candidates (smaller = higher priority):
 /// 1. More occurrences of "annotation" as a separate path segment = higher priority
 /// 2. Shallower paths (fewer `/` segments) win
@@ -340,8 +324,6 @@ impl WorkspaceAggregation {
             summaries: HashMap::new(),
             global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
-            require_by_return: HashMap::new(),
-            type_dependants: HashMap::new(),
             module_index: HashMap::new(),
             require_aliases: HashMap::new(),
         }
@@ -365,8 +347,6 @@ impl WorkspaceAggregation {
         self.summaries.clear();
         self.global_shard.clear();
         self.type_shard.clear();
-        self.require_by_return.clear();
-        self.type_dependants.clear();
 
         // 1. Insert all summaries first (consuming the owned Vec to avoid
         //    deep-cloning every DocumentSummary) so `resolve_module_to_uri`
@@ -402,23 +382,6 @@ impl WorkspaceAggregation {
                     source_uri: uri.clone(),
                     range: td.range,
                 });
-            }
-
-            for rb in &summary.require_bindings {
-                if let Some(target_uri) = self.resolve_module_to_uri(&rb.module_path) {
-                    self.require_by_return
-                        .entry(target_uri)
-                        .or_default()
-                        .push(RequireDependant {
-                            source_uri: uri.clone(),
-                            local_name: rb.local_name.clone(),
-                        });
-                }
-            }
-
-            for type_name in &summary.referenced_type_names {
-                self.type_dependants.entry(type_name.clone()).or_default()
-                    .insert(uri.clone());
             }
         }
 
@@ -472,26 +435,6 @@ impl WorkspaceAggregation {
                 range: td.range,
             });
             candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
-        }
-
-        for rb in &summary.require_bindings {
-            if let Some(target_uri) = self.resolve_module_to_uri(&rb.module_path) {
-                self.require_by_return
-                    .entry(target_uri)
-                    .or_default()
-                    .push(RequireDependant {
-                        source_uri: uri.clone(),
-                        local_name: rb.local_name.clone(),
-                    });
-            }
-        }
-
-        // Use the pre-computed referenced type names from the summary
-        // (built during `build_file_analysis`) instead of re-walking every
-        // TypeFact on each upsert.
-        for type_name in &summary.referenced_type_names {
-            self.type_dependants.entry(type_name.clone()).or_default()
-                .insert(uri.clone());
         }
 
         self.summaries.insert(uri, summary);
@@ -565,20 +508,6 @@ impl WorkspaceAggregation {
         self.type_shard.retain(|_, candidates| {
             candidates.retain(|c| &c.source_uri != uri);
             !candidates.is_empty()
-        });
-
-        // Only remove entries where THIS file is the *source* (requirer),
-        // not where it is the *target* (required module).
-        self.require_by_return.retain(|_, deps| {
-            deps.retain(|d| &d.source_uri != uri);
-            !deps.is_empty()
-        });
-
-        // Prune this URI from every type_dependants bucket (file may
-        // be re-indexed with a different set of referenced types).
-        self.type_dependants.retain(|_, uris| {
-            uris.remove(uri);
-            !uris.is_empty()
         });
     }
 

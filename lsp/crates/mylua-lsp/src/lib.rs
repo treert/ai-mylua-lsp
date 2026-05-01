@@ -338,52 +338,12 @@ impl Backend {
                 summary.is_meta = true;
             }
 
-            // Snapshot the set of *indexed* URIs (entire workspace after
-            // cold-start, not just client-opened ones) BEFORE locking
-            // index, to avoid lock-order inversion with `consumer_loop`
-            // (which locks documents then index). Named `indexed_uris`
-            // to avoid confusion with the new `self.open_uris` field
-            // which is strictly the set of client-opened URIs.
-            let indexed_uris: std::collections::HashSet<Uri> =
-                self.documents.lock().unwrap().keys().cloned().collect();
-
-            let dependant_uris = {
+            let should_cascade = {
                 let mut idx = self.index.lock().unwrap();
                 let old_fp = idx.summaries.get(&uri).map(|s| s.signature_fingerprint);
                 let new_fp = summary.signature_fingerprint;
-
-                // Snapshot the OLD summary's type names before the
-                // upsert swaps the summary away. Together with the
-                // new summary's names below, this covers:
-                //   - rename (`@class Foo` → `@class Bar` — old `Foo`
-                //     is in old set, lets us invalidate its dependants)
-                //   - delete (`@class` annotation removed entirely —
-                //     only old set contains the name)
-                //   - add / edit (new set contains the name)
-                let old_type_names: Vec<String> = idx
-                    .summaries
-                    .get(&uri)
-                    .map(|s| s.type_definitions.iter().map(|t| t.name.clone()).collect())
-                    .unwrap_or_default();
-                let new_type_names: Vec<String> = summary
-                    .type_definitions
-                    .iter()
-                    .map(|t| t.name.clone())
-                    .collect();
-
                 idx.upsert_summary(summary);
-
-                if old_fp.is_some_and(|old| old != new_fp) {
-                    let mut affected = old_type_names;
-                    for n in new_type_names {
-                        if !affected.contains(&n) {
-                            affected.push(n);
-                        }
-                    }
-                    indexing::collect_dependant_uris(&uri, &idx, &indexed_uris, &affected)
-                } else {
-                    Vec::new()
-                }
+                old_fp.is_some_and(|old| old != new_fp)
             };
 
             self.documents.lock().unwrap().insert(
@@ -409,28 +369,38 @@ impl Backend {
             } else {
                 diagnostic_scheduler::Priority::Cold
             };
-            self.scheduler.schedule(uri, pri);
+            self.scheduler.schedule(uri.clone(), pri);
 
-            // Cascade: signature-fingerprint change → re-diagnose
-            // dependent URIs. Scope config (Full | OpenOnly) decides
-            // whether we also re-diagnose closed dependants. Snapshot
-            // `open_uris` as a cheap clone (typical <100 opened URIs)
-            // and drop the lock before the scheduler.schedule loop to
-            // keep the lock-hold window tight — matches the style of
-            // `initialized`'s seed routine below.
-            let scope = self.config.lock().unwrap().diagnostics.scope.clone();
-            let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
-            for dep_uri in dependant_uris {
-                let dep_is_open = open.contains(&dep_uri);
-                if !dep_is_open && matches!(scope, config::DiagnosticScope::OpenOnly) {
-                    continue;
+            // Cascade: signature-fingerprint change → re-diagnose other
+            // files. Scope config (Full | OpenOnly) decides the set.
+            if should_cascade {
+                let diag_cfg = self.config.lock().unwrap().diagnostics.clone();
+                if diag_cfg.enable {
+                    let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
+                    match diag_cfg.scope {
+                        config::DiagnosticScope::OpenOnly => {
+                            for dep_uri in &open {
+                                if *dep_uri != uri {
+                                    self.scheduler.schedule(dep_uri.clone(), diagnostic_scheduler::Priority::Hot);
+                                }
+                            }
+                        }
+                        config::DiagnosticScope::Full => {
+                            let all_uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
+                            for dep_uri in all_uris {
+                                if dep_uri == uri {
+                                    continue;
+                                }
+                                let pri = if open.contains(&dep_uri) {
+                                    diagnostic_scheduler::Priority::Hot
+                                } else {
+                                    diagnostic_scheduler::Priority::Cold
+                                };
+                                self.scheduler.schedule(dep_uri, pri);
+                            }
+                        }
+                    }
                 }
-                let dep_pri = if dep_is_open {
-                    diagnostic_scheduler::Priority::Hot
-                } else {
-                    diagnostic_scheduler::Priority::Cold
-                };
-                self.scheduler.schedule(dep_uri, dep_pri);
             }
         }
     }

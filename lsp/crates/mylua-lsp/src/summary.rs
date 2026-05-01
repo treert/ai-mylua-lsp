@@ -104,22 +104,11 @@ pub struct DocumentSummary {
     /// Optional module name supplied via `---@meta <name>`; purely
     /// informational at present (no require_map mapping yet).
     pub meta_name: Option<String>,
-    /// Type names referenced by local variable type facts.
-    /// Pre-computed during build so `collect_referenced_type_names` in
-    /// aggregation can use this field.
-    pub referenced_local_type_names: std::collections::HashSet<String>,
     /// External global names referenced by this file, stored as a trie.
     /// Extracted from `FieldOf`/`GlobalRef` chains in all TypeFacts.
     /// Self-contributions (names in `global_contributions`) are excluded.
     #[serde(default)]
     pub global_ref_tree: GlobalRefTree,
-    /// All Emmy type names referenced by this file (scope declarations +
-    /// function signatures + class fields + global contributions + module
-    /// return type). Pre-computed during build; aggregation can use this
-    /// directly instead of re-walking every TypeFact on each upsert.
-    /// Self-defined types and generic params are excluded.
-    #[serde(default)]
-    pub referenced_type_names: std::collections::HashSet<String>,
 }
 
 /// One `function_call` occurrence recorded during summary build.

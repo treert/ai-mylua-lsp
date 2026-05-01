@@ -374,7 +374,7 @@ pub async fn run_workspace_scan(
         // module_index and aliases were already populated in Phase 1.5
         // (right after the scan). build_initial() does NOT clear
         // module_index — it only clears summaries, global_shard,
-        // type_shard, require_by_return, and type_dependants.
+        // type_shard.
         // So module_index is already ready for
         // resolve_module_to_uri during the merge.
 
@@ -665,55 +665,6 @@ async fn consumer_loop(
 }
 
 // ── Helpers ────────────────────────────────────────────────────────
-
-/// Collect URIs of dependent files (from the given candidate set) that
-/// depend on `uri` either via `require()` (require_by_return) or via
-/// Emmy type references (type_dependants — P1-7). `candidate_uris` is
-/// the filter set — typically the whole indexed workspace; **not** to
-/// be confused with `Backend.open_uris` (client-opened subset). The
-/// scope-based filtering (open-only vs full) happens in the caller's
-/// scheduler loop, not here.
-///
-/// De-duplicates across both sources so a file that both requires
-/// `uri` AND references one of its classes only appears once.
-pub(crate) fn collect_dependant_uris(
-    uri: &Uri,
-    idx: &crate::aggregation::WorkspaceAggregation,
-    candidate_uris: &std::collections::HashSet<Uri>,
-    affected_type_names: &[String],
-) -> Vec<Uri> {
-    let mut seen: std::collections::HashSet<Uri> = std::collections::HashSet::new();
-    let mut result = Vec::new();
-
-    if let Some(deps) = idx.require_by_return.get(uri) {
-        for dep in deps {
-            if candidate_uris.contains(&dep.source_uri) && seen.insert(dep.source_uri.clone()) {
-                result.push(dep.source_uri.clone());
-            }
-        }
-    }
-
-    // Cascade via the reverse type-dependency graph. `affected_type_names`
-    // includes BOTH the old summary's type names (so
-    // rename/delete still invalidates the abandoned name's
-    // dependants) and the new summary's type names (covers
-    // add/edit). The lib.rs call site is responsible for snapshotting
-    // the old set before `upsert_summary` swaps the summary.
-    for type_name in affected_type_names {
-        if let Some(uris) = idx.type_dependants.get(type_name) {
-            for dep_uri in uris {
-                if dep_uri == uri {
-                    continue;
-                }
-                if candidate_uris.contains(dep_uri) && seen.insert(dep_uri.clone()) {
-                    result.push(dep_uri.clone());
-                }
-            }
-        }
-    }
-
-    result
-}
 
 pub(crate) fn content_hash(s: &str) -> u64 {
     util::hash_bytes(s.as_bytes())
