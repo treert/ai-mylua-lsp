@@ -369,7 +369,6 @@ fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
 /// 1. More occurrences of "annotation" (case-insensitive) in the path = higher priority
 /// 2. Shallower paths (fewer `/` segments) win
 /// 3. Shorter total path length as tiebreaker
-/// 4. Lexicographic URI string for full determinism
 fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
     let path = uri.as_str();
     let lower = path.to_ascii_lowercase();
