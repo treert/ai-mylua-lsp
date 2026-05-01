@@ -477,3 +477,72 @@ end"#;
         locs,
     );
 }
+
+#[test]
+fn references_field_on_local_class_table_literal() {
+    // Same as references_field_on_local_class_function_name but with `= {}`
+    // instead of `= class(...)`. This tests the table-shape path:
+    // bound_class resolves to EmmyType, while type_fact is Table(shape_id).
+    // Both paths should agree on def_range so find_references works from
+    // both declaration site and usage site.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, summary_builder};
+
+    let mut parser = new_parser();
+    let src = r#"---@class MyObj
+local MyObj = {}
+
+function MyObj:hello()
+    print("hello")
+end
+
+function MyObj:caller()
+    self:hello()
+end"#;
+    let uri = make_uri("local_table_class.lua");
+    let tree = parser.parse(src.as_bytes(), None).unwrap();
+    let result = summary_builder::build_file_analysis(
+        &uri, &tree, src.as_bytes(), &mylua_lsp::util::LineIndex::new(src.as_bytes()),
+    );
+    let doc = Document {
+        lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
+        tree,
+        scope_tree: result.1,
+    };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(result.0);
+
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Click on `hello` at declaration: `function MyObj:hello()` (line 3, col 15)
+    let from_decl = references::find_references(
+        doc, &uri, pos(3, 15), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find references for hello from declaration");
+
+    // Click on `hello` at usage: `self:hello()` (line 8, col 9)
+    let from_usage = references::find_references(
+        doc, &uri, pos(8, 9), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find references for hello from usage");
+
+    // Both should find at least 2 (declaration + self:hello())
+    assert!(
+        from_decl.len() >= 2,
+        "from declaration site: expected >= 2, got {}: {:?}",
+        from_decl.len(), from_decl,
+    );
+    assert!(
+        from_usage.len() >= 2,
+        "from usage site: expected >= 2, got {}: {:?}",
+        from_usage.len(), from_usage,
+    );
+
+    // Both should return the same set of locations
+    assert_eq!(
+        from_decl, from_usage,
+        "references from declaration and usage should match",
+    );
+}
