@@ -41,13 +41,13 @@ pub(crate) fn is_type_compatible(declared: &TypeFact, actual: &TypeFact) -> bool
             types.iter().all(|t| is_type_compatible(declared, t))
         }
         (TypeFact::Stub(SymbolicStub::TypeRef { name }), TypeFact::Known(a)) => {
-            is_named_type_compatible(name, a)
+            is_named_type_compatible(name, a, &[])
         }
         _ => true,
     }
 }
 
-pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType) -> bool {
+pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType, declared_params: &[TypeFact]) -> bool {
     match (name, actual) {
         ("string", KnownType::String) => true,
         ("number" | "integer", KnownType::Number | KnownType::Integer) => true,
@@ -63,6 +63,21 @@ pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType) -> bool {
         ("string", KnownType::Number | KnownType::Boolean) => false,
         ("number" | "integer", KnownType::String | KnownType::Boolean) => false,
         ("boolean", KnownType::String | KnownType::Number) => false,
+        // For EmmyGeneric: check if name matches and parameters are compatible
+        (n, KnownType::EmmyGeneric(actual_name, actual_params)) if n == actual_name => {
+            // If declared side has no parameters, allow any actual parameters (backwards compat)
+            if declared_params.is_empty() {
+                return true;
+            }
+            // If parameter counts differ, they're incompatible
+            if declared_params.len() != actual_params.len() {
+                return false;
+            }
+            // Recursively check all parameters for compatibility
+            declared_params.iter().zip(actual_params.iter()).all(|(d, a)| {
+                is_type_compatible(d, a)
+            })
+        }
         _ => true,
     }
 }
@@ -79,8 +94,27 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
         (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name == "__array" => true,
         (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name == "__array" => true,
         (KnownType::Function(_) | KnownType::FunctionRef(_), KnownType::Function(_) | KnownType::FunctionRef(_)) => true,
+        // Handle EmmyGeneric vs EmmyGeneric comparison: check parameters
+        (KnownType::EmmyGeneric(d_name, d_params), KnownType::EmmyGeneric(a_name, a_params)) => {
+            // Names must match
+            if d_name != a_name {
+                return false;
+            }
+            // If declared has no parameters, accept any actual parameters (backwards compat)
+            if d_params.is_empty() {
+                return true;
+            }
+            // If parameter counts differ, they're incompatible
+            if d_params.len() != a_params.len() {
+                return false;
+            }
+            // Recursively check all parameters for compatibility
+            d_params.iter().zip(a_params.iter()).all(|(d, a)| {
+                is_type_compatible(d, a)
+            })
+        }
         (KnownType::EmmyType(name), actual) | (KnownType::EmmyGeneric(name, _), actual) => {
-            is_named_type_compatible(name, actual)
+            is_named_type_compatible(name, actual, &[])
         }
         (KnownType::String, KnownType::Number | KnownType::Integer | KnownType::Boolean) => false,
         (KnownType::Number | KnownType::Integer, KnownType::String | KnownType::Boolean) => false,
