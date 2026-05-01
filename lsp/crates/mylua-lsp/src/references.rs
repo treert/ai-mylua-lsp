@@ -374,9 +374,15 @@ fn resolve_segments_to_field(
     index: &WorkspaceAggregation,
     lookup_byte: usize,
 ) -> Option<(Uri, ByteRange)> {
-    // First, infer the type of the root segment
+    // First, infer the type of the root segment.
+    // Prefer bound_class (@class binding) over resolve_type, because @class
+    // is the most explicit type declaration. When a local has both
+    // `---@class Foo` and a type_fact from its initializer (e.g. a function
+    // call whose return is unknown), bound_class is authoritative.
     let root_name = &segments[0];
-    let root_fact = if let Some(tf) = scope_tree.resolve_type(lookup_byte, root_name) {
+    let root_fact = if let Some(class_name) = scope_tree.resolve_bound_class(lookup_byte, root_name) {
+        crate::type_system::TypeFact::Known(crate::type_system::KnownType::EmmyType(class_name.to_string()))
+    } else if let Some(tf) = scope_tree.resolve_type(lookup_byte, root_name) {
         tf.clone()
     } else {
         crate::type_system::TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {

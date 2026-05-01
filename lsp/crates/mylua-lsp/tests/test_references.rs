@@ -430,7 +430,7 @@ fn references_field_on_local_class_function_name() {
 
     let mut parser = new_parser();
     let src = r#"---@class ClassB1
-local ClassB1 = {}
+local ClassB1 = class("ClassB1")
 
 function ClassB1:bbb()
     print("bbb")
