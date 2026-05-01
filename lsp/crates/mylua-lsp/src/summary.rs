@@ -160,6 +160,11 @@ pub struct GlobalContribution {
     pub type_fact: TypeFact,
     pub range: ByteRange,
     pub selection_range: ByteRange,
+    /// `true` when the original source used colon syntax (`function Foo:m()`).
+    /// The `name` field is already normalized to dot form, so this flag
+    /// preserves the method vs function distinction for display purposes.
+    #[serde(default)]
+    pub is_method: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

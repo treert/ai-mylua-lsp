@@ -49,6 +49,8 @@ pub struct GlobalCandidate {
     pub range: ByteRange,
     pub selection_range: ByteRange,
     pub source_uri: Uri,
+    /// `true` when the original source used colon syntax.
+    pub is_method: bool,
 }
 
 // ---------------------------------------------------------------------------
@@ -443,6 +445,7 @@ impl WorkspaceAggregation {
                     range: gc.range,
                     selection_range: gc.selection_range,
                     source_uri: uri.clone(),
+                    is_method: gc.is_method,
                 });
             }
 
@@ -519,6 +522,7 @@ impl WorkspaceAggregation {
                 range: gc.range,
                 selection_range: gc.selection_range,
                 source_uri: uri.clone(),
+                is_method: gc.is_method,
             });
             self.global_shard.sort_at(&gc.name, |c| uri_priority_key(&c.source_uri));
         }

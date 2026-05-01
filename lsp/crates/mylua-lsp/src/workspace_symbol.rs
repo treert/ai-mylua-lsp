@@ -188,23 +188,12 @@ fn split_qualified_name(
     name: &str,
     candidates: &[crate::aggregation::GlobalCandidate],
 ) -> (String, Option<String>, Option<SymbolKind>) {
-    // `:method` binds tightest — prefer colon split over dot split.
-    if let Some((class, member)) = name.rsplit_once(':') {
-        if !class.is_empty() && !member.is_empty() {
-            return (
-                member.to_string(),
-                Some(class.to_string()),
-                Some(SymbolKind::METHOD),
-            );
-        }
-    }
     if let Some((class, member)) = name.rsplit_once('.') {
         if !class.is_empty() && !member.is_empty() {
-            // `.` accessors may be method-like or field-like; drive the
-            // kind off the candidate (if any is a Function, go METHOD
-            // so it shows up in IDE "Go to Symbol" as a method-style
-            // entry; otherwise FIELD).
-            let kind = if candidates
+            // If any candidate was originally a colon-method, use METHOD kind.
+            let kind = if candidates.iter().any(|c| c.is_method) {
+                SymbolKind::METHOD
+            } else if candidates
                 .iter()
                 .any(|c| matches!(c.kind, GlobalContributionKind::Function))
             {

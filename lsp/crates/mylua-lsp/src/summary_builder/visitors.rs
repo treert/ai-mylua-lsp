@@ -696,6 +696,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     }
 
     // Global function: colon→dot normalization for both index and contribution.
+    let is_method = name.contains(':');
     let normalized = name.replace(':', ".");
     ctx.function_name_index.insert(normalized.clone(), func_id);
 
@@ -707,6 +708,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
         selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+        is_method,
     });
 }
 
@@ -1059,6 +1061,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     type_fact,
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
+                    is_method: false,
                 });
             }
             // Field assignment: `x.foo = expr` or `a.b.c = expr` etc.
@@ -1150,6 +1153,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     type_fact,
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
+                    is_method: false,
                 });
             }
             // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
