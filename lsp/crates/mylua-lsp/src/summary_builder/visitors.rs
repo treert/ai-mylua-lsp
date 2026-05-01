@@ -357,6 +357,29 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 continue;
             }
 
+
+            // If we have a pending class binding (from ---@class) and this is
+            // the first local with no explicit @type annotation, use the class
+            // type as the type_fact so that method resolution can find the
+            // class's methods. This makes local classes consistent with global
+            // classes (which populate type_fact directly in visit_assignment).
+            if i == 0 && var_bound_class.is_some() && pending_type.is_none() {
+                let class_name = var_bound_class.clone().unwrap();
+                let class_type_fact = TypeFact::Known(KnownType::EmmyType(class_name));
+                ctx.add_scoped_decl(ScopeDecl {
+                    name: name.clone(),
+                    kind: DefKind::LocalVariable,
+                    decl_byte: name_node.start_byte(),
+                    visible_after_byte: node.end_byte(),
+                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
+                    selection_range: range,
+                    type_fact: Some(class_type_fact),
+                    bound_class: var_bound_class.clone(),
+                    is_emmy_annotated: true,
+                });
+                continue;
+            }
+
             let type_fact = infer_expression_type(ctx, val, 0);
             // When the RHS is a literal table constructor, stamp
             // this binding name onto the freshly-allocated shape so
