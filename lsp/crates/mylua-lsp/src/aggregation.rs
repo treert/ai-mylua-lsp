@@ -372,21 +372,11 @@ fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
 /// 4. Lexicographic URI string for full determinism
 fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
     let path = uri.as_str();
-    let bytes = path.as_bytes();
-    // Count case-insensitive occurrences of "annotation" without allocating.
-    let pattern = b"annotation";
-    let mut annotation_count = 0usize;
-    let mut i = 0;
-    while i + pattern.len() <= bytes.len() {
-        if bytes[i..i + pattern.len()].eq_ignore_ascii_case(pattern) {
-            annotation_count += 1;
-            i += pattern.len();
-        } else {
-            i += 1;
-        }
-    }
+    let lower = path.to_ascii_lowercase();
+    let annotation_count = lower.matches("annotation").count();
+    // Negate: more occurrences → smaller key → higher priority
     let annotation_key = usize::MAX - annotation_count;
-    let depth = bytes.iter().filter(|&&b| b == b'/').count();
+    let depth = path.matches('/').count();
     (annotation_key, depth, path.len())
 }
 
