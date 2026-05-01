@@ -13,7 +13,7 @@ fn workspace_symbol_class_fields_visible_with_container_name() {
 ---@field baz string
 Foo = {}
 "#;
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("bar", &agg);
     let field = results
@@ -36,7 +36,7 @@ Foo = {}
 ---@field bar string
 Bar = {}
 "#);
-    let (docs, agg, _parser) = setup_workspace(&[a, b]);
+    let (_docs, agg, _parser) = setup_workspace(&[a, b]);
 
     let results = search_workspace_symbols("bar", &agg);
     let bar_fields: Vec<_> = results
@@ -60,7 +60,7 @@ fn workspace_symbol_method_splits_qualified_name() {
 Foo = {}
 function Foo:myMethod() end
 "#;
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("myMethod", &agg);
     let m = results
@@ -84,7 +84,7 @@ fn workspace_symbol_dot_method_is_function_kind() {
 Foo = {}
 function Foo.bar() end
 "#;
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("bar", &agg);
     let entry = results
@@ -104,7 +104,7 @@ fn workspace_symbol_function_value_on_class_promoted_to_function() {
 Foo = {}
 Foo.bar = function() end
 "#;
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("bar", &agg);
     let entry = results
@@ -135,7 +135,7 @@ fn workspace_symbol_global_function_still_listed() {
     // Plain top-level `function helper() end` still appears as a
     // FUNCTION symbol with no container.
     let src = "function helper() end\n";
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("helper", &agg);
     let h = results
@@ -150,7 +150,7 @@ fn workspace_symbol_global_function_still_listed() {
 fn workspace_symbol_class_itself_surfaces() {
     // `@class Foo` is itself searchable as CLASS.
     let src = "---@class MyClass\nMyClass = {}\n";
-    let (docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
+    let (_docs, agg, _parser) = setup_workspace(&[("a.lua", src)]);
 
     let results = search_workspace_symbols("MyClass", &agg);
     assert!(
