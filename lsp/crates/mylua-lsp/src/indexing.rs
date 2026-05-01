@@ -36,6 +36,7 @@ pub(crate) async fn send_index_status(client: &Client, state: &str, indexed: u64
             elapsed_ms: None,
             phase: None,
             message: None,
+            remaining: None,
         })
         .await;
 }
@@ -55,6 +56,7 @@ pub(crate) async fn send_index_phase(
             elapsed_ms: None,
             phase: Some(phase.to_string()),
             message: Some(message.to_string()),
+            remaining: None,
         })
         .await;
 }
@@ -68,6 +70,7 @@ pub(crate) async fn send_index_ready(client: &Client, indexed: u64, total: u64, 
             elapsed_ms: Some(elapsed_ms),
             phase: None,
             message: None,
+            remaining: None,
         })
         .await;
 }
@@ -477,6 +480,60 @@ pub(crate) fn start_diagnostic_consumer(
     library_uris: Arc<Mutex<HashSet<Uri>>>,
     client: Client,
 ) {
+    // Diagnostic progress reporter: 100ms snapshot of remaining queue size.
+    // Exits once the queue is first drained after having seen work.
+    // Uses `seen_nonzero` to avoid a race where Ready is set but
+    // seed_bulk hasn't run yet (pending_count would be 0 briefly).
+    {
+        let sched = scheduler.clone();
+        let state = index_state.clone();
+        let cl = client.clone();
+        tokio::spawn(async move {
+            let mut seen_nonzero = false;
+            let mut ready_ticks: u32 = 0;
+            loop {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                if *state.lock().unwrap() != IndexState::Ready {
+                    continue;
+                }
+                let remaining = sched.pending_count();
+                if remaining > 0 {
+                    seen_nonzero = true;
+                    ready_ticks = 0;
+                    cl.send_notification::<IndexStatusNotification>(IndexStatusParams {
+                        state: "diagnosing".to_string(),
+                        indexed: 0,
+                        total: 0,
+                        elapsed_ms: None,
+                        phase: Some("diagnosing".to_string()),
+                        message: Some(format!("{} files remaining", remaining)),
+                        remaining: Some(remaining as u64),
+                    })
+                    .await;
+                } else if seen_nonzero {
+                    // All caught up — send final "ready" with remaining=0 and exit.
+                    cl.send_notification::<IndexStatusNotification>(IndexStatusParams {
+                        state: "ready".to_string(),
+                        indexed: 0,
+                        total: 0,
+                        elapsed_ms: None,
+                        phase: None,
+                        message: None,
+                        remaining: Some(0),
+                    })
+                    .await;
+                    break;
+                } else {
+                    // Ready but seed_bulk hasn't fired yet — wait up to 2s.
+                    ready_ticks += 1;
+                    if ready_ticks >= 20 {
+                        break; // Nothing was seeded (e.g. OpenOnly scope with no files).
+                    }
+                }
+            }
+        });
+    }
+
     tokio::spawn(async move {
         loop {
             let s = scheduler.clone();

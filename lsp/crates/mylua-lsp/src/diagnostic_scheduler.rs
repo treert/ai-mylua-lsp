@@ -141,6 +141,12 @@ impl DiagnosticScheduler {
         self.notify.notify_one();
     }
 
+    /// 当前待处理 URI 数量（即尚未被 consumer pop 走的任务数）。
+    pub fn pending_count(&self) -> usize {
+        let inner = self.inner.lock().unwrap();
+        inner.enqueued.len()
+    }
+
     /// 文件 DELETED 时清空 scheduler 里与 `uri` 相关的状态。
     /// 不物理移除 hot/cold 队列里的残留——consumer 侧对 `documents` 不存在
     /// 的 URI 会跳过，自然容错。

@@ -112,6 +112,10 @@ pub struct IndexStatusParams {
     /// Human-readable message for the current phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Remaining files awaiting background diagnostics.
+    /// Only present when `state == "diagnosing"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remaining: Option<u64>,
 }
 
 pub enum IndexStatusNotification {}

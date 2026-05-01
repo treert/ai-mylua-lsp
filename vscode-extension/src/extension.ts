@@ -12,14 +12,16 @@ let statusBarItem: vscode.StatusBarItem | undefined;
 let readyNotified = false;
 
 type IndexStatusParams = {
-  state: 'indexing' | 'ready';
+  state: 'indexing' | 'diagnosing' | 'ready';
   indexed: number;
   total: number;
   elapsedMs?: number;
-  /** Current indexing phase: 'scanning' | 'module_map_ready' | 'parsing' | 'merging'. */
-  phase?: 'scanning' | 'module_map_ready' | 'parsing' | 'merging';
+  /** Current indexing phase: 'scanning' | 'module_map_ready' | 'parsing' | 'merging' | 'diagnosing'. */
+  phase?: 'scanning' | 'module_map_ready' | 'parsing' | 'merging' | 'diagnosing';
   /** Human-readable message for the current phase. */
   message?: string;
+  /** Remaining files awaiting background diagnostics. */
+  remaining?: number;
 };
 
 /// Bundled stdlib fallback chain. Ordered newest→oldest so the most
@@ -145,6 +147,10 @@ function renderStatus(status: IndexStatusParams): void {
         () => new Promise<void>((resolve) => setTimeout(resolve, 4000)),
       );
     }
+  } else if (status.state === 'diagnosing') {
+    const r = status.remaining ?? 0;
+    statusBarItem.text = `💚${r}`;
+    statusBarItem.tooltip = `MyLua: diagnosing files (${r} remaining) — click to open settings`;
   } else {
     const total = status.total;
     const phase = status.phase;
