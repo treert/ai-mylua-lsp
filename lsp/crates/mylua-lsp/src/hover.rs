@@ -13,7 +13,7 @@ pub fn hover(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
@@ -412,7 +412,7 @@ fn hover_method_call(
     call_node: tree_sitter::Node,
     doc: &Document,
     uri: &Uri,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.source();
@@ -429,7 +429,7 @@ fn hover_variable_field(
     var_node: tree_sitter::Node,
     doc: &Document,
     uri: &Uri,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
 ) -> Option<Hover> {
     let source = doc.source();
@@ -468,7 +468,7 @@ fn build_field_hover(
     source: &[u8],
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
     line_index: &LineIndex,
 ) -> Option<Hover> {
@@ -495,7 +495,7 @@ fn build_field_chain_hover(
     source: &[u8],
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     all_docs: &std::collections::HashMap<Uri, Document>,
     line_index: &LineIndex,
 ) -> Option<Hover> {
@@ -549,7 +549,7 @@ fn resolve_local_type_info(
     name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<String> {
     // FunctionRef hover fix: resolve to readable signature via scope_tree
     if let Some(type_fact) = scope_tree.resolve_type(byte_offset, name) {

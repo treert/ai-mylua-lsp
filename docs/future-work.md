@@ -26,24 +26,13 @@
 - **方案**：value 改为 `HashSet<Uri>`；引入 `per_uri_contributions` 反查表，删除时只动相关桶。
 - **验收**：10,000 文件工作区，upsert 耗时从 O(all buckets) 降到 O(本文件贡献数)。
 
-### 1.4 [P2] `collect_affected_names` 漏收 type_fact 引用的外部名字
-
-- **问题**：只收本文件**定义**的名字，不收 `type_fact` 里**引用**的外部类型名。导致 `resolution_cache` 漏标脏。
-- **方案**：扩展收集 `type_fact` 中的 `GlobalRef` / `TypeRef` 名字。随 1.1 一起做。
-- **验收**：field 类型从 `OldT` 改为 `NewT`，相关 cache 都被标脏。
-
-### 1.5 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
+### 1.4 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
 
 - **问题**：不含 fields / parents，消费方需回查 `summaries[uri].type_definitions` 做 `find()` 线扫。
 - **方案**：`type_definitions` 改为 `HashMap<String, TypeDefinition>`，O(1) 查询。注意同文件多同名 class 的去重。
 - **验收**：hover 热路径的"候选 → 详情"查找耗时下降。
 
-### 1.6 [P3] `invalidate_dependants_targeted` 命名/契约模糊
-
-- **问题**：函数名暗示"一键级联失效"，实际只改 `resolution_cache` dirty 位。
-- **方案**：重命名为 `mark_resolution_cache_dirty_for`，或提供 `cascade_invalidate` facade 收敛职责。
-
-### 1.7 [P2] `find_global_references` 全量 AST 扫描不区分 global/local
+### 1.5 [P2] `find_global_references` 全量 AST 扫描不区分 global/local
 
 - **问题**：`references.rs::find_global_references` 遍历所有文件 AST，匹配 `identifier` 节点名字。但不使用 `scope_tree` 判断该标识符是全局还是同名 local，导致 `local Mgr = {}; Mgr.init()` 也被当作全局引用收进结果（误报）。`collect_emmy_type_references` 同理走纯文本匹配。
 - **方案**：扫描时用 `scope_tree.resolve()` 判断标识符是否为 local 声明，过滤掉同名 local。需要 `parse_temp` 同时建 scope_tree，或先完成 1.4（引用反向索引）缩小扫描范围后再处理。

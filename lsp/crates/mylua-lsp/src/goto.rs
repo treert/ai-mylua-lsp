@@ -10,7 +10,7 @@ pub fn goto_definition(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
@@ -126,7 +126,7 @@ pub fn goto_type_definition(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
@@ -168,7 +168,7 @@ fn type_definition_for_local(
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
     // Resolve the local's type via scope_tree
@@ -233,7 +233,7 @@ fn goto_variable_field(
     var_node: tree_sitter::Node,
     doc: &Document,
     uri: &Uri,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
@@ -257,7 +257,7 @@ fn goto_method_call(
     call_node: tree_sitter::Node,
     doc: &Document,
     uri: &Uri,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
@@ -274,7 +274,7 @@ fn goto_field_or_method(
     source: &[u8],
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 

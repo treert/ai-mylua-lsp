@@ -27,9 +27,6 @@ pub struct WorkspaceAggregation {
     /// the changed class needs its semantic diagnostics recomputed,
     /// even if it doesn't `require()` the defining file.
     pub type_dependants: HashMap<String, HashSet<Uri>>,
-    /// Resolved cross-file type cache; entries are lazily populated and
-    /// marked dirty on upstream signature changes.
-    pub resolution_cache: HashMap<CacheKey, CachedResolution>,
 
     /// Module index: last_segment → Vec<(full_module_name, Uri)>.
     /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
@@ -312,59 +309,6 @@ pub struct RequireDependant {
     pub local_name: String,
 }
 
-/// Key for the cross-file resolution cache.
-///
-/// `FieldAccess { base_key, field }` covers both "field on a global" and
-/// "field on a type" via its `base_key` — there is no separate `GlobalField`
-/// / `TypeField` variant. Keep this enum minimal to avoid dead code.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CacheKey {
-    RequireReturn { module_path: String },
-    /// Resolve a global name itself (not a field on it).
-    Global { name: String },
-    /// Resolve an Emmy type name itself (not a field on it).
-    Type { name: String },
-    CallReturn { base_key: Box<CacheKey>, func_name: String, is_method_call: bool },
-    FieldAccess { base_key: Box<CacheKey>, field: String },
-}
-
-/// Cached result of cross-file type resolution.
-///
-/// `def_uri` / `def_range` are preserved so that subsequent cache hits
-/// produce the *same* `ResolvedType` as the cold-path resolution —
-/// crucial for `Known(Table(shape_id))` where the shape id is per-file
-/// and a dropped `def_uri` silently turns table field lookups into
-/// `Unknown` (manifested as false-positive `Unknown field` diagnostics
-/// and hover returning no type on the second access).
-#[derive(Debug, Clone)]
-pub struct CachedResolution {
-    pub resolved_type: TypeFact,
-    pub def_uri: Option<Uri>,
-    pub def_range: Option<ByteRange>,
-    pub dirty: bool,
-}
-
-/// Names affected by a file update, used for targeted cache invalidation.
-struct AffectedNames {
-    module_paths: HashSet<String>,
-    global_names: HashSet<String>,
-    type_names: HashSet<String>,
-}
-
-/// Check whether a cache key transitively depends on any of the affected names.
-fn cache_key_affected(key: &CacheKey, affected: &AffectedNames) -> bool {
-    match key {
-        CacheKey::RequireReturn { module_path } => {
-            affected.module_paths.contains(module_path)
-        }
-        CacheKey::Global { name } => affected.global_names.contains(name),
-        CacheKey::Type { name } => affected.type_names.contains(name),
-        CacheKey::CallReturn { base_key, .. } | CacheKey::FieldAccess { base_key, .. } => {
-            cache_key_affected(base_key, affected)
-        }
-    }
-}
-
 /// Priority key for sorting candidates (smaller = higher priority):
 /// 1. More occurrences of "annotation" as a separate path segment = higher priority
 /// 2. Shallower paths (fewer `/` segments) win
@@ -398,7 +342,6 @@ impl WorkspaceAggregation {
             type_shard: HashMap::new(),
             require_by_return: HashMap::new(),
             type_dependants: HashMap::new(),
-            resolution_cache: HashMap::new(),
             module_index: HashMap::new(),
             require_aliases: HashMap::new(),
         }
@@ -424,7 +367,6 @@ impl WorkspaceAggregation {
         self.type_shard.clear();
         self.require_by_return.clear();
         self.type_dependants.clear();
-        self.resolution_cache.clear();
 
         // 1. Insert all summaries first (consuming the owned Vec to avoid
         //    deep-cloning every DocumentSummary) so `resolve_module_to_uri`
@@ -500,29 +442,10 @@ impl WorkspaceAggregation {
 
     /// Integrate a new or updated file summary into the aggregation layer.
     ///
-    /// Performs a name-level diff: removes old contributions from this URI,
-    /// inserts new ones, and marks affected resolution cache entries as dirty
-    /// if the file's signature fingerprint changed.
-    /// Also synchronizes legacy `globals` field for backward compatibility.
+    /// Performs a name-level diff: removes old contributions from this URI
+    /// and inserts new ones.
     pub fn upsert_summary(&mut self, summary: DocumentSummary) {
         let uri = summary.uri.clone();
-        let old_fingerprint = self
-            .summaries
-            .get(&uri)
-            .map(|s| s.signature_fingerprint);
-
-        // `affected` only drives `invalidate_dependants_targeted`,
-        // which walks `resolution_cache` looking for stale entries.
-        // Skip the collection pass entirely when the cache is empty
-        // (true for the entire cold-start scan, since no resolver
-        // has run yet) — this avoids an O(require_map) + O(old
-        // summary contributions) pass per upsert that compounded
-        // the merge-phase O(N²) alongside `remove_contributions`.
-        let affected = if self.resolution_cache.is_empty() {
-            None
-        } else {
-            Some(self.collect_affected_names(&uri, &summary))
-        };
 
         self.remove_contributions(&uri);
 
@@ -569,13 +492,6 @@ impl WorkspaceAggregation {
         for type_name in &summary.referenced_type_names {
             self.type_dependants.entry(type_name.clone()).or_default()
                 .insert(uri.clone());
-        }
-
-        let fingerprint_changed = old_fingerprint != Some(summary.signature_fingerprint);
-        if fingerprint_changed {
-            if let Some(ref affected) = affected {
-                self.invalidate_dependants_targeted(affected);
-            }
         }
 
         self.summaries.insert(uri, summary);
@@ -664,65 +580,6 @@ impl WorkspaceAggregation {
             uris.remove(uri);
             !uris.is_empty()
         });
-    }
-
-    /// Collect the set of module paths, global names, and type names affected
-    /// by updating a file. Merges contributions from the old summary (if any)
-    /// and the new summary so that both added and removed names are covered.
-    fn collect_affected_names(
-        &self,
-        uri: &Uri,
-        new_summary: &DocumentSummary,
-    ) -> AffectedNames {
-        let mut module_paths: HashSet<String> = HashSet::new();
-        let mut global_names: HashSet<String> = HashSet::new();
-        let mut type_names: HashSet<String> = HashSet::new();
-
-        // Names from the old summary (about to be removed)
-        if let Some(old) = self.summaries.get(uri) {
-            for gc in &old.global_contributions {
-                global_names.insert(gc.name.clone());
-            }
-            for td in &old.type_definitions {
-                type_names.insert(td.name.clone());
-            }
-        }
-
-        // Names from the new summary (about to be inserted)
-        for gc in &new_summary.global_contributions {
-            global_names.insert(gc.name.clone());
-        }
-        for td in &new_summary.type_definitions {
-            type_names.insert(td.name.clone());
-        }
-
-        // Module paths that resolve to this URI
-        for entries in self.module_index.values() {
-            for (mod_path, target_uri) in entries {
-                if target_uri == uri {
-                    module_paths.insert(mod_path.clone());
-                }
-            }
-        }
-
-        AffectedNames { module_paths, global_names, type_names }
-    }
-
-    /// Mark only the resolution cache entries that transitively depend on the
-    /// affected names (global contributions, type definitions, or require
-    /// targets from the changed file).
-    fn invalidate_dependants_targeted(&mut self, affected: &AffectedNames) {
-        if affected.module_paths.is_empty()
-            && affected.global_names.is_empty()
-            && affected.type_names.is_empty()
-        {
-            return;
-        }
-        for (key, entry) in self.resolution_cache.iter_mut() {
-            if !entry.dirty && cache_key_affected(key, affected) {
-                entry.dirty = true;
-            }
-        }
     }
 
     /// Resolve a `require("module.path")` string to a file URI.

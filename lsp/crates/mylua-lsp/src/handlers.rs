@@ -618,9 +618,9 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
+        let idx = self.index.lock().unwrap();
         let cfg = self.config.lock().unwrap().inlay_hint.clone();
-        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &mut idx, &cfg)))
+        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &idx, &cfg)))
     }
 
     async fn selection_range(
@@ -657,9 +657,9 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
+        let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        let result = goto::goto_definition(doc, uri, position, &mut idx, &strategy);
+        let result = goto::goto_definition(doc, uri, position, &idx, &strategy);
         match &result {
             Some(GotoDefinitionResponse::Scalar(loc)) => {
                 lsp_log!("[goto] result: {:?} {}:{}-{}:{}", loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
@@ -689,9 +689,9 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
+        let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_type_definition(doc, uri, position, &mut idx, &strategy))
+        Ok(goto::goto_type_definition(doc, uri, position, &idx, &strategy))
     }
 
     /// Lua has no distinct forward-declaration concept: "declaration"
@@ -708,9 +708,9 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
+        let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_definition(doc, uri, position, &mut idx, &strategy))
+        Ok(goto::goto_definition(doc, uri, position, &idx, &strategy))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
@@ -720,8 +720,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri, position, &mut idx, &docs))
+        let idx = self.index.lock().unwrap();
+        Ok(hover::hover(doc, uri, position, &idx, &docs))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -731,8 +731,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
-        let items = completion::complete(doc, uri, position, &mut idx);
+        let idx = self.index.lock().unwrap();
+        let items = completion::complete(doc, uri, position, &idx);
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -811,8 +811,8 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(uri) else {
             return Ok(None);
         };
-        let mut idx = self.index.lock().unwrap();
-        Ok(signature_help::signature_help(doc, uri, position, &mut idx))
+        let idx = self.index.lock().unwrap();
+        Ok(signature_help::signature_help(doc, uri, position, &idx))
     }
 
     async fn semantic_tokens_full(

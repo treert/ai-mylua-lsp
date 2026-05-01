@@ -32,7 +32,7 @@ pub fn complete(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Vec<CompletionItem> {
     // `require("<here>")` string-literal completion — highest priority.
     if let Some(items) = try_require_path_completion(doc, position, index) {
@@ -190,7 +190,7 @@ fn try_dot_completion_ast(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if offset == 0 {

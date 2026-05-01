@@ -154,14 +154,7 @@ hover 在 p.name 上
 
 每步都是索引查表（O(1) map lookup），整体 O(链长)，不需要重新解析 AST。
 
-### 5.2 解析缓存
-
-| 缓存键 | 失效条件 |
-|--------|---------|
-| `(RequireRef("protocol"), "new_player")` | protocol.lua Summary 变更 |
-| `(GlobalRef("Mgr"), "create")` | 贡献 "Mgr.create" 的文件 Summary 变更 |
-
-缓存失效采用**标记脏 + 惰性重算**。解析过程维护访问栈，检测到环路时返回 `unknown`。
+解析过程维护访问栈（visited set），检测到环路时返回 `unknown`，最大深度 32。
 
 ---
 
@@ -207,7 +200,7 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
     → GlobalContributions 变化 → 更新 GlobalShard
     → TypeTable 变化 → 更新 TypeShard
     → RequireBindings 变化 → 更新 RequireByReturn
-    → 签名变化 → 标记依赖方解析缓存为脏
+    → 签名变化 → 调度依赖方诊断重算
   → 用 S' 替换 S → 调度诊断
 ```
 

@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::Uri;
 
-use crate::aggregation::{CacheKey, CachedResolution, WorkspaceAggregation};
+use crate::aggregation::WorkspaceAggregation;
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
 use crate::util::ByteRange;
@@ -34,7 +34,7 @@ impl ResolvedType {
 /// using the workspace aggregation layer.
 pub fn resolve_type(
     fact: &TypeFact,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> ResolvedType {
     let mut visited = HashSet::new();
     resolve_recursive(fact, agg, 0, &mut visited)
@@ -50,7 +50,7 @@ pub fn resolve_type(
 pub fn resolve_field_chain(
     base_fact: &TypeFact,
     fields: &[String],
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> ResolvedType {
     resolve_field_chain_inner(base_fact, fields, agg, None)
 }
@@ -65,7 +65,7 @@ pub fn resolve_field_chain_in_file(
     uri: &Uri,
     base_fact: &TypeFact,
     fields: &[String],
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> ResolvedType {
     resolve_field_chain_inner(base_fact, fields, agg, Some(uri))
 }
@@ -79,7 +79,7 @@ pub fn resolve_field_chain_in_file(
 fn resolve_field_chain_inner(
     base_fact: &TypeFact,
     fields: &[String],
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     uri_hint: Option<&Uri>,
 ) -> ResolvedType {
     let mut visited = HashSet::new();
@@ -169,7 +169,7 @@ pub fn resolve_local_in_file(
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> ResolvedType {
     let fact = match scope_tree.resolve_type(byte_offset, local_name) {
         Some(tf) => tf.clone(),
@@ -185,7 +185,7 @@ pub fn resolve_local_in_file(
 pub fn get_fields_for_type(
     fact: &TypeFact,
     source_uri_hint: Option<&Uri>,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
     // Collect global_shard direct children BEFORE resolving, so that
     // table-extension globals (e.g. `UE4.Foo`) are included even though
@@ -238,7 +238,7 @@ pub struct FieldCompletion {
 
 fn resolve_recursive(
     fact: &TypeFact,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -264,7 +264,7 @@ fn resolve_recursive(
 
 fn resolve_stub(
     stub: &SymbolicStub,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -273,23 +273,6 @@ fn resolve_stub(
         return ResolvedType::unknown();
     }
     visited.insert(visit_key.clone());
-
-    // Check resolution cache — preserving def_uri / def_range so that
-    // per-file shape ids (`Known(Table(shape_id))`) can still be looked
-    // up on warm hits.
-    if let Some(cache_key) = stub_to_cache_key(stub) {
-        if let Some(cached) = agg.resolution_cache.get(&cache_key) {
-            if !cached.dirty {
-                let result = ResolvedType {
-                    type_fact: cached.resolved_type.clone(),
-                    def_uri: cached.def_uri.clone(),
-                    def_range: cached.def_range,
-                };
-                visited.remove(&visit_key);
-                return result;
-            }
-        }
-    }
 
     let result = match stub {
         SymbolicStub::RequireRef { module_path } => {
@@ -313,24 +296,13 @@ fn resolve_stub(
         }
     };
 
-    // Cache the result — including def_uri / def_range (see the
-    // CachedResolution doc-comment for why).
-    if let Some(cache_key) = stub_to_cache_key(stub) {
-        agg.resolution_cache.insert(cache_key, CachedResolution {
-            resolved_type: result.type_fact.clone(),
-            def_uri: result.def_uri.clone(),
-            def_range: result.def_range,
-            dirty: false,
-        });
-    }
-
     visited.remove(&visit_key);
     result
 }
 
 fn resolve_require(
     module_path: &str,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -363,7 +335,7 @@ fn resolve_require(
 
 fn resolve_global(
     name: &str,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -392,7 +364,7 @@ fn resolve_global(
 /// registered as separate entries rather than as fields on a table shape.
 fn try_global_shard_qualified(
     qualified: &str,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
     preserve_resolved_location: bool,
@@ -436,7 +408,7 @@ fn resolve_call_return(
     func_name: &str,
     generic_args: &[TypeFact],
     call_arg_types: &[TypeFact],
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -683,7 +655,7 @@ pub fn resolve_require_global_name(
 fn resolve_field_access(
     base: &TypeFact,
     field: &str,
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
@@ -1011,46 +983,6 @@ fn collect_emmy_fields_recursive(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Cache key mapping
-// ---------------------------------------------------------------------------
-
-fn stub_to_cache_key(stub: &SymbolicStub) -> Option<CacheKey> {
-    match stub {
-        SymbolicStub::RequireRef { module_path } => {
-            Some(CacheKey::RequireReturn { module_path: module_path.clone() })
-        }
-        SymbolicStub::GlobalRef { name } => {
-            Some(CacheKey::Global { name: name.clone() })
-        }
-        SymbolicStub::FieldOf { base, field } => {
-            if let TypeFact::Stub(base_stub) = base.as_ref() {
-                let base_key = stub_to_cache_key(base_stub)?;
-                Some(CacheKey::FieldAccess {
-                    base_key: Box::new(base_key),
-                    field: field.clone(),
-                })
-            } else {
-                None
-            }
-        }
-        SymbolicStub::CallReturn { base, func_name, is_method_call, call_arg_types, generic_args } => {
-            if !call_arg_types.is_empty() || !generic_args.is_empty() {
-                return None;
-            }
-            let base_key = stub_to_cache_key(base)?;
-            Some(CacheKey::CallReturn {
-                base_key: Box::new(base_key),
-                func_name: func_name.clone(),
-                is_method_call: *is_method_call,
-            })
-        }
-        SymbolicStub::TypeRef { name } => {
-            Some(CacheKey::Type { name: name.clone() })
-        }
-    }
-}
-
 fn is_function_type(fact: &TypeFact) -> bool {
     match fact {
         TypeFact::Known(KnownType::Function(_))
@@ -1087,7 +1019,7 @@ pub fn resolve_method_return_with_generics(
     type_name: &str,
     method_name: &str,
     actual_params: &[TypeFact],
-    agg: &mut WorkspaceAggregation,
+    agg: &WorkspaceAggregation,
 ) -> TypeFact {
     // Find the source URI for this type so we can look up function_summaries.
     let source_uri = agg.type_shard.get(type_name)

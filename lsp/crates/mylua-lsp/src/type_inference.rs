@@ -35,7 +35,7 @@ pub fn infer_node_type(
     source: &[u8],
     uri: &Uri,
     scope_tree: &ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> TypeFact {
     match node.kind() {
         "variable" | "field_expression" => {
@@ -171,7 +171,7 @@ pub fn collect_call_arg_types(
     source: &[u8],
     uri: &Uri,
     scope_tree: &ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Vec<TypeFact> {
     let Some(args) = call_node.child_by_field_name("arguments") else {
         return Vec::new();
@@ -195,7 +195,7 @@ fn infer_call_return_fact(
     source: &[u8],
     uri: &Uri,
     scope_tree: &ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> TypeFact {
     use crate::type_system::{SymbolicStub, KnownType};
 

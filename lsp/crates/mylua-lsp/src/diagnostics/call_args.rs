@@ -21,7 +21,7 @@ pub(super) fn check_call_argument_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     scope_tree: &crate::scope::ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
     count_severity: Option<DiagnosticSeverity>,

@@ -32,7 +32,7 @@ struct InlayCtx<'a> {
     line_index: &'a LineIndex,
     uri: &'a Uri,
     scope_tree: &'a crate::scope::ScopeTree,
-    index: &'a mut WorkspaceAggregation,
+    index: &'a WorkspaceAggregation,
     cfg: &'a InlayHintConfig,
     range_start: usize,
     range_end: usize,
@@ -43,7 +43,7 @@ pub fn inlay_hints(
     doc: &Document,
     uri: &Uri,
     range: Range,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     cfg: &InlayHintConfig,
 ) -> Vec<InlayHint> {
     if !cfg.enable {
@@ -99,7 +99,7 @@ fn collect_parameter_name_hints(
     source: &[u8],
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {

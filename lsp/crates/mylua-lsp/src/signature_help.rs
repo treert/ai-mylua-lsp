@@ -21,7 +21,7 @@ pub fn signature_help(
     doc: &Document,
     uri: &Uri,
     position: Position,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let source = doc.source();
@@ -77,7 +77,7 @@ pub(crate) fn resolve_call_signatures(
     source: &[u8],
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
@@ -195,7 +195,7 @@ fn lookup_function_signatures_by_field(
     caller_uri: &Uri,
     base_fact: &TypeFact,
     field_name: &str,
-    index: &mut WorkspaceAggregation,
+    index: &WorkspaceAggregation,
 ) -> Vec<FunctionSignature> {
     let resolved_base = resolver::resolve_type(base_fact, index);
     let owner_class = match &resolved_base.type_fact {

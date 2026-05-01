@@ -374,8 +374,8 @@ pub async fn run_workspace_scan(
         // module_index and aliases were already populated in Phase 1.5
         // (right after the scan). build_initial() does NOT clear
         // module_index — it only clears summaries, global_shard,
-        // type_shard, require_by_return, type_dependants, and
-        // resolution_cache. So module_index is already ready for
+        // type_shard, require_by_return, and type_dependants.
+        // So module_index is already ready for
         // resolve_module_to_uri during the merge.
 
         // Separate parsed files into two sets: those already open in
@@ -626,13 +626,13 @@ async fn consumer_loop(
             };
             let mut syntax =
                 diagnostics::collect_diagnostics(doc.tree.root_node(), doc.source(), doc.line_index());
-            let mut idx = index.lock().unwrap();
+            let idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
             let semantic = diagnostics::collect_semantic_diagnostics_with_version(
                 doc.tree.root_node(),
                 doc.source(),
                 &uri,
-                &mut idx,
+                &idx,
                 &doc.scope_tree,
                 &cfg.diagnostics,
                 &cfg.runtime.version,
