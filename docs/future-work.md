@@ -14,12 +14,6 @@
 - **方案**：改为 **per-name fingerprint**（`HashMap<String, u64>`），按名字逐个 diff，只标脏变化的名字。文件级 hash 保留作 quick check。
 - **验收**：改一个 class 的单个 field，其他 class 的 cache 不被标脏。
 
-### 1.2 [P2] `uri_priority_key` 的 `"annotation"` 误判
-
-- **问题**：路径**子串**包含 `"annotation"` 就被提权（如 `my-annotation-helper/`），应改为**路径段**匹配。
-- **方案**：按 `/` 切段匹配，或走配置项 `workspace.annotationDirs`。
-- **验收**：路径含 `annotation` 子串但不是独立目录段时不提权。
-
 ### 1.3 [P2] `type_dependants` 线性查重 + 全桶 retain
 
 - **问题**：写入侧 `iter().any()` 线性查重；删除侧对每个 bucket 全量 `retain`，复杂度 `O(Σ buckets)`。
@@ -79,20 +73,18 @@
 - **设计文档**：[`superpowers/specs/2026-05-01-ast-lru-cache-design.md`](superpowers/specs/2026-05-01-ast-lru-cache-design.md)
 - **问题**：`documents` 为每个文件常驻 `LuaSource + tree + scope_tree`，大型项目内存线性增长（2 万文件工作区 ~6.5GB），但大部分语法树不被频繁访问。
 - **核心思路**：拆分 `DocumentStore`——`LuaSource` 常驻，`tree + scope_tree` 走 LRU 缓存（`astCacheCapacity` 可配置）。慢文件（`slow_pinned`）和打开文件（`open_pinned`）双 pin 集合互不干扰。
-- **阻塞因素**：`references.rs` 和 `rename.rs` 全量遍历所有文件 AST，summary 层无引用反向索引，无法缩小扫描范围。LRU 淘汰的文件会被频繁 `parse_temp` 重建，收益受限。**建议先完成 1.4（引用反向索引），再实施 LRU。**
+- **阻塞因素**：`references.rs` 和 `rename.rs` 全量遍历所有文件 AST，summary 层无引用反向索引，无法缩小扫描范围。LRU 淘汰的文件会被频繁 `parse_temp` 重建，收益受限。**建议先实现引用反向索引，再实施 LRU。**
 - **验收**：2 万文件工作区，AST 缓存容量 200，全流程无功能回归；内存 RSS 显著下降（预估释放 1.2~1.8GB）。
 
 ---
 
 ## 4. 推荐落地顺序
 
-1. **1.2** `uri_priority_key` 路径段匹配 — 工作量小，修正隐藏偏差
-2. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
-3. **1.1** per-name fingerprint — 改动较大，对大型工作区 cache 命中率有实质提升
-4. **1.4** `collect_affected_names` 扩展 — 正确性修复，随 1.1 一起做；**3.1 的前置依赖**
-5. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-6. **3.1** 语法树 LRU 缓存 — 依赖 1.4 引用反向索引，否则淘汰收益受限
-7. 其余 P3 项按需补做
+1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
+2. **1.1** per-name fingerprint — 改动较大，对大型工作区 cache 命中率有实质提升
+3. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
+4. **3.1** 语法树 LRU 缓存 — 依赖引用反向索引，否则淘汰收益受限
+5. 其余 P3 项按需补做
 
 ---
 
