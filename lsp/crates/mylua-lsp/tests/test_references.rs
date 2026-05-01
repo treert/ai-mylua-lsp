@@ -417,3 +417,63 @@ d.legs = 4"#;
         locs,
     );
 }
+
+#[test]
+fn references_field_on_local_class_function_name() {
+    // Regression: `function ClassB1:bbb()` where ClassB1 is a local variable.
+    // Clicking on `bbb` at the declaration site must find references including
+    // `self:bbb()` inside `test_bbb`. Previously this returned empty because
+    // resolve_segments_to_field used byte offset 0 which is before the local
+    // ClassB1's visibility range.
+    use std::collections::HashMap;
+    use mylua_lsp::{aggregation::WorkspaceAggregation, document::Document, summary_builder};
+
+    let mut parser = new_parser();
+    let src = r#"---@class ClassB1
+local ClassB1 = {}
+
+function ClassB1:bbb()
+    print("bbb")
+end
+
+function ClassB1:test_bbb()
+    self:bbb()
+end"#;
+    let uri = make_uri("local_class.lua");
+    let tree = parser.parse(src.as_bytes(), None).unwrap();
+    let result = summary_builder::build_file_analysis(
+        &uri, &tree, src.as_bytes(), &mylua_lsp::util::LineIndex::new(src.as_bytes()),
+    );
+    let doc = Document {
+        lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
+        tree,
+        scope_tree: result.1,
+    };
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.upsert_summary(result.0);
+
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Click on `bbb` in `function ClassB1:bbb()` (line 3, col 18)
+    let locs = references::find_references(
+        doc, &uri, pos(3, 18), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find references for method bbb on local class");
+
+    // Should find: declaration (ClassB1:bbb) + self:bbb() — at least 2
+    assert!(
+        locs.len() >= 2,
+        "expected at least 2 references to `bbb` (decl + self:bbb()), got {}: {:?}",
+        locs.len(), locs,
+    );
+
+    // self:bbb() is on line 8
+    let self_call = locs.iter().find(|l| l.range.start.line == 8);
+    assert!(
+        self_call.is_some(),
+        "self:bbb() call should be found as a reference: {:?}",
+        locs,
+    );
+}

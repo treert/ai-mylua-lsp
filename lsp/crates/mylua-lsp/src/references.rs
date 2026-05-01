@@ -312,6 +312,7 @@ fn try_identify_field(
             // For function_name, we need to construct the "base" fact
             // from the owner segments. Collect all idents before ident_node.
             let mut segments = Vec::new();
+            let mut first_segment_byte = 0usize;
             let child_count = parent.child_count();
             for i in 0..child_count {
                 let Some(child) = parent.child(i as u32) else { continue };
@@ -319,6 +320,9 @@ fn try_identify_field(
                     break;
                 }
                 if child.kind() == "identifier" {
+                    if segments.is_empty() {
+                        first_segment_byte = child.start_byte();
+                    }
                     segments.push(node_text(child, source).to_string());
                 }
             }
@@ -327,7 +331,7 @@ fn try_identify_field(
             }
             // Resolve the owner type through the segments chain
             let resolved = resolve_segments_to_field(
-                &segments, &field_name, source, uri, &doc.scope_tree, index,
+                &segments, &field_name, source, uri, &doc.scope_tree, index, first_segment_byte,
             )?;
             return Some(Identity::Field {
                 field_name,
@@ -356,6 +360,11 @@ fn try_identify_field(
 
 /// Resolve a chain of owner segments + field_name to a definition location.
 /// Used for `function M.N.foo()` where segments = ["M", "N"] and field = "foo".
+///
+/// `lookup_byte` is the byte offset at which the root segment name should be
+/// resolved in the scope tree (typically the root identifier's start_byte).
+/// This matters for local variables whose visibility starts after their
+/// declaration statement.
 fn resolve_segments_to_field(
     segments: &[String],
     field_name: &str,
@@ -363,10 +372,11 @@ fn resolve_segments_to_field(
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
+    lookup_byte: usize,
 ) -> Option<(Uri, ByteRange)> {
     // First, infer the type of the root segment
     let root_name = &segments[0];
-    let root_fact = if let Some(tf) = scope_tree.resolve_type(0, root_name) {
+    let root_fact = if let Some(tf) = scope_tree.resolve_type(lookup_byte, root_name) {
         tf.clone()
     } else {
         crate::type_system::TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
@@ -459,18 +469,22 @@ fn verify_field(
             };
             if first_child.id() == node.id() { return false; }
             let mut segments = Vec::new();
+            let mut first_segment_byte = 0usize;
             let child_count = parent.child_count();
             for i in 0..child_count {
                 let Some(child) = parent.child(i as u32) else { continue };
                 if child.id() == node.id() { break; }
                 if child.kind() == "identifier" {
+                    if segments.is_empty() {
+                        first_segment_byte = child.start_byte();
+                    }
                     segments.push(node_text(child, source).to_string());
                 }
             }
             if segments.is_empty() { return false; }
             // Resolve through segments
             if let Some((def_uri, def_range)) = resolve_segments_to_field(
-                &segments, field_name, source, doc_uri, scope_tree, index,
+                &segments, field_name, source, doc_uri, scope_tree, index, first_segment_byte,
             ) {
                 return &def_uri == target_def_uri && &def_range == target_def_range;
             }
