@@ -156,7 +156,7 @@ fn check_dotted_field(
     let resolved_base = if fields.len() == 1 {
         resolver::resolve_type(&base_fact, ctx.index)
     } else {
-        resolver::resolve_field_chain_in_file(
+        resolver::resolve_field_chain_prefix_in_file(
             ctx.uri,
             &base_fact,
             &fields[..fields.len() - 1],

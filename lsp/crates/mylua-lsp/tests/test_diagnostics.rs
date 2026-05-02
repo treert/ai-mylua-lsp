@@ -1532,6 +1532,54 @@ print(utils.test_const.ON_Evt_HAHA1)
 }
 
 #[test]
+fn require_returned_table_existing_nested_field_is_not_reported() {
+    let const_src = r#"
+local test_const = {
+    ON_Evt_HAHA = "ON_Evt_HAHA",
+    ON_Evt_LALA = "ON_Evt_LALA",
+}
+
+return test_const
+"#;
+    let utils_src = r#"
+utils = {}
+utils.test_const = require("test_const")
+"#;
+    let use_src = r#"
+if utils.test_const.ON_Evt_LALA then
+    print(utils.test_const.ON_Evt_HAHA1)
+end
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("test_const.lua", const_src),
+        ("utils.lua", utils_src),
+        ("use_const.lua", use_src),
+    ]);
+    let uri = make_uri("use_const.lua");
+    let doc = docs.get(&uri).expect("use document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), use_src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        !unknown.iter().any(|d| d.message.contains("ON_Evt_LALA")),
+        "existing nested field must not be reported, got: {:?}",
+        unknown,
+    );
+    assert_eq!(
+        unknown.iter().filter(|d| d.message.contains("ON_Evt_HAHA1")).count(),
+        1,
+        "only the missing nested field should be reported exactly once, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
 fn alias_to_inline_table_exposes_fields_for_diagnostics() {
     // `---@alias Vec2 { x: number, y: number }` should behave like a
     // `@class Vec2` with x/y for the purpose of `emmyUnknownField`

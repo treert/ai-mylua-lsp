@@ -52,7 +52,7 @@ pub fn resolve_field_chain(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(base_fact, fields, agg, None)
+    resolve_field_chain_inner(base_fact, fields, agg, None, false)
 }
 
 /// URI-aware variant of `resolve_field_chain` for bases that are
@@ -67,7 +67,22 @@ pub fn resolve_field_chain_in_file(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(base_fact, fields, agg, Some(uri))
+    resolve_field_chain_inner(base_fact, fields, agg, Some(uri), false)
+}
+
+/// Resolve a chain that will be used as the base for another field lookup.
+///
+/// This preserves the resolved owner's URI even when the requested chain is
+/// itself the tail of this call. Diagnostics use this for prefixes such as
+/// `utils.test_const` before checking `ON_Evt_LALA`; the table owner must stay
+/// at `test_const.lua`, not the `utils.test_const = require(...)` assignment.
+pub(crate) fn resolve_field_chain_prefix_in_file(
+    uri: &Uri,
+    base_fact: &TypeFact,
+    fields: &[String],
+    agg: &WorkspaceAggregation,
+) -> ResolvedType {
+    resolve_field_chain_inner(base_fact, fields, agg, Some(uri), true)
 }
 
 /// Shared core of `resolve_field_chain` and `resolve_field_chain_in_file`.
@@ -81,6 +96,7 @@ fn resolve_field_chain_inner(
     fields: &[String],
     agg: &WorkspaceAggregation,
     uri_hint: Option<&Uri>,
+    preserve_tail_resolved_location: bool,
 ) -> ResolvedType {
     let mut visited = HashSet::new();
 
@@ -126,7 +142,13 @@ fn resolve_field_chain_inner(
                 let qualified = format!("{}.{}", prefix, field);
                 let is_chain_tail = idx + 1 == fields.len();
                 let fallback =
-                    try_global_shard_qualified(&qualified, agg, 0, &mut visited, !is_chain_tail);
+                    try_global_shard_qualified(
+                        &qualified,
+                        agg,
+                        0,
+                        &mut visited,
+                        !is_chain_tail || preserve_tail_resolved_location,
+                    );
                 if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
                     current = fallback;
                     global_prefix = Some(qualified);
