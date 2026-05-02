@@ -65,7 +65,7 @@ local isEncodable
 -----------------------------------------------------------------------------
 --- Encodes an arbitrary Lua object / variable.
 -- @param v The Lua object / variable to be JSON encoded.
--- @return String containing the JSON encoding in internal Lua string format (i.e. not unicode)
+-- @return string @ containing the JSON encoding in internal Lua string format (i.e. not unicode)
 function json.encode (v)
   -- Handle nil values
   if v==nil then
@@ -117,9 +117,9 @@ end
 
 
 --- Decodes a JSON string and returns the decoded value as a Lua data structure / value.
--- @param s The string to scan.
--- @param [startPos] Optional starting position where the JSON string is located. Defaults to 1.
--- @param Lua object, number The object that was scanned, as a Lua table / string / number / boolean or nil,
+-- @param s string The string to scan.
+-- @param startPos? Optional starting position where the JSON string is located. Defaults to 1.
+-- @return Lua object, number The object that was scanned, as a Lua table / string / number / boolean or nil,
 -- and the position of the first character after
 -- the scanned JSON object.
 function json.decode(s, startPos)
