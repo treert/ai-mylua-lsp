@@ -29,7 +29,7 @@ pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Nod
     }
 }
 
-fn emit_pending_class_as_typedef(
+pub(super) fn emit_pending_class_as_typedef(
     ctx: &mut BuildContext,
     node: tree_sitter::Node,
 ) {

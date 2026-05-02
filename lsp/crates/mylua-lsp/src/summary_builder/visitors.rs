@@ -7,7 +7,11 @@ use crate::types::DefKind;
 use crate::util::{node_text, extract_string_literal};
 
 use super::BuildContext;
-use super::emmy_visitors::{flush_pending_class, visit_emmy_comment};
+use super::emmy_visitors::{
+    emit_pending_class_as_typedef,
+    flush_pending_class,
+    visit_emmy_comment,
+};
 use super::type_infer::infer_expression_type;
 use super::fingerprint::{merge_types, hash_function_signature};
 
@@ -95,7 +99,7 @@ fn clear_pending_on_blank_line_gap(ctx: &mut BuildContext, node: tree_sitter::No
         let node_start_row = node.start_position().row as u32;
         if node_start_row > emmy_end_row + 1 {
             // Blank line gap — drop all pending bindings.
-            ctx.pending_class = None;
+            emit_pending_class_as_typedef(ctx, node);
             ctx.pending_class_name = None;
             ctx.pending_type_annotation = None;
         }

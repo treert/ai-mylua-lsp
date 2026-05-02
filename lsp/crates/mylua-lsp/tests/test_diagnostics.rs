@@ -1491,6 +1491,47 @@ utils2.doesnotexist()
 }
 
 #[test]
+fn require_returned_table_unknown_nested_field_is_reported() {
+    let const_src = r#"
+local test_const = {
+    ON_Evt_HAHA = "ON_Evt_HAHA",
+    ON_Evt_LALA = "ON_Evt_LALA",
+}
+
+return test_const
+"#;
+    let utils_src = r#"
+utils = {}
+utils.test_const = require("test_const")
+"#;
+    let use_src = r#"
+print(utils.test_const.ON_Evt_HAHA1)
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("test_const.lua", const_src),
+        ("utils.lua", utils_src),
+        ("use_const.lua", use_src),
+    ]);
+    let uri = make_uri("use_const.lua");
+    let doc = docs.get(&uri).expect("use document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), use_src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field 'ON_Evt_HAHA1'"))
+        .collect();
+    assert_eq!(
+        unknown.len(),
+        1,
+        "missing field on a table returned through require should be flagged exactly once, got: {:?}",
+        diags
+    );
+}
+
+#[test]
 fn alias_to_inline_table_exposes_fields_for_diagnostics() {
     // `---@alias Vec2 { x: number, y: number }` should behave like a
     // `@class Vec2` with x/y for the purpose of `emmyUnknownField`
@@ -1569,6 +1610,42 @@ local name = hero:getName()
         unknown.is_empty(),
         "cross-file `Player.new()` via require returning global table must NOT flag \
          Unknown field; got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn require_returning_global_table_method_not_flagged_when_local_alias_differs() {
+    let mod_src = r#"
+Player = {}
+
+function Player.new(name)
+    return { name = name }
+end
+
+return Player
+"#;
+    let main_src = r#"local P = require("player")
+local hero = P.new("Alice")
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("player.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main.lua document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
+        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
+    );
+    let unknown: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "local require alias `P` must use returned global `Player` for field fallback, got: {:?}",
         unknown,
     );
 }
