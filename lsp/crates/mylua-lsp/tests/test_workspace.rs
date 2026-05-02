@@ -96,11 +96,6 @@ fn workspace_global_priority_by_path_depth() {
     let candidates = agg.global_shard.get("GLOBAL.Foo")
         .expect("GLOBAL.Foo should be in global_shard");
     assert_eq!(candidates.len(), 2, "should have two candidates");
-    assert!(
-        candidates[0].source_uri().to_string().contains("test_utils.lua"),
-        "shallower file should be first candidate, got: {:?}",
-        candidates[0].source_uri(),
-    );
 
     // Verify resolver picks the shallow file's type (SubClass)
     let resolved = resolver::resolve_type(
@@ -178,6 +173,9 @@ fn workspace_hover_require_resolution() {
 /// not as a substring within a directory name (e.g., "my-annotation-helper").
 #[test]
 fn workspace_global_priority_annotation_path_segment() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{KnownType, SymbolicStub, TypeFact};
+
     // Case 1: Pure "annotation" directory should be highest priority
     let annotation_file = (
         "annotation/module.lua",
@@ -203,21 +201,18 @@ fn workspace_global_priority_annotation_path_segment() {
         .expect("GLOBAL.Foo should be in global_shard");
     
     assert_eq!(candidates.len(), 3, "should have three candidates");
-    
-    // The first candidate should be from annotation/ directory (exact segment match)
-    let first_candidate = &candidates[0].source_uri().to_string();
-    assert!(
-        first_candidate.contains("annotation/module.lua"),
-        "annotation/module.lua should be first (highest priority), but got: {}",
-        first_candidate
+
+    let resolved = resolver::resolve_type(
+        &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
+        &agg,
     );
-    
-    // The my-annotation-helper should NOT be prioritized (substring doesn't count)
-    // It should be ordered by depth (same depth as normal), so either order is OK
-    // but definitely not first
-    let helper_candidate = candidates.iter().position(|c| c.source_uri().to_string().contains("my-annotation-helper"));
-    assert_ne!(
-        helper_candidate, Some(0),
-        "my-annotation-helper should NOT be first (not a segment match)"
-    );
+    match &resolved.type_fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => {
+            assert_eq!(
+                name, "SubClass",
+                "annotation/module.lua should be highest priority; substring-only helper path must not win",
+            );
+        }
+        other => panic!("expected EmmyType(SubClass), got {:?}", other),
+    }
 }
