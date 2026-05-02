@@ -446,15 +446,14 @@ pub async fn run_workspace_scan(
     // Seed the diagnostics scheduler now that `IndexState::Ready` is
     // set. `documents` is fully populated at this point.
     let open: HashSet<UriId> = open_uris.lock().unwrap().clone();
-    let all_uris: Vec<Uri> = documents
+    let all_uri_ids: Vec<UriId> = documents
         .lock()
         .unwrap()
         .keys()
-        .filter_map(|id| uri_interner.resolve(*id))
+        .copied()
         .collect();
     let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
-    let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter()
-        .map(|uri| uri_interner.intern(uri))
+    let (hot, cold): (Vec<_>, Vec<_>) = all_uri_ids.into_iter()
         .partition(|uri_id| open.contains(uri_id));
     let hot_ids = hot;
     scheduler.seed_bulk(hot_ids, diagnostic_scheduler::Priority::Hot);

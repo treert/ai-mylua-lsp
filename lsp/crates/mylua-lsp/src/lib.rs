@@ -287,10 +287,6 @@ impl Backend {
             .clone()
     }
 
-    pub(crate) fn document_id(&self, uri: &Uri) -> UriId {
-        self.uri_interner.intern(uri.clone())
-    }
-
     pub(crate) fn parse_and_store(&self, uri: Uri, text: String) {
         self.parse_and_store_with_old_tree(uri, text, None);
     }
@@ -330,7 +326,7 @@ impl Backend {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
                     let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
-                    let uri_id = self.document_id(&uri);
+                    let uri_id = self.uri_interner.intern(uri.clone());
                     self.documents.lock().unwrap().insert(
                         uri_id,
                         Document { lua_source, tree: old, scope_tree },
@@ -403,17 +399,16 @@ impl Backend {
                             }
                         }
                         config::DiagnosticScope::Full => {
-                            let all_uris: Vec<Uri> = self.documents
+                            let all_uri_ids: Vec<UriId> = self.documents
                                 .lock()
                                 .unwrap()
                                 .keys()
-                                .filter_map(|id| self.uri_interner.resolve(*id))
+                                .copied()
                                 .collect();
-                            for dep_uri in all_uris {
-                                if dep_uri == uri {
+                            for dep_uri_id in all_uri_ids {
+                                if dep_uri_id == uri_id {
                                     continue;
                                 }
-                                let dep_uri_id = self.uri_interner.intern(dep_uri);
                                 let pri = if open.contains(&dep_uri_id) {
                                     diagnostic_scheduler::Priority::Hot
                                 } else {
