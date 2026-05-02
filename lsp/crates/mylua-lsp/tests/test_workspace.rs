@@ -116,16 +116,19 @@ fn workspace_global_priority_by_path_depth() {
 #[test]
 fn require_map_survives_upsert() {
     use mylua_lsp::summary_builder;
+    use mylua_lsp::uri_id::UriInterner;
 
     let mut parser = new_parser();
     let mod_uri = make_uri("mymod.lua");
+    let uri_interner = UriInterner::new();
+    let mod_uri_id = uri_interner.intern(mod_uri.clone());
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
     let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg.set_require_mapping("mymod".to_string(), mod_uri.clone());
-    agg.upsert_summary(mod_summary);
+    agg.set_require_mapping("mymod".to_string(), mod_uri_id);
+    agg.upsert_summary(mod_uri_id, mod_summary);
 
     assert_eq!(
         agg.resolve_module_to_uri("mymod").as_ref(),
@@ -136,7 +139,7 @@ fn require_map_survives_upsert() {
     let new_src = "return { x = 2, y = 3 }";
     let new_doc = parse_doc(&mut parser, new_src);
     let new_summary = summary_builder::build_file_analysis(&mod_uri, &new_doc.tree, new_doc.source(), new_doc.line_index()).0;
-    agg.upsert_summary(new_summary);
+    agg.upsert_summary(mod_uri_id, new_summary);
 
     assert_eq!(
         agg.resolve_module_to_uri("mymod").as_ref(),
@@ -144,10 +147,47 @@ fn require_map_survives_upsert() {
         "after re-upserting (editing) mymod.lua, require(\"mymod\") must still resolve to it",
     );
 
-    agg.remove_file(&mod_uri);
+    agg.remove_file(mod_uri_id);
     assert!(
         agg.resolve_module_to_uri("mymod").is_none(),
         "after remove_file, require(\"mymod\") should no longer resolve",
+    );
+}
+
+#[test]
+fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
+    use mylua_lsp::{resolver, summary_builder};
+    use mylua_lsp::uri_id::UriInterner;
+
+    let mut parser = new_parser();
+    let uri_interner = UriInterner::new();
+    let main_uri = make_uri("main.lua");
+    let main_uri_id = uri_interner.intern(main_uri.clone());
+    let main_doc = parse_doc(&mut parser, "local Player = require(\"player\")\n");
+    let main_summary = summary_builder::build_file_analysis(
+        &main_uri,
+        &main_doc.tree,
+        main_doc.source(),
+        main_doc.line_index(),
+    ).0;
+
+    let player_uri = make_uri("player.lua");
+    let player_uri_id = uri_interner.intern(player_uri.clone());
+    let player_doc = parse_doc(&mut parser, "Player = {}\nreturn Player\n");
+    let player_summary = summary_builder::build_file_analysis(
+        &player_uri,
+        &player_doc.tree,
+        player_doc.source(),
+        player_doc.line_index(),
+    ).0;
+
+    let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
+    agg.set_require_mapping("player".to_string(), player_uri_id);
+    agg.build_initial(vec![(main_uri_id, main_summary), (player_uri_id, player_summary)]);
+
+    assert_eq!(
+        resolver::resolve_require_global_name("player", &agg).as_deref(),
+        Some("Player"),
     );
 }
 

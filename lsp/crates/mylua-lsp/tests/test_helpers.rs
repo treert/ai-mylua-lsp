@@ -7,6 +7,7 @@ use mylua_lsp::aggregation::WorkspaceAggregation;
 use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::summary_builder;
+use mylua_lsp::uri_id::UriInterner;
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
@@ -92,14 +93,16 @@ pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, Worksp
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, source);
     let uri = make_uri(filename);
+    let uri_interner = UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
     let mut agg = WorkspaceAggregation::new();
     let summary =
         summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
     // Register module mapping so resolve_module_to_uri works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
-        agg.set_require_mapping(module_name, uri.clone());
+        agg.set_require_mapping(module_name, uri_id);
     }
-    agg.upsert_summary(summary);
+    agg.upsert_summary(uri_id, summary);
     (doc, uri, agg)
 }
 
@@ -115,17 +118,19 @@ pub fn setup_workspace(
     let mut parser = new_parser();
     let mut docs = HashMap::new();
     let mut agg = WorkspaceAggregation::new();
+    let uri_interner = UriInterner::new();
 
     for (filename, source) in files {
         let uri = make_uri(filename);
+        let uri_id = uri_interner.intern(uri.clone());
         let doc = parse_doc(&mut parser, source);
         let summary =
             summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
-            agg.set_require_mapping(module_name, uri.clone());
+            agg.set_require_mapping(module_name, uri_id);
         }
-        agg.upsert_summary(summary);
+        agg.upsert_summary(uri_id, summary);
         docs.insert(uri, doc);
     }
 
@@ -145,6 +150,7 @@ pub fn setup_workspace_from_dir(
     let mut parser = new_parser();
     let mut docs = HashMap::new();
     let mut agg = WorkspaceAggregation::new();
+    let uri_interner = UriInterner::new();
 
     let roots = vec![dir.clone()];
     let module_entries = workspace_scanner::scan_workspace_lua_files(
@@ -153,7 +159,8 @@ pub fn setup_workspace_from_dir(
         &WorkspaceConfig::default(),
     );
     for (module, uri) in &module_entries {
-        agg.set_require_mapping(module.clone(), uri.clone());
+        let uri_id = uri_interner.intern(uri.clone());
+        agg.set_require_mapping(module.clone(), uri_id);
     }
 
     let files = workspace_scanner::collect_lua_files(&roots, &WorkspaceConfig::default());
@@ -166,6 +173,7 @@ pub fn setup_workspace_from_dir(
             Some(u) => u,
             None => continue,
         };
+        let uri_id = uri_interner.intern(uri.clone());
         let tree = parser.parse(text.as_bytes(), None);
         if let Some(tree) = tree {
             let lua_source = LuaSource::new(text);
@@ -175,7 +183,7 @@ pub fn setup_workspace_from_dir(
                 lua_source.source(),
                 lua_source.line_index(),
             );
-            agg.upsert_summary(summary);
+            agg.upsert_summary(uri_id, summary);
             docs.insert(
                 uri,
                 Document {
@@ -208,17 +216,19 @@ pub fn setup_workspace_with_library(
     let mut parser = new_parser();
     let mut docs = HashMap::new();
     let mut agg = WorkspaceAggregation::new();
+    let uri_interner = UriInterner::new();
 
     for (filename, source) in workspace_files {
         let uri = make_uri(filename);
+        let uri_id = uri_interner.intern(uri.clone());
         let doc = parse_doc(&mut parser, source);
         let summary =
             summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
-            agg.set_require_mapping(module_name, uri.clone());
+            agg.set_require_mapping(module_name, uri_id);
         }
-        agg.upsert_summary(summary);
+        agg.upsert_summary(uri_id, summary);
         docs.insert(uri, doc);
     }
 
@@ -240,7 +250,8 @@ pub fn setup_workspace_with_library(
         &ws_config,
     );
     for (module, uri) in &module_entries {
-        agg.set_require_mapping(module.clone(), uri.clone());
+        let uri_id = uri_interner.intern(uri.clone());
+        agg.set_require_mapping(module.clone(), uri_id);
     }
 
     for file in &library_files {
@@ -250,6 +261,7 @@ pub fn setup_workspace_with_library(
         let Some(uri) = workspace_scanner::path_to_uri(file) else {
             continue;
         };
+        let uri_id = uri_interner.intern(uri.clone());
         let Some(tree) = parser.parse(text.as_bytes(), None) else {
             continue;
         };
@@ -264,7 +276,7 @@ pub fn setup_workspace_with_library(
         // URI originating from a library root; tests mirror the same
         // contract.
         summary.is_meta = true;
-        agg.upsert_summary(summary);
+        agg.upsert_summary(uri_id, summary);
         docs.insert(
             uri,
             Document {

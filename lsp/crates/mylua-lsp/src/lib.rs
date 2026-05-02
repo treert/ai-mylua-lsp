@@ -176,7 +176,7 @@ pub struct Backend {
 }
 
 pub(crate) struct ParsedFile {
-    pub(crate) uri: Uri,
+    pub(crate) uri_id: UriId,
     pub(crate) lua_source: util::LuaSource,
     pub(crate) tree: tree_sitter::Tree,
     pub(crate) summary: summary::DocumentSummary,
@@ -355,7 +355,7 @@ impl Backend {
                 let mut idx = self.index.lock().unwrap();
                 let old_fp = idx.summary(&uri).map(|s| s.signature_fingerprint);
                 let new_fp = summary.signature_fingerprint;
-                idx.upsert_summary(summary);
+                idx.upsert_summary(uri_id, summary);
                 old_fp.is_some_and(|old| old != new_fp)
             };
 
@@ -423,14 +423,14 @@ impl Backend {
         }
     }
 
-    pub(crate) fn index_file_from_disk(&self, path: &std::path::Path) {
+    pub(crate) fn index_file_from_disk(&self, path: &std::path::Path) -> Option<UriId> {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
-            Err(_) => return,
+            Err(_) => return None,
         };
         let uri = match workspace_scanner::path_to_uri(path) {
             Some(u) => u,
-            None => return,
+            None => return None,
         };
         let tree = {
             let mut parser = self.parser.lock().unwrap();
@@ -452,11 +452,14 @@ impl Backend {
             if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
-            self.index.lock().unwrap().upsert_summary(summary);
+            self.index.lock().unwrap().upsert_summary(uri_id, summary);
             self.documents
                 .lock()
                 .unwrap()
                 .insert(uri_id, Document { lua_source, tree, scope_tree });
+            Some(uri_id)
+        } else {
+            None
         }
     }
 

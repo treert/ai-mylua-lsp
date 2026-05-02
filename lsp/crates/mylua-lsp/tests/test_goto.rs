@@ -319,9 +319,12 @@ fn goto_require_jumps_to_module_return() {
     let caller_doc = Document { lua_source: caller_lua_source, tree: caller_tree, scope_tree: caller_scope };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg.set_require_mapping("mymod".to_string(), mod_uri.clone());
-    agg.upsert_summary(mod_summary);
-    agg.upsert_summary(caller_summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let mod_uri_id = uri_interner.intern(mod_uri.clone());
+    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    agg.set_require_mapping("mymod".to_string(), mod_uri_id);
+    agg.upsert_summary(mod_uri_id, mod_summary);
+    agg.upsert_summary(caller_uri_id, caller_summary);
 
     // Click on `m` (line 0 col 6) in caller.lua — should jump to mymod.lua's
     // `return M` (line 2, column 0).
@@ -375,9 +378,12 @@ fn goto_require_with_attribute_before_target() {
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg.set_require_mapping("attr_mod".to_string(), mod_uri.clone());
-    agg.upsert_summary(mod_summary);
-    agg.upsert_summary(caller_summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let mod_uri_id = uri_interner.intern(mod_uri.clone());
+    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    agg.set_require_mapping("attr_mod".to_string(), mod_uri_id);
+    agg.upsert_summary(mod_uri_id, mod_summary);
+    agg.upsert_summary(caller_uri_id, caller_summary);
 
     // `y` is at column 17 in `local x <const>, y = ...`
     let result =
@@ -565,9 +571,12 @@ local hero = Player.new("Alice")"#;
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg.set_require_mapping("player".to_string(), mod_uri.clone());
-    agg.upsert_summary(mod_summary);
-    agg.upsert_summary(caller_summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let mod_uri_id = uri_interner.intern(mod_uri.clone());
+    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    agg.set_require_mapping("player".to_string(), mod_uri_id);
+    agg.upsert_summary(mod_uri_id, mod_summary);
+    agg.upsert_summary(caller_uri_id, caller_summary);
 
     // Click on `new` in `Player.new("Alice")` — line 1, col 20
     let result = goto::goto_definition(
@@ -617,7 +626,8 @@ return test_const"#,
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main doc");
     let target_uri = make_uri("test_const.lua");
-    agg.set_require_mapping("test_const".to_string(), target_uri.clone());
+    let target_uri_id = agg.summary_id(&target_uri).expect("test_const.lua summary id");
+    agg.set_require_mapping("test_const".to_string(), target_uri_id);
 
     let result = goto::goto_definition(
         main_doc,
@@ -660,7 +670,8 @@ return settings"#,
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main doc");
     let target_uri = make_uri("settings.lua");
-    agg.set_require_mapping("settings".to_string(), target_uri.clone());
+    let target_uri_id = agg.summary_id(&target_uri).expect("settings.lua summary id");
+    agg.set_require_mapping("settings".to_string(), target_uri_id);
 
     let result = goto::goto_definition(
         main_doc,

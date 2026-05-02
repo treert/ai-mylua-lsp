@@ -24,7 +24,7 @@
 
 ### 2.1 每文件摘要 `DocumentSummary`
 
-每个 URI 对应一份 Summary，与版本/内容哈希绑定；聚合层内部使用 aggregation-local `UriId` 作为 `summaries` 的 HashMap key，`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 边界与缓存持久化来源。
+每个 URI 对应一份 Summary，与版本/内容哈希绑定；进程内由 `Backend.uri_interner` 分配 session-local `UriId`，聚合层只消费这个 ID 作为 `summaries` 的 HashMap key。`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 边界与缓存持久化来源。
 
 | 数据 | 说明 |
 |------|------|
@@ -62,13 +62,13 @@
 
 | 分片 | 键 → 值 | 更新方式 |
 |------|---------|---------|
-| `summaries` | aggregation-local `UriId` → `DocumentSummary`；对外访问器仍接收/返回 URI 语义 | `build_initial` 全量重建 / `upsert_summary` 按 URI 分配或复用局部 ID |
-| `GlobalShard` | 按 `.` / `:` 切段的树（`roots["UE4"].children["FVector"]`），叶/中间节点可挂 `[候选定义…]`；候选只携带 aggregation-local `UriId`，反向索引用 `UriId`→路径 | `push_candidate` 插入 / `remove_by_uri` 按 `UriId` 精准删除 |
+| `summaries` | session-local `UriId` → `DocumentSummary`；另维护不分配 ID 的 URI 反查缓存供边界 API O(1) 查询 | `build_initial` 全量重建 / `upsert_summary` 接收外层已 intern 的 `UriId` |
+| `GlobalShard` | 按 `.` / `:` 切段的树（`roots["UE4"].children["FVector"]`），叶/中间节点可挂 `[候选定义…]`；候选只携带 session-local `UriId`，反向索引用 `UriId`→路径 | `push_candidate` 插入 / `remove_by_uri` 按 `UriId` 精准删除 |
 | `TypeShard` | 类型裸名 → [候选定义…] | 同上 |
 | `RequireByReturn` | 目标 URI → [(来源文件, 局部名)…] | 绑定增删 |
 | `TypeDependants` | 类型名 → [依赖文件…] | 类型变更时失效依赖方缓存 |
 
-更新粒度是**名字级**（不是文件级）：`GlobalShard` 通过候选携带的 aggregation-local `UriId`→路径反向索引精准定位一个文件贡献的所有路径，增量更新只触及这些路径上的节点。
+更新粒度是**名字级**（不是文件级）：`GlobalShard` 通过候选携带的 session-local `UriId`→路径反向索引精准定位一个文件贡献的所有路径，增量更新只触及这些路径上的节点。
 
 ---
 
@@ -133,7 +133,7 @@
 ### 4.3 全局 Table 合并
 
 - `GlobalShard` 以树（trie）存储全局名：根节点对应顶层名（`UE4`、`print`），子节点按 `.` / `:` 切段（`UE4 → FVector → new`）；`.` 和 `:` 统一为同一个 `children` map（colon 只是 self 语法糖，由 `FunctionSignature.params` 区分）
-- 每个节点挂 `Vec<GlobalCandidate>`（多文件贡献同一路径时保留多候选），按来源 URI 优先级排序；候选内部只存 aggregation-local `source_uri_id`
+- 每个节点挂 `Vec<GlobalCandidate>`（多文件贡献同一路径时保留多候选），按来源 URI 优先级排序；候选内部只存 session-local `source_uri_id`
 - LSP 输出边界通过 `WorkspaceAggregation::candidate_uri` / `type_candidate_uri` 将候选 `UriId` 解析回 `Uri`；`GlobalShard` 的 `uri_to_paths: HashMap<UriId, Vec<String>>` 按文件精准删除贡献，O(贡献数)
 - 子字段枚举（补全、hover）直接遍历 `node.children`，O(children) 而非 O(全局条目数)
 - 全局链路某节点已绑定 Emmy 类型时，停止 GlobalTable 扩张，改走 Emmy 字段解析
@@ -171,10 +171,10 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 
 | 阶段 | 做什么 | 持锁 |
 |------|--------|------|
-| **Scan** | 发现 .lua 文件列表 + 构建 module_entries | 无 |
-| **Module Index** | 填充 module_index，此后 document_link 和 require 补全可用 | 短暂持 index 锁 |
-| **Parse** | rayon 全量并行：read → tree-sitter parse → build_summary → build_scope_tree | **不持任何锁** |
-| **Merge** | 原子 build_initial 构建全局索引（不清除 module_index） | 持 open_uris → documents → index |
+| **Scan** | 发现 .lua 文件列表 + 构建 module_entries，并通过唯一 `UriInterner` 集中分配 `UriId` | 无 |
+| **Module Index** | 以 `module_name → UriId` 填充 module_index，此后 document_link 和 require 补全可用 | 短暂持 index 锁 |
+| **Parse** | rayon 全量并行：read → tree-sitter parse → build_summary → build_scope_tree；`ParsedFile` 携带 scan 阶段分配的 `UriId` | **不持任何锁** |
+| **Merge** | 原子 build_initial 构建全局索引（不清除 module_index），summary 与 document 使用同一套 `UriId` | 持 open_uris → documents → index |
 | **Ready** | 设置 IndexState::Ready + seed 诊断队列 | 各锁短暂独立持有 |
 
 **关键设计**：

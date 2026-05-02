@@ -86,7 +86,7 @@ flowchart TB
 - **Emmy 优先**：命中明确 Emmy 类型后完全切换到 Emmy 语义，不再混用 table shape
 - **Table shape**：每个 table 字面值按节点 identity 建模，单文件内持续更新 shape
 - **全局 table**：跨文件允许对同一全局路径做结构合并，保留逐段节点树与来源候选
-- **定义位置**：resolver 内部的定义位置使用 aggregation-local `UriId` + `ByteRange`；hover / goto / references / completion / signatureHelp 在构造 LSP 响应时再解析回 `Uri`
+- **定义位置**：resolver 内部的定义位置使用 server session-local `UriId` + `ByteRange`；hover / goto / references / completion / signatureHelp 在构造 LSP 响应时再解析回 `Uri`
 
 ### 3.4 诊断
 

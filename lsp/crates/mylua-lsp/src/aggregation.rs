@@ -13,10 +13,11 @@ use crate::util::ByteRange;
 /// See `index-architecture.md` §2.2.
 #[derive(Debug)]
 pub struct WorkspaceAggregation {
-    /// All file summaries, keyed by aggregation-local UriId.
+    /// All file summaries, keyed by the server session-local UriId.
     summaries: HashMap<UriId, DocumentSummary>,
-    summary_uri_ids: HashMap<Uri, UriId>,
-    next_summary_uri_id: i32,
+    /// Reverse lookup for URI-facing APIs. This is only a cache of
+    /// caller-provided UriIds; aggregation never allocates UriIds.
+    summary_uri_to_id: HashMap<Uri, UriId>,
     /// Global name tree — candidate definitions from all files.
     pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
@@ -26,12 +27,6 @@ pub struct WorkspaceAggregation {
     /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
     /// followed by longest-suffix matching among candidates.
     module_index: HashMap<String, Vec<(String, UriId)>>,
-    /// Boundary lookup for `module_index` entries. Keeps existing
-    /// `resolve_module_to_uri` callers on LSP-facing `Uri` until the
-    /// rest of the aggregation layer migrates to `UriId`.
-    module_uris: HashMap<UriId, Uri>,
-    module_uri_ids: HashMap<Uri, UriId>,
-    next_module_uri_id: i32,
     /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
     /// The longest matching prefix alias is chosen.
     pub require_aliases: HashMap<String, String>,
@@ -254,7 +249,7 @@ impl GlobalShard {
 
     /// Remove all candidates contributed by a given URI.
     /// Uses the reverse index for O(contributions-per-file) work.
-    pub fn remove_by_uri(&mut self, _uri: &Uri, uri_id: UriId) {
+    pub fn remove_by_uri(&mut self, uri_id: UriId) {
         let Some(paths) = self.uri_to_paths.remove(&uri_id) else { return };
         for path in &paths {
             if let Some(node) = self.get_node_mut(path) {
@@ -349,25 +344,21 @@ impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
             summaries: HashMap::new(),
-            summary_uri_ids: HashMap::new(),
-            next_summary_uri_id: 1,
+            summary_uri_to_id: HashMap::new(),
             global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
             module_index: HashMap::new(),
-            module_uris: HashMap::new(),
-            module_uri_ids: HashMap::new(),
-            next_module_uri_id: 1,
             require_aliases: HashMap::new(),
         }
     }
 
     pub fn summary(&self, uri: &Uri) -> Option<&DocumentSummary> {
-        let uri_id = self.summary_uri_ids.get(uri)?;
+        let uri_id = self.summary_uri_to_id.get(uri)?;
         self.summaries.get(uri_id)
     }
 
     pub fn summary_id(&self, uri: &Uri) -> Option<UriId> {
-        self.summary_uri_ids.get(uri).copied()
+        self.summary_uri_to_id.get(uri).copied()
     }
 
     #[allow(dead_code)]
@@ -400,18 +391,6 @@ impl WorkspaceAggregation {
         self.summaries.len()
     }
 
-    fn summary_uri_id(&mut self, uri: &Uri) -> UriId {
-        if let Some(id) = self.summary_uri_ids.get(uri).copied() {
-            return id;
-        }
-
-        let raw = self.next_summary_uri_id;
-        let id = UriId::new(raw);
-        self.next_summary_uri_id = raw.checked_add(1).expect("summary UriId exhausted");
-        self.summary_uri_ids.insert(uri.clone(), id);
-        id
-    }
-
     /// Build the initial global index atomically from a complete set of
     /// file summaries. This is the cold-start path: all summaries are
     /// available at once, so we skip `remove_contributions` (nothing to
@@ -421,25 +400,23 @@ impl WorkspaceAggregation {
     /// defined in later batches.
     ///
     /// After this call, `upsert_summary` handles incremental updates.
-    pub fn build_initial(&mut self, summaries: Vec<DocumentSummary>) {
+    pub fn build_initial(&mut self, summaries: Vec<(UriId, DocumentSummary)>) {
         // Clear all shards — build_initial is a full rebuild. Any
         // contributions from did_open's upsert_summary during the
         // cold-start window are included in `summaries` (the caller
         // collects them via `idx.summary(...)` for open URIs), so we
         // must wipe the shards to avoid duplicates.
         self.summaries.clear();
-        self.summary_uri_ids.clear();
-        self.next_summary_uri_id = 1;
+        self.summary_uri_to_id.clear();
         self.global_shard.clear();
         self.type_shard.clear();
 
         // 1. Insert all summaries first (consuming the owned Vec to avoid
         //    deep-cloning every DocumentSummary) so later shard builds can
         //    see every file's summary in a single consistent snapshot.
-        for s in summaries {
-            let uri = s.uri.clone();
-            let uri_id = self.summary_uri_id(&uri);
-            self.summaries.insert(uri_id, s);
+        for (uri_id, summary) in summaries {
+            self.summary_uri_to_id.insert(summary.uri.clone(), uri_id);
+            self.summaries.insert(uri_id, summary);
         }
 
         {
@@ -497,11 +474,10 @@ impl WorkspaceAggregation {
     ///
     /// Performs a name-level diff: removes old contributions from this URI
     /// and inserts new ones.
-    pub fn upsert_summary(&mut self, summary: DocumentSummary) {
+    pub fn upsert_summary(&mut self, uri_id: UriId, summary: DocumentSummary) {
         let uri = summary.uri.clone();
 
-        self.remove_contributions(&uri);
-        let uri_id = self.summary_uri_id(&uri);
+        self.remove_contributions(uri_id);
         let summary_priorities: HashMap<UriId, (usize, usize, usize)> = self.summaries
             .iter()
             .map(|(id, summary)| (*id, uri_priority_key(&summary.uri)))
@@ -544,55 +520,33 @@ impl WorkspaceAggregation {
         }
 
         self.summaries.insert(uri_id, summary);
+        self.summary_uri_to_id.insert(uri, uri_id);
     }
 
     /// Remove a file from the aggregation layer entirely.
-    pub fn remove_file(&mut self, uri: &Uri) {
-        self.remove_contributions(uri);
+    pub fn remove_file(&mut self, uri_id: UriId) {
+        self.remove_contributions(uri_id);
         // Remove this URI from the module_index.
-        let removed_ids: HashSet<UriId> = self.module_uris
-            .iter()
-            .filter_map(|(id, u)| if u == uri { Some(*id) } else { None })
-            .collect();
         self.module_index.retain(|_, entries| {
-            entries.retain(|(_, id)| !removed_ids.contains(id));
+            entries.retain(|(_, id)| *id != uri_id);
             !entries.is_empty()
         });
-        for id in removed_ids {
-            if let Some(removed_uri) = self.module_uris.remove(&id) {
-                self.module_uri_ids.remove(&removed_uri);
-            }
-        }
-        if let Some(uri_id) = self.summary_uri_ids.remove(uri) {
-            self.summaries.remove(&uri_id);
+        if let Some(summary) = self.summaries.remove(&uri_id) {
+            self.summary_uri_to_id.remove(&summary.uri);
         }
     }
 
     /// Register a module name → URI mapping in the module index.
     /// The module_name should already be normalized (lowercase, `.`-separated,
     /// init.lua handled).
-    pub fn set_require_mapping(&mut self, module_name: String, uri: Uri) {
+    pub fn set_require_mapping(&mut self, module_name: String, uri_id: UriId) {
         use crate::workspace_scanner::module_last_segment;
         let last_seg = module_last_segment(&module_name).to_string();
-        let uri_id = self.module_uri_id(&uri);
         let entries = self.module_index.entry(last_seg).or_default();
-        // Avoid duplicates: if this exact (module_name, uri) pair exists, skip.
+        // Avoid duplicates: if this exact (module_name, uri_id) pair exists, skip.
         if !entries.iter().any(|(m, id)| m == &module_name && *id == uri_id) {
             entries.push((module_name, uri_id));
         }
-    }
-
-    fn module_uri_id(&mut self, uri: &Uri) -> UriId {
-        if let Some(id) = self.module_uri_ids.get(uri).copied() {
-            return id;
-        }
-
-        let raw = self.next_module_uri_id;
-        let id = UriId::new(raw);
-        self.next_module_uri_id = raw.checked_add(1).expect("module UriId exhausted");
-        self.module_uri_ids.insert(uri.clone(), id);
-        self.module_uris.insert(id, uri.clone());
-        id
     }
 
     /// Get all registered module names (for completion).
@@ -606,7 +560,7 @@ impl WorkspaceAggregation {
         names.into_iter().collect()
     }
 
-    fn remove_contributions(&mut self, uri: &Uri) {
+    fn remove_contributions(&mut self, uri_id: UriId) {
         // Invariant (enforced contract): if `self.summaries` does not
         // contain `uri`, NO shard may contain any candidate /
         // dependant keyed on that URI. This holds because the only
@@ -630,11 +584,11 @@ impl WorkspaceAggregation {
         // already-known file still performs the full prune (needed
         // to drop contributions whose names disappeared between
         // revisions), matching the pre-existing semantics.
-        let Some(uri_id) = self.summary_uri_ids.get(uri).copied() else {
+        if !self.summaries.contains_key(&uri_id) {
             return;
-        };
+        }
 
-        self.global_shard.remove_by_uri(uri, uri_id);
+        self.global_shard.remove_by_uri(uri_id);
 
         self.type_shard.retain(|_, candidates| {
             candidates.retain(|c| c.source_uri_id() != uri_id);
@@ -716,7 +670,7 @@ impl WorkspaceAggregation {
     /// A candidate matches if it equals the query or ends with `.{query}`.
     fn find_best_match(&self, module_path: &str) -> Option<Uri> {
         let uri_id = self.find_best_match_id(module_path)?;
-        self.module_uris.get(&uri_id).cloned()
+        self.summary_uri(uri_id).cloned()
     }
 
     fn find_best_match_id(&self, module_path: &str) -> Option<UriId> {

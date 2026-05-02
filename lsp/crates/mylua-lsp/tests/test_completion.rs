@@ -75,7 +75,9 @@ fn complete_fixture_test4_table_field() {
     let doc2 = parse_doc(&mut parser, &src_with_dot);
     let summary = mylua_lsp::summary_builder::build_file_analysis(&uri, &doc2.tree, doc2.source(), doc2.line_index()).0;
     let mut agg2 = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg2.upsert_summary(summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg2.upsert_summary(uri_id, summary);
 
     let lines: Vec<&str> = src_with_dot.lines().collect();
     let last_line = lines.len() - 1;
@@ -140,20 +142,23 @@ fn complete_emmy_tag_bare_at() {
 #[test]
 fn complete_require_path_from_index() {
     use mylua_lsp::{aggregation::WorkspaceAggregation, summary_builder};
+    use mylua_lsp::uri_id::UriInterner;
 
     let mut parser = new_parser();
+    let uri_interner = UriInterner::new();
     let caller_src = "local m = require(\"\")";
     let caller_uri = make_uri("caller.lua");
+    let caller_uri_id = uri_interner.intern(caller_uri.clone());
     let caller_doc = parse_doc(&mut parser, caller_src);
     let caller_summary = summary_builder::build_file_analysis(
         &caller_uri, &caller_doc.tree, caller_doc.source(), caller_doc.line_index(),
     ).0;
 
     let mut agg = WorkspaceAggregation::new();
-    agg.set_require_mapping("game.player".to_string(), make_uri("player.lua"));
-    agg.set_require_mapping("game.world".to_string(), make_uri("world.lua"));
-    agg.set_require_mapping("util.log".to_string(), make_uri("log.lua"));
-    agg.upsert_summary(caller_summary);
+    agg.set_require_mapping("game.player".to_string(), uri_interner.intern(make_uri("player.lua")));
+    agg.set_require_mapping("game.world".to_string(), uri_interner.intern(make_uri("world.lua")));
+    agg.set_require_mapping("util.log".to_string(), uri_interner.intern(make_uri("log.lua")));
+    agg.upsert_summary(caller_uri_id, caller_summary);
 
     // Cursor inside the empty string `""` at line 0, col 19 (just inside the quote).
     let items = completion::complete(&caller_doc, &caller_uri, pos(0, 19), &mut agg);

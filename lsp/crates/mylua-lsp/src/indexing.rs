@@ -174,7 +174,19 @@ pub async fn run_workspace_scan(
 
     let (module_entries, files) =
         workspace_scanner::scan_and_collect_lua_files(&all_roots, &require_config, &workspace_config);
-    let total = files.len();
+    let file_entries: Vec<(PathBuf, Uri, UriId)> = files
+        .into_iter()
+        .filter_map(|path| {
+            let uri = workspace_scanner::path_to_uri(&path)?;
+            let uri_id = uri_interner.intern(uri.clone());
+            Some((path, uri, uri_id))
+        })
+        .collect();
+    let module_entries: Vec<(String, UriId)> = module_entries
+        .into_iter()
+        .map(|(module, uri)| (module, uri_interner.intern(uri)))
+        .collect();
+    let total = file_entries.len();
 
     let phase1_ms = phase1_started.elapsed().as_millis();
     lsp_log!(
@@ -192,8 +204,8 @@ pub async fn run_workspace_scan(
     {
         let mut idx = index.lock().unwrap();
         idx.require_aliases = require_config.aliases.clone();
-        for (module, uri) in &module_entries {
-            idx.set_require_mapping(module.clone(), uri.clone());
+        for (module, uri_id) in &module_entries {
+            idx.set_require_mapping(module.clone(), *uri_id);
         }
     }
     *index_state.lock().unwrap() = IndexState::ModuleMapReady;
@@ -273,12 +285,11 @@ pub async fn run_workspace_scan(
 
         tokio::task::spawn_blocking(move || {
             use rayon::prelude::*;
-            files
+            file_entries
                 .par_iter()
-                .filter_map(|path| {
+                .filter_map(|(path, uri, uri_id)| {
                     let file_started = std::time::Instant::now();
                     let text = std::fs::read_to_string(path).ok()?;
-                    let uri = workspace_scanner::path_to_uri(path)?;
                     let content_hash = content_hash(&text);
                     let is_library = library_uris.contains(&uri);
 
@@ -326,7 +337,7 @@ pub async fn run_workspace_scan(
                     }
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri, lua_source, tree, summary, scope_tree })
+                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, summary, scope_tree })
                 })
                 .collect()
         })
@@ -382,16 +393,15 @@ pub async fn run_workspace_scan(
 
         // Separate parsed files into two sets: those already open in
         // the editor (skip — buffer version wins) and the rest.
-        let mut summaries_to_merge: Vec<summary::DocumentSummary> = Vec::with_capacity(parsed.len());
+        let mut summaries_to_merge: Vec<(UriId, summary::DocumentSummary)> = Vec::with_capacity(parsed.len());
         for pf in parsed {
-            let uri_id = uri_interner.intern(pf.uri.clone());
-            if open_held.contains(&uri_id) {
+            if open_held.contains(&pf.uri_id) {
                 skipped_open += 1;
                 continue;
             }
-            summaries_to_merge.push(pf.summary);
+            summaries_to_merge.push((pf.uri_id, pf.summary));
             docs.insert(
-                uri_id,
+                pf.uri_id,
                 Document {
                     lua_source: pf.lua_source,
                     tree: pf.tree,
@@ -410,7 +420,7 @@ pub async fn run_workspace_scan(
                 continue;
             };
             if let Some(existing) = idx.summary(&uri) {
-                summaries_to_merge.push(existing.clone());
+                summaries_to_merge.push((*uri_id, existing.clone()));
             }
         }
 

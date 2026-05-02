@@ -159,8 +159,11 @@ Bar = {}"#;
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(defn_summary);
-    agg.upsert_summary(user_summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let defn_uri_id = uri_interner.intern(defn_uri.clone());
+    let user_uri_id = uri_interner.intern(user_uri.clone());
+    agg.upsert_summary(defn_uri_id, defn_summary);
+    agg.upsert_summary(user_uri_id, user_summary);
 
     let docs = HashMap::from([
         (defn_uri.clone(), defn_doc),
@@ -220,8 +223,11 @@ fn references_emmy_type_word_boundary() {
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(defn_summary);
-    agg.upsert_summary(user_summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let defn_uri_id = uri_interner.intern(defn_uri.clone());
+    let user_uri_id = uri_interner.intern(user_uri.clone());
+    agg.upsert_summary(defn_uri_id, defn_summary);
+    agg.upsert_summary(user_uri_id, user_summary);
 
     let docs = HashMap::from([
         (defn_uri.clone(), defn_doc),
@@ -296,7 +302,9 @@ print(b.name)"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(result.0);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg.upsert_summary(uri_id, result.0);
 
     let docs = HashMap::from([(uri.clone(), doc)]);
     let doc = docs.get(&uri).unwrap();
@@ -426,7 +434,9 @@ d.legs = 4"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(result.0);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg.upsert_summary(uri_id, result.0);
 
     let docs = HashMap::from([(uri.clone(), doc)]);
     let doc = docs.get(&uri).unwrap();
@@ -486,7 +496,9 @@ end"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(result.0);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg.upsert_summary(uri_id, result.0);
 
     let docs = HashMap::from([(uri.clone(), doc)]);
     let doc = docs.get(&uri).unwrap();
@@ -546,7 +558,9 @@ end"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    agg.upsert_summary(result.0);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg.upsert_summary(uri_id, result.0);
 
     let docs = HashMap::from([(uri.clone(), doc)]);
     let doc = docs.get(&uri).unwrap();

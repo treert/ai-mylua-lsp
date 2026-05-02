@@ -499,23 +499,27 @@ impl LanguageServer for Backend {
                             if !workspace_scanner::should_index_path(&path, &roots, &filter) {
                                 continue;
                             }
-                            self.index_file_from_disk(&path);
+                            let Some(uri_id) = self.index_file_from_disk(&path) else {
+                                continue;
+                            };
                             if let Some(module_name) = workspace_scanner::file_path_to_module_name(&path) {
                                 let mut idx = self.index.lock().unwrap();
                                 idx.set_require_mapping(
                                     module_name,
-                                    change.uri.clone(),
+                                    uri_id,
                                 );
                             }
                         }
                     }
                 }
                 FileChangeType::DELETED => {
-                    self.index.lock().unwrap().remove_file(&change.uri);
-                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                    let uri_id = uri_to_path(&change.uri)
+                        .and_then(|path| workspace_scanner::path_to_uri(&path))
+                        .and_then(|uri| self.uri_interner.get(&uri))
+                        .or_else(|| self.uri_interner.get(&change.uri));
+                    if let Some(uri_id) = uri_id {
+                        self.index.lock().unwrap().remove_file(uri_id);
                         self.documents.lock().unwrap().remove(&uri_id);
-                    }
-                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
                         self.scheduler.invalidate(&uri_id);
                         self.open_uris.lock().unwrap().remove(&uri_id);
                         self.edit_locks.lock().unwrap().remove(&uri_id);
@@ -588,6 +592,7 @@ impl LanguageServer for Backend {
             doc.tree.root_node(),
             doc.source(),
             &idx,
+            Some(&self.uri_interner),
             doc.line_index(),
         )))
     }
@@ -679,7 +684,14 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        let result = goto::goto_definition(doc, uri, position, &idx, &strategy);
+        let result = goto::goto_definition_with_uri_interner(
+            doc,
+            uri,
+            position,
+            &idx,
+            &strategy,
+            &self.uri_interner,
+        );
         match &result {
             Some(GotoDefinitionResponse::Scalar(loc)) => {
                 lsp_log!("[goto] result: {:?} {}:{}-{}:{}", loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
@@ -730,7 +742,14 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_definition(doc, uri, position, &idx, &strategy))
+        Ok(goto::goto_definition_with_uri_interner(
+            doc,
+            uri,
+            position,
+            &idx,
+            &strategy,
+            &self.uri_interner,
+        ))
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {

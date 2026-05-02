@@ -838,7 +838,9 @@ local c = getContainer()
         scope_tree,
     };
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    agg.upsert_summary(summary);
+    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
+    let uri_id = uri_interner.intern(uri.clone());
+    agg.upsert_summary(uri_id, summary);
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;
     let resolved =
@@ -2466,7 +2468,8 @@ local name = hero:getName()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
-    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main.lua document present");
@@ -2584,7 +2587,8 @@ hero:describe()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
-    agg.set_require_mapping("player".to_string(), mod_uri.clone());
+    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main.lua document present");
