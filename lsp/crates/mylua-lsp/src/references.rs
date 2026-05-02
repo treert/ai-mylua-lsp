@@ -113,12 +113,12 @@ pub fn find_references(
             }
         }
         Identity::Field { field_name, location } => {
-            let Some(identity_def_uri) = index.summary_uri(location.uri_id) else {
-                return None;
-            };
             let identity_def_range = location.range;
             // Declaration: the def_range itself
             if include_declaration {
+                let Some(identity_def_uri) = index.summary_uri(location.uri_id) else {
+                    return None;
+                };
                 locations.push(Location {
                     uri: identity_def_uri.clone(),
                     range: range_from_byte_range(identity_def_uri, identity_def_range, all_docs),
@@ -132,7 +132,9 @@ pub fn find_references(
                         continue;
                     };
                     // Skip the declaration position itself
-                    if doc_uri == identity_def_uri && node.start_byte() == identity_def_range.start_byte {
+                    if index.summary_id(doc_uri) == Some(location.uri_id)
+                        && node.start_byte() == identity_def_range.start_byte
+                    {
                         continue;
                     }
                     if verify_field(node, *location, field_name, source, doc_uri, &file_doc.scope_tree, index) {
