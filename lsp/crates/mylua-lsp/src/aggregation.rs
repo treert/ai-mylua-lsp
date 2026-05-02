@@ -294,17 +294,13 @@ pub struct TypeCandidate {
 }
 
 /// Priority key for sorting candidates (smaller = higher priority):
-/// 1. More occurrences of "annotation" as a separate path segment = higher priority
+/// 1. More occurrences of "annotation" anywhere in the path = higher priority
 /// 2. Shallower paths (fewer `/` segments) win
 /// 3. Shorter total path length as tiebreaker
 fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
     let path = uri.as_str();
     let lower = path.to_ascii_lowercase();
-    // Count only "annotation" as a separate path segment, not substring
-    let annotation_count = lower
-        .split('/')
-        .filter(|segment| *segment == "annotation")
-        .count();
+    let annotation_count = lower.matches("annotation").count();
     
     // Negate: more occurrences → smaller key → higher priority
     let annotation_key = usize::MAX - annotation_count;
@@ -593,4 +589,3 @@ impl WorkspaceAggregation {
         None
     }
 }
-

@@ -2,6 +2,7 @@ mod test_helpers;
 
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
+use mylua_lsp::type_system::{KnownType, TypeFact};
 use test_helpers::*;
 use tower_lsp_server::ls_types::GotoDefinitionResponse;
 
@@ -127,4 +128,29 @@ fn type_definition_unknown_returns_none_after_fallback_also_fails() {
     let (doc, uri, mut agg) = setup_single_file("\n\n", "td_empty.lua");
     let r = goto::goto_type_definition(&doc, &uri, pos(0, 0), &mut agg, &GotoStrategy::Auto);
     assert!(r.is_none());
+}
+
+#[test]
+fn class_annotation_does_not_bind_across_blank_line_and_plain_doc_comment() {
+    let src = r#"---@class _ClassLala
+---@field lala string
+
+--- utils lala
+utils = {}
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "td_plain_doc_gap.lua");
+    let summary = agg.summaries.get(&uri).expect("summary");
+    let contrib = summary
+        .global_contributions
+        .iter()
+        .find(|c| c.name == "utils")
+        .expect("utils contribution");
+
+    assert!(
+        !matches!(
+            &contrib.type_fact,
+            TypeFact::Known(KnownType::EmmyType(name)) if name == "_ClassLala"
+        ),
+        "plain doc comments after a blank line must not carry @class binding"
+    );
 }

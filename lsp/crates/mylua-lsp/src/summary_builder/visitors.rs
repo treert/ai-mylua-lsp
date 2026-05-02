@@ -59,6 +59,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 visit_anonymous_function_definitions_in_node(ctx, node);
             }
             "emmy_comment" => {
+                clear_pending_on_blank_line_gap(ctx, node);
                 visit_emmy_comment(ctx, node);
                 ctx.last_emmy_end_row = Some(node.end_position().row as u32);
             }
@@ -235,6 +236,7 @@ fn visit_nested_block_inner(
                 visit_anonymous_function_definitions_in_node(ctx, child);
             }
             "emmy_comment" => {
+                clear_pending_on_blank_line_gap(ctx, child);
                 visit_emmy_comment(ctx, child);
                 ctx.last_emmy_end_row = Some(child.end_position().row as u32);
             }
