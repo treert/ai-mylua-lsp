@@ -21,7 +21,7 @@ use crate::document::Document;
 use crate::summary;
 use crate::summary_builder;
 use crate::summary_cache;
-use crate::uri_id::UriInterner;
+use crate::uri_id::{UriId, UriInterner};
 use crate::util;
 use crate::workspace_scanner;
 use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
@@ -105,7 +105,7 @@ pub async fn run_workspace_scan(
     config: Arc<Mutex<LspConfig>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
-    open_uris: Arc<Mutex<HashSet<Uri>>>,
+    open_uris: Arc<Mutex<HashSet<UriId>>>,
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
     uri_interner: Arc<UriInterner>,
     index_state: Arc<Mutex<IndexState>>,
@@ -384,7 +384,8 @@ pub async fn run_workspace_scan(
         // the editor (skip — buffer version wins) and the rest.
         let mut summaries_to_merge: Vec<summary::DocumentSummary> = Vec::with_capacity(parsed.len());
         for pf in parsed {
-            if open_held.contains(&pf.uri) {
+            let uri_id = uri_interner.intern(pf.uri.clone());
+            if open_held.contains(&uri_id) {
                 skipped_open += 1;
                 continue;
             }
@@ -404,8 +405,11 @@ pub async fn run_workspace_scan(
         // the index from parse_and_store_with_old_tree, but
         // build_initial replaces the entire aggregation state, so
         // we must include them.
-        for uri in open_held.iter() {
-            if let Some(existing) = idx.summaries.get(uri) {
+        for uri_id in open_held.iter() {
+            let Some(uri) = uri_interner.resolve(*uri_id) else {
+                continue;
+            };
+            if let Some(existing) = idx.summaries.get(&uri) {
                 summaries_to_merge.push(existing.clone());
             }
         }
@@ -441,14 +445,16 @@ pub async fn run_workspace_scan(
 
     // Seed the diagnostics scheduler now that `IndexState::Ready` is
     // set. `documents` is fully populated at this point.
-    let open: HashSet<Uri> = open_uris.lock().unwrap().clone();
+    let open: HashSet<UriId> = open_uris.lock().unwrap().clone();
     let all_uris: Vec<Uri> = documents.lock().unwrap().keys().cloned().collect();
     let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
-    let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter().partition(|u| open.contains(u));
-    let hot_ids = hot.into_iter().map(|uri| uri_interner.intern(uri)).collect();
+    let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter()
+        .map(|uri| uri_interner.intern(uri))
+        .partition(|uri_id| open.contains(uri_id));
+    let hot_ids = hot;
     scheduler.seed_bulk(hot_ids, diagnostic_scheduler::Priority::Hot);
     if matches!(diag_scope, config::DiagnosticScope::Full) {
-        let cold_ids = cold.into_iter().map(|uri| uri_interner.intern(uri)).collect();
+        let cold_ids = cold;
         scheduler.seed_bulk(cold_ids, diagnostic_scheduler::Priority::Cold);
     }
 

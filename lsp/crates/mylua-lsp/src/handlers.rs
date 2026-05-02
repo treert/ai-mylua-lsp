@@ -316,8 +316,8 @@ impl LanguageServer for Backend {
                 .is_some_and(|d| d.text() == params.text_document.text)
         };
         if text_matches {
-            self.open_uris.lock().unwrap().insert(uri.clone());
             let uri_id = self.uri_interner.intern(uri.clone());
+            self.open_uris.lock().unwrap().insert(uri_id);
             self.scheduler
                 .schedule(uri_id, diagnostic_scheduler::Priority::Hot);
             return;
@@ -328,7 +328,8 @@ impl LanguageServer for Backend {
         // queue. Otherwise the very first did_open of a fresh URI
         // would route to Cold (steady state after workspace Ready,
         // no seed_bulk tombstone upgrade to save us).
-        self.open_uris.lock().unwrap().insert(uri.clone());
+        let uri_id = self.uri_interner.intern(uri.clone());
+        self.open_uris.lock().unwrap().insert(uri_id);
         self.parse_and_store(uri.clone(), params.text_document.text);
 
         // Cold-start syntax-only fast path (no-op once IndexState::Ready).
@@ -403,10 +404,11 @@ impl LanguageServer for Backend {
         // close state the moment they unblock, so their scheduling
         // decisions don't use a stale "tracked open" view. Since
         // `open_uris` is a plain `std::sync::Mutex` held only for the
-        // `.remove(&uri)` call, it can't race with any other lock in
-        // the `edit_lock → open_uris → documents → index` order used
-        // elsewhere.
-        self.open_uris.lock().unwrap().remove(&uri);
+        // remove call, it can't race with any other lock in the
+        // `edit_lock → open_uris → documents → index` order used elsewhere.
+        if let Some(uri_id) = self.uri_interner.get(&uri) {
+            self.open_uris.lock().unwrap().remove(&uri_id);
+        }
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
         if let Some(uri_id) = self.uri_interner.get(&uri) {
@@ -506,7 +508,9 @@ impl LanguageServer for Backend {
                     if let Some(uri_id) = self.uri_interner.get(&change.uri) {
                         self.scheduler.invalidate(&uri_id);
                     }
-                    self.open_uris.lock().unwrap().remove(&change.uri);
+                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        self.open_uris.lock().unwrap().remove(&uri_id);
+                    }
                     self.edit_locks.lock().unwrap().remove(&change.uri);
                     if let Some(uri_id) = self.uri_interner.get(&change.uri) {
                         self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);

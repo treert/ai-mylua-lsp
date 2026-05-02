@@ -156,7 +156,7 @@ pub struct Backend {
     ///   - Diagnostic scheduler priority decision (Hot vs Cold)
     ///   - Cold-start seed routing (`initialized` splits documents into
     ///     Hot/Cold based on this set)
-    pub(crate) open_uris: Arc<Mutex<HashSet<Uri>>>,
+    pub(crate) open_uris: Arc<Mutex<HashSet<UriId>>>,
     /// URIs indexed via `config.workspace.library` (stdlib stubs and
     /// other external annotation packages). Populated by
     /// `run_workspace_scan` after library roots are resolved. Used by
@@ -369,13 +369,13 @@ impl Backend {
             //
             // Hot/Cold priority is decided by whether the client has
             // `did_open`'d this URI.
-            let is_open = self.open_uris.lock().unwrap().contains(&uri);
+            let uri_id = self.uri_interner.intern(uri.clone());
+            let is_open = self.open_uris.lock().unwrap().contains(&uri_id);
             let pri = if is_open {
                 diagnostic_scheduler::Priority::Hot
             } else {
                 diagnostic_scheduler::Priority::Cold
             };
-            let uri_id = self.uri_interner.intern(uri.clone());
             self.scheduler.schedule(uri_id, pri);
 
             // Cascade: signature-fingerprint change → re-diagnose other
@@ -383,13 +383,12 @@ impl Backend {
             if should_cascade {
                 let diag_cfg = self.config.lock().unwrap().diagnostics.clone();
                 if diag_cfg.enable {
-                    let open: HashSet<Uri> = self.open_uris.lock().unwrap().clone();
+                    let open: HashSet<UriId> = self.open_uris.lock().unwrap().clone();
                     match diag_cfg.scope {
                         config::DiagnosticScope::OpenOnly => {
-                            for dep_uri in &open {
-                                if *dep_uri != uri {
-                                    let dep_uri_id = self.uri_interner.intern(dep_uri.clone());
-                                    self.scheduler.schedule(dep_uri_id, diagnostic_scheduler::Priority::Hot);
+                            for dep_uri_id in &open {
+                                if *dep_uri_id != uri_id {
+                                    self.scheduler.schedule(*dep_uri_id, diagnostic_scheduler::Priority::Hot);
                                 }
                             }
                         }
@@ -399,12 +398,12 @@ impl Backend {
                                 if dep_uri == uri {
                                     continue;
                                 }
-                                let pri = if open.contains(&dep_uri) {
+                                let dep_uri_id = self.uri_interner.intern(dep_uri);
+                                let pri = if open.contains(&dep_uri_id) {
                                     diagnostic_scheduler::Priority::Hot
                                 } else {
                                     diagnostic_scheduler::Priority::Cold
                                 };
-                                let dep_uri_id = self.uri_interner.intern(dep_uri);
                                 self.scheduler.schedule(dep_uri_id, pri);
                             }
                         }
@@ -485,7 +484,10 @@ impl Backend {
         if *self.index_state.lock().unwrap() == IndexState::Ready {
             return;
         }
-        if !self.open_uris.lock().unwrap().contains(uri) {
+        let Some(uri_id) = self.uri_interner.get(uri) else {
+            return;
+        };
+        if !self.open_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
         // Library stubs never publish diagnostics. Skipping here
