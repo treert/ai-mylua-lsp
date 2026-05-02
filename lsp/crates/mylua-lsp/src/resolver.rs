@@ -376,8 +376,10 @@ fn resolve_global(
         depth + 1,
         visited,
     );
-    resolved.def_uri = Some(candidate.source_uri.clone());
-    resolved.def_range = Some(candidate.selection_range);
+    if resolved.def_uri.is_none() && resolved.def_range.is_none() {
+        resolved.def_uri = Some(candidate.source_uri.clone());
+        resolved.def_range = Some(candidate.selection_range);
+    }
     resolved
 }
 

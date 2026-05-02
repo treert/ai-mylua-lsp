@@ -1379,6 +1379,39 @@ print(sum)
     );
 }
 
+#[test]
+fn hover_global_require_returned_local_table_function() {
+    let mod_src = r#"local M = {}
+
+function M.hi()
+    print("hi")
+end
+
+return M
+"#;
+    let main_src = r#"mm = require("test_create_module")
+mm.hi()
+"#;
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("test_create_module.lua", mod_src),
+        ("main.lua", main_src),
+    ]);
+    let mod_uri = make_uri("test_create_module.lua");
+    agg.set_require_mapping("test_create_module".to_string(), mod_uri);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).unwrap();
+
+    let result = hover::hover(main_doc, &main_uri, pos(1, 3), &mut agg, &docs)
+        .expect("hover on global require returned table function should resolve");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("function M.hi()"),
+        "hover on `mm.hi()` should resolve through the required module table shape, got:\n{}",
+        text,
+    );
+}
+
 /// When a module does `return Player` (a global table), and the caller
 /// does `local Player = require("player")`, hover on `Player.new()`
 /// should resolve through the `resolve_require_global_name` helper to
