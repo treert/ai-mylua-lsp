@@ -13,8 +13,10 @@ use crate::util::ByteRange;
 /// See `index-architecture.md` §2.2.
 #[derive(Debug)]
 pub struct WorkspaceAggregation {
-    /// All file summaries, keyed by URI.
-    pub summaries: HashMap<Uri, DocumentSummary>,
+    /// All file summaries, keyed by aggregation-local UriId.
+    summaries: HashMap<UriId, DocumentSummary>,
+    summary_uri_ids: HashMap<Uri, UriId>,
+    next_summary_uri_id: i32,
     /// Global name tree — candidate definitions from all files.
     pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
@@ -354,6 +356,8 @@ impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
             summaries: HashMap::new(),
+            summary_uri_ids: HashMap::new(),
+            next_summary_uri_id: 1,
             global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
             module_index: HashMap::new(),
@@ -365,11 +369,12 @@ impl WorkspaceAggregation {
     }
 
     pub fn summary(&self, uri: &Uri) -> Option<&DocumentSummary> {
-        self.summaries.get(uri)
+        let uri_id = self.summary_uri_ids.get(uri)?;
+        self.summaries.get(uri_id)
     }
 
     pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {
-        self.summaries.iter()
+        self.summaries.values().map(|summary| (&summary.uri, summary))
     }
 
     pub fn summaries_values(&self) -> impl Iterator<Item = &DocumentSummary> {
@@ -378,6 +383,18 @@ impl WorkspaceAggregation {
 
     pub fn summary_count(&self) -> usize {
         self.summaries.len()
+    }
+
+    fn summary_uri_id(&mut self, uri: &Uri) -> UriId {
+        if let Some(id) = self.summary_uri_ids.get(uri).copied() {
+            return id;
+        }
+
+        let raw = self.next_summary_uri_id;
+        let id = UriId::new(raw);
+        self.next_summary_uri_id = raw.checked_add(1).expect("summary UriId exhausted");
+        self.summary_uri_ids.insert(uri.clone(), id);
+        id
     }
 
     /// Build the initial global index atomically from a complete set of
@@ -396,16 +413,18 @@ impl WorkspaceAggregation {
         // collects them via `idx.summary(...)` for open URIs), so we
         // must wipe the shards to avoid duplicates.
         self.summaries.clear();
+        self.summary_uri_ids.clear();
+        self.next_summary_uri_id = 1;
         self.global_shard.clear();
         self.type_shard.clear();
 
         // 1. Insert all summaries first (consuming the owned Vec to avoid
-        //    deep-cloning every DocumentSummary) so `resolve_module_to_uri`
-        //    fallback path (scanning `self.summaries.keys()`) works
-        //    for every file.
+        //    deep-cloning every DocumentSummary) so later shard builds can
+        //    see every file's summary in a single consistent snapshot.
         for s in summaries {
             let uri = s.uri.clone();
-            self.summaries.insert(uri, s);
+            let uri_id = self.summary_uri_id(&uri);
+            self.summaries.insert(uri_id, s);
         }
 
         // 2. Build all shards in a single pass.
@@ -439,8 +458,8 @@ impl WorkspaceAggregation {
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
         //    Pre-compute URI priority so each URI is evaluated only once
         //    (avoids repeated String allocations inside sort comparisons).
-        let uri_priority: HashMap<&Uri, (usize, usize, usize)> = self.summaries.keys()
-            .map(|uri| (uri, uri_priority_key(uri)))
+        let uri_priority: HashMap<&Uri, (usize, usize, usize)> = self.summaries.values()
+            .map(|summary| (&summary.uri, uri_priority_key(&summary.uri)))
             .collect();
         let default_priority = (usize::MAX, usize::MAX, usize::MAX);
 
@@ -462,6 +481,7 @@ impl WorkspaceAggregation {
         let uri = summary.uri.clone();
 
         self.remove_contributions(&uri);
+        let uri_id = self.summary_uri_id(&uri);
 
         for gc in &summary.global_contributions {
             self.global_shard.push_candidate(&gc.name, GlobalCandidate {
@@ -488,7 +508,7 @@ impl WorkspaceAggregation {
             candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
         }
 
-        self.summaries.insert(uri, summary);
+        self.summaries.insert(uri_id, summary);
     }
 
     /// Remove a file from the aggregation layer entirely.
@@ -508,7 +528,9 @@ impl WorkspaceAggregation {
                 self.module_uri_ids.remove(&removed_uri);
             }
         }
-        self.summaries.remove(uri);
+        if let Some(uri_id) = self.summary_uri_ids.remove(uri) {
+            self.summaries.remove(&uri_id);
+        }
     }
 
     /// Register a module name → URI mapping in the module index.
@@ -573,7 +595,7 @@ impl WorkspaceAggregation {
         // already-known file still performs the full prune (needed
         // to drop contributions whose names disappeared between
         // revisions), matching the pre-existing semantics.
-        if !self.summaries.contains_key(uri) {
+        if !self.summary_uri_ids.contains_key(uri) {
             return;
         }
 

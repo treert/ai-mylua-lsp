@@ -24,7 +24,7 @@
 
 ### 2.1 每文件摘要 `DocumentSummary`
 
-每个 URI 对应一份 Summary，与版本/内容哈希绑定：
+每个 URI 对应一份 Summary，与版本/内容哈希绑定；聚合层内部使用 aggregation-local `UriId` 作为 `summaries` 的 HashMap key，`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 边界与缓存持久化来源。
 
 | 数据 | 说明 |
 |------|------|
@@ -62,6 +62,7 @@
 
 | 分片 | 键 → 值 | 更新方式 |
 |------|---------|---------|
+| `summaries` | aggregation-local `UriId` → `DocumentSummary`；对外访问器仍接收/返回 URI 语义 | `build_initial` 全量重建 / `upsert_summary` 按 URI 分配或复用局部 ID |
 | `GlobalShard` | 按 `.` / `:` 切段的树（`roots["UE4"].children["FVector"]`），叶/中间节点可挂 `[候选定义…]`；附带 shard-local `UriId`→路径反向索引（入口仍用 URI 查找局部 ID） | `push_candidate` 插入 / `remove_by_uri` 按 URI 精准删除 |
 | `TypeShard` | 类型裸名 → [候选定义…] | 同上 |
 | `RequireByReturn` | 目标 URI → [(来源文件, 局部名)…] | 绑定增删 |

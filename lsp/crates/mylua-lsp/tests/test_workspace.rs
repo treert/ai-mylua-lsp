@@ -67,9 +67,9 @@ fn workspace_project_dir() {
     assert!(!docs.is_empty(), "project dir should have documents");
     // Verify all files are indexed without panic
     assert!(
-        agg.summaries.len() == docs.len(),
+        agg.summary_count() == docs.len(),
         "all documents should have summaries: {} summaries vs {} docs",
-        agg.summaries.len(),
+        agg.summary_count(),
         docs.len()
     );
 }

@@ -139,7 +139,7 @@ fn class_annotation_does_not_bind_across_blank_line_and_plain_doc_comment() {
 utils = {}
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "td_plain_doc_gap.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let contrib = summary
         .global_contributions
         .iter()

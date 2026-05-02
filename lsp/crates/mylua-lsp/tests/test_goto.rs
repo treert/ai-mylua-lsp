@@ -74,7 +74,7 @@ Foo = class()
 function Foo:bar()
 end"#;
     let (_doc, uri, agg) = setup_single_file(src, "local_class_assignment.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let class = summary
         .type_definitions
         .iter()
@@ -102,7 +102,7 @@ local M = {}
 function M:bar()
 end"#;
     let (_doc, uri, agg) = setup_single_file(src, "immediate_local_class.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let class = summary
         .type_definitions
         .iter()
@@ -126,7 +126,7 @@ local M
 function M:bar()
 end"#;
     let (_doc, uri, agg) = setup_single_file(src, "local_class_without_value.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let class = summary
         .type_definitions
         .iter()
@@ -191,7 +191,7 @@ do
     local Foo = { shadow_only = 1 }
 end"#;
     let (_doc, uri, agg) = setup_single_file(src, "class_anchor_shadow.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let class = summary
         .type_definitions
         .iter()

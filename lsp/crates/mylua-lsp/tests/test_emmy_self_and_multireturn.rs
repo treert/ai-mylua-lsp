@@ -68,7 +68,7 @@ function Builder:chain()
 end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let fs = summary.function_summaries.values()
         .find(|fs| fs.name == "Builder:chain").expect("method");
     assert_eq!(fs.signature.returns.len(), 1);
@@ -92,7 +92,7 @@ function Builder:merge(other)
 end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder_param.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let fs = summary.function_summaries.values()
         .find(|fs| fs.name == "Builder:merge").expect("method");
     let other = fs.signature.params.iter().find(|p| p.name == "other").expect("other param");
@@ -114,7 +114,7 @@ fn free_function_self_is_not_resolved() {
 local function free() return nil end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "free.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let fs = summary.function_summaries.values()
         .find(|fs| fs.name == "free").expect("func");
     match &fs.signature.returns[0] {
@@ -139,7 +139,7 @@ local B = {}
 local function takes(cb) end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "multi_ret_param.lua");
-    let summary = agg.summaries.get(&uri).expect("summary");
+    let summary = agg.summary(&uri).expect("summary");
     let fs = summary.function_summaries.values()
         .find(|fs| fs.name == "takes").expect("takes");
     let cb = fs.signature.params.iter().find(|p| p.name == "cb").expect("cb");

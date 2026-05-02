@@ -10,7 +10,7 @@ use mylua_lsp::diagnostics;
 fn meta_file_is_detected_and_flagged() {
     let src = "---@meta\n\nfunction os_exit() end\n";
     let (_doc, uri, agg) = setup_single_file(src, "stub.lua");
-    let summary = agg.summaries.get(&uri).expect("summary present");
+    let summary = agg.summary(&uri).expect("summary present");
     assert!(summary.is_meta, "top-level @meta should be detected");
     assert!(summary.meta_name.is_none(), "no module name supplied");
 }
@@ -19,7 +19,7 @@ fn meta_file_is_detected_and_flagged() {
 fn meta_file_with_module_name() {
     let src = "---@meta io\n\nfunction io.open(path) end\n";
     let (_doc, uri, agg) = setup_single_file(src, "io_stub.lua");
-    let summary = agg.summaries.get(&uri).expect("summary present");
+    let summary = agg.summary(&uri).expect("summary present");
     assert!(summary.is_meta);
     assert_eq!(summary.meta_name.as_deref(), Some("io"));
 }
@@ -30,7 +30,7 @@ fn meta_placed_after_code_is_not_treated_as_meta() {
     // authoring mistake; don't silently accept it.
     let src = "local x = 1\n---@meta\n";
     let (_doc, uri, agg) = setup_single_file(src, "late_meta.lua");
-    let summary = agg.summaries.get(&uri).expect("summary present");
+    let summary = agg.summary(&uri).expect("summary present");
     assert!(!summary.is_meta, "late `---@meta` must not flag the file as a stub");
 }
 
