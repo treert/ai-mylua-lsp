@@ -39,6 +39,13 @@ pub(crate) fn is_type_compatible(declared: &TypeFact, actual: &TypeFact) -> bool
     match (declared, actual) {
         (TypeFact::Unknown, _) | (_, TypeFact::Unknown) => true,
         (TypeFact::Known(d), TypeFact::Known(a)) => known_types_compatible(d, a),
+        (TypeFact::Union(declared_types), TypeFact::Union(actual_types)) => {
+            actual_types.iter().all(|actual_type| {
+                declared_types
+                    .iter()
+                    .any(|declared_type| is_type_compatible(declared_type, actual_type))
+            })
+        }
         (TypeFact::Union(types), actual) => types.iter().any(|t| is_type_compatible(t, actual)),
         (declared, TypeFact::Union(types)) => types.iter().all(|t| is_type_compatible(declared, t)),
         (TypeFact::Stub(SymbolicStub::TypeRef { name }), TypeFact::Known(a)) => {

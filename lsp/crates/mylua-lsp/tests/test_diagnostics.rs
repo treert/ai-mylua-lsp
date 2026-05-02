@@ -1760,6 +1760,36 @@ f("str", 42)
     );
 }
 
+#[test]
+fn argument_type_union_order_does_not_mismatch() {
+    let src = r#"
+---@param e string|number
+local function accepts(e) return e end
+
+---@type number|string
+local value = 1
+
+accepts(value)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype_union_order.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.starts_with("Argument ")),
+        "same union members in a different order must be accepted, got: {:?}",
+        diags,
+    );
+}
+
 // ---------------------------------------------------------------------------
 // P2-3 — @return mismatch
 // ---------------------------------------------------------------------------
