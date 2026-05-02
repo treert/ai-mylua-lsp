@@ -108,7 +108,7 @@
     },
 
     "emmy-param": {
-      "begin": "(---\\s*)(@param)\\s+([a-zA-Z_][a-zA-Z0-9_]*|\\.\\.\\.)\\s*(\\?)?",
+      "begin": "(---\\s*|--\\s+)(@param)\\s+([a-zA-Z_][a-zA-Z0-9_]*|\\.\\.\\.)\\s*(\\?)?",
       "end": "$",
       "beginCaptures": {
         "1": { "name": "comment.line.documentation.lua" },
@@ -123,7 +123,7 @@
     },
 
     "emmy-return": {
-      "begin": "(---\\s*)(@return)",
+      "begin": "(---\\s*|--\\s+)(@return)",
       "end": "$",
       "beginCaptures": {
         "1": { "name": "comment.line.documentation.lua" },
@@ -163,7 +163,7 @@
     },
 
     "emmy-generic": {
-      "begin": "(---\\s*)(@generic)",
+      "begin": "(---\\s*|--\\s+)(@generic)",
       "end": "$",
       "beginCaptures": {
         "1": { "name": "comment.line.documentation.lua" },
@@ -176,7 +176,7 @@
     },
 
     "emmy-overload": {
-      "begin": "(---\\s*)(@overload)",
+      "begin": "(---\\s*|--\\s+)(@overload)",
       "end": "$",
       "beginCaptures": {
         "1": { "name": "comment.line.documentation.lua" },
@@ -203,7 +203,7 @@
     },
 
     "emmy-vararg": {
-      "begin": "(---\\s*)(@vararg)",
+      "begin": "(---\\s*|--\\s+)(@vararg)",
       "end": "$",
       "beginCaptures": {
         "1": { "name": "comment.line.documentation.lua" },
