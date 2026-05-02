@@ -54,7 +54,7 @@ impl GlobalCandidate {
         &self.source_uri
     }
 
-    fn source_uri_id(&self) -> UriId {
+    pub(crate) fn source_uri_id(&self) -> UriId {
         self.source_uri_id
     }
 }
@@ -329,7 +329,7 @@ impl TypeCandidate {
         &self.source_uri
     }
 
-    fn source_uri_id(&self) -> UriId {
+    pub(crate) fn source_uri_id(&self) -> UriId {
         self.source_uri_id
     }
 }
@@ -374,6 +374,20 @@ impl WorkspaceAggregation {
     pub fn summary(&self, uri: &Uri) -> Option<&DocumentSummary> {
         let uri_id = self.summary_uri_ids.get(uri)?;
         self.summaries.get(uri_id)
+    }
+
+    pub(crate) fn summary_id(&self, uri: &Uri) -> Option<UriId> {
+        self.summary_uri_ids.get(uri).copied()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn summary_by_id(&self, uri_id: UriId) -> Option<&DocumentSummary> {
+        self.summaries.get(&uri_id)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn summary_uri(&self, uri_id: UriId) -> Option<&Uri> {
+        self.summaries.get(&uri_id).map(|summary| &summary.uri)
     }
 
     pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {

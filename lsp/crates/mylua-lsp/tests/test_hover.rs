@@ -417,6 +417,44 @@ return test_const"#,
 }
 
 #[test]
+fn hover_required_table_field_preserves_public_content() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"local settings = require("settings")
+print(settings.host)"#,
+        ),
+        (
+            "settings.lua",
+            r#"local settings = {
+    -- hostname docs
+    host = "localhost",
+}
+
+return settings"#,
+        ),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main doc");
+    agg.set_require_mapping("settings".to_string(), make_uri("settings.lua"));
+
+    let result = hover::hover(main_doc, &main_uri, pos(1, 15), &mut agg, &docs)
+        .expect("hover on settings.host should resolve");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("Type: `string`"),
+        "hover should keep the required table field type, got: {}",
+        content,
+    );
+    assert!(
+        content.contains("host = \"localhost\""),
+        "hover should keep the required table field source line, got: {}",
+        content,
+    );
+}
+
+#[test]
 fn hover_on_method_decl_base_falls_through_to_variable() {
     // `function ABC:f1()` — hover on `ABC` (the base) must NOT show
     // the function declaration; it should resolve `ABC` as a local.

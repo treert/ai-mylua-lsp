@@ -640,6 +640,54 @@ return test_const"#,
 }
 
 #[test]
+fn goto_required_table_field_preserves_public_location() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"local settings = require("settings")
+print(settings.host)"#,
+        ),
+        (
+            "settings.lua",
+            r#"local settings = {
+    host = "localhost",
+}
+
+return settings"#,
+        ),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&main_uri).expect("main doc");
+    let target_uri = make_uri("settings.lua");
+    agg.set_require_mapping("settings".to_string(), target_uri.clone());
+
+    let result = goto::goto_definition(
+        main_doc,
+        &main_uri,
+        pos(1, 15),
+        &mut agg,
+        &GotoStrategy::Auto)
+    .expect("goto on settings.host should resolve");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
+        assert_eq!(loc.uri, target_uri, "should jump to settings.lua");
+        assert_eq!(
+            loc.range.start.line, 1,
+            "should land on host in the returned local table, got: {:?}",
+            loc.range,
+        );
+        assert_eq!(
+            loc.range.start.character, 4,
+            "host field should start at column 4, got: {:?}",
+            loc.range,
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", result);
+    }
+}
+
+#[test]
 fn goto_emmy_comment_parent_type_name() {
     let src = r#"---@class BaseCls
 BaseCls = {}

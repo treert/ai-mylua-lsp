@@ -4,29 +4,42 @@ use tower_lsp_server::ls_types::Uri;
 use crate::aggregation::WorkspaceAggregation;
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
+use crate::uri_id::UriId;
 use crate::util::ByteRange;
 
 const MAX_RESOLVE_DEPTH: usize = 32;
 
 /// Result of resolving a type, with optional source location for goto.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ResolvedLocation {
+    pub uri_id: UriId,
+    pub range: ByteRange,
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub type_fact: TypeFact,
     pub def_uri: Option<Uri>,
     pub def_range: Option<ByteRange>,
+    pub def_location: Option<ResolvedLocation>,
 }
 
 impl ResolvedType {
     fn unknown() -> Self {
-        Self { type_fact: TypeFact::Unknown, def_uri: None, def_range: None }
+        Self { type_fact: TypeFact::Unknown, def_uri: None, def_range: None, def_location: None }
     }
 
     fn from_fact(fact: TypeFact) -> Self {
-        Self { type_fact: fact, def_uri: None, def_range: None }
+        Self { type_fact: fact, def_uri: None, def_range: None, def_location: None }
     }
 
-    fn with_location(fact: TypeFact, uri: Uri, range: ByteRange) -> Self {
-        Self { type_fact: fact, def_uri: Some(uri), def_range: Some(range) }
+    fn with_location(fact: TypeFact, uri: Uri, range: ByteRange, uri_id: Option<UriId>) -> Self {
+        Self {
+            type_fact: fact,
+            def_uri: Some(uri),
+            def_range: Some(range),
+            def_location: uri_id.map(|id| ResolvedLocation { uri_id: id, range }),
+        }
     }
 }
 
@@ -109,6 +122,7 @@ fn resolve_field_chain_inner(
             type_fact: base_fact.clone(),
             def_uri: uri_hint.cloned(),
             def_range: None,
+            def_location: None,
         }
     } else {
         resolve_recursive(base_fact, agg, 0, &mut visited)
@@ -173,6 +187,7 @@ fn resolve_field_chain_inner(
         current = result;
         if kept_uri {
             current.def_uri = uri_hint.cloned();
+            current.def_location = None;
         }
 
         if current.type_fact == TypeFact::Unknown {
@@ -351,6 +366,7 @@ fn resolve_require(
     let mut result = resolve_recursive(&return_fact, agg, depth + 1, visited);
     if result.def_uri.is_none() {
         result.def_uri = Some(target_uri);
+        result.def_location = None;
     }
     result
 }
@@ -379,6 +395,10 @@ fn resolve_global(
     if resolved.def_uri.is_none() && resolved.def_range.is_none() {
         resolved.def_uri = Some(candidate.source_uri().clone());
         resolved.def_range = Some(candidate.selection_range);
+        resolved.def_location = Some(ResolvedLocation {
+            uri_id: candidate.source_uri_id(),
+            range: candidate.selection_range,
+        });
     }
     resolved
 }
@@ -407,6 +427,10 @@ fn try_global_shard_qualified(
     if !preserve_resolved_location || resolved.def_uri.is_none() {
         resolved.def_uri = Some(candidate.source_uri().clone());
         resolved.def_range = Some(candidate.selection_range);
+        resolved.def_location = Some(ResolvedLocation {
+            uri_id: candidate.source_uri_id(),
+            range: candidate.selection_range,
+        });
     }
     resolved
 }
@@ -424,6 +448,7 @@ fn resolve_emmy_type(
         TypeFact::Known(KnownType::EmmyType(name.to_string())),
         candidate.source_uri().clone(),
         candidate.range,
+        Some(candidate.source_uri_id()),
     )
 }
 
@@ -567,6 +592,10 @@ fn resolve_call_return(
                         if ret_resolved.def_uri.is_none() {
                             ret_resolved.def_uri = Some(c.source_uri().clone());
                             ret_resolved.def_range = Some(c.selection_range);
+                            ret_resolved.def_location = Some(ResolvedLocation {
+                                uri_id: c.source_uri_id(),
+                                range: c.selection_range,
+                            });
                         }
                         return ret_resolved;
                     }
@@ -580,6 +609,10 @@ fn resolve_call_return(
                                     if ret_resolved.def_uri.is_none() {
                                         ret_resolved.def_uri = Some(c.source_uri().clone());
                                         ret_resolved.def_range = Some(c.selection_range);
+                                        ret_resolved.def_location = Some(ResolvedLocation {
+                                            uri_id: c.source_uri_id(),
+                                            range: c.selection_range,
+                                        });
                                     }
                                     return ret_resolved;
                                 }
@@ -593,6 +626,7 @@ fn resolve_call_return(
                 c.type_fact.clone(),
                 c.source_uri().clone(),
                 c.selection_range,
+                Some(c.source_uri_id()),
             );
         }
     }
@@ -717,6 +751,7 @@ fn resolve_field_access(
                         c.type_fact.clone(),
                         c.source_uri().clone(),
                         c.selection_range,
+                        Some(c.source_uri_id()),
                     );
                 }
             }
@@ -726,13 +761,16 @@ fn resolve_field_access(
 
         TypeFact::Union(types) => {
             let mut resolved_types = Vec::new();
-            let mut best_location: Option<(Uri, ByteRange)> = None;
+            let mut best_location: Option<(Uri, ByteRange, Option<UriId>)> = None;
             for t in types {
                 let result = resolve_field_access(t, field, agg, depth + 1, visited);
                 if result.type_fact != TypeFact::Unknown {
                     if best_location.is_none() {
                         if let (Some(u), Some(r)) = (&result.def_uri, &result.def_range) {
-                            best_location = Some((u.clone(), *r));
+                            let uri_id = result.def_location
+                                .map(|location| location.uri_id)
+                                .or_else(|| agg.summary_id(u));
+                            best_location = Some((u.clone(), *r, uri_id));
                         }
                     }
                     if !resolved_types.contains(&result.type_fact) {
@@ -744,16 +782,16 @@ fn resolve_field_access(
                 0 => ResolvedType::unknown(),
                 1 => {
                     let fact = resolved_types.into_iter().next().unwrap();
-                    if let Some((uri, range)) = best_location {
-                        ResolvedType::with_location(fact, uri, range)
+                    if let Some((uri, range, uri_id)) = best_location {
+                        ResolvedType::with_location(fact, uri, range, uri_id)
                     } else {
                         ResolvedType::from_fact(fact)
                     }
                 }
                 _ => {
                     let fact = TypeFact::Union(resolved_types);
-                    if let Some((uri, range)) = best_location {
-                        ResolvedType::with_location(fact, uri, range)
+                    if let Some((uri, range, uri_id)) = best_location {
+                        ResolvedType::with_location(fact, uri, range, uri_id)
                     } else {
                         ResolvedType::from_fact(fact)
                     }
@@ -777,6 +815,7 @@ fn resolve_table_field(
         Some(u) => u,
         None => return ResolvedType::unknown(),
     };
+    let uri_id = agg.summary_id(uri);
     let summary = match agg.summary(uri) {
         Some(s) => s,
         None => return ResolvedType::unknown(),
@@ -787,6 +826,8 @@ fn resolve_table_field(
                 type_fact: fi.type_fact.clone(),
                 def_uri: Some(uri.clone()),
                 def_range: fi.def_range,
+                def_location: fi.def_range
+                    .and_then(|range| uri_id.map(|id| ResolvedLocation { uri_id: id, range })),
             };
         }
     }
@@ -832,6 +873,10 @@ fn resolve_emmy_field_with_visited(
                                     type_fact: tf.type_fact.clone(),
                                     def_uri: Some(candidate.source_uri().clone()),
                                     def_range: Some(tf.range),
+                                    def_location: Some(ResolvedLocation {
+                                        uri_id: candidate.source_uri_id(),
+                                        range: tf.range,
+                                    }),
                                 };
                             }
                         }
@@ -848,6 +893,10 @@ fn resolve_emmy_field_with_visited(
                                         type_fact: fi.type_fact.clone(),
                                         def_uri: Some(candidate.source_uri().clone()),
                                         def_range: fi.def_range,
+                                        def_location: fi.def_range.map(|range| ResolvedLocation {
+                                            uri_id: candidate.source_uri_id(),
+                                            range,
+                                        }),
                                     };
                                 }
                             }
@@ -876,6 +925,7 @@ fn resolve_emmy_field_with_visited(
                     c.type_fact.clone(),
                     c.source_uri().clone(),
                     c.selection_range,
+                    Some(c.source_uri_id()),
                 );
             }
         }
