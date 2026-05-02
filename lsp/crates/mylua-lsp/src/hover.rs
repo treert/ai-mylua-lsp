@@ -516,19 +516,40 @@ fn build_field_chain_hover(
 
     let type_display = format_resolved_type(&resolved.type_fact);
 
-    if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-        if all_docs.contains_document(def_uri) {
-            let synth_def = crate::types::Definition {
-                name: field_name.clone(),
-                kind: DefKind::GlobalVariable,
-                range: *def_range,
-                selection_range: *def_range,
-                uri: def_uri.clone(),
-            };
-            return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
+    let synth_def = (|| {
+        let Some(location) = resolved.def_location else {
+            return None;
+        };
+        let Some(def_uri) = index.summary_uri(location.uri_id) else {
+            return None;
+        };
+        let def_range = location.range;
+        if !all_docs.contains_document(def_uri) {
+            return None;
         }
+        Some(crate::types::Definition {
+            name: field_name.clone(),
+            kind: DefKind::GlobalVariable,
+            range: def_range,
+            selection_range: def_range,
+            uri: def_uri.clone(),
+        })
+    })();
+    if let Some(synth_def) = synth_def {
+        return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
     }
 
+    fallback_field_hover(kind_label, &field_name, &type_display, name_node, source, line_index)
+}
+
+fn fallback_field_hover(
+    kind_label: &str,
+    field_name: &str,
+    type_display: &str,
+    name_node: tree_sitter::Node,
+    source: &[u8],
+    line_index: &LineIndex,
+) -> Option<Hover> {
     let mut parts = Vec::new();
     parts.push(format!("```lua\n({}) {}\n```", kind_label, field_name));
     if type_display != "unknown" {

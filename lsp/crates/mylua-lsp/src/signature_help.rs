@@ -136,8 +136,8 @@ pub(crate) fn resolve_call_signatures(
             return Some((vec![sig.clone()], false, name));
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
-            if let Some(ref def_uri) = resolved.def_uri {
-                if let Some(summary) = index.summary(def_uri) {
+            if let Some(location) = resolved.def_location {
+                if let Some(summary) = index.summary_by_id(location.uri_id) {
                     if let Some(fs) = summary.function_summaries.get(fid) {
                         let sigs = primary_plus_overloads(fs);
                         return Some((sigs, false, name));
@@ -208,7 +208,10 @@ fn lookup_function_signatures_by_field(
         caller_uri, base_fact, &[field_name.to_string()], index,
     );
     if let TypeFact::Known(KnownType::Function(sig)) = &resolved.type_fact {
-        if let Some(def_uri) = &resolved.def_uri {
+        let def_uri = resolved
+            .def_location
+            .and_then(|location| index.summary_uri(location.uri_id));
+        if let Some(def_uri) = def_uri {
             if let Some(summary) = index.summary(def_uri) {
                 // Try exact `{class}:{field}` / `{class}.{field}` lookup
                 // when we know the owner class (covers methods declared
@@ -244,7 +247,7 @@ fn lookup_function_signatures_by_field(
             if let Some((impl_uri, impl_sigs)) =
                 lookup_overloads_via_global_shard(cls, field_name, index)
             {
-                if Some(&impl_uri) != resolved.def_uri.as_ref() {
+                if Some(&impl_uri) != def_uri {
                     let mut merged = vec![sig.clone()];
                     for s in impl_sigs {
                         // Skip entries that would render as duplicates of
@@ -268,8 +271,8 @@ fn lookup_function_signatures_by_field(
         return vec![sig.clone()];
     }
     if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
-        if let Some(def_uri) = &resolved.def_uri {
-            if let Some(summary) = index.summary(def_uri) {
+        if let Some(location) = resolved.def_location {
+            if let Some(summary) = index.summary_by_id(location.uri_id) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     return primary_plus_overloads(fs);
                 }

@@ -238,8 +238,8 @@ fn infer_call_return_fact(
                     }
                 }
                 TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                    if let Some(ref uri) = field_result.def_uri {
-                        if let Some(summary) = index.summary(uri) {
+                    if let Some(location) = field_result.def_location {
+                        if let Some(summary) = index.summary_by_id(location.uri_id) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
                                 if let Some(ret) = fs.signature.returns.first() {
                                     return ret.clone();
