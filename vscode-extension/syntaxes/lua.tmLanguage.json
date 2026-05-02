@@ -303,6 +303,7 @@
 
     "emmy-type-expr": {
       "patterns": [
+        { "include": "#emmy-description-separator" },
         { "include": "#emmy-type-fun" },
         { "include": "#emmy-type-table-literal" },
         { "include": "#emmy-type-paren" },
@@ -314,6 +315,11 @@
         { "include": "#emmy-type-name" },
         { "include": "#emmy-type-punctuation" }
       ]
+    },
+
+    "emmy-description-separator": {
+      "match": "\\s+@.*$",
+      "name": "comment.line.documentation.lua"
     },
 
     "emmy-type-fun": {
