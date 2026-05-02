@@ -46,14 +46,9 @@ pub struct GlobalCandidate {
     pub range: ByteRange,
     pub selection_range: ByteRange,
     source_uri_id: UriId,
-    source_uri: Uri,
 }
 
 impl GlobalCandidate {
-    pub fn source_uri(&self) -> &Uri {
-        &self.source_uri
-    }
-
     pub(crate) fn source_uri_id(&self) -> UriId {
         self.source_uri_id
     }
@@ -259,11 +254,11 @@ impl GlobalShard {
 
     /// Remove all candidates contributed by a given URI.
     /// Uses the reverse index for O(contributions-per-file) work.
-    pub fn remove_by_uri(&mut self, uri: &Uri, uri_id: UriId) {
+    pub fn remove_by_uri(&mut self, _uri: &Uri, uri_id: UriId) {
         let Some(paths) = self.uri_to_paths.remove(&uri_id) else { return };
         for path in &paths {
             if let Some(node) = self.get_node_mut(path) {
-                node.candidates.retain(|c| c.source_uri_id() != uri_id && c.source_uri() != uri);
+                node.candidates.retain(|c| c.source_uri_id() != uri_id);
             }
         }
         // Note: we leave empty structural nodes in place.
@@ -320,15 +315,10 @@ pub struct TypeCandidate {
     pub name: String,
     pub kind: crate::summary::TypeDefinitionKind,
     source_uri_id: UriId,
-    source_uri: Uri,
     pub range: ByteRange,
 }
 
 impl TypeCandidate {
-    pub fn source_uri(&self) -> &Uri {
-        &self.source_uri
-    }
-
     pub(crate) fn source_uri_id(&self) -> UriId {
         self.source_uri_id
     }
@@ -388,6 +378,14 @@ impl WorkspaceAggregation {
     #[allow(dead_code)]
     pub(crate) fn summary_uri(&self, uri_id: UriId) -> Option<&Uri> {
         self.summaries.get(&uri_id).map(|summary| &summary.uri)
+    }
+
+    pub(crate) fn candidate_uri(&self, candidate: &GlobalCandidate) -> Option<&Uri> {
+        self.summary_uri(candidate.source_uri_id())
+    }
+
+    pub(crate) fn type_candidate_uri(&self, candidate: &TypeCandidate) -> Option<&Uri> {
+        self.summary_uri(candidate.source_uri_id())
     }
 
     pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {
@@ -451,8 +449,6 @@ impl WorkspaceAggregation {
 
             // 2. Build all shards in a single pass.
             for (uri_id, summary) in summaries {
-                let uri = &summary.uri;
-
                 for gc in &summary.global_contributions {
                     global_shard.push_candidate(&gc.name, GlobalCandidate {
                         name: gc.name.clone(),
@@ -461,7 +457,6 @@ impl WorkspaceAggregation {
                         range: gc.range,
                         selection_range: gc.selection_range,
                         source_uri_id: *uri_id,
-                        source_uri: uri.clone(),
                     });
                 }
 
@@ -473,7 +468,6 @@ impl WorkspaceAggregation {
                         name: td.name.clone(),
                         kind: td.kind.clone(),
                         source_uri_id: *uri_id,
-                        source_uri: uri.clone(),
                         range: td.range,
                     });
                 }
@@ -483,17 +477,18 @@ impl WorkspaceAggregation {
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
         //    Pre-compute URI priority so each URI is evaluated only once
         //    (avoids repeated String allocations inside sort comparisons).
-        let uri_priority: HashMap<&Uri, (usize, usize, usize)> = self.summaries.values()
-            .map(|summary| (&summary.uri, uri_priority_key(&summary.uri)))
+        let id_priority: HashMap<UriId, (usize, usize, usize)> = self.summaries
+            .iter()
+            .map(|(id, summary)| (*id, uri_priority_key(&summary.uri)))
             .collect();
         let default_priority = (usize::MAX, usize::MAX, usize::MAX);
 
         self.global_shard.sort_all(|c| {
-            *uri_priority.get(c.source_uri()).unwrap_or(&default_priority)
+            *id_priority.get(&c.source_uri_id()).unwrap_or(&default_priority)
         });
         for candidates in self.type_shard.values_mut() {
             candidates.sort_by_cached_key(|c| {
-                *uri_priority.get(c.source_uri()).unwrap_or(&default_priority)
+                *id_priority.get(&c.source_uri_id()).unwrap_or(&default_priority)
             });
         }
     }
@@ -507,6 +502,11 @@ impl WorkspaceAggregation {
 
         self.remove_contributions(&uri);
         let uri_id = self.summary_uri_id(&uri);
+        let summary_priorities: HashMap<UriId, (usize, usize, usize)> = self.summaries
+            .iter()
+            .map(|(id, summary)| (*id, uri_priority_key(&summary.uri)))
+            .collect();
+        let current_priority = uri_priority_key(&uri);
 
         for gc in &summary.global_contributions {
             self.global_shard.push_candidate(&gc.name, GlobalCandidate {
@@ -516,9 +516,13 @@ impl WorkspaceAggregation {
                 range: gc.range,
                 selection_range: gc.selection_range,
                 source_uri_id: uri_id,
-                source_uri: uri.clone(),
             });
-            self.global_shard.sort_at(&gc.name, |c| uri_priority_key(&c.source_uri));
+            self.global_shard.sort_at(&gc.name, |c| {
+                summary_priorities
+                    .get(&c.source_uri_id())
+                    .copied()
+                    .unwrap_or(current_priority)
+            });
         }
 
         for td in &summary.type_definitions {
@@ -529,10 +533,14 @@ impl WorkspaceAggregation {
                 name: td.name.clone(),
                 kind: td.kind.clone(),
                 source_uri_id: uri_id,
-                source_uri: uri.clone(),
                 range: td.range,
             });
-            candidates.sort_by_cached_key(|c| uri_priority_key(&c.source_uri));
+            candidates.sort_by_cached_key(|c| {
+                summary_priorities
+                    .get(&c.source_uri_id())
+                    .copied()
+                    .unwrap_or(current_priority)
+            });
         }
 
         self.summaries.insert(uri_id, summary);
@@ -629,7 +637,7 @@ impl WorkspaceAggregation {
         self.global_shard.remove_by_uri(uri, uri_id);
 
         self.type_shard.retain(|_, candidates| {
-            candidates.retain(|c| c.source_uri_id() != uri_id && c.source_uri() != uri);
+            candidates.retain(|c| c.source_uri_id() != uri_id);
             !candidates.is_empty()
         });
     }

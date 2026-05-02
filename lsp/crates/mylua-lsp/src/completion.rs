@@ -418,13 +418,15 @@ fn resolve_global_item(
     let Some(best) = candidates.first() else {
         return item;
     };
+    let Some(best_uri) = index.candidate_uri(best) else {
+        return item;
+    };
 
     let mut detail_parts: Vec<String> = Vec::new();
     // Type summary from the candidate's type_fact.
     detail_parts.push(format!("{}", best.type_fact));
     // File origin — trailing path segment for brevity.
-    let origin = best
-        .source_uri()
+    let origin = best_uri
         .as_str()
         .rsplit('/')
         .next()
@@ -437,7 +439,7 @@ fn resolve_global_item(
 
     // Pull richer cross-file function summary documentation when the
     // target file is indexed.
-    if let Some(summary) = index.summary(best.source_uri()) {
+    if let Some(summary) = index.summary(best_uri) {
         if let Some(fs) = summary.get_function_by_name(name) {
             let mut md = String::new();
             md.push_str("```lua\n");

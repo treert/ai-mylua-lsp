@@ -42,6 +42,9 @@ pub fn search_workspace_symbols(
             continue;
         }
         for candidate in candidates {
+            let Some(candidate_uri) = index.candidate_uri(candidate) else {
+                continue;
+            };
             let effective_kind = if container.is_some() {
                 // Qualified name: determine kind from the function signature.
                 candidate_symbol_kind(candidate, index)
@@ -55,7 +58,7 @@ pub fn search_workspace_symbols(
                 let key = (
                     display_name.clone(),
                     container.clone(),
-                    candidate.source_uri().to_string(),
+                    candidate_uri.to_string(),
                 );
                 if !member_keys.insert(key) {
                     continue;
@@ -68,7 +71,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate.source_uri().clone(),
+                    uri: candidate_uri.clone(),
                     range: candidate.selection_range.into(),
                 },
                 container_name: container.clone(),
@@ -82,6 +85,9 @@ pub fn search_workspace_symbols(
             continue;
         }
         for candidate in candidates {
+            let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
+                continue;
+            };
             let kind = match candidate.kind {
                 TypeDefinitionKind::Class => SymbolKind::CLASS,
                 TypeDefinitionKind::Alias => SymbolKind::INTERFACE,
@@ -93,7 +99,7 @@ pub fn search_workspace_symbols(
             // Look up via the owning summary because `TypeShardEntry`
             // only carries the coarse anchor range.
             let location_range = index
-                .summary(candidate.source_uri())
+                .summary(candidate_uri)
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
@@ -108,7 +114,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate.source_uri().clone(),
+                    uri: candidate_uri.clone(),
                     range: location_range.into(),
                 },
                 container_name: None,
@@ -194,16 +200,18 @@ fn candidate_symbol_kind(
     };
 
     if let Some(id) = func_id {
-        if let Some(summary) = index.summary(candidate.source_uri()) {
-            if let Some(func) = summary.function_summaries.get(&id) {
-                // FunctionSummary.name preserves the original colon form
-                // (e.g. "Foo:myMethod"), while GlobalContribution.name is
-                // normalized to dot. Check for colon in the name.
-                return if func.name.contains(':') {
-                    SymbolKind::METHOD
-                } else {
-                    SymbolKind::FUNCTION
-                };
+        if let Some(candidate_uri) = index.candidate_uri(candidate) {
+            if let Some(summary) = index.summary(candidate_uri) {
+                if let Some(func) = summary.function_summaries.get(&id) {
+                    // FunctionSummary.name preserves the original colon form
+                    // (e.g. "Foo:myMethod"), while GlobalContribution.name is
+                    // normalized to dot. Check for colon in the name.
+                    return if func.name.contains(':') {
+                        SymbolKind::METHOD
+                    } else {
+                        SymbolKind::FUNCTION
+                    };
+                }
             }
         }
         return SymbolKind::FUNCTION;

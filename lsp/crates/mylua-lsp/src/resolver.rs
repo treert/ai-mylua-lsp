@@ -232,13 +232,14 @@ pub fn get_fields_for_type(
         if let Some(node) = agg.global_shard.get_node(name) {
             for (child_name, child_node) in &node.children {
                 if let Some(c) = child_node.candidates.first() {
+                    let candidate_uri = agg.candidate_uri(c).cloned();
                     let is_func = is_function_type(&c.type_fact)
                         || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
                     global_prefix_fields.push(FieldCompletion {
                         name: child_name.clone(),
                         type_display: format!("{}", c.type_fact),
                         is_function: is_func,
-                        def_uri: Some(c.source_uri().clone()),
+                        def_uri: candidate_uri,
                         def_range: Some(c.selection_range),
                     });
                 }
@@ -393,7 +394,7 @@ fn resolve_global(
         visited,
     );
     if resolved.def_uri.is_none() && resolved.def_range.is_none() {
-        resolved.def_uri = Some(candidate.source_uri().clone());
+        resolved.def_uri = agg.candidate_uri(&candidate).cloned();
         resolved.def_range = Some(candidate.selection_range);
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
@@ -425,7 +426,7 @@ fn try_global_shard_qualified(
         visited,
     );
     if !preserve_resolved_location || resolved.def_uri.is_none() {
-        resolved.def_uri = Some(candidate.source_uri().clone());
+        resolved.def_uri = agg.candidate_uri(&candidate).cloned();
         resolved.def_range = Some(candidate.selection_range);
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
@@ -443,10 +444,13 @@ fn resolve_emmy_type(
         Some(candidates) if !candidates.is_empty() => &candidates[0],
         _ => return ResolvedType::from_fact(TypeFact::Known(KnownType::EmmyType(name.to_string()))),
     };
+    let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
+        return ResolvedType::from_fact(TypeFact::Known(KnownType::EmmyType(name.to_string())));
+    };
 
     ResolvedType::with_location(
         TypeFact::Known(KnownType::EmmyType(name.to_string())),
-        candidate.source_uri().clone(),
+        candidate_uri.clone(),
         candidate.range,
         Some(candidate.source_uri_id()),
     )
@@ -590,7 +594,7 @@ fn resolve_call_return(
                     if let Some(ret) = sig.returns.first() {
                         let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
                         if ret_resolved.def_uri.is_none() {
-                            ret_resolved.def_uri = Some(c.source_uri().clone());
+                            ret_resolved.def_uri = agg.candidate_uri(&c).cloned();
                             ret_resolved.def_range = Some(c.selection_range);
                             ret_resolved.def_location = Some(ResolvedLocation {
                                 uri_id: c.source_uri_id(),
@@ -607,7 +611,7 @@ fn resolve_call_return(
                                 if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
                                     let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
                                     if ret_resolved.def_uri.is_none() {
-                                        ret_resolved.def_uri = Some(c.source_uri().clone());
+                                        ret_resolved.def_uri = agg.candidate_uri(&c).cloned();
                                         ret_resolved.def_range = Some(c.selection_range);
                                         ret_resolved.def_location = Some(ResolvedLocation {
                                             uri_id: c.source_uri_id(),
@@ -622,9 +626,12 @@ fn resolve_call_return(
                 }
                 _ => {}
             }
+            let Some(candidate_uri) = agg.candidate_uri(&c) else {
+                return ResolvedType::unknown();
+            };
             return ResolvedType::with_location(
                 c.type_fact.clone(),
-                c.source_uri().clone(),
+                candidate_uri.clone(),
                 c.selection_range,
                 Some(c.source_uri_id()),
             );
@@ -747,9 +754,12 @@ fn resolve_field_access(
             let qualified = format!("{}.{}", name, field);
             if let Some(candidates) = agg.global_shard.get(&qualified).cloned() {
                 if let Some(c) = candidates.first() {
+                    let Some(candidate_uri) = agg.candidate_uri(c) else {
+                        return ResolvedType::unknown();
+                    };
                     return ResolvedType::with_location(
                         c.type_fact.clone(),
-                        c.source_uri().clone(),
+                        candidate_uri.clone(),
                         c.selection_range,
                         Some(c.source_uri_id()),
                     );
@@ -854,7 +864,10 @@ fn resolve_emmy_field_with_visited(
 
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summary(candidate.source_uri()) {
+            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
+                continue;
+            };
+            if let Some(summary) = agg.summary(candidate_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
 
@@ -871,7 +884,7 @@ fn resolve_emmy_field_with_visited(
                             if tf.name == field {
                                 return ResolvedType {
                                     type_fact: tf.type_fact.clone(),
-                                    def_uri: Some(candidate.source_uri().clone()),
+                                    def_uri: Some(candidate_uri.clone()),
                                     def_range: Some(tf.range),
                                     def_location: Some(ResolvedLocation {
                                         uri_id: candidate.source_uri_id(),
@@ -891,7 +904,7 @@ fn resolve_emmy_field_with_visited(
                                 if let Some(fi) = shape.fields.get(field) {
                                     return ResolvedType {
                                         type_fact: fi.type_fact.clone(),
-                                        def_uri: Some(candidate.source_uri().clone()),
+                                        def_uri: Some(candidate_uri.clone()),
                                         def_range: fi.def_range,
                                         def_location: fi.def_range.map(|range| ResolvedLocation {
                                             uri_id: candidate.source_uri_id(),
@@ -921,9 +934,12 @@ fn resolve_emmy_field_with_visited(
         let qualified = format!("{}.{}", type_name, field);
         if let Some(global_candidates) = agg.global_shard.get(&qualified) {
             if let Some(c) = global_candidates.first() {
+                let Some(candidate_uri) = agg.candidate_uri(c) else {
+                    return ResolvedType::unknown();
+                };
                 return ResolvedType::with_location(
                     c.type_fact.clone(),
-                    c.source_uri().clone(),
+                    candidate_uri.clone(),
                     c.selection_range,
                     Some(c.source_uri_id()),
                 );
@@ -1009,7 +1025,10 @@ fn collect_emmy_fields_recursive(
     }
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summary(candidate.source_uri()) {
+            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
+                continue;
+            };
+            if let Some(summary) = agg.summary(candidate_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
@@ -1023,7 +1042,7 @@ fn collect_emmy_fields_recursive(
                                 name: tf.name.clone(),
                                 type_display: format!("{}", tf.type_fact),
                                 is_function: is_function_type(&tf.type_fact),
-                                def_uri: Some(candidate.source_uri().clone()),
+                                def_uri: Some(candidate_uri.clone()),
                                 def_range: Some(tf.range),
                             });
                         }
@@ -1039,7 +1058,7 @@ fn collect_emmy_fields_recursive(
                                             name: fname.clone(),
                                             type_display: format!("{}", fi.type_fact),
                                             is_function: is_function_type(&fi.type_fact),
-                                            def_uri: Some(candidate.source_uri().clone()),
+                                            def_uri: Some(candidate_uri.clone()),
                                             def_range: fi.def_range,
                                         });
                                     }
@@ -1071,7 +1090,10 @@ fn is_function_type(fact: &TypeFact) -> bool {
 fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<String> {
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summary(candidate.source_uri()) {
+            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
+                continue;
+            };
+            if let Some(summary) = agg.summary(candidate_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name && !td.generic_params.is_empty() {
                         return td.generic_params.clone();
@@ -1098,7 +1120,7 @@ pub fn resolve_method_return_with_generics(
     // Find the source URI for this type so we can look up function_summaries.
     let source_uri = agg.type_shard.get(type_name)
         .and_then(|candidates| candidates.first())
-        .map(|c| c.source_uri().clone());
+        .and_then(|c| agg.type_candidate_uri(c).cloned());
 
     if let Some(uri) = source_uri {
         // Try qualified name `TypeName:method` or `TypeName.method` in

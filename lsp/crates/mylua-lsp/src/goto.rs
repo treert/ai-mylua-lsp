@@ -77,8 +77,9 @@ pub fn goto_definition(
     // Check if ident is a type name → jump to its definition
     if let Some(candidates) = index.type_shard.get(name) {
         if let Some(candidate) = candidates.first() {
+            let candidate_uri = index.type_candidate_uri(candidate)?;
             return Some(GotoDefinitionResponse::Scalar(Location {
-                uri: candidate.source_uri().clone(),
+                uri: candidate_uri.clone(),
                 range: candidate.range.into(),
             }));
         }
@@ -87,9 +88,12 @@ pub fn goto_definition(
     if let Some(candidates) = index.global_shard.get(name) {
         let locations: Vec<Location> = candidates
             .iter()
-            .map(|c| Location {
-                uri: c.source_uri().clone(),
-                range: c.selection_range.into(),
+            .filter_map(|c| {
+                let uri = index.candidate_uri(c)?;
+                Some(Location {
+                    uri: uri.clone(),
+                    range: c.selection_range.into(),
+                })
             })
             .collect();
 
@@ -218,9 +222,12 @@ fn type_definition_for_name(
     }
     let locations: Vec<Location> = candidates
         .iter()
-        .map(|c| Location {
-            uri: c.source_uri().clone(),
-            range: c.range.into(),
+        .filter_map(|c| {
+            let uri = index.type_candidate_uri(c)?;
+            Some(Location {
+                uri: uri.clone(),
+                range: c.range.into(),
+            })
         })
         .collect();
     Some(apply_goto_strategy(locations, strategy))

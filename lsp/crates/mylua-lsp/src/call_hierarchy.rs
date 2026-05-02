@@ -92,6 +92,9 @@ pub fn prepare_call_hierarchy(
     }
     if let Some(candidates) = index.global_shard.get(&name) {
         if let Some(c) = candidates.first() {
+            let Some(candidate_uri) = index.candidate_uri(c) else {
+                return Vec::new();
+            };
             let kind = if matches!(c.kind, GlobalContributionKind::Function) {
                 SymbolKind::FUNCTION
             } else {
@@ -102,7 +105,7 @@ pub fn prepare_call_hierarchy(
             return vec![build_item(
                 name,
                 kind,
-                c.source_uri().clone(),
+                candidate_uri.clone(),
                 r,
                 sr,
             )];
@@ -373,15 +376,24 @@ fn resolve_outgoing_target(
     // O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
         if let Some(c) = candidates.first() {
+            let Some(candidate_uri) = index.candidate_uri(c) else {
+                return build_item(
+                    name.to_string(),
+                    SymbolKind::FUNCTION,
+                    fallback_uri.clone(),
+                    fallback_range,
+                    fallback_range,
+                );
+            };
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
-            if let Some(summary) = index.summary(c.source_uri()) {
+            if let Some(summary) = index.summary(candidate_uri) {
                 if let Some(fs) = summary.get_function_by_name(name) {
                     let lsp_range: Range = fs.range.into();
                     return build_item(
                         name.to_string(),
                         SymbolKind::FUNCTION,
-                        c.source_uri().clone(),
+                        candidate_uri.clone(),
                         lsp_range,
                         lsp_range,
                     );
@@ -397,7 +409,7 @@ fn resolve_outgoing_target(
             return build_item(
                 name.to_string(),
                 kind,
-                c.source_uri().clone(),
+                candidate_uri.clone(),
                 r,
                 sr,
             );

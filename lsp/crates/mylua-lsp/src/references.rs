@@ -151,8 +151,11 @@ pub fn find_references(
             if include_declaration {
                 if let Some(candidates) = index.type_shard.get(name.as_str()) {
                     for candidate in candidates {
+                        let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
+                            continue;
+                        };
                         locations.push(Location {
-                            uri: candidate.source_uri().clone(),
+                            uri: candidate_uri.clone(),
                             range: candidate.range.into(),
                         });
                     }
@@ -164,16 +167,21 @@ pub fn find_references(
                     match strategy {
                         ReferencesStrategy::Best => {
                             if let Some(best) = candidates.first() {
-                                locations.push(Location {
-                                    uri: best.source_uri().clone(),
-                                    range: best.selection_range.into(),
-                                });
+                                if let Some(best_uri) = index.candidate_uri(best) {
+                                    locations.push(Location {
+                                        uri: best_uri.clone(),
+                                        range: best.selection_range.into(),
+                                    });
+                                }
                             }
                         }
                         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
                             for c in candidates {
+                                let Some(candidate_uri) = index.candidate_uri(c) else {
+                                    continue;
+                                };
                                 locations.push(Location {
-                                    uri: c.source_uri().clone(),
+                                    uri: candidate_uri.clone(),
                                     range: c.selection_range.into(),
                                 });
                             }
@@ -572,16 +580,22 @@ fn collect_global_declarations(
         ReferencesStrategy::Best => {
             if let Some(candidates) = index.global_shard.get(name) {
                 if let Some(best) = candidates.first() {
+                    let Some(best_uri) = index.candidate_uri(best) else {
+                        return;
+                    };
                     locations.push(Location {
-                        uri: best.source_uri().clone(),
+                        uri: best_uri.clone(),
                         range: best.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 if let Some(best) = candidates.first() {
+                    let Some(best_uri) = index.type_candidate_uri(best) else {
+                        return;
+                    };
                     locations.push(Location {
-                        uri: best.source_uri().clone(),
+                        uri: best_uri.clone(),
                         range: best.range.into(),
                     });
                 }
@@ -590,16 +604,22 @@ fn collect_global_declarations(
         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
             if let Some(candidates) = index.global_shard.get(name) {
                 for candidate in candidates {
+                    let Some(candidate_uri) = index.candidate_uri(candidate) else {
+                        continue;
+                    };
                     locations.push(Location {
-                        uri: candidate.source_uri().clone(),
+                        uri: candidate_uri.clone(),
                         range: candidate.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 for candidate in candidates {
+                    let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
+                        continue;
+                    };
                     locations.push(Location {
-                        uri: candidate.source_uri().clone(),
+                        uri: candidate_uri.clone(),
                         range: candidate.range.into(),
                     });
                 }

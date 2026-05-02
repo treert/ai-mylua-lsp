@@ -150,20 +150,24 @@ pub(crate) fn resolve_call_signatures(
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
     for c in &candidates {
-        if let Some(target_summary) = index.summary(c.source_uri()) {
-            if let Some(fs) = target_summary.get_function_by_name(&name) {
-                let sigs = primary_plus_overloads(fs);
-                return Some((sigs, false, name));
+        if let Some(target_uri) = index.candidate_uri(c) {
+            if let Some(target_summary) = index.summary(target_uri) {
+                if let Some(fs) = target_summary.get_function_by_name(&name) {
+                    let sigs = primary_plus_overloads(fs);
+                    return Some((sigs, false, name));
+                }
             }
         }
         if let TypeFact::Known(KnownType::Function(ref sig)) = c.type_fact {
             return Some((vec![sig.clone()], false, name));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
-            if let Some(summary) = index.summary(c.source_uri()) {
-                if let Some(fs) = summary.function_summaries.get(fid) {
-                    let sigs = primary_plus_overloads(fs);
-                    return Some((sigs, false, name));
+            if let Some(target_uri) = index.candidate_uri(c) {
+                if let Some(summary) = index.summary(target_uri) {
+                    if let Some(fs) = summary.function_summaries.get(fid) {
+                        let sigs = primary_plus_overloads(fs);
+                        return Some((sigs, false, name));
+                    }
                 }
             }
         }
@@ -312,7 +316,7 @@ fn lookup_overloads_via_global_shard(
         .get(&qualified)
         .and_then(|v| v.first().cloned())
     {
-        let source_uri = candidate.source_uri().clone();
+        let source_uri = index.candidate_uri(&candidate)?.clone();
         if let Some(summary) = index.summary(&source_uri) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
