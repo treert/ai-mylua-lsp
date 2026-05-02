@@ -76,13 +76,15 @@ pub struct GlobalNode {
 ///
 /// Provides O(depth) exact lookup, O(children) direct-child enumeration,
 /// and O(contributions-per-file) URI-based removal via a reverse index.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GlobalShard {
     /// Top-level entries: `"print"`, `"UE4"`, `"Foo"`, etc.
     roots: HashMap<String, GlobalNode>,
-    /// Reverse index: URI → full-path strings contributed by that URI.
+    /// Reverse index: UriId → full-path strings contributed by that URI.
     /// Maintained by `push_candidate` / `remove_by_uri` / `clear`.
-    uri_to_paths: HashMap<Uri, Vec<String>>,
+    uri_to_paths: HashMap<UriId, Vec<String>>,
+    uri_ids: HashMap<Uri, UriId>,
+    next_uri_id: i32,
 }
 
 /// Split a path string on `.` and `:` separators.
@@ -204,8 +206,9 @@ impl GlobalShard {
     /// as needed. Also updates the reverse URI→path index.
     pub fn push_candidate(&mut self, path: &str, candidate: GlobalCandidate) {
         // Update reverse index.
+        let source_uri_id = self.uri_id(&candidate.source_uri);
         self.uri_to_paths
-            .entry(candidate.source_uri.clone())
+            .entry(source_uri_id)
             .or_default()
             .push(path.to_string());
 
@@ -247,7 +250,8 @@ impl GlobalShard {
     /// Remove all candidates contributed by a given URI.
     /// Uses the reverse index for O(contributions-per-file) work.
     pub fn remove_by_uri(&mut self, uri: &Uri) {
-        let Some(paths) = self.uri_to_paths.remove(uri) else { return };
+        let Some(uri_id) = self.uri_ids.remove(uri) else { return };
+        let Some(paths) = self.uri_to_paths.remove(&uri_id) else { return };
         for path in &paths {
             if let Some(node) = self.get_node_mut(path) {
                 node.candidates.retain(|c| &c.source_uri != uri);
@@ -262,6 +266,8 @@ impl GlobalShard {
     pub fn clear(&mut self) {
         self.roots.clear();
         self.uri_to_paths.clear();
+        self.uri_ids.clear();
+        self.next_uri_id = 1;
     }
 
     /// DFS iterate over all entries with non-empty candidates.
@@ -288,6 +294,29 @@ impl GlobalShard {
             }
         }
         out
+    }
+
+    fn uri_id(&mut self, uri: &Uri) -> UriId {
+        if let Some(id) = self.uri_ids.get(uri).copied() {
+            return id;
+        }
+
+        let raw = self.next_uri_id;
+        let id = UriId::new(raw);
+        self.next_uri_id = raw.checked_add(1).expect("global shard UriId exhausted");
+        self.uri_ids.insert(uri.clone(), id);
+        id
+    }
+}
+
+impl Default for GlobalShard {
+    fn default() -> Self {
+        Self {
+            roots: HashMap::new(),
+            uri_to_paths: HashMap::new(),
+            uri_ids: HashMap::new(),
+            next_uri_id: 1,
+        }
     }
 }
 
