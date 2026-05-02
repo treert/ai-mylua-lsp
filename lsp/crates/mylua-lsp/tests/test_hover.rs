@@ -373,7 +373,8 @@ utils.test_const = require("test_const")"#,
             "test_const.lua",
             r#"local test_const = {
     A = 1,
-    B = "B",
+    -- const B docs
+    B = "B", -- const B tail
     C = "CC",
 }
 
@@ -391,6 +392,26 @@ return test_const"#,
     assert!(
         content.contains("Type: `string`"),
         "hover should show returned table field B as string, got: {}",
+        content,
+    );
+    assert!(
+        content.contains("B = \"B\""),
+        "hover should show the table field line, got: {}",
+        content,
+    );
+    assert!(
+        content.contains("const B docs"),
+        "hover should include the field's leading comment, got: {}",
+        content,
+    );
+    assert!(
+        content.contains("const B tail"),
+        "hover should include the field's trailing comment after comma, got: {}",
+        content,
+    );
+    assert!(
+        !content.contains("local test_const = {"),
+        "hover should not show the enclosing table declaration for a field, got: {}",
         content,
     );
 }
