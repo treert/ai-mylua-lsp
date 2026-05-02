@@ -365,8 +365,8 @@ end
 -- We consider any table an array if it has indexes 1..n for its n items, and no
 -- other data in the table.
 -- I think this method is currently a little 'flaky', but can't think of a good way around it yet...
--- @param t The table to evaluate as an array
--- @return boolean, number True if the table can be represented as an array, false otherwise. If true,
+---@param t any[] The table to evaluate as an array
+---@return boolean, number? True if the table can be represented as an array, false otherwise. If true,
 -- the second returned value is the maximum
 -- number of indexed elements in the array. 
 function isArray(t)

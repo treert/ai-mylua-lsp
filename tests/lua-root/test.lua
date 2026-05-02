@@ -26,5 +26,11 @@ end
 print(utils.test_const.A, utils.test_const.B, utils.test_const.C)
 
 if utils.test_const.ON_Evt_LALA then
-    print(utils.test_const.ON_Evt_HAHA1)
+    print(utils.test_const.ON_Evt_HAHA)
+end
+
+
+---@return boolean, number?
+local function test_ret1()
+    return false
 end
