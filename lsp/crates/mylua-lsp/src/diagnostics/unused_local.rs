@@ -1,7 +1,7 @@
-use tower_lsp_server::ls_types::*;
 use crate::scope::{ScopeDecl, ScopeTree};
 use crate::types::DefKind;
 use crate::util::node_text;
+use tower_lsp_server::ls_types::*;
 
 /// Warn on locals that are declared but never referenced. Uses the
 /// `ScopeTree` to find every declaration, then scans the file for
@@ -36,8 +36,7 @@ pub(super) fn check_unused_locals(
             continue;
         }
         // Exempt parameters in empty function bodies (stub/interface functions).
-        if decl.kind == DefKind::Parameter
-            && is_param_in_empty_function_body(root, decl.decl_byte)
+        if decl.kind == DefKind::Parameter && is_param_in_empty_function_body(root, decl.decl_byte)
         {
             continue;
         }
@@ -84,7 +83,9 @@ fn count_identifier_references(
             // Skip if this identifier IS the declaration itself —
             // decl.decl_byte's occurrence is the binding, not a use.
             if byte != decl.decl_byte {
-                *ref_count.entry((name.to_string(), decl.decl_byte)).or_insert(0) += 1;
+                *ref_count
+                    .entry((name.to_string(), decl.decl_byte))
+                    .or_insert(0) += 1;
             }
         }
     }
@@ -93,8 +94,7 @@ fn count_identifier_references(
             // Skip bracket-key-only table constructors — they contain
             // no identifiers, only literal key-value pairs.
             let child = cursor.node();
-            if child.kind() == "table_constructor"
-                && crate::util::is_bracket_key_only_table(child)
+            if child.kind() == "table_constructor" && crate::util::is_bracket_key_only_table(child)
             {
                 if !cursor.goto_next_sibling() {
                     break;

@@ -1,8 +1,8 @@
-use std::collections::HashSet;
-use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::scope::ScopeTree;
 use crate::util::{node_text, LineIndex};
-use crate::aggregation::WorkspaceAggregation;
+use std::collections::HashSet;
+use tower_lsp_server::ls_types::*;
 
 /// True if `function_name` contains any `.` or `:` separator — i.e.
 /// the form is `foo.bar(...)` / `foo:m(...)` rather than the bare
@@ -74,10 +74,7 @@ pub(super) fn check_undefined_globals(
                 let name = node_text(node, source);
                 let byte_offset = node.start_byte();
                 let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
-                if !is_local
-                    && !builtins.contains(name)
-                    && !index.global_shard.contains_key(name)
-                {
+                if !is_local && !builtins.contains(name) && !index.global_shard.contains_key(name) {
                     diagnostics.push(Diagnostic {
                         range: line_index.ts_node_to_range(node, source),
                         severity: Some(severity),
@@ -95,15 +92,23 @@ pub(super) fn check_undefined_globals(
             // Skip bracket-key-only table constructors — they contain
             // no identifiers, only literal key-value pairs.
             let child = cursor.node();
-            if child.kind() == "table_constructor"
-                && crate::util::is_bracket_key_only_table(child)
+            if child.kind() == "table_constructor" && crate::util::is_bracket_key_only_table(child)
             {
                 if !cursor.goto_next_sibling() {
                     break;
                 }
                 continue;
             }
-            check_undefined_globals(cursor, source, builtins, index, scope_tree, diagnostics, severity, line_index);
+            check_undefined_globals(
+                cursor,
+                source,
+                builtins,
+                index,
+                scope_tree,
+                diagnostics,
+                severity,
+                line_index,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }

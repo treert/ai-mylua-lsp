@@ -55,7 +55,10 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
     let lua_source = LuaSource::new(text.to_string());
     let uri: Uri = "file:///test/parse_doc.lua".parse().unwrap();
     let (_, scope_tree) = summary_builder::build_file_analysis(
-        &uri, &tree, lua_source.source(), lua_source.line_index(),
+        &uri,
+        &tree,
+        lua_source.source(),
+        lua_source.line_index(),
     );
     Document {
         lua_source,
@@ -85,15 +88,13 @@ pub fn empty_docs() -> HashMap<Uri, Document> {
 
 /// Set up a single-file workspace: parse the file, build its summary, upsert
 /// into the aggregation, and return everything needed to call LSP handlers.
-pub fn setup_single_file(
-    source: &str,
-    filename: &str,
-) -> (Document, Uri, WorkspaceAggregation) {
+pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, WorkspaceAggregation) {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, source);
     let uri = make_uri(filename);
     let mut agg = WorkspaceAggregation::new();
-    let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+    let summary =
+        summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
     // Register module mapping so resolve_module_to_uri works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
         agg.set_require_mapping(module_name, uri.clone());
@@ -106,7 +107,11 @@ pub fn setup_single_file(
 /// Returns documents map, aggregation, and the parser (in case you need more parsing).
 pub fn setup_workspace(
     files: &[(&str, &str)],
-) -> (HashMap<Uri, Document>, WorkspaceAggregation, tree_sitter::Parser) {
+) -> (
+    HashMap<Uri, Document>,
+    WorkspaceAggregation,
+    tree_sitter::Parser,
+) {
     let mut parser = new_parser();
     let mut docs = HashMap::new();
     let mut agg = WorkspaceAggregation::new();
@@ -114,7 +119,8 @@ pub fn setup_workspace(
     for (filename, source) in files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+        let summary =
+            summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -130,14 +136,22 @@ pub fn setup_workspace(
 /// This mimics what the LSP does on `initialized`.
 pub fn setup_workspace_from_dir(
     dir_relative: &str,
-) -> (HashMap<Uri, Document>, WorkspaceAggregation, tree_sitter::Parser) {
+) -> (
+    HashMap<Uri, Document>,
+    WorkspaceAggregation,
+    tree_sitter::Parser,
+) {
     let dir = fixture_path(dir_relative);
     let mut parser = new_parser();
     let mut docs = HashMap::new();
     let mut agg = WorkspaceAggregation::new();
 
     let roots = vec![dir.clone()];
-    let module_entries = workspace_scanner::scan_workspace_lua_files(&roots, &RequireConfig::default(), &WorkspaceConfig::default());
+    let module_entries = workspace_scanner::scan_workspace_lua_files(
+        &roots,
+        &RequireConfig::default(),
+        &WorkspaceConfig::default(),
+    );
     for (module, uri) in &module_entries {
         agg.set_require_mapping(module.clone(), uri.clone());
     }
@@ -155,9 +169,21 @@ pub fn setup_workspace_from_dir(
         let tree = parser.parse(text.as_bytes(), None);
         if let Some(tree) = tree {
             let lua_source = LuaSource::new(text);
-            let (summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (summary, scope_tree) = summary_builder::build_file_analysis(
+                &uri,
+                &tree,
+                lua_source.source(),
+                lua_source.line_index(),
+            );
             agg.upsert_summary(summary);
-            docs.insert(uri, Document { lua_source, tree, scope_tree });
+            docs.insert(
+                uri,
+                Document {
+                    lua_source,
+                    tree,
+                    scope_tree,
+                },
+            );
         }
     }
 
@@ -186,7 +212,8 @@ pub fn setup_workspace_with_library(
     for (filename, source) in workspace_files {
         let uri = make_uri(filename);
         let doc = parse_doc(&mut parser, source);
-        let summary = summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+        let summary =
+            summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_uri works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri.clone());
@@ -227,13 +254,25 @@ pub fn setup_workspace_with_library(
             continue;
         };
         let lua_source = LuaSource::new(text);
-        let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+        let (mut summary, scope_tree) = summary_builder::build_file_analysis(
+            &uri,
+            &tree,
+            lua_source.source(),
+            lua_source.line_index(),
+        );
         // Production `run_workspace_scan` does this override for any
         // URI originating from a library root; tests mirror the same
         // contract.
         summary.is_meta = true;
         agg.upsert_summary(summary);
-        docs.insert(uri, Document { lua_source, tree, scope_tree });
+        docs.insert(
+            uri,
+            Document {
+                lua_source,
+                tree,
+                scope_tree,
+            },
+        );
     }
 
     (docs, agg, parser, library_uris)

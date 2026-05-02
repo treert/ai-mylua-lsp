@@ -4,17 +4,22 @@
 
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::config::{DiagnosticSeverityOption, DiagnosticsConfig};
 use mylua_lsp::diagnostics;
+use test_helpers::*;
 use tower_lsp_server::ls_types::NumberOrString;
 
 /// Convenience: run both syntax + semantic passes then apply the
 /// suppression post-process. Mirrors what `publish_diagnostics` does
 /// in `lib.rs`.
-fn collect_all(src: &str, name: &str, cfg: DiagnosticsConfig) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
+fn collect_all(
+    src: &str,
+    name: &str,
+    cfg: DiagnosticsConfig,
+) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, name);
-    let mut all = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    let mut all =
+        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     let semantic = diagnostics::collect_semantic_diagnostics(
         doc.tree.root_node(),
         src.as_bytes(),
@@ -38,8 +43,11 @@ print(use_undefined)
     let cfg = DiagnosticsConfig::default();
     let diags = collect_all(src, "disable_next_all.lua", cfg);
     assert!(
-        diags.iter().all(|d| !d.message.contains("Undefined global")),
-        "disable-next-line should suppress all diagnostics on next line, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Undefined global")),
+        "disable-next-line should suppress all diagnostics on next line, got: {:?}",
+        diags,
     );
 }
 
@@ -55,7 +63,26 @@ print(use_undefined)
     let diags = collect_all(src, "disable_next_specific.lua", cfg);
     assert!(
         diags.iter().any(|d| d.message.contains("Undefined global")),
-        "non-matching code should not be suppressed, got: {:?}", diags,
+        "non-matching code should not be suppressed, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn disable_next_line_param_annotation() {
+    let src = r#"
+---@diagnostic disable-next-line: param-annotation
+---@param x number
+local function f(a) return a end
+"#;
+    let cfg = DiagnosticsConfig::default();
+    let diags = collect_all(src, "disable_next_param_annotation.lua", cfg);
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("does not match any Lua parameter")),
+        "param-annotation should be suppressible, got: {:?}",
+        diags,
     );
 }
 
@@ -67,8 +94,11 @@ print(use_undefined) ---@diagnostic disable-line
     let cfg = DiagnosticsConfig::default();
     let diags = collect_all(src, "disable_line.lua", cfg);
     assert!(
-        diags.iter().all(|d| !d.message.contains("Undefined global")),
-        "disable-line on the same line must suppress, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Undefined global")),
+        "disable-line on the same line must suppress, got: {:?}",
+        diags,
     );
 }
 
@@ -88,12 +118,15 @@ print(third_undef)
         .filter(|d| d.message.contains("Undefined global"))
         .collect();
     assert_eq!(
-        undef.len(), 1,
-        "only `third_undef` (after enable) should fire; got: {:?}", diags,
+        undef.len(),
+        1,
+        "only `third_undef` (after enable) should fire; got: {:?}",
+        diags,
     );
     assert!(
         undef[0].message.contains("third_undef"),
-        "reported undefined should be 'third_undef', got: {}", undef[0].message,
+        "reported undefined should be 'third_undef', got: {}",
+        undef[0].message,
     );
 }
 
@@ -111,21 +144,21 @@ print(more_undef)
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = collect_all(src, "disable_star.lua", cfg);
     // Only `more_undef` should remain.
-    let remaining: Vec<_> = diags
-        .iter()
-        .map(|d| d.message.as_str())
-        .collect();
+    let remaining: Vec<_> = diags.iter().map(|d| d.message.as_str()).collect();
     assert!(
         remaining.iter().any(|m| m.contains("more_undef")),
-        "post-enable diagnostic should remain, got: {:?}", remaining,
+        "post-enable diagnostic should remain, got: {:?}",
+        remaining,
     );
     assert!(
         !remaining.iter().any(|m| m.contains("uuu")),
-        "pre-enable undefined should be suppressed, got: {:?}", remaining,
+        "pre-enable undefined should be suppressed, got: {:?}",
+        remaining,
     );
     assert!(
         !remaining.iter().any(|m| m.contains("argument(s)")),
-        "pre-enable arg count should be suppressed, got: {:?}", remaining,
+        "pre-enable arg count should be suppressed, got: {:?}",
+        remaining,
     );
 }
 
@@ -146,10 +179,12 @@ x = "str"
         match &d.code {
             Some(NumberOrString::String(s)) => assert!(
                 !s.is_empty(),
-                "code slug must not be empty, got diag: {:?}", d,
+                "code slug must not be empty, got diag: {:?}",
+                d,
             ),
             other => panic!(
-                "every survivor must have a String code, got {:?} for {:?}", other, d,
+                "every survivor must have a String code, got {:?} for {:?}",
+                other, d,
             ),
         }
     }
@@ -166,7 +201,8 @@ print(undef)
     let diags = collect_all(src, "unknown_tag.lua", cfg);
     assert!(
         diags.iter().any(|d| d.message.contains("Undefined global")),
-        "unknown directive tag must not suppress, got: {:?}", diags,
+        "unknown directive tag must not suppress, got: {:?}",
+        diags,
     );
 }
 
@@ -187,7 +223,10 @@ print(use_undef) ---@diagnostic disable-line: undefined-global, unused-local
     let cfg = DiagnosticsConfig::default();
     let diags = collect_all(src, "disable_line_multi.lua", cfg);
     assert!(
-        diags.iter().all(|d| !d.message.contains("Undefined global")),
-        "multi-code list should cover listed codes, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Undefined global")),
+        "multi-code list should cover listed codes, got: {:?}",
+        diags,
     );
 }

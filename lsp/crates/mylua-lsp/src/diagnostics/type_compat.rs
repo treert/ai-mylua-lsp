@@ -1,4 +1,4 @@
-use crate::type_system::{TypeFact, KnownType, SymbolicStub};
+use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::node_text;
 
 pub(crate) fn infer_literal_type(
@@ -11,10 +11,15 @@ pub(crate) fn infer_literal_type(
         "string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
-        "table_constructor" => TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX))),
-        "function_definition" => TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
-            params: vec![], returns: vec![],
-        })),
+        "table_constructor" => {
+            TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
+        }
+        "function_definition" => {
+            TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
+                params: vec![],
+                returns: vec![],
+            }))
+        }
         "variable" | "identifier" => {
             let text = node_text(node, source);
             if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
@@ -34,12 +39,8 @@ pub(crate) fn is_type_compatible(declared: &TypeFact, actual: &TypeFact) -> bool
     match (declared, actual) {
         (TypeFact::Unknown, _) | (_, TypeFact::Unknown) => true,
         (TypeFact::Known(d), TypeFact::Known(a)) => known_types_compatible(d, a),
-        (TypeFact::Union(types), actual) => {
-            types.iter().any(|t| is_type_compatible(t, actual))
-        }
-        (declared, TypeFact::Union(types)) => {
-            types.iter().all(|t| is_type_compatible(declared, t))
-        }
+        (TypeFact::Union(types), actual) => types.iter().any(|t| is_type_compatible(t, actual)),
+        (declared, TypeFact::Union(types)) => types.iter().all(|t| is_type_compatible(declared, t)),
         (TypeFact::Stub(SymbolicStub::TypeRef { name }), TypeFact::Known(a)) => {
             is_named_type_compatible(name, a, &[])
         }
@@ -47,7 +48,11 @@ pub(crate) fn is_type_compatible(declared: &TypeFact, actual: &TypeFact) -> bool
     }
 }
 
-pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType, declared_params: &[TypeFact]) -> bool {
+pub(crate) fn is_named_type_compatible(
+    name: &str,
+    actual: &KnownType,
+    declared_params: &[TypeFact],
+) -> bool {
     match (name, actual) {
         ("string", KnownType::String) => true,
         ("number" | "integer", KnownType::Number | KnownType::Integer) => true,
@@ -74,9 +79,10 @@ pub(crate) fn is_named_type_compatible(name: &str, actual: &KnownType, declared_
                 return false;
             }
             // Recursively check all parameters for compatibility
-            declared_params.iter().zip(actual_params.iter()).all(|(d, a)| {
-                is_type_compatible(d, a)
-            })
+            declared_params
+                .iter()
+                .zip(actual_params.iter())
+                .all(|(d, a)| is_type_compatible(d, a))
         }
         _ => true,
     }
@@ -93,7 +99,10 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
         // __array<T> is compatible with table and vice versa
         (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name == "__array" => true,
         (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name == "__array" => true,
-        (KnownType::Function(_) | KnownType::FunctionRef(_), KnownType::Function(_) | KnownType::FunctionRef(_)) => true,
+        (
+            KnownType::Function(_) | KnownType::FunctionRef(_),
+            KnownType::Function(_) | KnownType::FunctionRef(_),
+        ) => true,
         // Handle EmmyGeneric vs EmmyGeneric comparison: check parameters
         (KnownType::EmmyGeneric(d_name, d_params), KnownType::EmmyGeneric(a_name, a_params)) => {
             // Names must match
@@ -109,9 +118,10 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
                 return false;
             }
             // Recursively check all parameters for compatibility
-            d_params.iter().zip(a_params.iter()).all(|(d, a)| {
-                is_type_compatible(d, a)
-            })
+            d_params
+                .iter()
+                .zip(a_params.iter())
+                .all(|(d, a)| is_type_compatible(d, a))
         }
         (KnownType::EmmyType(name), actual) | (KnownType::EmmyGeneric(name, _), actual) => {
             is_named_type_compatible(name, actual, &[])
@@ -119,8 +129,18 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
         (KnownType::String, KnownType::Number | KnownType::Integer | KnownType::Boolean) => false,
         (KnownType::Number | KnownType::Integer, KnownType::String | KnownType::Boolean) => false,
         (KnownType::Boolean, KnownType::String | KnownType::Number | KnownType::Integer) => false,
-        (KnownType::Table(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Function(_) | KnownType::FunctionRef(_)) => false,
-        (KnownType::Function(_) | KnownType::FunctionRef(_), KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Table(_)) => false,
+        (
+            KnownType::Table(_),
+            KnownType::String
+            | KnownType::Number
+            | KnownType::Boolean
+            | KnownType::Function(_)
+            | KnownType::FunctionRef(_),
+        ) => false,
+        (
+            KnownType::Function(_) | KnownType::FunctionRef(_),
+            KnownType::String | KnownType::Number | KnownType::Boolean | KnownType::Table(_),
+        ) => false,
         _ => true,
     }
 }
@@ -159,12 +179,12 @@ pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
         "table_constructor" => {
             TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
         }
-        "function_definition" => TypeFact::Known(KnownType::Function(
-            crate::type_system::FunctionSignature {
+        "function_definition" => {
+            TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
                 params: vec![],
                 returns: vec![],
-            },
-        )),
+            }))
+        }
         _ => TypeFact::Unknown,
     }
 }

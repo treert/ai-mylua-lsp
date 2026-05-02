@@ -1,5 +1,5 @@
-use tower_lsp_server::ls_types::*;
 use crate::util::{byte_col_to_utf16_col, node_text, truncate, LineIndex};
+use tower_lsp_server::ls_types::*;
 
 pub(super) fn collect_errors_recursive(
     cursor: &mut tree_sitter::TreeCursor,
@@ -38,11 +38,7 @@ pub(super) fn collect_errors_recursive(
     }
 }
 
-fn syntax_error_range(
-    node: tree_sitter::Node,
-    source: &[u8],
-    line_index: &LineIndex,
-) -> Range {
+fn syntax_error_range(node: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Range {
     let mut range = line_index.ts_node_to_range(node, source);
     if range.start.line == range.end.line {
         return range;

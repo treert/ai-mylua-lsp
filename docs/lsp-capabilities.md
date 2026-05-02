@@ -133,6 +133,9 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 | 参数个数不匹配 | `argumentCountMismatch` | Warning |
 | 参数类型不匹配 | `argumentTypeMismatch` | Warning |
 | return 不匹配 | `returnMismatch` | Warning |
+| `@param` 名称不匹配 Lua 参数 | 内置 | Warning |
+
+`@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。

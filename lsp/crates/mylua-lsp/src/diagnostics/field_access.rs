@@ -1,8 +1,8 @@
-use tower_lsp_server::ls_types::*;
-use crate::resolver;
-use crate::type_system::{TypeFact, KnownType, SymbolicStub};
-use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
+use crate::resolver;
+use crate::type_system::{KnownType, SymbolicStub, TypeFact};
+use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
+use tower_lsp_server::ls_types::*;
 
 /// Shared context for field-access diagnostic collection, avoiding
 /// long parameter lists in the recursive walker.
@@ -31,8 +31,15 @@ pub(super) fn check_field_access_diagnostics(
     line_index: &LineIndex,
 ) {
     let mut ctx = FieldDiagCtx {
-        source, line_index, uri, scope_tree, index, diagnostics,
-        emmy_severity, lua_error_severity, lua_warn_severity,
+        source,
+        line_index,
+        uri,
+        scope_tree,
+        index,
+        diagnostics,
+        emmy_severity,
+        lua_error_severity,
+        lua_warn_severity,
     };
     let mut cursor = root.walk();
     collect_field_diagnostics(&mut cursor, &mut ctx);
@@ -60,12 +67,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
     false
 }
 
-
-
-fn collect_field_diagnostics(
-    cursor: &mut tree_sitter::TreeCursor,
-    ctx: &mut FieldDiagCtx,
-) {
+fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
     let node = cursor.node();
 
     let is_dotted = matches!(node.kind(), "field_expression" | "variable")
@@ -172,7 +174,8 @@ fn check_dotted_field(
                     std::slice::from_ref(field_name),
                     ctx.index,
                 );
-                if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none() {
+                if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none()
+                {
                     let qualified = format!("{}.{}", type_name, field_name);
                     if !ctx.index.global_shard.contains_key(&qualified) {
                         ctx.diagnostics.push(Diagnostic {
@@ -195,18 +198,14 @@ fn check_dotted_field(
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     if !shape.fields.contains_key(field_name) {
                         let field_is_global = field_global_prefixes(
-                            &base_fact,
-                            base_node,
-                            fields,
-                            ctx.source,
-                            ctx.index,
+                            &base_fact, base_node, fields, ctx.source, ctx.index,
                         )
-                            .iter()
-                            .any(|prefix| {
-                                ctx.index
-                                    .global_shard
-                                    .contains_key(&format!("{}.{}", prefix, field_name))
-                            });
+                        .iter()
+                        .any(|prefix| {
+                            ctx.index
+                                .global_shard
+                                .contains_key(&format!("{}.{}", prefix, field_name))
+                        });
                         if !field_is_global {
                             let severity = if shape.is_closed {
                                 ctx.lua_error_severity
@@ -218,10 +217,7 @@ fn check_dotted_field(
                                     range: ctx.line_index.ts_node_to_range(field_node, ctx.source),
                                     severity: Some(sev),
                                     source: Some("mylua".to_string()),
-                                    message: format!(
-                                        "Unknown field '{}' on table",
-                                        field_name
-                                    ),
+                                    message: format!("Unknown field '{}' on table", field_name),
                                     ..Default::default()
                                 });
                             }
@@ -289,7 +285,9 @@ fn push_simple_prefix(prefixes: &mut Vec<String>, prefix: String) {
 
 fn is_simple_dotted_prefix(prefix: &str) -> bool {
     !prefix.is_empty()
-        && prefix.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '.')
+        && prefix
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '.')
         && !prefix.starts_with('.')
         && !prefix.ends_with('.')
         && !prefix.contains("..")

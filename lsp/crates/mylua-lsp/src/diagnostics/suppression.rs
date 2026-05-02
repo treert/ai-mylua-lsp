@@ -19,8 +19,8 @@
 // slugs matching what `classify_diagnostic_code` produces; the special
 // slug `*` (or an omitted `:` list) means "all codes".
 
-use tower_lsp_server::ls_types::*;
 use crate::util::node_text;
+use tower_lsp_server::ls_types::*;
 
 /// Classify a diagnostic message into a stable rule code slug used by
 /// `---@diagnostic disable: <code>` directives. Returned slugs follow
@@ -44,6 +44,8 @@ pub fn classify_diagnostic_code(message: &str) -> &'static str {
         "argument-type"
     } else if message.starts_with("Return ") {
         "return-mismatch"
+    } else if message.starts_with("@param ") {
+        "param-annotation"
     } else {
         "general"
     }
@@ -103,11 +105,7 @@ fn collect_suppression_directives(root: tree_sitter::Node, source: &[u8]) -> Vec
     out
 }
 
-fn collect_directives_recursive(
-    node: tree_sitter::Node,
-    source: &[u8],
-    out: &mut Vec<Directive>,
-) {
+fn collect_directives_recursive(node: tree_sitter::Node, source: &[u8], out: &mut Vec<Directive>) {
     if node.kind() == "emmy_line" {
         if let Some(d) = parse_directive_from_emmy_line(node, source) {
             out.push(d);
@@ -190,16 +188,14 @@ fn is_suppressed(target_line: u32, code: &str, directives: &[Directive]) -> bool
             break;
         }
         match d.kind {
-            DirectiveKind::Disable => {
-                match &d.codes {
-                    None => all_disabled_since = Some(d.line),
-                    Some(list) => {
-                        for c in list {
-                            disabled_since.insert(c.clone(), d.line);
-                        }
+            DirectiveKind::Disable => match &d.codes {
+                None => all_disabled_since = Some(d.line),
+                Some(list) => {
+                    for c in list {
+                        disabled_since.insert(c.clone(), d.line);
                     }
                 }
-            }
+            },
             DirectiveKind::Enable => {
                 match &d.codes {
                     None => {
@@ -286,14 +282,42 @@ mod directive_tests {
 
     #[test]
     fn classify_covers_major_rules() {
-        assert_eq!(classify_diagnostic_code("Undefined global 'x'"), "undefined-global");
+        assert_eq!(
+            classify_diagnostic_code("Undefined global 'x'"),
+            "undefined-global"
+        );
         assert_eq!(classify_diagnostic_code("Unused local 'y'"), "unused-local");
-        assert_eq!(classify_diagnostic_code("Unknown field 'foo' on type 'Bar'"), "unknown-field");
-        assert_eq!(classify_diagnostic_code("Type mismatch: declared 'X', got 'Y'"), "type-mismatch");
-        assert_eq!(classify_diagnostic_code("Duplicate table key 'a' (first defined at line 2)"), "duplicate-table-key");
-        assert_eq!(classify_diagnostic_code("Call to 'foo' passes 3 argument(s), expected 2"), "argument-count");
-        assert_eq!(classify_diagnostic_code("Argument 1 of 'foo': declared 'X', got 'Y'"), "argument-type");
-        assert_eq!(classify_diagnostic_code("Return statement yields 1 value(s), expected 2"), "return-mismatch");
-        assert_eq!(classify_diagnostic_code("Syntax error near 'foo'"), "syntax");
+        assert_eq!(
+            classify_diagnostic_code("Unknown field 'foo' on type 'Bar'"),
+            "unknown-field"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Type mismatch: declared 'X', got 'Y'"),
+            "type-mismatch"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Duplicate table key 'a' (first defined at line 2)"),
+            "duplicate-table-key"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Call to 'foo' passes 3 argument(s), expected 2"),
+            "argument-count"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Argument 1 of 'foo': declared 'X', got 'Y'"),
+            "argument-type"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Return statement yields 1 value(s), expected 2"),
+            "return-mismatch"
+        );
+        assert_eq!(
+            classify_diagnostic_code("@param 'x' does not match any Lua parameter"),
+            "param-annotation"
+        );
+        assert_eq!(
+            classify_diagnostic_code("Syntax error near 'foo'"),
+            "syntax"
+        );
     }
 }

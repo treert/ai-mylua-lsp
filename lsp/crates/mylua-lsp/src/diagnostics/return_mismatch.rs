@@ -1,7 +1,7 @@
-use tower_lsp_server::ls_types::*;
+use super::type_compat::{infer_return_literal_type, is_type_compatible};
 use crate::type_system::TypeFact;
 use crate::util::LineIndex;
-use super::type_compat::{is_type_compatible, infer_return_literal_type};
+use tower_lsp_server::ls_types::*;
 
 /// Walk every function declaration / definition; when preceded by
 /// `---@return` annotations, compare against every `return_statement`
@@ -52,8 +52,9 @@ fn inspect_function_returns(
     // `local_declaration` / `assignment_statement`. For the named
     // forms, the declaration node itself carries the comments.
     let anchor = match fun.kind() {
-        "function_definition" => crate::summary_builder::enclosing_statement_for_function_expr(fun)
-            .unwrap_or(fun),
+        "function_definition" => {
+            crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
+        }
         _ => fun,
     };
 
@@ -90,7 +91,14 @@ fn inspect_function_returns(
     }
 
     for ret in returns {
-        inspect_single_return(ret, &declared_types, source, diagnostics, severity, line_index);
+        inspect_single_return(
+            ret,
+            &declared_types,
+            source,
+            diagnostics,
+            severity,
+            line_index,
+        );
     }
 }
 
@@ -141,8 +149,7 @@ fn inspect_single_return(
     // returns to avoid flooding opt-in users with false positives
     // from idiomatic `return foo()` / `return ...`.
     if let Some(values) = values {
-        if let Some(last) = values
-            .named_child(values.named_child_count().saturating_sub(1) as u32)
+        if let Some(last) = values.named_child(values.named_child_count().saturating_sub(1) as u32)
         {
             if matches!(last.kind(), "function_call" | "vararg_expression") {
                 return;
@@ -170,7 +177,9 @@ fn inspect_single_return(
         // have the per-file summary plumbed here and the walk is
         // already heuristic. Literal nodes cover the common cases.
         for (i, declared) in declared_types.iter().enumerate() {
-            let Some(val) = values.named_child(i as u32) else { break };
+            let Some(val) = values.named_child(i as u32) else {
+                break;
+            };
             let actual = infer_return_literal_type(val);
             if actual == TypeFact::Unknown {
                 continue;
@@ -182,7 +191,9 @@ fn inspect_single_return(
                     source: Some("mylua".to_string()),
                     message: format!(
                         "Return value {}: declared '{}', got '{}'",
-                        i + 1, declared, actual,
+                        i + 1,
+                        declared,
+                        actual,
                     ),
                     ..Default::default()
                 });

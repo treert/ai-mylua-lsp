@@ -1,5 +1,5 @@
-use tower_lsp_server::ls_types::*;
 use crate::util::{node_text, LineIndex};
+use tower_lsp_server::ls_types::*;
 
 /// Walk every `table_constructor` and report keys that appear more
 /// than once. Only named keys (`{ a = 1, a = 2 }`) and static
@@ -33,18 +33,24 @@ fn check_duplicate_keys_recursive(
         }
         let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
         for i in 0..node.named_child_count() {
-            let Some(field_list) = node.named_child(i as u32) else { continue };
+            let Some(field_list) = node.named_child(i as u32) else {
+                continue;
+            };
             let fields = if field_list.kind() == "field_list" {
                 field_list
             } else {
                 continue;
             };
             for j in 0..fields.named_child_count() {
-                let Some(field) = fields.named_child(j as u32) else { continue };
+                let Some(field) = fields.named_child(j as u32) else {
+                    continue;
+                };
                 if field.kind() != "field" {
                     continue;
                 }
-                let Some(key_text) = extract_field_key(field, source) else { continue };
+                let Some(key_text) = extract_field_key(field, source) else {
+                    continue;
+                };
                 if let Some(first_range) = seen.get(&key_text) {
                     let range = line_index.ts_node_to_range(field, source);
                     diagnostics.push(Diagnostic {
@@ -88,7 +94,10 @@ fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> 
                 // content excluding quotes so that `["a"]` vs `['a']`
                 // dedup.
                 let t = node_text(key, source);
-                return Some(t.trim_matches(|c| c == '"' || c == '\'' || c == '[' || c == ']').to_string());
+                return Some(
+                    t.trim_matches(|c| c == '"' || c == '\'' || c == '[' || c == ']')
+                        .to_string(),
+                );
             }
             "number" => {
                 return Some(format!("num:{}", node_text(key, source)));

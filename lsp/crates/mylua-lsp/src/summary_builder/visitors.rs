@@ -1,19 +1,20 @@
-use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, parse_type_from_str, EmmyAnnotation, EmmyType};
-use crate::scope::{ScopeKind, ScopeDecl};
+use crate::emmy::{
+    collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, parse_type_from_str,
+    EmmyAnnotation, EmmyType,
+};
+use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape};
 use crate::type_system::*;
 use crate::types::DefKind;
-use crate::util::{node_text, extract_string_literal};
+use crate::util::{extract_string_literal, node_text};
 
-use super::BuildContext;
 use super::emmy_visitors::{
-    emit_pending_class_as_typedef,
-    flush_pending_class,
-    visit_emmy_comment,
+    emit_pending_class_as_typedef, flush_pending_class, visit_emmy_comment,
 };
+use super::fingerprint::{hash_function_signature, merge_types};
 use super::type_infer::infer_expression_type;
-use super::fingerprint::{merge_types, hash_function_signature};
+use super::BuildContext;
 
 // ---------------------------------------------------------------------------
 // Top-level visitor
@@ -67,8 +68,12 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 visit_emmy_comment(ctx, node);
                 ctx.last_emmy_end_row = Some(node.end_position().row as u32);
             }
-            "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
-            | "for_numeric_statement" | "for_generic_statement" => {
+            "if_statement"
+            | "do_statement"
+            | "while_statement"
+            | "repeat_statement"
+            | "for_numeric_statement"
+            | "for_generic_statement" => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
@@ -189,10 +194,12 @@ fn visit_nested_block_inner(
                                 decl_byte: db,
                                 visible_after_byte: db,
                                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
-                                selection_range: ctx.line_index.ts_node_to_byte_range(id_node, ctx.source),
+                                selection_range: ctx
+                                    .line_index
+                                    .ts_node_to_byte_range(id_node, ctx.source),
                                 type_fact: None,
                                 bound_class: None,
-                    is_emmy_annotated: false,
+                                is_emmy_annotated: false,
                             });
                         }
                     }
@@ -204,15 +211,24 @@ fn visit_nested_block_inner(
 
     let mut cursor = node.walk();
     if !cursor.goto_first_child() {
-        if scope_kind.is_some() { ctx.pop_scope(); }
+        if scope_kind.is_some() {
+            ctx.pop_scope();
+        }
         return;
     }
     loop {
         let child = cursor.node();
         match child.kind() {
-            "block" | "if_clause" | "elseif_clause" | "else_clause"
-            | "if_statement" | "do_statement" | "while_statement" | "repeat_statement"
-            | "for_numeric_statement" | "for_generic_statement" => {
+            "block"
+            | "if_clause"
+            | "elseif_clause"
+            | "else_clause"
+            | "if_statement"
+            | "do_statement"
+            | "while_statement"
+            | "repeat_statement"
+            | "for_numeric_statement"
+            | "for_generic_statement" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_nested_block_inner(ctx, child, return_types);
             }
@@ -254,7 +270,9 @@ fn visit_nested_block_inner(
         }
     }
 
-    if scope_kind.is_some() { ctx.pop_scope(); }
+    if scope_kind.is_some() {
+        ctx.pop_scope();
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -263,9 +281,9 @@ fn visit_nested_block_inner(
 
 fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // Check for preceding `---@type` annotation (either from pending or inline comment)
-    let pending_type = ctx.take_pending_type().or_else(|| {
-        extract_preceding_type_annotation(node, ctx.source)
-    });
+    let pending_type = ctx
+        .take_pending_type()
+        .or_else(|| extract_preceding_type_annotation(node, ctx.source));
 
     // Phase 2: consume pending_class_name — bind the first local to the class
     let mut pending_class = ctx.pending_class_name.take();
@@ -299,8 +317,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         let name = node_text(name_node, ctx.source).to_string();
         let range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
 
-        let value_node = values_node
-            .and_then(|v| v.named_child(i as u32));
+        let value_node = values_node.and_then(|v| v.named_child(i as u32));
         // Phase 2: only the first local immediately following the class
         // comment gets the binding, even when it has no initializer.
         let var_bound_class = if i == 0 { pending_class.take() } else { None };
@@ -363,9 +380,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 continue;
             }
 
-
             let type_fact = infer_expression_type(ctx, val, 0);
-            
+
             // If we have a pending class binding (from ---@class) and this is
             // the first local with no explicit @type annotation, and the inferred
             // type is a table, keep the table type so backfill can anchor the shape.
@@ -596,7 +612,11 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // Traverse function body to populate scope tree with parameters and locals
     if let Some(b) = body {
         let mut returns = Vec::new();
-        let return_target = if should_infer_returns { Some(&mut returns) } else { None };
+        let return_target = if should_infer_returns {
+            Some(&mut returns)
+        } else {
+            None
+        };
         visit_function_body(ctx, b, &params, false, "", return_target);
         if should_infer_returns {
             update_function_returns(ctx, func_id, returns);
@@ -656,12 +676,17 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                 let sid = *shape_id;
                 if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
-                    shape.set_field(field_name.to_string(), FieldInfo {
-                        name: field_name.to_string(),
-                        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
-                        def_range: Some(ctx.line_index.ts_node_to_byte_range(name_node, ctx.source)),
-                        assignment_count: 1,
-                    });
+                    shape.set_field(
+                        field_name.to_string(),
+                        FieldInfo {
+                            name: field_name.to_string(),
+                            type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
+                            def_range: Some(
+                                ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+                            ),
+                            assignment_count: 1,
+                        },
+                    );
                     break 'shape true;
                 }
             }
@@ -675,7 +700,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         .map(|(base_name, _)| {
             !base_name.contains('.')
                 && !base_name.contains(':')
-                && ctx.resolve_visible_in_build_scopes(base_name, name_node.start_byte()).is_some()
+                && ctx
+                    .resolve_visible_in_build_scopes(base_name, name_node.start_byte())
+                    .is_some()
         })
         .unwrap_or(false);
 
@@ -699,7 +726,11 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // (must happen before the early-return for local table shapes)
     if let Some(b) = body {
         let mut returns = Vec::new();
-        let return_target = if should_infer_returns { Some(&mut returns) } else { None };
+        let return_target = if should_infer_returns {
+            Some(&mut returns)
+        } else {
+            None
+        };
         visit_function_body(ctx, b, &params, is_method, &class_prefix, return_target);
         if should_infer_returns {
             update_function_returns(ctx, func_id, returns);
@@ -749,9 +780,11 @@ fn add_field_to_class(
     type_fact: TypeFact,
     def_range: crate::util::ByteRange,
 ) {
-    if let Some(td) = ctx.type_definitions.iter_mut().find(|td| {
-        td.kind == TypeDefinitionKind::Class && td.name == class_name
-    }) {
+    if let Some(td) = ctx
+        .type_definitions
+        .iter_mut()
+        .find(|td| td.kind == TypeDefinitionKind::Class && td.name == class_name)
+    {
         if td.fields.iter().any(|f| f.name == field_name) {
             return;
         }
@@ -774,18 +807,34 @@ fn build_function_summary(
     let emmy_comments = collect_preceding_comments(decl_node, ctx.source);
     let emmy_text = emmy_comments.join("\n");
     let annotations = parse_emmy_comments(&emmy_text);
+    let is_method = name.contains(':');
 
     let mut params = Vec::new();
+    let mut annotated_params = Vec::new();
     let mut returns = Vec::new();
     let mut emmy_annotated = false;
     let mut overloads = Vec::new();
     let mut func_generic_params = Vec::new();
+    let mut vararg_param = None;
+    let mut has_ast_param_list = false;
+
+    if let Some(b) = body {
+        if let Some(param_list) = b.child_by_field_name("parameters") {
+            has_ast_param_list = true;
+            extract_ast_params(&mut params, param_list, ctx.source);
+        }
+    }
 
     for ann in &annotations {
         match ann {
-            EmmyAnnotation::Param { name: pname, optional, type_expr, .. } => {
+            EmmyAnnotation::Param {
+                name: pname,
+                optional,
+                type_expr,
+                ..
+            } => {
                 emmy_annotated = true;
-                params.push(ParamInfo {
+                annotated_params.push(ParamInfo {
                     name: pname.clone(),
                     type_fact: emmy_type_to_fact(type_expr),
                     optional: *optional,
@@ -796,6 +845,14 @@ fn build_function_summary(
                 for rt in return_types {
                     returns.push(emmy_type_to_fact(rt));
                 }
+            }
+            EmmyAnnotation::Vararg { type_expr } => {
+                emmy_annotated = true;
+                vararg_param = Some(ParamInfo {
+                    name: "...".to_string(),
+                    type_fact: emmy_type_to_fact(type_expr),
+                    optional: false,
+                });
             }
             EmmyAnnotation::Overload { fun_type } => {
                 if let TypeFact::Known(KnownType::Function(sig)) = emmy_type_to_fact(fun_type) {
@@ -811,13 +868,28 @@ fn build_function_summary(
         }
     }
 
-    // If no Emmy params, extract from AST
-    if params.is_empty() {
-        if let Some(b) = body {
-            if let Some(param_list) = b.child_by_field_name("parameters") {
-                extract_ast_params(&mut params, param_list, ctx.source);
+    if has_ast_param_list {
+        if is_method
+            && annotated_params.iter().any(|p| p.name == "self")
+            && params.iter().all(|p| p.name != "self")
+        {
+            if let Some(self_param) = annotated_params.iter().find(|p| p.name == "self") {
+                params.insert(0, self_param.clone());
             }
         }
+        for annotated in annotated_params {
+            if let Some(param) = params.iter_mut().find(|p| p.name == annotated.name) {
+                param.type_fact = annotated.type_fact;
+                param.optional = annotated.optional;
+            }
+        }
+    } else {
+        params = annotated_params;
+    }
+
+    if let Some(param) = vararg_param {
+        params.retain(|p| p.name != "...");
+        params.push(param);
     }
 
     // If no Emmy return, try to infer from return statements
@@ -913,14 +985,20 @@ pub(crate) fn enclosing_statement_for_function_expr(
     }
 }
 
-pub(super) fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_sitter::Node, source: &[u8]) {
+pub(super) fn extract_ast_params(
+    params: &mut Vec<ParamInfo>,
+    param_list: tree_sitter::Node,
+    source: &[u8],
+) {
     // Walk ALL children (named + unnamed) so we can pick up the
     // anonymous `...` token too: the grammar's `_parameter_list_content`
     // is inlined (leading `_`) and does NOT give the ellipsis its own
     // node kind, so `named_child_count` alone would silently drop
     // vararg params. Signal it by pushing a `ParamInfo { name: "...", .. }`.
     for i in 0..param_list.child_count() {
-        let Some(child) = param_list.child(i as u32) else { continue };
+        let Some(child) = param_list.child(i as u32) else {
+            continue;
+        };
         match child.kind() {
             "identifier" => {
                 params.push(ParamInfo {
@@ -1023,9 +1101,9 @@ fn collect_return_statement_types(
 // ---------------------------------------------------------------------------
 
 fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    let pending_type = ctx.take_pending_type().or_else(|| {
-        extract_preceding_type_annotation(node, ctx.source)
-    });
+    let pending_type = ctx
+        .take_pending_type()
+        .or_else(|| extract_preceding_type_annotation(node, ctx.source));
 
     // Phase 2: consume pending_class_name for global assignment binding
     let pending_class = ctx.pending_class_name.take();
@@ -1051,14 +1129,18 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             "variable" if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
-                if ctx.resolve_visible_in_build_scopes(&name, var_node.start_byte()).is_some() {
+                if ctx
+                    .resolve_visible_in_build_scopes(&name, var_node.start_byte())
+                    .is_some()
+                {
                     continue;
                 }
 
                 // Phase 2: bind the first simple-identifier LHS to the class
                 if i == 0 {
                     if let Some(ref class_name) = pending_class {
-                        ctx.global_class_bindings.insert(name.clone(), class_name.clone());
+                        ctx.global_class_bindings
+                            .insert(name.clone(), class_name.clone());
                     }
                 }
 
@@ -1154,7 +1236,13 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                         .map(|s| s.to_string())
                     {
                         let field_name = &chain.fields[0];
-                        add_field_to_class(ctx, &class_name, field_name, type_fact.clone(), assign_range);
+                        add_field_to_class(
+                            ctx,
+                            &class_name,
+                            field_name,
+                            type_fact.clone(),
+                            assign_range,
+                        );
                     }
                 }
 
@@ -1190,7 +1278,9 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             "subscript_expression" => {
                 if let Some(base) = var_node.child_by_field_name("object") {
                     let base_text = node_text(base, ctx.source);
-                    if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
+                    if let Some(decl) =
+                        ctx.resolve_visible_in_build_scopes(base_text, base.start_byte())
+                    {
                         if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
                             let sid = *shape_id;
                             if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
@@ -1288,13 +1378,14 @@ fn register_nested_field_write(
     type_fact: TypeFact,
     assign_range: crate::util::ByteRange,
 ) -> bool {
-    let base_shape_id = match ctx.resolve_visible_in_build_scopes(base_name, assign_range.start_byte) {
-        Some(decl) => match &decl.type_fact {
-            Some(TypeFact::Known(KnownType::Table(sid))) => *sid,
-            _ => return false,
-        },
-        None => return false,
-    };
+    let base_shape_id =
+        match ctx.resolve_visible_in_build_scopes(base_name, assign_range.start_byte) {
+            Some(decl) => match &decl.type_fact {
+                Some(TypeFact::Known(KnownType::Table(sid))) => *sid,
+                _ => return false,
+            },
+            None => return false,
+        };
 
     // Walk the intermediate shapes. Three cases per step:
     //   (a) field exists as `Known(Table(sid))` → reuse existing shape.
@@ -1318,7 +1409,9 @@ fn register_nested_field_write(
         if i == last_idx {
             break;
         }
-        let existing_field = ctx.table_shapes.get(&current_shape)
+        let existing_field = ctx
+            .table_shapes
+            .get(&current_shape)
             .and_then(|s| s.fields.get(field_name))
             .map(|fi| fi.type_fact.clone());
         let next_shape = match existing_field {
@@ -1328,12 +1421,15 @@ fn register_nested_field_write(
                 let new_id = ctx.alloc_shape_id();
                 ctx.table_shapes.insert(new_id, TableShape::new(new_id));
                 if let Some(parent) = ctx.table_shapes.get_mut(&current_shape) {
-                    parent.set_field(field_name.clone(), FieldInfo {
-                        name: field_name.clone(),
-                        type_fact: TypeFact::Known(KnownType::Table(new_id)),
-                        def_range: Some(assign_range),
-                        assignment_count: 1,
-                    });
+                    parent.set_field(
+                        field_name.clone(),
+                        FieldInfo {
+                            name: field_name.clone(),
+                            type_fact: TypeFact::Known(KnownType::Table(new_id)),
+                            def_range: Some(assign_range),
+                            assignment_count: 1,
+                        },
+                    );
                 }
                 new_id
             }
@@ -1346,22 +1442,22 @@ fn register_nested_field_write(
         None => return false,
     };
     if let Some(shape) = ctx.table_shapes.get_mut(&current_shape) {
-        shape.set_field(final_field.clone(), FieldInfo {
-            name: final_field,
-            type_fact,
-            def_range: Some(assign_range),
-            assignment_count: 1,
-        });
+        shape.set_field(
+            final_field.clone(),
+            FieldInfo {
+                name: final_field,
+                type_fact,
+                def_range: Some(assign_range),
+                assignment_count: 1,
+            },
+        );
         true
     } else {
         false
     }
 }
 
-fn visit_anonymous_function_definitions_in_node(
-    ctx: &mut BuildContext,
-    node: tree_sitter::Node,
-) {
+fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if node.kind() == "function_definition" {
         visit_anonymous_function_definition(ctx, node);
         return;
@@ -1380,10 +1476,7 @@ fn visit_anonymous_function_definitions_in_node(
     }
 }
 
-fn visit_anonymous_function_definition(
-    ctx: &mut BuildContext,
-    node: tree_sitter::Node,
-) {
+fn visit_anonymous_function_definition(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let Some(body) = node.child_by_field_name("body") else {
         return;
     };
@@ -1412,7 +1505,11 @@ fn visit_function_body(
     class_prefix: &str,
     mut return_types: Option<&mut Vec<TypeFact>>,
 ) {
-    ctx.push_scope(ScopeKind::FunctionBody, func_body.start_byte(), func_body.end_byte());
+    ctx.push_scope(
+        ScopeKind::FunctionBody,
+        func_body.start_byte(),
+        func_body.end_byte(),
+    );
 
     // Register implicit self for colon methods (before explicit params)
     if is_method {
@@ -1432,7 +1529,9 @@ fn visit_function_body(
                 )
             } else {
                 (
-                    Some(TypeFact::Known(KnownType::EmmyType(class_prefix.to_string()))),
+                    Some(TypeFact::Known(KnownType::EmmyType(
+                        class_prefix.to_string(),
+                    ))),
                     None,
                 )
             }
@@ -1473,7 +1572,9 @@ fn register_params_into_scope(
     emmy_params: &[ParamInfo],
 ) {
     for i in 0..param_list.child_count() {
-        let Some(child) = param_list.child(i as u32) else { continue };
+        let Some(child) = param_list.child(i as u32) else {
+            continue;
+        };
         match child.kind() {
             "identifier" => {
                 register_single_param(ctx, child, emmy_params);
@@ -1497,7 +1598,8 @@ fn register_params_into_scope(
                     visible_after_byte: db,
                     range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
                     selection_range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
-                    type_fact: emmy_params.iter()
+                    type_fact: emmy_params
+                        .iter()
                         .find(|p| p.name == "...")
                         .map(|p| p.type_fact.clone())
                         .filter(|tf| *tf != TypeFact::Unknown),
@@ -1516,12 +1618,13 @@ fn register_params_into_scope(
                         visible_after_byte: db,
                         range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
                         selection_range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
-                        type_fact: emmy_params.iter()
+                        type_fact: emmy_params
+                            .iter()
                             .find(|p| p.name == "...")
                             .map(|p| p.type_fact.clone())
                             .filter(|tf| *tf != TypeFact::Unknown),
                         bound_class: None,
-                    is_emmy_annotated: false,
+                        is_emmy_annotated: false,
                     });
                 }
             }
@@ -1536,7 +1639,8 @@ fn register_single_param(
     emmy_params: &[ParamInfo],
 ) {
     let name = node_text(id_node, ctx.source).to_string();
-    let type_fact = emmy_params.iter()
+    let type_fact = emmy_params
+        .iter()
         .find(|p| p.name == name)
         .map(|p| p.type_fact.clone())
         .filter(|tf| *tf != TypeFact::Unknown);

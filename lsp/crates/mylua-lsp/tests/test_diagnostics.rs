@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use test_helpers::*;
-use mylua_lsp::config::{DiagnosticsConfig, DiagnosticSeverityOption};
+use mylua_lsp::config::{DiagnosticSeverityOption, DiagnosticsConfig};
 use mylua_lsp::diagnostics;
+use test_helpers::*;
 
 #[test]
 fn no_diagnostics_for_clean_code() {
@@ -13,8 +13,13 @@ local b = "hello"
 print(a, b)
 "#;
     let doc = parse_doc(&mut parser, src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
-    assert!(diags.is_empty(), "clean code should have no diagnostics, got: {:?}", diags);
+    let diags =
+        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    assert!(
+        diags.is_empty(),
+        "clean code should have no diagnostics, got: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -22,9 +27,13 @@ fn diagnostics_for_syntax_errors() {
     let src = read_fixture("parse/test1.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    let diags =
+        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     // test1.lua contains intentional parse errors (e.g. "dfjsofjao", "if faf fsf")
-    assert!(!diags.is_empty(), "parse/test1.lua should produce diagnostics");
+    assert!(
+        !diags.is_empty(),
+        "parse/test1.lua should produce diagnostics"
+    );
 }
 
 #[test]
@@ -32,9 +41,13 @@ fn diagnostics_for_define_test1() {
     let src = read_fixture("define/test1.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    let diags =
+        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     // define/test1.lua has some intentionally invalid lines
-    assert!(!diags.is_empty(), "define/test1.lua should produce parse-level diagnostics");
+    assert!(
+        !diags.is_empty(),
+        "define/test1.lua should produce parse-level diagnostics"
+    );
 }
 
 #[test]
@@ -42,13 +55,18 @@ fn syntax_error_range_does_not_swallow_following_statement() {
     let src = "local broken = function(\n\nprint(broken)\n";
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
-    let diags = diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+    let diags =
+        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
     assert!(!diags.is_empty(), "expected syntax diagnostics");
     let syntax_errors: Vec<_> = diags
         .iter()
         .filter(|d| d.message.starts_with("Syntax error"))
         .collect();
-    assert!(!syntax_errors.is_empty(), "expected syntax error diagnostics: {:?}", diags);
+    assert!(
+        !syntax_errors.is_empty(),
+        "expected syntax error diagnostics: {:?}",
+        diags
+    );
     assert!(
         syntax_errors
             .iter()
@@ -106,7 +124,9 @@ end
         doc.line_index(),
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("Undefined global 'c'")),
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'c'")),
         "anonymous function parameter 'c' must resolve as local. diags={:?}",
         diags
     );
@@ -129,7 +149,9 @@ handler(function(c) return c end)
         doc.line_index(),
     );
     assert!(
-        !diags.iter().any(|d| d.message.contains("Undefined global 'c'")),
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'c'")),
         "top-level callback parameter 'c' must resolve as local. diags={:?}",
         diags
     );
@@ -149,17 +171,30 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "undef_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
-    let undefined: Vec<_> = diags.iter()
+    let undefined: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Undefined global 'A1213'"))
         .collect();
-    assert_eq!(undefined.len(), 1,
-        "expected exactly one Undefined global 'A1213' on method base. diags={:?}", diags);
+    assert_eq!(
+        undefined.len(),
+        1,
+        "expected exactly one Undefined global 'A1213' on method base. diags={:?}",
+        diags
+    );
     // The method name `f` is a field write, must NOT be flagged.
-    assert!(!diags.iter().any(|d| d.message.contains("'f'")),
-        "method name should not be flagged as undefined global. diags={:?}", diags);
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'f'")),
+        "method name should not be flagged as undefined global. diags={:?}",
+        diags
+    );
     // White-box: the diagnostic correctness here depends on the
     // indexer *not* registering `A1213` as a global from
     // `function A1213:f()`. If that ever regresses (e.g. summary
@@ -187,27 +222,37 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "multi_chain.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
     // Exactly two undefined-global diagnostics: the two distinct bases.
-    let undefined_messages: Vec<&str> = diags.iter()
+    let undefined_messages: Vec<&str> = diags
+        .iter()
         .filter(|d| d.message.starts_with("Undefined global"))
         .map(|d| d.message.as_str())
         .collect();
     assert!(
         undefined_messages.iter().any(|m| m.contains("'NoSuch'")),
-        "expected 'NoSuch' undefined. diags={:?}", diags
+        "expected 'NoSuch' undefined. diags={:?}",
+        diags
     );
     assert!(
         undefined_messages.iter().any(|m| m.contains("'NoSuchToo'")),
-        "expected 'NoSuchToo' undefined. diags={:?}", diags
+        "expected 'NoSuchToo' undefined. diags={:?}",
+        diags
     );
     // Intermediate / tail segments must NOT produce diagnostics.
     for forbidden in &["'b'", "'c'", "'m'"] {
         assert!(
             !diags.iter().any(|d| d.message.contains(forbidden)),
-            "segment {} must not be flagged. diags={:?}", forbidden, diags
+            "segment {} must not be flagged. diags={:?}",
+            forbidden,
+            diags
         );
     }
 }
@@ -224,16 +269,29 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "undef_dotted.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
-    let undefined: Vec<_> = diags.iter()
+    let undefined: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Undefined global 'NoSuch'"))
         .collect();
-    assert_eq!(undefined.len(), 1,
-        "expected Undefined global on dotted base 'NoSuch'. diags={:?}", diags);
-    assert!(!diags.iter().any(|d| d.message.contains("'bar'")),
-        "tail field 'bar' should not be flagged. diags={:?}", diags);
+    assert_eq!(
+        undefined.len(),
+        1,
+        "expected Undefined global on dotted base 'NoSuch'. diags={:?}",
+        diags
+    );
+    assert!(
+        !diags.iter().any(|d| d.message.contains("'bar'")),
+        "tail field 'bar' should not be flagged. diags={:?}",
+        diags
+    );
 }
 
 #[test]
@@ -250,11 +308,21 @@ foo()
     let (doc, uri, mut agg) = setup_single_file(src, "bare_def.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
-    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'foo'")),
-        "bare `function foo()` must define foo, not flag it. diags={:?}", diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'foo'")),
+        "bare `function foo()` must define foo, not flag it. diags={:?}",
+        diags
+    );
 }
 
 #[test]
@@ -271,11 +339,21 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "local_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
-    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
-        "local ABC must not be flagged as undefined. diags={:?}", diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'ABC'")),
+        "local ABC must not be flagged as undefined. diags={:?}",
+        diags
+    );
 }
 
 #[test]
@@ -292,11 +370,21 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "global_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &diag_config, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
     );
-    assert!(!diags.iter().any(|d| d.message.contains("Undefined global 'ABC'")),
-        "global ABC (assigned earlier) must not be flagged. diags={:?}", diags);
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'ABC'")),
+        "global ABC (assigned earlier) must not be flagged. diags={:?}",
+        diags
+    );
 }
 
 #[test]
@@ -310,10 +398,16 @@ print(t.no_exist)
     let mut cfg = DiagnosticsConfig::default();
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let field_diags: Vec<_> = diags.iter()
+    let field_diags: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -333,10 +427,16 @@ local x = 42
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatch: Vec<_> = diags.iter()
+    let mismatch: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch"))
         .collect();
     assert!(
@@ -356,10 +456,16 @@ local x = 42
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatch: Vec<_> = diags.iter()
+    let mismatch: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch"))
         .collect();
     assert!(
@@ -400,10 +506,16 @@ a.b.c = 1
     let (doc, uri, mut agg) = setup_single_file(src, "chained_lhs.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -430,10 +542,16 @@ print(t.age)
     let (doc, uri, mut agg) = setup_single_file(src, "shape_fields.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -458,10 +576,16 @@ print(t[2])
     let (doc, uri, mut agg) = setup_single_file(src, "bracket_key.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let errors: Vec<_> = diags.iter()
+    let errors: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .filter(|d| d.severity == Some(tower_lsp_server::ls_types::DiagnosticSeverity::ERROR))
         .collect();
@@ -486,10 +610,16 @@ print(t.anything)
     let (doc, uri, mut agg) = setup_single_file(src, "dyn_bracket.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let field_errors: Vec<_> = diags.iter()
+    let field_errors: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .filter(|d| d.severity == Some(tower_lsp_server::ls_types::DiagnosticSeverity::ERROR))
         .collect();
@@ -519,10 +649,16 @@ print(t[1])
     // diagnostic path, so no diagnostic is expected here. This is a
     // smoke test for the `None` arm of `extract_single_field`.
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -544,8 +680,13 @@ print(t.no_exist)
     let mut cfg = DiagnosticsConfig::default();
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().any(|d| d.message.contains("no_exist")),
@@ -584,10 +725,16 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "cross_globals.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -607,7 +754,7 @@ fn global_table_field_hover_survives_warm_cache() {
     // `TableShapeId` lookups.
     use mylua_lsp::hover;
     use mylua_lsp::resolver;
-    use mylua_lsp::type_system::{TypeFact, KnownType, SymbolicStub};
+    use mylua_lsp::type_system::{KnownType, SymbolicStub, TypeFact};
     let src = r#"---@class Audit
 ---@field enabled boolean
 Audit = { enabled = true }
@@ -618,13 +765,14 @@ print(Audit.enabled)
 
     // Warm the resolution cache first (diagnostics does this in real
     // LSP sessions before any hover arrives).
-    let base = TypeFact::Stub(SymbolicStub::GlobalRef { name: "Audit".to_string() });
+    let base = TypeFact::Stub(SymbolicStub::GlobalRef {
+        name: "Audit".to_string(),
+    });
     let _ = resolver::resolve_type(&base, &mut agg);
 
     // Now resolve the field chain — must succeed, not return Unknown.
-    let resolved = resolver::resolve_field_chain_in_file(
-        &uri, &base, &["enabled".to_string()], &mut agg,
-    );
+    let resolved =
+        resolver::resolve_field_chain_in_file(&uri, &base, &["enabled".to_string()], &mut agg);
     assert!(
         !matches!(resolved.type_fact, TypeFact::Unknown),
         "warm-cache resolve_field_chain_in_file must find 'Audit.enabled', got Unknown"
@@ -640,13 +788,16 @@ print(Audit.enabled)
     let d = docs.get(&uri).unwrap();
     // `Audit.enabled` — `enabled` starts at col 12 (0-based) on line 4 (`print(Audit.enabled)`).
     let hv = hover::hover(d, &uri, pos(4, 12), &mut agg, &docs);
-    assert!(hv.is_some(), "hover on Audit.enabled after warm cache should produce a result");
+    assert!(
+        hv.is_some(),
+        "hover on Audit.enabled after warm cache should produce a result"
+    );
 }
 
 #[test]
 fn generic_class_field_resolution() {
     use mylua_lsp::resolver;
-    use mylua_lsp::type_system::{TypeFact, KnownType};
+    use mylua_lsp::type_system::{KnownType, TypeFact};
 
     let src = r#"
 ---@generic T
@@ -662,17 +813,24 @@ local c = getContainer()
     let lua_source = mylua_lsp::util::LuaSource::new(src.to_string());
     let uri = make_uri("generic.lua");
     let (summary, scope_tree) = mylua_lsp::summary_builder::build_file_analysis(
-        &uri, &tree, lua_source.source(), lua_source.line_index(),
+        &uri,
+        &tree,
+        lua_source.source(),
+        lua_source.line_index(),
     );
-    let doc = mylua_lsp::document::Document { lua_source, tree, scope_tree };
+    let doc = mylua_lsp::document::Document {
+        lua_source,
+        tree,
+        scope_tree,
+    };
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.upsert_summary(summary);
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;
-    let resolved = resolver::resolve_local_in_file(&uri, "c", byte_offset, &doc.scope_tree, &mut agg);
-    let field_result = resolver::resolve_field_chain(
-        &resolved.type_fact, &["value".to_string()], &mut agg,
-    );
+    let resolved =
+        resolver::resolve_local_in_file(&uri, "c", byte_offset, &doc.scope_tree, &mut agg);
+    let field_result =
+        resolver::resolve_field_chain(&resolved.type_fact, &["value".to_string()], &mut agg);
     assert!(
         matches!(&field_result.type_fact, TypeFact::Known(KnownType::String)),
         "Container<string>.value should resolve to string, got: {}",
@@ -690,11 +848,29 @@ fn duplicate_table_key_reports_warning() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_key.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
-    assert_eq!(dup.len(), 1, "exactly one duplicate report, got: {:?}", diags);
-    assert!(dup[0].message.contains("'a'"), "message names the key, got: {}", dup[0].message);
+    let dup: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Duplicate table key"))
+        .collect();
+    assert_eq!(
+        dup.len(),
+        1,
+        "exactly one duplicate report, got: {:?}",
+        diags
+    );
+    assert!(
+        dup[0].message.contains("'a'"),
+        "message names the key, got: {}",
+        dup[0].message
+    );
 }
 
 #[test]
@@ -706,10 +882,24 @@ fn duplicate_table_key_across_numeric_and_string_keys() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let dup: Vec<_> = diags.iter().filter(|d| d.message.contains("Duplicate table key")).collect();
-    assert_eq!(dup.len(), 0, "bracket-key-only tables skip duplicate-key check, got: {:?}", diags);
+    let dup: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Duplicate table key"))
+        .collect();
+    assert_eq!(
+        dup.len(),
+        0,
+        "bracket-key-only tables skip duplicate-key check, got: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -719,11 +909,20 @@ fn duplicate_table_key_off_via_config() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.duplicate_table_key = DiagnosticSeverityOption::Off;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Duplicate table key")),
-        "off config should suppress duplicate-key diagnostic, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Duplicate table key")),
+        "off config should suppress duplicate-key diagnostic, got: {:?}",
+        diags,
     );
 }
 
@@ -737,10 +936,24 @@ fn unused_local_reports_by_default() {
     let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
-    assert_eq!(unused.len(), 1, "unused_local defaults to warning, got: {:?}", diags);
+    let unused: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unused local"))
+        .collect();
+    assert_eq!(
+        unused.len(),
+        1,
+        "unused_local defaults to warning, got: {:?}",
+        diags
+    );
     assert!(unused[0].message.contains("'x'"));
 }
 
@@ -751,9 +964,18 @@ fn unused_local_reports_when_enabled() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
+    let unused: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unused local"))
+        .collect();
     assert_eq!(unused.len(), 1, "only `x` is unused, got: {:?}", diags);
     assert!(unused[0].message.contains("'x'"));
 }
@@ -766,11 +988,18 @@ fn unused_local_skips_underscore_names() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Unused local")),
-        "underscore names shouldn't trigger unused, got: {:?}", diags,
+        "underscore names shouldn't trigger unused, got: {:?}",
+        diags,
     );
 }
 
@@ -781,11 +1010,18 @@ fn unused_local_counts_reference_in_expression() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Unused local")),
-        "x is used in return expression, got: {:?}", diags,
+        "x is used in return expression, got: {:?}",
+        diags,
     );
 }
 
@@ -801,11 +1037,20 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Unused local '...'")),
-        "used varargs should not trigger unused-local, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Unused local '...'")),
+        "used varargs should not trigger unused-local, got: {:?}",
+        diags,
     );
 }
 
@@ -821,11 +1066,20 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("Unused local '...'")),
-        "unused varargs should still trigger unused-local, got: {:?}", diags,
+        diags
+            .iter()
+            .any(|d| d.message.contains("Unused local '...'")),
+        "unused varargs should still trigger unused-local, got: {:?}",
+        diags,
     );
 }
 
@@ -841,11 +1095,20 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Unused local 'self'")),
-        "implicit method self should not trigger unused-local, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Unused local 'self'")),
+        "implicit method self should not trigger unused-local, got: {:?}",
+        diags,
     );
 }
 
@@ -860,11 +1123,20 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("Unused local 'self'")),
-        "explicit self parameter should still trigger unused-local, got: {:?}", diags,
+        diags
+            .iter()
+            .any(|d| d.message.contains("Unused local 'self'")),
+        "explicit self parameter should still trigger unused-local, got: {:?}",
+        diags,
     );
 }
 
@@ -883,12 +1155,22 @@ function utils:empty_func(arg1, arg2) end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unused: Vec<_> = diags.iter().filter(|d| d.message.contains("Unused local")).collect();
+    let unused: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unused local"))
+        .collect();
     assert!(
         unused.is_empty(),
-        "params in empty method should not trigger unused-local, got: {:?}", unused,
+        "params in empty method should not trigger unused-local, got: {:?}",
+        unused,
     );
 }
 
@@ -905,19 +1187,28 @@ x = "not a number"
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch on assignment"))
         .collect();
     assert_eq!(
-        mismatches.len(), 1,
-        "exactly one follow-up assignment mismatch, got: {:?}", diags,
+        mismatches.len(),
+        1,
+        "exactly one follow-up assignment mismatch, got: {:?}",
+        diags,
     );
     assert!(
         mismatches[0].message.contains("'x'"),
-        "message names the variable, got: {}", mismatches[0].message,
+        "message names the variable, got: {}",
+        mismatches[0].message,
     );
 }
 
@@ -938,12 +1229,20 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Type mismatch on assignment")),
-        "shadowed inner `x` reassignments must not flag outer number type, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Type mismatch on assignment")),
+        "shadowed inner `x` reassignments must not flag outer number type, got: {:?}",
+        diags,
     );
 }
 
@@ -961,14 +1260,29 @@ f(1, 2, 3)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("argument(s)"))
         .collect();
-    assert_eq!(mismatches.len(), 1, "should flag over-arity, got: {:?}", diags);
-    assert!(mismatches[0].message.contains("expected 2"), "expected 2 params: {}", mismatches[0].message);
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "should flag over-arity, got: {:?}",
+        diags
+    );
+    assert!(
+        mismatches[0].message.contains("expected 2"),
+        "expected 2 params: {}",
+        mismatches[0].message
+    );
 }
 
 #[test]
@@ -981,13 +1295,24 @@ f(1)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("argument(s)"))
         .collect();
-    assert_eq!(mismatches.len(), 1, "should flag under-arity, got: {:?}", diags);
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "should flag under-arity, got: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -1000,12 +1325,252 @@ f(1, 2, 3, 4, 5)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
-        "vararg must absorb extras, got: {:?}", diags,
+        "vararg must absorb extras, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_stdlib_math_max_accepts_varargs() {
+    let lib = bundled_lua54_library_path();
+    let user_file = ("math_max_user.lua", "local x = math.max(1, 2)\n");
+    let (docs, mut agg, _parser, _library_uris) =
+        setup_workspace_with_library(&[user_file], &[lib]);
+    let uri = make_uri("math_max_user.lua");
+    let doc = docs.get(&uri).expect("user document present");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        doc.source(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "stdlib math.max vararg signature must absorb extras, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_vararg_annotation_order_stays_trailing() {
+    let src = r#"
+---@vararg number
+---@param a number
+local function f(a, ...) return a end
+f(1, 2, 3)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_vararg_annotation_order.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "vararg annotation must remain trailing regardless of annotation order, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_vararg_only_annotation_keeps_ast_fixed_params() {
+    let src = r#"
+---@vararg number
+local function f(a, ...) return a end
+f()
+f(1, 2)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_vararg_only_annotation.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "vararg-only annotation must keep AST fixed params, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_uses_lua_params_when_param_annotation_name_mismatches() {
+    let src = r#"
+---@param x number
+local function f(a, b) return a + b end
+f(1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_param_name_mismatch.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "argument count must use Lua parameters, not mismatched @param names, got: {:?}",
+        diags,
+    );
+    assert!(
+        mismatches[0].message.contains("expected 2"),
+        "expected Lua parameter count 2, got: {}",
+        mismatches[0].message,
+    );
+}
+
+#[test]
+fn param_annotation_name_mismatch_reports_warning() {
+    let src = r#"
+---@param x number
+local function f(a) return a end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "param_name_mismatch_warning.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags
+        .iter()
+        .filter(|d| {
+            d.message
+                .contains("@param 'x' does not match any Lua parameter")
+        })
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "mismatched @param names should report a warning, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn matching_param_annotation_reports_no_warning() {
+    let src = r#"
+---@param a number
+local function f(a) return a end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "param_name_match.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("does not match any Lua parameter")),
+        "matching @param names should not warn, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn method_self_param_annotation_reports_no_warning() {
+    let src = r#"
+---@param self T
+---@param value number
+function T:set(value) end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "param_method_self.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("@param 'self' does not match")),
+        "method implicit self should match @param self, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn param_annotation_mismatch_after_plain_doc_line_reports_warning() {
+    let src = r#"
+---@param x number
+--- Docs between annotation and declaration.
+local function f(a) return a end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "param_name_mismatch_doc_line.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().any(|d| d
+            .message
+            .contains("@param 'x' does not match any Lua parameter")),
+        "plain doc lines must not hide earlier @param mismatch warnings, got: {:?}",
+        diags,
     );
 }
 
@@ -1022,10 +1587,16 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("argument(s)"))
         .collect();
     assert_eq!(
@@ -1049,10 +1620,16 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("argument(s)"))
         .collect();
     assert_eq!(
@@ -1081,14 +1658,20 @@ g:hello("world")
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     // The call passes 1 visible arg ("world"); the signature has
     // 2 params (self, name); after hiding `self` it's 1 — match.
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
-        "method call with matching visible arg count should not flag, got: {:?}", diags,
+        "method call with matching visible arg count should not flag, got: {:?}",
+        diags,
     );
 }
 
@@ -1106,12 +1689,18 @@ f(1)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
-        "any overload match clears the count diagnostic, got: {:?}", diags,
+        "any overload match clears the count diagnostic, got: {:?}",
+        diags,
     );
 }
 
@@ -1124,12 +1713,18 @@ f(1, 2, 3)
     let (doc, uri, mut agg) = setup_single_file(src, "argcount_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("argument(s)")),
-        "argument count check is off by default, got: {:?}", diags,
+        "argument count check is off by default, got: {:?}",
+        diags,
     );
 }
 
@@ -1145,15 +1740,23 @@ f("str", 42)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let type_mismatches: Vec<_> = diags.iter()
+    let type_mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.starts_with("Argument "))
         .collect();
     assert_eq!(
-        type_mismatches.len(), 2,
-        "both args flagged: str->number, 42->string, got: {:?}", diags,
+        type_mismatches.len(),
+        2,
+        "both args flagged: str->number, 42->string, got: {:?}",
+        diags,
     );
 }
 
@@ -1173,10 +1776,16 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let return_mismatches: Vec<_> = diags.iter()
+    let return_mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Return statement yields"))
         .collect();
     assert_eq!(return_mismatches.len(), 1, "got: {:?}", diags);
@@ -1195,10 +1804,16 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let return_mismatches: Vec<_> = diags.iter()
+    let return_mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Return value"))
         .collect();
     assert_eq!(return_mismatches.len(), 1, "got: {:?}", diags);
@@ -1219,15 +1834,26 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     // The string return inside `if` should be flagged as type mismatch,
     // the outer `return 0` is correct.
-    let return_mismatches: Vec<_> = diags.iter()
+    let return_mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Return value"))
         .collect();
-    assert_eq!(return_mismatches.len(), 1, "nested return must be walked, got: {:?}", diags);
+    assert_eq!(
+        return_mismatches.len(),
+        1,
+        "nested return must be walked, got: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -1245,12 +1871,18 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
-        "nested function's returns must not count against outer, got: {:?}", diags,
+        "nested function's returns must not count against outer, got: {:?}",
+        diags,
     );
 }
 
@@ -1263,12 +1895,18 @@ local function f() return "str" end
     let (doc, uri, mut agg) = setup_single_file(src, "return_off.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
-        "return mismatch default off, got: {:?}", diags,
+        "return mismatch default off, got: {:?}",
+        diags,
     );
 }
 
@@ -1289,12 +1927,18 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
-        "tail call return should not be flagged, got: {:?}", diags,
+        "tail call return should not be flagged, got: {:?}",
+        diags,
     );
 }
 
@@ -1311,12 +1955,18 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("Return")),
-        "vararg return should not be flagged, got: {:?}", diags,
+        "vararg return should not be flagged, got: {:?}",
+        diags,
     );
 }
 
@@ -1337,15 +1987,23 @@ takes_number(s)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.starts_with("Argument "))
         .collect();
     assert_eq!(
-        mismatches.len(), 1,
-        "passing @type string to @param number must be flagged, got: {:?}", diags,
+        mismatches.len(),
+        1,
+        "passing @type string to @param number must be flagged, got: {:?}",
+        diags,
     );
 }
 
@@ -1371,10 +2029,16 @@ utils2.hello()
     let (doc, uri, mut agg) = setup_single_file(src, "global_table_fn_decl.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1403,19 +2067,23 @@ end
     let file_b = r#"
 utils2.hello()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("utils2_def.lua", file_a),
-        ("utils2_use.lua", file_b),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
     let doc_b = docs.get(&uri_b).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
+        doc_b.tree.root_node(),
+        file_b.as_bytes(),
+        &uri_b,
+        &mut agg,
+        &doc_b.scope_tree,
+        &cfg,
+        doc_b.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1440,19 +2108,23 @@ utils2.bar = 1
     let file_b = r#"
 print(utils2.bar)
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("utils2_def.lua", file_a),
-        ("utils2_use.lua", file_b),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
     let doc_b = docs.get(&uri_b).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
+        doc_b.tree.root_node(),
+        file_b.as_bytes(),
+        &uri_b,
+        &mut agg,
+        &doc_b.scope_tree,
+        &cfg,
+        doc_b.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1483,19 +2155,23 @@ end
     let file_b = r#"
 utils2.sub.hello()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("nested_def.lua", file_a),
-        ("nested_use.lua", file_b),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("nested_def.lua", file_a), ("nested_use.lua", file_b)]);
     let uri_b = make_uri("nested_use.lua");
     let doc_b = docs.get(&uri_b).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
+        doc_b.tree.root_node(),
+        file_b.as_bytes(),
+        &uri_b,
+        &mut agg,
+        &doc_b.scope_tree,
+        &cfg,
+        doc_b.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1522,19 +2198,23 @@ end
     let file_b = r#"
 utils2.doesnotexist()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("utils2_def.lua", file_a),
-        ("utils2_use.lua", file_b),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
     let doc_b = docs.get(&uri_b).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc_b.tree.root_node(), file_b.as_bytes(), &uri_b,
-        &mut agg, &doc_b.scope_tree, &cfg, doc_b.line_index(),
+        doc_b.tree.root_node(),
+        file_b.as_bytes(),
+        &uri_b,
+        &mut agg,
+        &doc_b.scope_tree,
+        &cfg,
+        doc_b.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field 'doesnotexist'"))
         .collect();
     assert!(
@@ -1571,10 +2251,16 @@ print(utils.test_const.ON_Evt_HAHA1)
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), use_src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        use_src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field 'ON_Evt_HAHA1'"))
         .collect();
     assert_eq!(
@@ -1614,10 +2300,16 @@ end
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), use_src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        use_src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1626,7 +2318,10 @@ end
         unknown,
     );
     assert_eq!(
-        unknown.iter().filter(|d| d.message.contains("ON_Evt_HAHA1")).count(),
+        unknown
+            .iter()
+            .filter(|d| d.message.contains("ON_Evt_HAHA1"))
+            .count(),
         1,
         "only the missing nested field should be reported exactly once, got: {:?}",
         unknown,
@@ -1650,10 +2345,16 @@ print(p.x, p.z)
     let (doc, uri, mut agg) = setup_single_file(src, "alias_shape.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri,
-        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1690,10 +2391,8 @@ return Player
 local hero = Player.new("Alice")
 local name = hero:getName()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("player.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
     agg.set_require_mapping("player".to_string(), mod_uri.clone());
 
@@ -1702,10 +2401,16 @@ local name = hero:getName()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
-        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
+        main_doc.tree.root_node(),
+        main_src.as_bytes(),
+        &main_uri,
+        &mut agg,
+        &main_doc.scope_tree,
+        &cfg,
+        main_doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1730,19 +2435,23 @@ return Player
     let main_src = r#"local P = require("player")
 local hero = P.new("Alice")
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("player.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
-        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
+        main_doc.tree.root_node(),
+        main_src.as_bytes(),
+        &main_uri,
+        &mut agg,
+        &main_doc.scope_tree,
+        &cfg,
+        main_doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1800,10 +2509,8 @@ hero:take_damage(5)
 hero:pick_up("sword")
 hero:describe()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("player.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
     agg.set_require_mapping("player".to_string(), mod_uri.clone());
 
@@ -1812,10 +2519,16 @@ hero:describe()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        main_doc.tree.root_node(), main_src.as_bytes(), &main_uri,
-        &mut agg, &main_doc.scope_tree, &cfg, main_doc.line_index(),
+        main_doc.tree.root_node(),
+        main_src.as_bytes(),
+        &main_uri,
+        &mut agg,
+        &main_doc.scope_tree,
+        &cfg,
+        main_doc.line_index(),
     );
-    let unknown: Vec<_> = diags.iter()
+    let unknown: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Unknown field"))
         .collect();
     assert!(
@@ -1825,7 +2538,6 @@ hero:describe()
         unknown,
     );
 }
-
 
 // ---------------------------------------------------------------------------
 // P2 — Generic type variance
@@ -1851,9 +2563,16 @@ process_numbers(my_list)  -- type mismatch: passing List<string> to List<number>
     let (doc, uri, mut agg) = setup_single_file(src, "generic_call_variance.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch") || d.message.contains("mismatch"))
         .collect();
     // This test verifies that generic variance is checked at call sites
@@ -1878,12 +2597,24 @@ local list2 = list1  -- should not error
     let (doc, uri, mut agg) = setup_single_file(src, "generic_same.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch"))
         .collect();
-    assert_eq!(mismatches.len(), 0, "should not report any mismatches for same generic params, got: {:?}", diags);
+    assert_eq!(
+        mismatches.len(),
+        0,
+        "should not report any mismatches for same generic params, got: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -1903,10 +2634,22 @@ list = {}  -- should not error (backwards compat)
     let (doc, uri, mut agg) = setup_single_file(src, "generic_untyped.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(), src.as_bytes(), &uri, &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
     );
-    let mismatches: Vec<_> = diags.iter()
+    let mismatches: Vec<_> = diags
+        .iter()
         .filter(|d| d.message.contains("Type mismatch"))
         .collect();
-    assert_eq!(mismatches.len(), 0, "untyped List should accept any generic params, got: {:?}", diags);
+    assert_eq!(
+        mismatches.len(),
+        0,
+        "untyped List should accept any generic params, got: {:?}",
+        diags
+    );
 }

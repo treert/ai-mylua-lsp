@@ -1,8 +1,8 @@
-use tower_lsp_server::ls_types::*;
+use super::type_compat::{infer_argument_type, is_type_compatible};
+use crate::aggregation::WorkspaceAggregation;
 use crate::type_system::TypeFact;
 use crate::util::LineIndex;
-use crate::aggregation::WorkspaceAggregation;
-use super::type_compat::{infer_argument_type, is_type_compatible};
+use tower_lsp_server::ls_types::*;
 
 /// Walk every `function_call` in the tree and compare actual argument
 /// count (and, when types are knowable, types) against the resolved
@@ -49,13 +49,17 @@ pub(super) fn check_call_argument_diagnostics(
         if sigs.is_empty() {
             continue;
         }
-        let Some(args_node) = call.child_by_field_name("arguments") else { continue };
+        let Some(args_node) = call.child_by_field_name("arguments") else {
+            continue;
+        };
         let (actual_count, arg_exprs) = collect_call_arguments(args_node, source);
 
         // Count match: any overload compatible with the actual count
         // clears the diagnostic.
         if let Some(severity) = count_severity {
-            let any_count_ok = sigs.iter().any(|sig| signature_accepts_count(sig, actual_count, is_method));
+            let any_count_ok = sigs
+                .iter()
+                .any(|sig| signature_accepts_count(sig, actual_count, is_method));
             if !any_count_ok {
                 // Use the smallest/largest expected count range across
                 // overloads for the human-readable message.
@@ -94,7 +98,11 @@ pub(super) fn check_call_argument_diagnostics(
             // its param slots for typing. If multiple overloads match,
             // prefer the one whose param types align most with the
             // provided literal types (best-effort, non-critical).
-            let Some(best_sig) = pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, scope_tree) else { continue };
+            let Some(best_sig) =
+                pick_best_typing_overload(&sigs, &arg_exprs, is_method, source, scope_tree)
+            else {
+                continue;
+            };
             let visible_params = visible_params_for(&best_sig, is_method);
             for (i, arg_expr) in arg_exprs.iter().enumerate() {
                 // Vararg param absorbs everything past its position.
@@ -117,7 +125,10 @@ pub(super) fn check_call_argument_diagnostics(
                         source: Some("mylua".to_string()),
                         message: format!(
                             "Argument {} of '{}': declared '{}', got '{}'",
-                            i + 1, display, param.type_fact, actual,
+                            i + 1,
+                            display,
+                            param.type_fact,
+                            actual,
                         ),
                         ..Default::default()
                     });
@@ -157,7 +168,10 @@ fn collect_call_arguments<'tree>(
     (exprs.len() as u32, exprs)
 }
 
-fn visible_params_for(sig: &crate::type_system::FunctionSignature, is_method: bool) -> Vec<crate::type_system::ParamInfo> {
+fn visible_params_for(
+    sig: &crate::type_system::FunctionSignature,
+    is_method: bool,
+) -> Vec<crate::type_system::ParamInfo> {
     sig.params
         .iter()
         .filter(|p| !(is_method && p.name == "self"))
@@ -165,7 +179,11 @@ fn visible_params_for(sig: &crate::type_system::FunctionSignature, is_method: bo
         .collect()
 }
 
-fn signature_accepts_count(sig: &crate::type_system::FunctionSignature, actual: u32, is_method: bool) -> bool {
+fn signature_accepts_count(
+    sig: &crate::type_system::FunctionSignature,
+    actual: u32,
+    is_method: bool,
+) -> bool {
     let visible = visible_params_for(sig, is_method);
     let (min, max) = accepted_count_bounds(&visible);
     actual >= min && (max == u32::MAX || actual <= max)
@@ -174,7 +192,10 @@ fn signature_accepts_count(sig: &crate::type_system::FunctionSignature, actual: 
 /// Return the `(min, max)` acceptable argument counts across all
 /// overloads, where `max == u32::MAX` indicates at least one overload
 /// has a vararg trailing parameter.
-fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_method: bool) -> (u32, u32) {
+fn expected_count_range(
+    sigs: &[crate::type_system::FunctionSignature],
+    is_method: bool,
+) -> (u32, u32) {
     let mut min_acc = u32::MAX;
     let mut max_acc = 0u32;
     let mut any_vararg = false;
@@ -184,8 +205,12 @@ fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_metho
         if hi == u32::MAX {
             any_vararg = true;
         }
-        if lo < min_acc { min_acc = lo; }
-        if hi > max_acc { max_acc = hi; }
+        if lo < min_acc {
+            min_acc = lo;
+        }
+        if hi > max_acc {
+            max_acc = hi;
+        }
     }
     if any_vararg {
         (min_acc, u32::MAX)
@@ -207,7 +232,11 @@ fn accepted_count_bounds(visible: &[crate::type_system::ParamInfo]) -> (u32, u32
         .take_while(|p| p.optional)
         .count();
     let min = fixed_len.saturating_sub(optional_tail) as u32;
-    let max = if has_vararg { u32::MAX } else { fixed_len as u32 };
+    let max = if has_vararg {
+        u32::MAX
+    } else {
+        fixed_len as u32
+    };
     (min, max)
 }
 

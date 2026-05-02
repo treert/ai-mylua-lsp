@@ -1,28 +1,33 @@
-mod syntax;
-mod undefined_global;
-mod field_access;
-mod type_mismatch;
-pub(crate) mod type_compat;
-mod duplicate_key;
-mod unused_local;
 mod call_args;
+mod duplicate_key;
+mod field_access;
+mod param_annotation;
 mod return_mismatch;
 mod suppression;
+mod syntax;
+pub(crate) mod type_compat;
+mod type_mismatch;
+mod undefined_global;
+mod unused_local;
 
-use std::collections::HashSet;
-use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::config::DiagnosticsConfig;
 use crate::scope::ScopeTree;
 use crate::util::LineIndex;
-use crate::aggregation::WorkspaceAggregation;
+use std::collections::HashSet;
+use tower_lsp_server::ls_types::*;
 
-pub use suppression::{classify_diagnostic_code, apply_diagnostic_suppressions};
+pub use suppression::{apply_diagnostic_suppressions, classify_diagnostic_code};
 
 // Built-in identifier set is now version-dependent and lives in
 // `lua_builtins::builtins_for(version)`. Diagnostic paths pull the
 // set through `collect_semantic_diagnostics`'s config parameter.
 
-pub fn collect_diagnostics(root: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Vec<Diagnostic> {
+pub fn collect_diagnostics(
+    root: tree_sitter::Node,
+    source: &[u8],
+    line_index: &LineIndex,
+) -> Vec<Diagnostic> {
     let mut diagnostics = Vec::new();
     let mut cursor = root.walk();
     syntax::collect_errors_recursive(&mut cursor, source, &mut diagnostics, line_index);
@@ -39,7 +44,14 @@ pub fn collect_semantic_diagnostics(
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
     collect_semantic_diagnostics_with_version(
-        root, source, uri, index, scope_tree, diag_config, "5.3", line_index,
+        root,
+        source,
+        uri,
+        index,
+        scope_tree,
+        diag_config,
+        "5.3",
+        line_index,
     )
 }
 
@@ -74,7 +86,16 @@ pub fn collect_semantic_diagnostics_with_version(
     let is_meta = index.summaries.get(uri).map(|s| s.is_meta).unwrap_or(false);
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
         if !is_meta {
-            undefined_global::check_undefined_globals(&mut cursor, source, &builtins, index, scope_tree, &mut diagnostics, severity, line_index);
+            undefined_global::check_undefined_globals(
+                &mut cursor,
+                source,
+                &builtins,
+                index,
+                scope_tree,
+                &mut diagnostics,
+                severity,
+                line_index,
+            );
         }
     }
     let emmy_severity = diag_config.emmy_unknown_field.to_lsp_severity();
@@ -82,17 +103,36 @@ pub fn collect_semantic_diagnostics_with_version(
     let lua_warn_severity = diag_config.lua_field_warning.to_lsp_severity();
     if emmy_severity.is_some() || lua_error_severity.is_some() || lua_warn_severity.is_some() {
         field_access::check_field_access_diagnostics(
-            root, source, uri, index, scope_tree, &mut diagnostics,
-            emmy_severity, lua_error_severity, lua_warn_severity, line_index,
+            root,
+            source,
+            uri,
+            index,
+            scope_tree,
+            &mut diagnostics,
+            emmy_severity,
+            lua_error_severity,
+            lua_warn_severity,
+            line_index,
         );
     }
     if let Some(severity) = diag_config.emmy_type_mismatch.to_lsp_severity() {
         type_mismatch::check_type_mismatch_diagnostics(
-            root, source, scope_tree, &mut diagnostics, severity, line_index,
+            root,
+            source,
+            scope_tree,
+            &mut diagnostics,
+            severity,
+            line_index,
         );
     }
     if let Some(severity) = diag_config.duplicate_table_key.to_lsp_severity() {
-        duplicate_key::check_duplicate_table_keys(root, source, &mut diagnostics, severity, line_index);
+        duplicate_key::check_duplicate_table_keys(
+            root,
+            source,
+            &mut diagnostics,
+            severity,
+            line_index,
+        );
     }
     if let Some(severity) = diag_config.unused_local.to_lsp_severity() {
         unused_local::check_unused_locals(root, source, scope_tree, &mut diagnostics, severity);
@@ -101,11 +141,31 @@ pub fn collect_semantic_diagnostics_with_version(
     let type_sev = diag_config.argument_type_mismatch.to_lsp_severity();
     if count_sev.is_some() || type_sev.is_some() {
         call_args::check_call_argument_diagnostics(
-            root, source, uri, index, scope_tree, &mut diagnostics, count_sev, type_sev, line_index,
+            root,
+            source,
+            uri,
+            index,
+            scope_tree,
+            &mut diagnostics,
+            count_sev,
+            type_sev,
+            line_index,
         );
     }
     if let Some(severity) = diag_config.return_mismatch.to_lsp_severity() {
-        return_mismatch::check_return_mismatch_diagnostics(root, source, &mut diagnostics, severity, line_index);
+        return_mismatch::check_return_mismatch_diagnostics(
+            root,
+            source,
+            &mut diagnostics,
+            severity,
+            line_index,
+        );
     }
+    param_annotation::check_param_annotation_diagnostics(
+        root,
+        source,
+        &mut diagnostics,
+        line_index,
+    );
     diagnostics
 }

@@ -59,7 +59,7 @@ ai-mylua-lsp/
 
 **编辑器辅助**：completion（+ resolve）/ selectionRange / foldingRange / documentHighlight
 
-**诊断**：语法诊断 / 语义诊断（undefinedGlobal / unknownField / typeMismatch / duplicateTableKey / unusedLocal / argumentCount / argumentType / returnMismatch）/ `---@meta` 元文件 / `---@diagnostic` 抑制
+**诊断**：语法诊断 / 语义诊断（undefinedGlobal / unknownField / typeMismatch / duplicateTableKey / unusedLocal / argumentCount / argumentType / returnMismatch / paramAnnotation）/ `---@meta` 元文件 / `---@diagnostic` 抑制
 
 **EmmyLua 注解**：完整类型表达式 / @class / @field / @param / @return / @type / @alias / @enum / @generic / @overload / self 泛型绑定 / 多返回值
 

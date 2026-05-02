@@ -1,8 +1,8 @@
-use tower_lsp_server::ls_types::*;
+use super::type_compat::{infer_literal_type, is_type_compatible};
 use crate::scope::ScopeTree;
 use crate::type_system::TypeFact;
 use crate::util::{node_text, LineIndex};
-use super::type_compat::{infer_literal_type, is_type_compatible};
+use tower_lsp_server::ls_types::*;
 
 pub(super) fn check_type_mismatch_diagnostics(
     root: tree_sitter::Node,
@@ -19,7 +19,9 @@ pub(super) fn check_type_mismatch_diagnostics(
         if !decl.is_emmy_annotated {
             continue;
         }
-        let Some(ref declared) = decl.type_fact else { continue };
+        let Some(ref declared) = decl.type_fact else {
+            continue;
+        };
         let actual = find_actual_type_for_local(&decl.name, &decl.range, root, source, scope_tree);
         if actual == TypeFact::Unknown {
             continue;
@@ -29,10 +31,7 @@ pub(super) fn check_type_mismatch_diagnostics(
                 range: decl.range.into(),
                 severity: Some(severity),
                 source: Some("mylua".to_string()),
-                message: format!(
-                    "Type mismatch: declared '{}', got '{}'",
-                    declared, actual
-                ),
+                message: format!("Type mismatch: declared '{}', got '{}'", declared, actual),
                 ..Default::default()
             });
         }
@@ -43,9 +42,7 @@ pub(super) fn check_type_mismatch_diagnostics(
     // resolves the LHS identifier via `scope_tree` back to its
     // declaration site, and (if the decl site carries an Emmy type
     // fact) compares RHS literal type against the declared type.
-    check_assignment_type_mismatches(
-        root, source, scope_tree, diagnostics, severity, line_index,
-    );
+    check_assignment_type_mismatches(root, source, scope_tree, diagnostics, severity, line_index);
 }
 
 fn check_assignment_type_mismatches(
@@ -57,7 +54,14 @@ fn check_assignment_type_mismatches(
     line_index: &LineIndex,
 ) {
     let mut cursor = root.walk();
-    walk_assignment_nodes(&mut cursor, source, scope_tree, diagnostics, severity, line_index);
+    walk_assignment_nodes(
+        &mut cursor,
+        source,
+        scope_tree,
+        diagnostics,
+        severity,
+        line_index,
+    );
 }
 
 fn walk_assignment_nodes(
@@ -70,11 +74,25 @@ fn walk_assignment_nodes(
 ) {
     let node = cursor.node();
     if node.kind() == "assignment_statement" {
-        inspect_assignment_for_mismatch(node, source, scope_tree, diagnostics, severity, line_index);
+        inspect_assignment_for_mismatch(
+            node,
+            source,
+            scope_tree,
+            diagnostics,
+            severity,
+            line_index,
+        );
     }
     if cursor.goto_first_child() {
         loop {
-            walk_assignment_nodes(cursor, source, scope_tree, diagnostics, severity, line_index);
+            walk_assignment_nodes(
+                cursor,
+                source,
+                scope_tree,
+                diagnostics,
+                severity,
+                line_index,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -91,11 +109,17 @@ fn inspect_assignment_for_mismatch(
     severity: DiagnosticSeverity,
     line_index: &LineIndex,
 ) {
-    let Some(left) = node.child_by_field_name("left") else { return };
-    let Some(right) = node.child_by_field_name("right") else { return };
+    let Some(left) = node.child_by_field_name("left") else {
+        return;
+    };
+    let Some(right) = node.child_by_field_name("right") else {
+        return;
+    };
 
     for i in 0..left.named_child_count() {
-        let Some(lhs) = left.named_child(i as u32) else { continue };
+        let Some(lhs) = left.named_child(i as u32) else {
+            continue;
+        };
         let ident_node = if lhs.kind() == "identifier" {
             Some(lhs)
         } else if lhs.kind() == "variable"
@@ -117,9 +141,13 @@ fn inspect_assignment_for_mismatch(
         if !decl.is_emmy_annotated {
             continue;
         }
-        let Some(ref declared_type) = decl.type_fact else { continue };
+        let Some(ref declared_type) = decl.type_fact else {
+            continue;
+        };
 
-        let Some(value_expr) = right.named_child(i as u32) else { continue };
+        let Some(value_expr) = right.named_child(i as u32) else {
+            continue;
+        };
         let actual = infer_literal_type(value_expr, source, scope_tree);
         if actual == TypeFact::Unknown {
             continue;
