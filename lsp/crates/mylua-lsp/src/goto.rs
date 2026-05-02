@@ -230,6 +230,9 @@ fn type_definition_for_name(
             })
         })
         .collect();
+    if locations.is_empty() {
+        return None;
+    }
     Some(apply_goto_strategy(locations, strategy))
 }
 
