@@ -1,5 +1,5 @@
 use super::type_compat::{infer_return_literal_type, is_type_compatible};
-use crate::type_system::TypeFact;
+use crate::type_system::{KnownType, TypeFact};
 use crate::util::LineIndex;
 use tower_lsp_server::ls_types::*;
 
@@ -141,6 +141,7 @@ fn inspect_single_return(
         .find(|c| c.kind() == "expression_list");
     let actual_count = values.map(|v| v.named_child_count() as u32).unwrap_or(0);
     let declared_count = declared_types.len() as u32;
+    let required_count = required_return_count(declared_types) as u32;
 
     // Lua multi-value expansion: a trailing `function_call` or
     // `vararg_expression` at the last return-value position expands
@@ -157,7 +158,7 @@ fn inspect_single_return(
         }
     }
 
-    if actual_count != declared_count {
+    if actual_count < required_count || actual_count > declared_count {
         diagnostics.push(Diagnostic {
             range: line_index.ts_node_to_range(ret, source),
             severity: Some(severity),
@@ -199,5 +200,21 @@ fn inspect_single_return(
                 });
             }
         }
+    }
+}
+
+fn required_return_count(declared_types: &[TypeFact]) -> usize {
+    declared_types
+        .iter()
+        .rposition(|declared| !is_optional_return_type(declared))
+        .map(|idx| idx + 1)
+        .unwrap_or(0)
+}
+
+fn is_optional_return_type(declared: &TypeFact) -> bool {
+    match declared {
+        TypeFact::Known(KnownType::Nil) => true,
+        TypeFact::Union(parts) => parts.iter().any(is_optional_return_type),
+        _ => false,
     }
 }

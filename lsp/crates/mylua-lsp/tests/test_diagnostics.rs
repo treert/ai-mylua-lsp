@@ -1796,6 +1796,61 @@ end
 }
 
 #[test]
+fn return_count_allows_omitted_trailing_optional_return() {
+    let src = r#"
+---@return boolean, number?
+local function f()
+    return false
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_optional_tail.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return statement yields")),
+        "omitting a trailing optional return must not be flagged, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn return_count_allows_omitted_trailing_optional_return_across_lines() {
+    let src = r#"
+---@return boolean
+---@return number?
+local function f()
+    return false
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "return_optional_tail_lines.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.return_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(),
+        src.as_bytes(),
+        &uri,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Return statement yields")),
+        "omitting trailing optional returns across @return lines must not be flagged, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn return_type_mismatch_reports() {
     let src = r#"
 ---@return number
