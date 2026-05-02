@@ -45,12 +45,17 @@ pub struct GlobalCandidate {
     pub type_fact: TypeFact,
     pub range: ByteRange,
     pub selection_range: ByteRange,
-    pub source_uri: Uri,
+    source_uri_id: UriId,
+    source_uri: Uri,
 }
 
 impl GlobalCandidate {
     pub fn source_uri(&self) -> &Uri {
         &self.source_uri
+    }
+
+    fn source_uri_id(&self) -> UriId {
+        self.source_uri_id
     }
 }
 
@@ -91,8 +96,6 @@ pub struct GlobalShard {
     /// Reverse index: UriId → full-path strings contributed by that URI.
     /// Maintained by `push_candidate` / `remove_by_uri` / `clear`.
     uri_to_paths: HashMap<UriId, Vec<String>>,
-    uri_ids: HashMap<Uri, UriId>,
-    next_uri_id: i32,
 }
 
 /// Split a path string on `.` and `:` separators.
@@ -214,9 +217,8 @@ impl GlobalShard {
     /// as needed. Also updates the reverse URI→path index.
     pub fn push_candidate(&mut self, path: &str, candidate: GlobalCandidate) {
         // Update reverse index.
-        let source_uri_id = self.uri_id(&candidate.source_uri);
         self.uri_to_paths
-            .entry(source_uri_id)
+            .entry(candidate.source_uri_id())
             .or_default()
             .push(path.to_string());
 
@@ -257,12 +259,11 @@ impl GlobalShard {
 
     /// Remove all candidates contributed by a given URI.
     /// Uses the reverse index for O(contributions-per-file) work.
-    pub fn remove_by_uri(&mut self, uri: &Uri) {
-        let Some(uri_id) = self.uri_ids.remove(uri) else { return };
+    pub fn remove_by_uri(&mut self, uri: &Uri, uri_id: UriId) {
         let Some(paths) = self.uri_to_paths.remove(&uri_id) else { return };
         for path in &paths {
             if let Some(node) = self.get_node_mut(path) {
-                node.candidates.retain(|c| &c.source_uri != uri);
+                node.candidates.retain(|c| c.source_uri_id() != uri_id && c.source_uri() != uri);
             }
         }
         // Note: we leave empty structural nodes in place.
@@ -274,8 +275,6 @@ impl GlobalShard {
     pub fn clear(&mut self) {
         self.roots.clear();
         self.uri_to_paths.clear();
-        self.uri_ids.clear();
-        self.next_uri_id = 1;
     }
 
     /// DFS iterate over all entries with non-empty candidates.
@@ -304,17 +303,6 @@ impl GlobalShard {
         out
     }
 
-    fn uri_id(&mut self, uri: &Uri) -> UriId {
-        if let Some(id) = self.uri_ids.get(uri).copied() {
-            return id;
-        }
-
-        let raw = self.next_uri_id;
-        let id = UriId::new(raw);
-        self.next_uri_id = raw.checked_add(1).expect("global shard UriId exhausted");
-        self.uri_ids.insert(uri.clone(), id);
-        id
-    }
 }
 
 impl Default for GlobalShard {
@@ -322,8 +310,6 @@ impl Default for GlobalShard {
         Self {
             roots: HashMap::new(),
             uri_to_paths: HashMap::new(),
-            uri_ids: HashMap::new(),
-            next_uri_id: 1,
         }
     }
 }
@@ -333,13 +319,18 @@ impl Default for GlobalShard {
 pub struct TypeCandidate {
     pub name: String,
     pub kind: crate::summary::TypeDefinitionKind,
-    pub source_uri: Uri,
+    source_uri_id: UriId,
+    source_uri: Uri,
     pub range: ByteRange,
 }
 
 impl TypeCandidate {
     pub fn source_uri(&self) -> &Uri {
         &self.source_uri
+    }
+
+    fn source_uri_id(&self) -> UriId {
+        self.source_uri_id
     }
 }
 
@@ -439,31 +430,39 @@ impl WorkspaceAggregation {
             self.summaries.insert(uri_id, s);
         }
 
-        // 2. Build all shards in a single pass.
-        for summary in self.summaries.values() {
-            let uri = &summary.uri;
+        {
+            let summaries = &self.summaries;
+            let global_shard = &mut self.global_shard;
+            let type_shard = &mut self.type_shard;
 
-            for gc in &summary.global_contributions {
-                self.global_shard.push_candidate(&gc.name, GlobalCandidate {
-                    name: gc.name.clone(),
-                    kind: gc.kind.clone(),
-                    type_fact: gc.type_fact.clone(),
-                    range: gc.range,
-                    selection_range: gc.selection_range,
-                    source_uri: uri.clone(),
-                });
-            }
+            // 2. Build all shards in a single pass.
+            for (uri_id, summary) in summaries {
+                let uri = &summary.uri;
 
-            for td in &summary.type_definitions {
-                let candidates = self.type_shard
-                    .entry(td.name.clone())
-                    .or_default();
-                candidates.push(TypeCandidate {
-                    name: td.name.clone(),
-                    kind: td.kind.clone(),
-                    source_uri: uri.clone(),
-                    range: td.range,
-                });
+                for gc in &summary.global_contributions {
+                    global_shard.push_candidate(&gc.name, GlobalCandidate {
+                        name: gc.name.clone(),
+                        kind: gc.kind.clone(),
+                        type_fact: gc.type_fact.clone(),
+                        range: gc.range,
+                        selection_range: gc.selection_range,
+                        source_uri_id: *uri_id,
+                        source_uri: uri.clone(),
+                    });
+                }
+
+                for td in &summary.type_definitions {
+                    let candidates = type_shard
+                        .entry(td.name.clone())
+                        .or_default();
+                    candidates.push(TypeCandidate {
+                        name: td.name.clone(),
+                        kind: td.kind.clone(),
+                        source_uri_id: *uri_id,
+                        source_uri: uri.clone(),
+                        range: td.range,
+                    });
+                }
             }
         }
 
@@ -476,11 +475,11 @@ impl WorkspaceAggregation {
         let default_priority = (usize::MAX, usize::MAX, usize::MAX);
 
         self.global_shard.sort_all(|c| {
-            *uri_priority.get(&c.source_uri).unwrap_or(&default_priority)
+            *uri_priority.get(c.source_uri()).unwrap_or(&default_priority)
         });
         for candidates in self.type_shard.values_mut() {
             candidates.sort_by_cached_key(|c| {
-                *uri_priority.get(&c.source_uri).unwrap_or(&default_priority)
+                *uri_priority.get(c.source_uri()).unwrap_or(&default_priority)
             });
         }
     }
@@ -502,6 +501,7 @@ impl WorkspaceAggregation {
                 type_fact: gc.type_fact.clone(),
                 range: gc.range,
                 selection_range: gc.selection_range,
+                source_uri_id: uri_id,
                 source_uri: uri.clone(),
             });
             self.global_shard.sort_at(&gc.name, |c| uri_priority_key(&c.source_uri));
@@ -514,6 +514,7 @@ impl WorkspaceAggregation {
             candidates.push(TypeCandidate {
                 name: td.name.clone(),
                 kind: td.kind.clone(),
+                source_uri_id: uri_id,
                 source_uri: uri.clone(),
                 range: td.range,
             });
@@ -607,14 +608,14 @@ impl WorkspaceAggregation {
         // already-known file still performs the full prune (needed
         // to drop contributions whose names disappeared between
         // revisions), matching the pre-existing semantics.
-        if !self.summary_uri_ids.contains_key(uri) {
+        let Some(uri_id) = self.summary_uri_ids.get(uri).copied() else {
             return;
-        }
+        };
 
-        self.global_shard.remove_by_uri(uri);
+        self.global_shard.remove_by_uri(uri, uri_id);
 
         self.type_shard.retain(|_, candidates| {
-            candidates.retain(|c| &c.source_uri != uri);
+            candidates.retain(|c| c.source_uri_id() != uri_id && c.source_uri() != uri);
             !candidates.is_empty()
         });
     }
