@@ -521,7 +521,9 @@ impl LanguageServer for Backend {
                     // the same path (perhaps of different content)
                     // would still be force-flagged meta just because
                     // its URI was previously registered.
-                    self.library_uris.lock().unwrap().remove(&change.uri);
+                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        self.library_uris.lock().unwrap().remove(&uri_id);
+                    }
                 }
                 _ => {}
             }

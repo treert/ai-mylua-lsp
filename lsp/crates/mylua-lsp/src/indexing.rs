@@ -488,7 +488,7 @@ pub(crate) fn start_diagnostic_consumer(
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
-    library_uris: Arc<Mutex<HashSet<Uri>>>,
+    library_uris: Arc<Mutex<HashSet<UriId>>>,
     client: Client,
 ) {
     // Diagnostic progress reporter: 100ms snapshot of remaining queue size.
@@ -596,7 +596,7 @@ async fn consumer_loop(
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
-    library_uris: Arc<Mutex<HashSet<Uri>>>,
+    library_uris: Arc<Mutex<HashSet<UriId>>>,
     client: Client,
 ) {
     loop {
@@ -605,12 +605,12 @@ async fn consumer_loop(
             continue;
         }
 
-        let uri = loop {
+        let (uri_id, uri) = loop {
             if let Some(uri_id) = scheduler.pop() {
                 let Some(uri) = uri_interner.resolve(uri_id) else {
                     continue;
                 };
-                break uri;
+                break (uri_id, uri);
             }
             scheduler.notified().await;
         };
@@ -621,7 +621,7 @@ async fn consumer_loop(
         // Publishing an empty diagnostic vector clears any stale
         // state on the client side if this URI was ever diagnosed
         // previously (e.g. config change enabling the library path).
-        let is_library = library_uris.lock().unwrap().contains(&uri);
+        let is_library = library_uris.lock().unwrap().contains(&uri_id);
         if is_library {
             client.publish_diagnostics(uri, Vec::new(), None).await;
             continue;

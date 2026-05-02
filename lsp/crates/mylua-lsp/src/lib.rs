@@ -165,7 +165,7 @@ pub struct Backend {
     /// they should never clutter the client's Problems panel even if
     /// a stub file happens to contain tree-sitter ERROR nodes or
     /// shape-level warnings.
-    pub(crate) library_uris: Arc<Mutex<HashSet<Uri>>>,
+    pub(crate) library_uris: Arc<Mutex<HashSet<UriId>>>,
     /// Unified semantic diagnostics scheduler (priority queue + single
     /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
     /// spawns and the cold-start `publish_diagnostics_for_open_files`.
@@ -225,7 +225,7 @@ impl Backend {
     }
 
     /// Resolve `config.workspace.library` into absolute roots and
-    /// the corresponding URI set, write the URI set into
+    /// the corresponding URI set, write the UriId set into
     /// `self.library_uris`, and return both for downstream use by
     /// `run_workspace_scan`. Called from `initialized` BEFORE the
     /// handler's first `.await` so that tower-lsp-server cannot
@@ -263,7 +263,11 @@ impl Backend {
                 .collect()
         };
         if !library_file_uris.is_empty() {
-            *self.library_uris.lock().unwrap() = library_file_uris.clone();
+            *self.library_uris.lock().unwrap() = library_file_uris
+                .iter()
+                .cloned()
+                .map(|uri| self.uri_interner.intern(uri))
+                .collect();
             lsp_log!(
                 "[mylua-lsp] library files to index: {}",
                 library_file_uris.len()
@@ -333,6 +337,7 @@ impl Backend {
         {
             let lua_source = util::LuaSource::new(text);
             let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let uri_id = self.uri_interner.intern(uri.clone());
             // Library stubs retain their meta treatment across edits.
             // `summary_builder::build_file_analysis` infers `is_meta` from
             // `---@meta` headers, and bundled stdlib stubs typically
@@ -340,7 +345,7 @@ impl Backend {
             // user navigating to `print`'s definition and editing the
             // stub would flip the flag back to false and start
             // triggering `undefinedGlobal` inside the library file.
-            if self.library_uris.lock().unwrap().contains(&uri) {
+            if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
 
@@ -369,7 +374,6 @@ impl Backend {
             //
             // Hot/Cold priority is decided by whether the client has
             // `did_open`'d this URI.
-            let uri_id = self.uri_interner.intern(uri.clone());
             let is_open = self.open_uris.lock().unwrap().contains(&uri_id);
             let pri = if is_open {
                 diagnostic_scheduler::Priority::Hot
@@ -438,7 +442,8 @@ impl Backend {
             // library path inside the workspace tree) would flip the
             // flag back to false and surface `undefinedGlobal`
             // warnings inside the stub file.
-            if self.library_uris.lock().unwrap().contains(&uri) {
+            let uri_id = self.uri_interner.intern(uri.clone());
+            if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
             self.index.lock().unwrap().upsert_summary(summary);
@@ -495,7 +500,7 @@ impl Backend {
         // also publishes an empty vector for library URIs) and
         // prevents a one-shot syntax publish from flashing in the
         // cold-start window, only to be cleared microseconds later.
-        if self.library_uris.lock().unwrap().contains(uri) {
+        if self.library_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
         let diags = {
