@@ -141,7 +141,7 @@ pub struct Backend {
     /// documents map and race on the re-insert, corrupting text state.
     /// The outer `std::sync::Mutex` only guards the HashMap itself; the
     /// inner `tokio::sync::Mutex` is awaited while parsing/applying edits.
-    pub(crate) edit_locks: Arc<Mutex<HashMap<Uri, Arc<tokio::sync::Mutex<()>>>>>,
+    pub(crate) edit_locks: Arc<Mutex<HashMap<UriId, Arc<tokio::sync::Mutex<()>>>>>,
     /// Per-URI semantic-tokens delta cache: stores the token data
     /// last returned for each URI so `semanticTokens/full/delta` can
     /// compute a compact edit set. Keyed by session-local `UriId`;
@@ -279,9 +279,10 @@ impl Backend {
     /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
     /// `lock()` to serialize document mutations for a single URI.
     pub(crate) fn edit_lock_for(&self, uri: &Uri) -> Arc<tokio::sync::Mutex<()>> {
+        let uri_id = self.uri_interner.intern(uri.clone());
         let mut locks = self.edit_locks.lock().unwrap();
         locks
-            .entry(uri.clone())
+            .entry(uri_id)
             .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
             .clone()
     }

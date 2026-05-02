@@ -507,21 +507,15 @@ impl LanguageServer for Backend {
                     self.documents.lock().unwrap().remove(&change.uri);
                     if let Some(uri_id) = self.uri_interner.get(&change.uri) {
                         self.scheduler.invalidate(&uri_id);
-                    }
-                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
                         self.open_uris.lock().unwrap().remove(&uri_id);
-                    }
-                    self.edit_locks.lock().unwrap().remove(&change.uri);
-                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        self.edit_locks.lock().unwrap().remove(&uri_id);
                         self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
-                    }
-                    // Also drop from `library_uris` so a deleted
-                    // library file doesn't leave a stale entry
-                    // behind — otherwise a later file CREATED at
-                    // the same path (perhaps of different content)
-                    // would still be force-flagged meta just because
-                    // its URI was previously registered.
-                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        // Also drop from `library_uris` so a deleted
+                        // library file doesn't leave a stale entry
+                        // behind — otherwise a later file CREATED at
+                        // the same path (perhaps of different content)
+                        // would still be force-flagged meta just because
+                        // its URI was previously registered.
                         self.library_uris.lock().unwrap().remove(&uri_id);
                     }
                 }
