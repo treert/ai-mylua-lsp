@@ -132,7 +132,7 @@ function ipairs(t) end
 ---
 --- Lua does not check the consistency of binary chunks. Maliciously crafted
 --- binary chunks can crash the interpreter.
----@param chunk fun():string
+---@param chunk string | fun():string
 ---@param chunkname? string
 ---@param mode? loadmode
 ---@param env? any
