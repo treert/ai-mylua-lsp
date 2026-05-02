@@ -334,7 +334,7 @@ fn resolve_require(
     };
 
     let return_fact = {
-        let summary = match agg.summaries.get(&target_uri) {
+        let summary = match agg.summary(&target_uri) {
             Some(s) => s,
             None => return ResolvedType::unknown(),
         };
@@ -478,7 +478,7 @@ fn resolve_call_return(
     if let TypeFact::Known(KnownType::Table(shape_id)) = &base_resolved.type_fact {
         if let Some(ref uri) = base_resolved.def_uri {
             let ret = {
-                let summary = match agg.summaries.get(uri) {
+                let summary = match agg.summary(uri) {
                     Some(s) => s,
                     None => return ResolvedType::unknown(),
                 };
@@ -523,7 +523,7 @@ fn resolve_call_return(
     // If base resolved to a known type, look for the function in its source
     if let Some(ref uri) = base_resolved.def_uri {
         let return_type = {
-            let summary = match agg.summaries.get(uri) {
+            let summary = match agg.summary(uri) {
                 Some(s) => s,
                 None => return ResolvedType::unknown(),
             };
@@ -573,7 +573,7 @@ fn resolve_call_return(
                 }
                 TypeFact::Known(KnownType::FunctionRef(fid)) => {
                     if let Some(ref uri) = resolved.def_uri {
-                        if let Some(summary) = agg.summaries.get(uri) {
+                        if let Some(summary) = agg.summary(uri) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
                                 if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
                                     let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
@@ -609,7 +609,7 @@ fn first_function_return_with_call_args(
         TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
             let uri = result.def_uri.as_ref()?;
-            let summary = agg.summaries.get(uri)?;
+            let summary = agg.summary(uri)?;
             let fs = summary.function_summaries.get(fid)?;
             function_return_with_call_args(fs, call_arg_types)
         }
@@ -667,7 +667,7 @@ pub fn resolve_require_global_name(
 ) -> Option<String> {
     agg.resolve_module_to_uri(module_path)
         .and_then(|target_uri| {
-            agg.summaries.get(&target_uri)
+            agg.summary(&target_uri)
                 .and_then(|s| s.module_return_type.as_ref())
                 .and_then(|ret| match ret {
                     TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
@@ -777,7 +777,7 @@ fn resolve_table_field(
         Some(u) => u,
         None => return ResolvedType::unknown(),
     };
-    let summary = match agg.summaries.get(uri) {
+    let summary = match agg.summary(uri) {
         Some(s) => s,
         None => return ResolvedType::unknown(),
     };
@@ -813,7 +813,7 @@ fn resolve_emmy_field_with_visited(
 
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+            if let Some(summary) = agg.summary(&candidate.source_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
 
@@ -896,7 +896,7 @@ fn collect_fields(
             // TableShapeId is per-file, so we need source_uri to avoid
             // cross-file collisions.
             if let Some(uri) = source_uri {
-                if let Some(summary) = agg.summaries.get(uri) {
+                if let Some(summary) = agg.summary(uri) {
                     if let Some(shape) = summary.table_shapes.get(shape_id) {
                         for (name, fi) in &shape.fields {
                             fields.push(FieldCompletion {
@@ -959,7 +959,7 @@ fn collect_emmy_fields_recursive(
     }
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+            if let Some(summary) = agg.summary(&candidate.source_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
@@ -1021,7 +1021,7 @@ fn is_function_type(fact: &TypeFact) -> bool {
 fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<String> {
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            if let Some(summary) = agg.summaries.get(&candidate.source_uri) {
+            if let Some(summary) = agg.summary(&candidate.source_uri) {
                 for td in &summary.type_definitions {
                     if td.name == type_name && !td.generic_params.is_empty() {
                         return td.generic_params.clone();
@@ -1057,7 +1057,7 @@ pub fn resolve_method_return_with_generics(
         let qualified_colon = format!("{}:{}", type_name, method_name);
         let qualified_dot = format!("{}.{}", type_name, method_name);
 
-        let ret = agg.summaries.get(&uri).and_then(|summary| {
+        let ret = agg.summary(&uri).and_then(|summary| {
             let fs = summary.get_function_by_name(&qualified_colon)
                 .or_else(|| summary.get_function_by_name(&qualified_dot));
             fs.and_then(|fs| fs.signature.returns.first().cloned())
@@ -1081,7 +1081,7 @@ pub fn resolve_method_return_with_generics(
             }
             TypeFact::Known(KnownType::FunctionRef(fid)) => {
                 if let Some(ref uri) = resolved.def_uri {
-                    if let Some(summary) = agg.summaries.get(uri) {
+                    if let Some(summary) = agg.summary(uri) {
                         if let Some(fs) = summary.function_summaries.get(fid) {
                             if let Some(ret) = fs.signature.returns.first() {
                                 return substitute_generics(ret, type_name, actual_params, agg);

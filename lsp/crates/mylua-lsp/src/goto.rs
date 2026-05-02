@@ -353,7 +353,7 @@ fn try_require_goto(
     // Prefer the file-level `return` statement's range (what the require
     // expression actually evaluates to). Fall back to the first global
     // contribution's selection range, then to file start.
-    let target_range = index.summaries.get(&target_uri)
+    let target_range = index.summary(&target_uri)
         .and_then(|s| {
             s.module_return_range
                 .or_else(|| s.global_contributions.first().map(|gc| gc.selection_range))

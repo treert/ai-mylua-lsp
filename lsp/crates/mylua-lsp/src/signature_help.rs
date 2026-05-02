@@ -107,7 +107,7 @@ pub(crate) fn resolve_call_signatures(
 
     // Simple identifier / variable callee: `foo(...)`
     let name = node_text(callee, source).to_string();
-    if let Some(summary) = index.summaries.get(uri) {
+    if let Some(summary) = index.summary(uri) {
         // Local function via scope tree → FunctionRef(id) → rich summary
         // with overloads. Must be checked before the global path because
         // a local `f` shadows any global `f`.
@@ -137,7 +137,7 @@ pub(crate) fn resolve_call_signatures(
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
             if let Some(ref def_uri) = resolved.def_uri {
-                if let Some(summary) = index.summaries.get(def_uri) {
+                if let Some(summary) = index.summary(def_uri) {
                     if let Some(fs) = summary.function_summaries.get(fid) {
                         let sigs = primary_plus_overloads(fs);
                         return Some((sigs, false, name));
@@ -150,7 +150,7 @@ pub(crate) fn resolve_call_signatures(
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
     for c in &candidates {
-        if let Some(target_summary) = index.summaries.get(&c.source_uri) {
+        if let Some(target_summary) = index.summary(&c.source_uri) {
             if let Some(fs) = target_summary.get_function_by_name(&name) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
@@ -160,7 +160,7 @@ pub(crate) fn resolve_call_signatures(
             return Some((vec![sig.clone()], false, name));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
-            if let Some(summary) = index.summaries.get(&c.source_uri) {
+            if let Some(summary) = index.summary(&c.source_uri) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     let sigs = primary_plus_overloads(fs);
                     return Some((sigs, false, name));
@@ -209,7 +209,7 @@ fn lookup_function_signatures_by_field(
     );
     if let TypeFact::Known(KnownType::Function(sig)) = &resolved.type_fact {
         if let Some(def_uri) = &resolved.def_uri {
-            if let Some(summary) = index.summaries.get(def_uri) {
+            if let Some(summary) = index.summary(def_uri) {
                 // Try exact `{class}:{field}` / `{class}.{field}` lookup
                 // when we know the owner class (covers methods declared
                 // via `function Foo:m() end` or `function Foo.m() end`).
@@ -269,7 +269,7 @@ fn lookup_function_signatures_by_field(
     }
     if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
         if let Some(def_uri) = &resolved.def_uri {
-            if let Some(summary) = index.summaries.get(def_uri) {
+            if let Some(summary) = index.summary(def_uri) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     return primary_plus_overloads(fs);
                 }
@@ -309,7 +309,7 @@ fn lookup_overloads_via_global_shard(
         .get(&qualified)
         .and_then(|v| v.first().cloned())
     {
-        if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+        if let Some(summary) = index.summary(&candidate.source_uri) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
             if let Some(fs) = summary.get_function_by_name(&candidate.name) {
@@ -320,7 +320,7 @@ fn lookup_overloads_via_global_shard(
             return Some((candidate.source_uri.clone(), vec![sig]));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = candidate.type_fact {
-            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+            if let Some(summary) = index.summary(&candidate.source_uri) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
                 }

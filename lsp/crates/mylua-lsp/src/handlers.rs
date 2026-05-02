@@ -544,7 +544,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let summary = idx.summaries.get(&params.text_document.uri);
+        let summary = idx.summary(&params.text_document.uri);
         let syms = symbols::collect_document_symbols(
             doc.tree.root_node(),
             doc.source(),

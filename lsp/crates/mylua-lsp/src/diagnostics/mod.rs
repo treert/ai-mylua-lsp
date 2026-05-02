@@ -83,7 +83,7 @@ pub fn collect_semantic_diagnostics_with_version(
     // many of the identifiers they reference are intentionally not
     // declared in the workspace. Skip `undefinedGlobal` there to
     // avoid a wall of noise on a legitimate stub file.
-    let is_meta = index.summaries.get(uri).map(|s| s.is_meta).unwrap_or(false);
+    let is_meta = index.summary(uri).map(|s| s.is_meta).unwrap_or(false);
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
         if !is_meta {
             undefined_global::check_undefined_globals(

@@ -93,8 +93,7 @@ pub fn search_workspace_symbols(
             // Look up via the owning summary because `TypeShardEntry`
             // only carries the coarse anchor range.
             let location_range = index
-                .summaries
-                .get(&candidate.source_uri)
+                .summary(&candidate.source_uri)
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
@@ -118,7 +117,7 @@ pub fn search_workspace_symbols(
     }
 
     // --- Class fields: `@field x integer` in any file's @class ---
-    for (uri, summary) in &index.summaries {
+    for (uri, summary) in index.summaries_iter() {
         for td in &summary.type_definitions {
             for fd in &td.fields {
                 if !matches_query(&fd.name, &query_lower, query.is_empty()) {
@@ -195,7 +194,7 @@ fn candidate_symbol_kind(
     };
 
     if let Some(id) = func_id {
-        if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+        if let Some(summary) = index.summary(&candidate.source_uri) {
             if let Some(func) = summary.function_summaries.get(&id) {
                 // FunctionSummary.name preserves the original colon form
                 // (e.g. "Foo:myMethod"), while GlobalContribution.name is

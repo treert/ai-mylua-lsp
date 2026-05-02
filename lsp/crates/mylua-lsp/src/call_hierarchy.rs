@@ -64,7 +64,7 @@ pub fn prepare_call_hierarchy(
     // Case 2: the cursor is on some other identifier occurrence (e.g.
     // a call site). Try scope tree first (handles local functions via
     // FunctionRef(id)), then global function_name_index, then global_shard.
-    if let Some(summary) = index.summaries.get(uri) {
+    if let Some(summary) = index.summary(uri) {
         // Local function via scope tree → FunctionRef(id)
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),
@@ -211,7 +211,7 @@ pub fn incoming_calls(
     // expressions do not merge into one incoming caller.
     let mut groups: HashMap<(Uri, String, Option<FunctionSummaryId>), (CallHierarchyItem, Vec<Range>)> = HashMap::new();
 
-    for (uri, summary) in &index.summaries {
+    for (uri, summary) in index.summaries_iter() {
         for cs in &summary.call_sites {
             if last_segment(&cs.callee_name) != target {
                 continue;
@@ -314,7 +314,7 @@ pub fn outgoing_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyOutgoingCall> {
-    let Some(summary) = index.summaries.get(&item.uri) else { return Vec::new() };
+    let Some(summary) = index.summary(&item.uri) else { return Vec::new() };
 
     // Find all call sites for this item. Prefer FunctionSummaryId when the
     // item can be tied back to one; otherwise fall back to name matching.
@@ -375,7 +375,7 @@ fn resolve_outgoing_target(
         if let Some(c) = candidates.first() {
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
-            if let Some(summary) = index.summaries.get(&c.source_uri) {
+            if let Some(summary) = index.summary(&c.source_uri) {
                 if let Some(fs) = summary.get_function_by_name(name) {
                     let lsp_range: Range = fs.range.into();
                     return build_item(

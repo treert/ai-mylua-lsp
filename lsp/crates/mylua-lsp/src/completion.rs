@@ -437,7 +437,7 @@ fn resolve_global_item(
 
     // Pull richer cross-file function summary documentation when the
     // target file is indexed.
-    if let Some(summary) = index.summaries.get(&best.source_uri) {
+    if let Some(summary) = index.summary(&best.source_uri) {
         if let Some(fs) = summary.get_function_by_name(name) {
             let mut md = String::new();
             md.push_str("```lua\n");

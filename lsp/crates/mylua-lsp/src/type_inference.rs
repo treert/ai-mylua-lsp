@@ -59,7 +59,7 @@ pub fn infer_node_type(
             ) {
                 let base_fact = infer_node_type(object, source, uri, scope_tree, index);
                 if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact {
-                    if let Some(summary) = index.summaries.get(uri) {
+                    if let Some(summary) = index.summary(uri) {
                         if let Some(shape) = summary.table_shapes.get(shape_id) {
                             if let Some(elem) = &shape.array_element_type {
                                 return elem.clone();
@@ -239,7 +239,7 @@ fn infer_call_return_fact(
                 }
                 TypeFact::Known(KnownType::FunctionRef(fid)) => {
                     if let Some(ref uri) = field_result.def_uri {
-                        if let Some(summary) = index.summaries.get(uri) {
+                        if let Some(summary) = index.summary(uri) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
                                 if let Some(ret) = fs.signature.returns.first() {
                                     return ret.clone();
@@ -302,7 +302,7 @@ fn infer_call_return_fact(
     // (which needs mutable borrow).
     // Try scope tree first for local functions, then function_name_index
     // for globals.
-    let fs_data = index.summaries.get(uri).and_then(|summary| {
+    let fs_data = index.summary(uri).and_then(|summary| {
         // Local function via scope tree → FunctionRef(id)
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),

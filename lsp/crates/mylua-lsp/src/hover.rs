@@ -130,7 +130,7 @@ pub fn hover(
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
     if let Some(candidates) = index.type_shard.get(ident_text) {
         if let Some(candidate) = candidates.first() {
-            if let Some(summary) = index.summaries.get(&candidate.source_uri) {
+            if let Some(summary) = index.summary(&candidate.source_uri) {
                 for td in &summary.type_definitions {
                     if td.name == ident_text {
                         let mut parts = Vec::new();
@@ -224,7 +224,7 @@ pub fn hover(
         if entry_count > 1 {
             let _ = write!(type_info, " ({} definitions)", entry_count);
         }
-        if let Some(summary) = index.summaries.get(&source_uri) {
+        if let Some(summary) = index.summary(&source_uri) {
             if let Some(fs) = summary.get_function_by_name(ident_text) {
                 if !fs.overloads.is_empty() {
                     type_info.push_str("\n\nOverloads:");
@@ -247,7 +247,7 @@ fn hover_type_name(
 ) -> Option<Hover> {
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
-    let summary = index.summaries.get(&candidate.source_uri)?;
+    let summary = index.summary(&candidate.source_uri)?;
 
     for td in &summary.type_definitions {
         if td.name != name {
@@ -554,7 +554,7 @@ fn resolve_local_type_info(
     // FunctionRef hover fix: resolve to readable signature via scope_tree
     if let Some(type_fact) = scope_tree.resolve_type(byte_offset, name) {
         if let TypeFact::Known(crate::type_system::KnownType::FunctionRef(id)) = type_fact {
-            if let Some(summary) = index.summaries.get(uri) {
+            if let Some(summary) = index.summary(uri) {
                 if let Some(fs) = summary.function_summaries.get(id) {
                     return Some(format_signature(&fs.signature));
                 }

@@ -194,7 +194,7 @@ fn check_dotted_field(
         }
         TypeFact::Known(KnownType::Table(shape_id)) => {
             let table_uri = resolved_base.def_uri.as_ref().unwrap_or(ctx.uri);
-            if let Some(summary) = ctx.index.summaries.get(table_uri) {
+            if let Some(summary) = ctx.index.summary(table_uri) {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     if !shape.fields.contains_key(field_name) {
                         let field_is_global = field_global_prefixes(

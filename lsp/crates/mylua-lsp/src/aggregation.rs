@@ -364,6 +364,22 @@ impl WorkspaceAggregation {
         }
     }
 
+    pub fn summary(&self, uri: &Uri) -> Option<&DocumentSummary> {
+        self.summaries.get(uri)
+    }
+
+    pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {
+        self.summaries.iter()
+    }
+
+    pub fn summaries_values(&self) -> impl Iterator<Item = &DocumentSummary> {
+        self.summaries.values()
+    }
+
+    pub fn summary_count(&self) -> usize {
+        self.summaries.len()
+    }
+
     /// Build the initial global index atomically from a complete set of
     /// file summaries. This is the cold-start path: all summaries are
     /// available at once, so we skip `remove_contributions` (nothing to
@@ -377,7 +393,7 @@ impl WorkspaceAggregation {
         // Clear all shards — build_initial is a full rebuild. Any
         // contributions from did_open's upsert_summary during the
         // cold-start window are included in `summaries` (the caller
-        // collects them from `idx.summaries` for open URIs), so we
+        // collects them via `idx.summary(...)` for open URIs), so we
         // must wipe the shards to avoid duplicates.
         self.summaries.clear();
         self.global_shard.clear();

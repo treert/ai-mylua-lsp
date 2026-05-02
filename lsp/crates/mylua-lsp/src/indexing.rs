@@ -409,7 +409,7 @@ pub async fn run_workspace_scan(
             let Some(uri) = uri_interner.resolve(*uri_id) else {
                 continue;
             };
-            if let Some(existing) = idx.summaries.get(&uri) {
+            if let Some(existing) = idx.summary(&uri) {
                 summaries_to_merge.push(existing.clone());
             }
         }
@@ -466,8 +466,7 @@ pub async fn run_workspace_scan(
         let summaries: Vec<summary::DocumentSummary> = index
             .lock()
             .unwrap()
-            .summaries
-            .values()
+            .summaries_values()
             .cloned()
             .collect();
         let summary_count = summaries.len();

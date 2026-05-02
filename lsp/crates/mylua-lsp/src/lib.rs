@@ -352,7 +352,7 @@ impl Backend {
 
             let should_cascade = {
                 let mut idx = self.index.lock().unwrap();
-                let old_fp = idx.summaries.get(&uri).map(|s| s.signature_fingerprint);
+                let old_fp = idx.summary(&uri).map(|s| s.signature_fingerprint);
                 let new_fp = summary.signature_fingerprint;
                 idx.upsert_summary(summary);
                 old_fp.is_some_and(|old| old != new_fp)

@@ -43,7 +43,7 @@ pub(super) fn check_call_argument_diagnostics(
         };
         // After `resolve_call_signatures` returns, the `&mut index`
         // borrow ends (the returned values are owned). We can now
-        // take an immutable reference to `index.summaries[uri]` for
+        // take an immutable summary reference for `uri` for
         // the type-check path without cloning a full DocumentSummary
         // on every call.
         if sigs.is_empty() {
