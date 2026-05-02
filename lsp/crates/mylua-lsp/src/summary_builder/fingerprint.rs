@@ -48,6 +48,7 @@ pub(super) fn hash_function_signature(sig: &FunctionSignature) -> u64 {
 fn hash_signature(sig: &FunctionSignature, hasher: &mut impl Hasher) {
     for p in &sig.params {
         p.name.hash(hasher);
+        p.optional.hash(hasher);
         hash_type_fact(&p.type_fact, hasher);
     }
     for r in &sig.returns {
@@ -216,4 +217,31 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     }
 
     hasher.finish()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn function_signature_hash_includes_param_optionality() {
+        let required = FunctionSignature {
+            params: vec![ParamInfo {
+                name: "value".to_string(),
+                type_fact: TypeFact::Known(KnownType::String),
+                optional: false,
+            }],
+            returns: Vec::new(),
+        };
+        let optional = FunctionSignature {
+            params: vec![ParamInfo {
+                name: "value".to_string(),
+                type_fact: TypeFact::Known(KnownType::String),
+                optional: true,
+            }],
+            returns: Vec::new(),
+        };
+
+        assert_ne!(hash_function_signature(&required), hash_function_signature(&optional));
+    }
 }

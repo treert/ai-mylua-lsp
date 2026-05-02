@@ -1152,6 +1152,7 @@ fn substitute_in_fact(
                 crate::type_system::ParamInfo {
                     name: p.name.clone(),
                     type_fact: substitute_in_fact(&p.type_fact, param_names, actual_params),
+                    optional: p.optional,
                 }
             }).collect();
             let returns: Vec<TypeFact> = sig.returns.iter()

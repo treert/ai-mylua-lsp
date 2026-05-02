@@ -1010,6 +1010,60 @@ f(1, 2, 3, 4, 5)
 }
 
 #[test]
+fn argument_count_optional_param_allows_omission() {
+    let src = r#"
+---@param a number
+---@param b? string
+local function f(a, b) return a end
+f(1)
+f()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_optional_param.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "optional trailing param should allow one arg but still reject zero, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_optional_param_on_function_expression_allows_omission() {
+    let src = r#"
+---@param a number
+---@param b? string
+local f = function(a, b) return a end
+f(1)
+f()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_optional_param_function_expr.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics(
+        doc.tree.root_node(), src.as_bytes(), &uri,
+        &mut agg, &doc.scope_tree, &cfg, doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags.iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "optional trailing param on function expression should allow one arg but still reject zero, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn argument_count_method_call_hides_self() {
     // `:` call passes `self` implicitly; the user-visible arg list
     // should match the `@field`-declared params after hiding `self`.

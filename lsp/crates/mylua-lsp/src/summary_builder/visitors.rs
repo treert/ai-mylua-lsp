@@ -783,11 +783,12 @@ fn build_function_summary(
 
     for ann in &annotations {
         match ann {
-            EmmyAnnotation::Param { name: pname, type_expr, .. } => {
+            EmmyAnnotation::Param { name: pname, optional, type_expr, .. } => {
                 emmy_annotated = true;
                 params.push(ParamInfo {
                     name: pname.clone(),
                     type_fact: emmy_type_to_fact(type_expr),
+                    optional: *optional,
                 });
             }
             EmmyAnnotation::Return { return_types, .. } => {
@@ -925,6 +926,7 @@ pub(super) fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_s
                 params.push(ParamInfo {
                     name: node_text(child, source).to_string(),
                     type_fact: TypeFact::Unknown,
+                    optional: false,
                 });
             }
             "name_list" => {
@@ -934,6 +936,7 @@ pub(super) fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_s
                             params.push(ParamInfo {
                                 name: node_text(id, source).to_string(),
                                 type_fact: TypeFact::Unknown,
+                                optional: false,
                             });
                         }
                     }
@@ -945,6 +948,7 @@ pub(super) fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_s
                 params.push(ParamInfo {
                     name: "...".to_string(),
                     type_fact: TypeFact::Unknown,
+                    optional: false,
                 });
             }
             _ => {
@@ -955,6 +959,7 @@ pub(super) fn extract_ast_params(params: &mut Vec<ParamInfo>, param_list: tree_s
                     params.push(ParamInfo {
                         name: "...".to_string(),
                         type_fact: TypeFact::Unknown,
+                        optional: false,
                     });
                 }
             }

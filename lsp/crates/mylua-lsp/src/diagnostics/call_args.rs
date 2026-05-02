@@ -167,15 +167,8 @@ fn visible_params_for(sig: &crate::type_system::FunctionSignature, is_method: bo
 
 fn signature_accepts_count(sig: &crate::type_system::FunctionSignature, actual: u32, is_method: bool) -> bool {
     let visible = visible_params_for(sig, is_method);
-    let has_vararg = visible.last().is_some_and(|p| p.name == "...");
-    let declared = visible.len() as u32;
-    if has_vararg {
-        // `declared - 1` is the count of non-vararg params; vararg
-        // absorbs zero or more extras.
-        actual >= declared.saturating_sub(1)
-    } else {
-        actual == declared
-    }
+    let (min, max) = accepted_count_bounds(&visible);
+    actual >= min && (max == u32::MAX || actual <= max)
 }
 
 /// Return the `(min, max)` acceptable argument counts across all
@@ -187,14 +180,10 @@ fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_metho
     let mut any_vararg = false;
     for sig in sigs {
         let visible = visible_params_for(sig, is_method);
-        let has_vararg = visible.last().is_some_and(|p| p.name == "...");
-        let declared = visible.len() as u32;
-        let (lo, hi) = if has_vararg {
+        let (lo, hi) = accepted_count_bounds(&visible);
+        if hi == u32::MAX {
             any_vararg = true;
-            (declared.saturating_sub(1), u32::MAX)
-        } else {
-            (declared, declared)
-        };
+        }
         if lo < min_acc { min_acc = lo; }
         if hi > max_acc { max_acc = hi; }
     }
@@ -203,6 +192,23 @@ fn expected_count_range(sigs: &[crate::type_system::FunctionSignature], is_metho
     } else {
         (min_acc, max_acc)
     }
+}
+
+fn accepted_count_bounds(visible: &[crate::type_system::ParamInfo]) -> (u32, u32) {
+    let has_vararg = visible.last().is_some_and(|p| p.name == "...");
+    let fixed_len = if has_vararg {
+        visible.len().saturating_sub(1)
+    } else {
+        visible.len()
+    };
+    let optional_tail = visible[..fixed_len]
+        .iter()
+        .rev()
+        .take_while(|p| p.optional)
+        .count();
+    let min = fixed_len.saturating_sub(optional_tail) as u32;
+    let max = if has_vararg { u32::MAX } else { fixed_len as u32 };
+    (min, max)
 }
 
 /// Heuristic: among overloads that accept the actual count, pick the

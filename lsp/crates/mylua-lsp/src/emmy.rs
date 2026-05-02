@@ -1336,6 +1336,7 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
             let param_infos: Vec<ParamInfo> = params.iter().map(|p| ParamInfo {
                 name: p.name.clone().unwrap_or_default(),
                 type_fact: emmy_type_to_fact(&p.type_expr),
+                optional: false,
             }).collect();
             let ret_facts: Vec<TypeFact> = returns.iter().map(emmy_type_to_fact).collect();
             TypeFact::Known(KnownType::Function(FunctionSignature {

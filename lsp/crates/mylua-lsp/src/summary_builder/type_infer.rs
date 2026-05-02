@@ -50,7 +50,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
                 let emmy_text = emmy_comments.join("\n");
                 for ann in parse_emmy_comments(&emmy_text) {
                     match ann {
-                        EmmyAnnotation::Param { name: pname, type_expr, .. } => {
+                        EmmyAnnotation::Param { name: pname, optional, type_expr, .. } => {
                             emmy_annotated = true;
                             let fact = emmy_type_to_fact(&type_expr);
                             // Only overwrite an AST-declared param of the
@@ -60,6 +60,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
                             // line with `build_function_summary`).
                             if let Some(p) = params.iter_mut().find(|p| p.name == pname) {
                                 p.type_fact = fact;
+                                p.optional = optional;
                             }
                         }
                         EmmyAnnotation::Return { return_types, .. } => {

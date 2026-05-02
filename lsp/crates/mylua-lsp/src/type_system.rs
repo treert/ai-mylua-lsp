@@ -95,6 +95,8 @@ pub struct FunctionSignature {
 pub struct ParamInfo {
     pub name: std::string::String,
     pub type_fact: TypeFact,
+    #[serde(default)]
+    pub optional: bool,
 }
 
 impl FunctionSignature {
@@ -118,10 +120,11 @@ impl FunctionSignature {
                 label.push_str(", ");
             }
             first = false;
+            let param_name = display_param_name(p);
             if p.type_fact == TypeFact::Unknown {
-                label.push_str(&p.name);
+                label.push_str(&param_name);
             } else {
-                let _ = write!(label, "{}: {}", p.name, p.type_fact);
+                let _ = write!(label, "{}: {}", param_name, p.type_fact);
             }
         }
         label.push(')');
@@ -154,10 +157,11 @@ impl FunctionSignature {
             }
             first = false;
             let start = label.len() as u32;
+            let param_name = display_param_name(p);
             if p.type_fact == TypeFact::Unknown {
-                label.push_str(&p.name);
+                label.push_str(&param_name);
             } else {
-                let _ = write!(label, "{}: {}", p.name, p.type_fact);
+                let _ = write!(label, "{}: {}", param_name, p.type_fact);
             }
             let end = label.len() as u32;
             offsets.push([start, end]);
@@ -205,6 +209,7 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
                 .map(|p| ParamInfo {
                     name: p.name.clone(),
                     type_fact: substitute_self(&p.type_fact, class_name),
+                    optional: p.optional,
                 })
                 .collect();
             let returns = sig.returns.iter().map(|r| substitute_self(r, class_name)).collect();
@@ -215,6 +220,14 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
             TypeFact::Union(parts.iter().map(|p| substitute_self(p, class_name)).collect())
         }
         other => other.clone(),
+    }
+}
+
+fn display_param_name(param: &ParamInfo) -> String {
+    if param.optional && param.name != "..." {
+        format!("{}?", param.name)
+    } else {
+        param.name.clone()
     }
 }
 
