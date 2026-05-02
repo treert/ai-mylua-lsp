@@ -20,9 +20,10 @@ pub(super) fn collect_call_sites(
     source: &[u8],
     line_index: &LineIndex,
     name_to_id: &HashMap<String, FunctionSummaryId>,
+    function_node_to_id: &HashMap<(usize, usize), FunctionSummaryId>,
 ) -> Vec<crate::summary::CallSite> {
     let mut out = Vec::new();
-    collect_calls_in_scope(root, source, "", None, &mut out, line_index, name_to_id);
+    collect_calls_in_scope(root, source, "", None, &mut out, line_index, name_to_id, function_node_to_id);
     out
 }
 
@@ -37,6 +38,7 @@ fn collect_calls_in_scope(
     out: &mut Vec<crate::summary::CallSite>,
     line_index: &LineIndex,
     name_to_id: &HashMap<String, FunctionSummaryId>,
+    function_node_to_id: &HashMap<(usize, usize), FunctionSummaryId>,
 ) {
     match node.kind() {
         "function_declaration" | "local_function_declaration" => {
@@ -44,9 +46,12 @@ fn collect_calls_in_scope(
                 .child_by_field_name("name")
                 .map(|n| node_text(n, source).to_string())
                 .unwrap_or_default();
-            let id = name_to_id.get(&name).copied();
+            let id = function_node_to_id
+                .get(&(node.start_byte(), node.end_byte()))
+                .copied()
+                .or_else(|| name_to_id.get(&name).copied());
             if let Some(body) = node.child_by_field_name("body") {
-                collect_calls_in_scope(body, source, &name, id, out, line_index, name_to_id);
+                collect_calls_in_scope(body, source, &name, id, out, line_index, name_to_id, function_node_to_id);
             }
             return;
         }
@@ -61,12 +66,16 @@ fn collect_calls_in_scope(
             // produces.
             let inferred = infer_anon_caller_name(node, source);
             let (sub_caller, sub_id) = if let Some(ref name) = inferred {
-                (name.as_str(), name_to_id.get(name).copied())
+                let id = function_node_to_id
+                    .get(&(node.start_byte(), node.end_byte()))
+                    .copied()
+                    .or_else(|| name_to_id.get(name).copied());
+                (name.as_str(), id)
             } else {
                 (caller_name, caller_id)
             };
             if let Some(body) = node.child_by_field_name("body") {
-                collect_calls_in_scope(body, source, sub_caller, sub_id, out, line_index, name_to_id);
+                collect_calls_in_scope(body, source, sub_caller, sub_id, out, line_index, name_to_id, function_node_to_id);
             }
             return;
         }
@@ -89,7 +98,7 @@ fn collect_calls_in_scope(
     }
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
-            collect_calls_in_scope(child, source, caller_name, caller_id, out, line_index, name_to_id);
+            collect_calls_in_scope(child, source, caller_name, caller_id, out, line_index, name_to_id, function_node_to_id);
         }
     }
 }
@@ -107,7 +116,9 @@ fn infer_anon_caller_name(
     match stmt.kind() {
         "local_declaration" => {
             let names = stmt.child_by_field_name("names")?;
-            let id = names.named_child(0)?;
+            let values = stmt.child_by_field_name("values")?;
+            let index = rhs_index_of(values, node)?;
+            let id = names.named_child(index as u32)?;
             if id.kind() == "identifier" {
                 Some(node_text(id, source).to_string())
             } else {
@@ -116,10 +127,22 @@ fn infer_anon_caller_name(
         }
         "assignment_statement" => {
             let left = stmt.child_by_field_name("left")?;
-            let first = left.named_child(0)?;
+            let right = stmt.child_by_field_name("right")?;
+            let index = rhs_index_of(right, node)?;
+            let first = left.named_child(index as u32)?;
             // Return the full LHS text (supports `Foo.m` / `m[1]` / bare id).
             Some(node_text(first, source).to_string())
         }
         _ => None,
     }
+}
+
+fn rhs_index_of(values: tree_sitter::Node, target: tree_sitter::Node) -> Option<usize> {
+    for i in 0..values.named_child_count() {
+        let Some(candidate) = values.named_child(i as u32) else { continue };
+        if candidate.start_byte() == target.start_byte() && candidate.end_byte() == target.end_byte() {
+            return Some(i);
+        }
+    }
+    None
 }

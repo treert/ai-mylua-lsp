@@ -388,8 +388,32 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
         }
     }
 
-    // Simple local/global function call — check local function summaries
-    if let Some(&func_id) = ctx.function_name_to_id.get(callee_text) {
+    // Simple local/global function call. Prefer the scoped binding so
+    // block-local function expressions do not leak through the file-wide map.
+    if let Some(decl) = ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte()) {
+        match decl.type_fact.as_ref() {
+            Some(TypeFact::Known(KnownType::FunctionRef(func_id))) => {
+                if let Some(fs) = ctx.function_summaries.get(func_id) {
+                    let actual_arg_types = collect_call_arg_types(ctx, node);
+                    if let Some(ret) = function_return_with_call_args(fs, &actual_arg_types) {
+                        return ret;
+                    }
+                }
+                return TypeFact::Unknown;
+            }
+            Some(TypeFact::Known(KnownType::Function(sig))) => {
+                if let Some(ret) = sig.returns.first() {
+                    return ret.clone();
+                }
+                return TypeFact::Unknown;
+            }
+            _ => return TypeFact::Unknown,
+        }
+    }
+
+    // Global function fallback. Local functions are intentionally excluded here
+    // because their visibility is already handled by the scoped lookup above.
+    if let Some(&func_id) = ctx.function_name_index.get(callee_text) {
         if let Some(fs) = ctx.function_summaries.get(&func_id) {
             // Function-level generic inference: if the callee has @generic params,
             // try to unify them from the actual argument types at the call site.

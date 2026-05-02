@@ -191,3 +191,100 @@ end
         helper_ranges,
     );
 }
+
+#[test]
+fn multi_rhs_local_function_expressions_keep_distinct_callers() {
+    let src = r#"
+local function x() end
+local function y() end
+
+local a, b = function()
+    x()
+end, function()
+    y()
+end
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "multi_rhs_local_functions.lua");
+
+    let a_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(4, 6), &agg);
+    let a = a_items.into_iter().find(|i| i.name == "a").expect("a");
+    let a_outgoing = call_hierarchy::outgoing_calls(&a, &agg);
+    let a_targets: Vec<&str> = a_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(a_targets, vec!["x"], "`a` should only call x, got: {:?}", a_targets);
+
+    let b_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(4, 9), &agg);
+    let b = b_items.into_iter().find(|i| i.name == "b").expect("b");
+    let b_outgoing = call_hierarchy::outgoing_calls(&b, &agg);
+    let b_targets: Vec<&str> = b_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(b_targets, vec!["y"], "`b` should only call y, got: {:?}", b_targets);
+}
+
+#[test]
+fn shadowed_local_function_expressions_keep_distinct_callers() {
+    let src = r#"
+local function x() end
+local function y() end
+
+do
+    local f = function()
+        x()
+    end
+    f()
+end
+
+do
+    local f = function()
+        y()
+    end
+    f()
+end
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "shadowed_local_functions.lua");
+
+    let first_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(8, 4), &agg);
+    let first = first_items.into_iter().find(|i| i.name == "f").expect("first f");
+    let first_outgoing = call_hierarchy::outgoing_calls(&first, &agg);
+    let first_targets: Vec<&str> = first_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(first_targets, vec!["x"], "first `f` should only call x, got: {:?}", first_targets);
+
+    let second_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(15, 4), &agg);
+    let second = second_items.into_iter().find(|i| i.name == "f").expect("second f");
+    let second_outgoing = call_hierarchy::outgoing_calls(&second, &agg);
+    let second_targets: Vec<&str> = second_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(second_targets, vec!["y"], "second `f` should only call y, got: {:?}", second_targets);
+}
+
+#[test]
+fn shadowed_local_function_declarations_keep_distinct_callers() {
+    let src = r#"
+local function x() end
+local function y() end
+
+do
+    local function f()
+        x()
+    end
+    f()
+end
+
+do
+    local function f()
+        y()
+    end
+    f()
+end
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "shadowed_local_function_decls.lua");
+
+    let first_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(8, 4), &agg);
+    let first = first_items.into_iter().find(|i| i.name == "f").expect("first f");
+    let first_outgoing = call_hierarchy::outgoing_calls(&first, &agg);
+    let first_targets: Vec<&str> = first_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(first_targets, vec!["x"], "first `f` should only call x, got: {:?}", first_targets);
+
+    let second_items = call_hierarchy::prepare_call_hierarchy(&doc, &uri, pos(15, 4), &agg);
+    let second = second_items.into_iter().find(|i| i.name == "f").expect("second f");
+    let second_outgoing = call_hierarchy::outgoing_calls(&second, &agg);
+    let second_targets: Vec<&str> = second_outgoing.iter().map(|c| c.to.name.as_str()).collect();
+    assert_eq!(second_targets, vec!["y"], "second `f` should only call y, got: {:?}", second_targets);
+}

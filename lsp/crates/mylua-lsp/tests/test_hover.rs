@@ -1256,6 +1256,58 @@ print(sum)
 }
 
 #[test]
+fn hover_local_function_expression_returns_local_table_shape() {
+    let src = r#"local creat_module = function ()
+    local m = {}
+    function m.hi()
+        print("hi")
+    end
+    return m
+end
+
+local mm = creat_module()
+mm.hi()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_function_expr_return_shape.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(9, 3), &mut agg, &docs)
+        .expect("hover on `hi` returned by creat_module() should use the local table shape");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("function m.hi()"),
+        "hover on `mm.hi()` should resolve to the returned table shape method, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_local_function_expression_does_not_escape_block_scope() {
+    let src = r#"do
+    local make = function()
+        return { x = 1 }
+    end
+end
+
+local v = make()
+v.x
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_function_expr_scope.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    let result = hover::hover(doc, &uri, pos(7, 2), &mut agg, &docs)
+        .expect("hover on unresolved field should still produce fallback hover");
+    let text = hover_content_string(&result);
+    assert!(
+        !text.contains("Type: `number`"),
+        "block-local function expression should not provide a table shape outside its scope, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_self_field_in_local_table_method_uses_shape() {
     let src = r#"local obj = { value = 42 }
 function obj:inspect()

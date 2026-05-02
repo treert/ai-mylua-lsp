@@ -41,6 +41,7 @@ pub fn build_file_analysis(
         function_summaries: HashMap::new(),
         function_name_to_id: HashMap::new(),
         function_name_index: HashMap::new(),
+        function_node_to_id: HashMap::new(),
         type_definitions: Vec::new(),
         table_shapes: HashMap::new(),
         next_shape_id: 0,
@@ -68,7 +69,13 @@ pub fn build_file_analysis(
 
     let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
-    let call_sites = collect_call_sites(root, source, &line_index, &ctx.function_name_to_id);
+    let call_sites = collect_call_sites(
+        root,
+        source,
+        &line_index,
+        &ctx.function_name_to_id,
+        &ctx.function_node_to_id,
+    );
     let (is_meta, meta_name) = detect_meta_annotation(root, source);
 
     let scope_tree = ctx.take_scope_tree();
@@ -311,6 +318,9 @@ pub(crate) struct BuildContext<'a> {
     /// Populated by `visit_function_declaration` for global functions only.
     /// Transferred to `DocumentSummary::function_name_index` at build completion.
     pub(crate) function_name_index: HashMap<String, FunctionSummaryId>,
+    /// Direct function syntax node byte range → FunctionSummaryId.
+    /// Used by call-site collection to distinguish shadowed same-name locals.
+    pub(crate) function_node_to_id: HashMap<(usize, usize), FunctionSummaryId>,
     pub(crate) type_definitions: Vec<TypeDefinition>,
     pub(crate) table_shapes: HashMap<TableShapeId, TableShape>,
     pub(crate) next_shape_id: u32,

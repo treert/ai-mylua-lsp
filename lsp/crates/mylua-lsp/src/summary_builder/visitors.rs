@@ -380,7 +380,22 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 continue;
             }
 
-            let type_fact = infer_expression_type(ctx, val, 0);
+            let (type_fact, function_expr_body) = if val.kind() == "function_definition" {
+                let body = val.child_by_field_name("body");
+                let func_id = ctx.alloc_function_id();
+                let fs = build_function_summary(ctx, &name, node, body, false);
+                let params = fs.signature.params.clone();
+                let should_infer_returns = should_infer_body_returns(&fs);
+                ctx.function_name_to_id.insert(name.clone(), func_id);
+                ctx.function_node_to_id.insert((val.start_byte(), val.end_byte()), func_id);
+                ctx.function_summaries.insert(func_id, fs);
+                (
+                    TypeFact::Known(KnownType::FunctionRef(func_id)),
+                    body.map(|b| (func_id, params, should_infer_returns, b)),
+                )
+            } else {
+                (infer_expression_type(ctx, val, 0), None)
+            };
 
             // If we have a pending class binding (from ---@class) and this is
             // the first local with no explicit @type annotation, and the inferred
@@ -424,14 +439,19 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 is_emmy_annotated: false,
             });
 
-            // Traverse anonymous function bodies for scope tree completeness
-            if val.kind() == "function_definition" {
-                if let Some(body) = val.child_by_field_name("body") {
-                    let params = match &type_fact {
-                        TypeFact::Known(KnownType::Function(sig)) => sig.params.clone(),
-                        _ => Vec::new(),
-                    };
-                    visit_function_body(ctx, body, &params, false, "", None);
+            // Traverse function bodies for scope tree completeness. For
+            // `local f = function() ... end`, collect returns during the walk
+            // so body-local tables can be returned by shape instead of name.
+            if let Some((func_id, params, should_infer_returns, body)) = function_expr_body {
+                let mut returns = Vec::new();
+                let return_target = if should_infer_returns {
+                    Some(&mut returns)
+                } else {
+                    None
+                };
+                visit_function_body(ctx, body, &params, false, "", return_target);
+                if should_infer_returns {
+                    update_function_returns(ctx, func_id, returns);
                 }
             } else {
                 visit_anonymous_function_definitions_in_node(ctx, val);
@@ -502,9 +522,25 @@ fn extract_call_return_types(
     }
     let callee_text = node_text(callee, ctx.source);
 
-    // Same-file function summary (covers `local function`, `function`,
-    // `function Class:m`, etc.).
-    if let Some(&func_id) = ctx.function_name_to_id.get(callee_text) {
+    // Same-file scoped function summary (covers `local function` and
+    // `local f = function()`). Prefer scope over the file-wide maps so
+    // block-local function expressions cannot escape their lexical scope.
+    if let Some(decl) = ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte()) {
+        match decl.type_fact.as_ref() {
+            Some(TypeFact::Known(KnownType::FunctionRef(func_id))) => {
+                if let Some(fs) = ctx.function_summaries.get(func_id) {
+                    return Some(fs.signature.returns.clone());
+                }
+            }
+            Some(TypeFact::Known(KnownType::Function(sig))) => {
+                return Some(sig.returns.clone());
+            }
+            _ => return None,
+        }
+    }
+
+    // Global function summary fallback.
+    if let Some(&func_id) = ctx.function_name_index.get(callee_text) {
         if let Some(fs) = ctx.function_summaries.get(&func_id) {
             return Some(fs.signature.returns.clone());
         }
@@ -595,6 +631,7 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let params = fs.signature.params.clone();
     let should_infer_returns = should_infer_body_returns(&fs);
     ctx.function_name_to_id.insert(name.clone(), func_id);
+    ctx.function_node_to_id.insert((node.start_byte(), node.end_byte()), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
     ctx.add_scoped_decl(ScopeDecl {
@@ -639,6 +676,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let is_method = name.contains(':');
     let class_prefix = crate::type_system::class_prefix_of(&name).to_string();
     ctx.function_name_to_id.insert(name.clone(), func_id);
+    ctx.function_node_to_id.insert((node.start_byte(), node.end_byte()), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
     let local_bare_function = if !name.contains('.') && !name.contains(':') {

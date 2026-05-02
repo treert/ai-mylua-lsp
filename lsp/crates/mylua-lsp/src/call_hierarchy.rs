@@ -207,8 +207,9 @@ pub fn incoming_calls(
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyIncomingCall> {
     let target = last_segment(&item.name);
-    // Map from (caller_uri, caller_name) → accumulated call ranges.
-    let mut groups: HashMap<(Uri, String), (CallHierarchyItem, Vec<Range>)> = HashMap::new();
+    // Include caller_id when available so shadowed same-name local function
+    // expressions do not merge into one incoming caller.
+    let mut groups: HashMap<(Uri, String, Option<FunctionSummaryId>), (CallHierarchyItem, Vec<Range>)> = HashMap::new();
 
     for (uri, summary) in &index.summaries {
         for cs in &summary.call_sites {
@@ -217,7 +218,7 @@ pub fn incoming_calls(
             }
             let caller_item = resolve_caller_item(uri, cs, summary);
             let lsp_range: Range = cs.range.into();
-            let key = (uri.clone(), cs.caller_name.clone());
+            let key = (uri.clone(), cs.caller_name.clone(), cs.caller_id);
             groups
                 .entry(key)
                 .or_insert_with(|| (caller_item, Vec::new()))
@@ -228,7 +229,7 @@ pub fn incoming_calls(
 
     groups
         .into_iter()
-        .map(|((_uri, _name), (from, ranges))| CallHierarchyIncomingCall {
+        .map(|((_uri, _name, _id), (from, ranges))| CallHierarchyIncomingCall {
             from,
             from_ranges: ranges,
         })
@@ -315,11 +316,17 @@ pub fn outgoing_calls(
 ) -> Vec<CallHierarchyOutgoingCall> {
     let Some(summary) = index.summaries.get(&item.uri) else { return Vec::new() };
 
-    // Find all call sites whose `caller_name == item.name`.
+    // Find all call sites for this item. Prefer FunctionSummaryId when the
+    // item can be tied back to one; otherwise fall back to name matching.
+    let item_id = function_id_for_item(summary, item);
     let mut groups: HashMap<String, (CallHierarchyItem, Vec<Range>)> = HashMap::new();
 
     for cs in &summary.call_sites {
-        if cs.caller_name != item.name {
+        if let Some(id) = item_id {
+            if cs.caller_id != Some(id) {
+                continue;
+            }
+        } else if cs.caller_name != item.name {
             continue;
         }
         let target_name = last_segment(&cs.callee_name).to_string();
@@ -339,6 +346,18 @@ pub fn outgoing_calls(
             from_ranges: ranges,
         })
         .collect()
+}
+
+fn function_id_for_item(
+    summary: &DocumentSummary,
+    item: &CallHierarchyItem,
+) -> Option<FunctionSummaryId> {
+    summary.function_summaries
+        .iter()
+        .find_map(|(id, fs)| {
+            let range: Range = fs.range.into();
+            (fs.name == item.name && range == item.range).then_some(*id)
+        })
 }
 
 /// Build a `CallHierarchyItem` for an outgoing-call target. Tries
