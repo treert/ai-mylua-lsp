@@ -409,7 +409,9 @@ impl LanguageServer for Backend {
         self.open_uris.lock().unwrap().remove(&uri);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
-        self.semantic_tokens_cache.lock().unwrap().remove(&uri);
+        if let Some(uri_id) = self.uri_interner.get(&uri) {
+            self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
+        }
 
         // Workspace-indexing LSP: diagnostics for closed files remain
         // valid based on the index, so we do NOT clear them. If we
@@ -506,7 +508,9 @@ impl LanguageServer for Backend {
                     }
                     self.open_uris.lock().unwrap().remove(&change.uri);
                     self.edit_locks.lock().unwrap().remove(&change.uri);
-                    self.semantic_tokens_cache.lock().unwrap().remove(&change.uri);
+                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
+                    }
                     // Also drop from `library_uris` so a deleted
                     // library file doesn't leave a stale entry
                     // behind — otherwise a later file CREATED at
@@ -830,6 +834,7 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&uri) else {
             return Ok(None);
         };
+        let uri_id = self.uri_interner.intern(uri.clone());
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let data = semantic_tokens::collect_semantic_tokens_with_version(
             doc.tree.root_node(),
@@ -842,7 +847,7 @@ impl LanguageServer for Backend {
         // Cache the full response so a subsequent `delta` request
         // with `previous_result_id == result_id` can diff against it.
         self.semantic_tokens_cache.lock().unwrap().insert(
-            uri.clone(),
+            uri_id,
             semantic_tokens::TokenCacheEntry {
                 result_id: result_id.clone(),
                 data: data.clone(),
@@ -866,6 +871,7 @@ impl LanguageServer for Backend {
         let Some(doc) = docs.get(&uri) else {
             return Ok(None);
         };
+        let uri_id = self.uri_interner.intern(uri.clone());
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let new_tokens = semantic_tokens::collect_semantic_tokens_with_version(
             doc.tree.root_node(),
@@ -882,14 +888,14 @@ impl LanguageServer for Backend {
         let mut cache = self.semantic_tokens_cache.lock().unwrap();
         let new_result_id = self.mint_semantic_token_result_id();
         let cached_matches = cache
-            .get(&uri)
+            .get(&uri_id)
             .map(|c| c.result_id == previous_result_id)
             .unwrap_or(false);
         if cached_matches {
-            let old = cache.get(&uri).expect("cached_matches guarded above").data.clone();
+            let old = cache.get(&uri_id).expect("cached_matches guarded above").data.clone();
             let edits = semantic_tokens::compute_semantic_token_delta(&old, &new_tokens);
             cache.insert(
-                uri.clone(),
+                uri_id,
                 semantic_tokens::TokenCacheEntry {
                     result_id: new_result_id.clone(),
                     data: new_tokens,
@@ -903,7 +909,7 @@ impl LanguageServer for Backend {
             )))
         } else {
             cache.insert(
-                uri.clone(),
+                uri_id,
                 semantic_tokens::TokenCacheEntry {
                     result_id: new_result_id.clone(),
                     data: new_tokens.clone(),

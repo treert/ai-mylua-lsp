@@ -78,7 +78,7 @@ use tower_lsp_server::Client;
 use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
-use uri_id::UriInterner;
+use uri_id::{UriId, UriInterner};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
@@ -144,9 +144,9 @@ pub struct Backend {
     pub(crate) edit_locks: Arc<Mutex<HashMap<Uri, Arc<tokio::sync::Mutex<()>>>>>,
     /// Per-URI semantic-tokens delta cache: stores the token data
     /// last returned for each URI so `semanticTokens/full/delta` can
-    /// compute a compact edit set. `u64` counter is appended to the
-    /// URI to form `result_id`.
-    pub(crate) semantic_tokens_cache: Arc<Mutex<HashMap<Uri, semantic_tokens::TokenCacheEntry>>>,
+    /// compute a compact edit set. Keyed by session-local `UriId`;
+    /// `result_id` itself comes from a global monotonic counter.
+    pub(crate) semantic_tokens_cache: Arc<Mutex<HashMap<UriId, semantic_tokens::TokenCacheEntry>>>,
     /// Monotonic counter used to mint unique `result_id`s.
     pub(crate) semantic_tokens_counter: Arc<Mutex<u64>>,
     /// URIs currently in LSP `did_open` state (not yet `did_close`d).
