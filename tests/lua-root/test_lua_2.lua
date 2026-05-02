@@ -23,4 +23,4 @@ end
 
 ---@type ClassA2
 local a1_test3 = test3()
-a1_test3:Say1()
+a1_test3:Say()
