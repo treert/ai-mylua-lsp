@@ -1,3 +1,4 @@
+--- utils define
 utils = {}
 
 ---@return ClassA1
@@ -15,5 +16,11 @@ end
 
 function utils:empty_func(arg1, arg2) end
 
+--- 0000
+-- utils.test_const = {}
 
+--- 1111
 utils.test_const = require('test_const')
+
+--- 2222
+-- utils.test_const = {}

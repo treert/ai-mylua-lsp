@@ -18,11 +18,13 @@ local function my_Print(self, ...)
     print("my_print")
 end
 
-local XX = UE4.Class()
-
 function encodeString(s)
     local s = tostring(s)
-    return s:gsub(".", function(c) return escapeList[c] end)
+    return s:gsub(".", function(c) return c end)
 end
 
 print(utils.test_const.A, utils.test_const.B, utils.test_const.C)
+
+if utils.test_const.ON_Evt_LALA then
+    print(utils.test_const.ON_Evt_HAHA1)
+end

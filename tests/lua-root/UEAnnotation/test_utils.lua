@@ -36,4 +36,8 @@ UE4 = {}
 ---@type UMiscSystemLibrary_
 UE4.UMiscSystemLibrary = nil
 
+---@class _ClassLala
+---@field lala string
 
+--- utils lala
+utils = {}
