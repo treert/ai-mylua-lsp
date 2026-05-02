@@ -34,3 +34,7 @@ end
 local function test_ret1()
     return false
 end
+
+mm = require("test_create_module")
+-- local mm = require("test_create_module")
+mm.hi()

@@ -10,6 +10,6 @@
 	"settings": {
 		"mylua.debug.fileLog": true,
 		"mylua.diagnostics.enable": true,
-		"mylua.diagnostics.scope": "openOnly"
+		"mylua.diagnostics.scope": "full"
 	}
 }
