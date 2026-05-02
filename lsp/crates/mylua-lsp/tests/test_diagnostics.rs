@@ -709,7 +709,7 @@ fn no_unknown_field_on_global_table_with_class_annotation() {
     // base `Audit` to `Known(Table(shape_id))` (via `global_shard`).
     // The shape for `{ enabled = true }` clearly has an `enabled`
     // field, so no diagnostic should fire. A previous bug: a warm
-    // resolution cache dropped `def_uri` on cached GlobalRef
+    // resolution cache dropped the owner identity on cached GlobalRef
     // resolutions, leaving the per-file `TableShapeId` unmoored.
     let src = r#"---@class Audit
 ---@field enabled boolean
@@ -750,7 +750,7 @@ fn global_table_field_hover_survives_warm_cache() {
     // cache is warm (e.g. after diagnostics ran), hover on
     // `Audit.enabled` must still resolve to the field's type rather
     // than silently dropping to Unknown. The cached GlobalRef
-    // resolution needs to preserve enough info (def_uri) for per-file
+    // resolution needs to preserve enough owner identity for per-file
     // `TableShapeId` lookups.
     use mylua_lsp::hover;
     use mylua_lsp::resolver;
@@ -762,6 +762,7 @@ Audit = { enabled = true }
 print(Audit.enabled)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "warm_cache.lua");
+    let uri_id = agg.summary_id(&uri).expect("warm_cache.lua should be indexed");
 
     // Warm the resolution cache first (diagnostics does this in real
     // LSP sessions before any hover arrives).
@@ -781,6 +782,19 @@ print(Audit.enabled)
         matches!(resolved.type_fact, TypeFact::Known(KnownType::Boolean)),
         "Audit.enabled should resolve to Boolean, got: {}",
         resolved.type_fact,
+    );
+
+    let resolved_by_id =
+        resolver::resolve_field_chain_in_file_id(uri_id, &base, &["enabled".to_string()], &mut agg);
+    assert!(
+        matches!(resolved_by_id.type_fact, TypeFact::Known(KnownType::Boolean)),
+        "UriId field-chain resolution should find Audit.enabled, got: {}",
+        resolved_by_id.type_fact,
+    );
+    assert_eq!(
+        resolved_by_id.def_location.map(|location| location.uri_id),
+        Some(uri_id),
+        "UriId field-chain resolution should preserve the table owner identity",
     );
 
     // Full hover path sanity: we just verify it returns something.

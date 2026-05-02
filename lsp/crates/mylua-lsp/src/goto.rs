@@ -251,7 +251,7 @@ fn goto_variable_field(
             crate::type_inference::infer_node_type(base_node, source, uri, &doc.scope_tree, index);
         let resolved =
             resolver::resolve_field_chain_in_file(uri, &base_fact, &fields, index);
-        return resolved_to_goto(resolved);
+        return resolved_to_goto(resolved, index);
     }
 
     let base_node = var_node.child_by_field_name("object")?;
@@ -294,16 +294,18 @@ fn goto_field_or_method(
         uri, &base_fact, &[field_name], index,
     );
 
-    resolved_to_goto(resolved)
+    resolved_to_goto(resolved, index)
 }
 
 fn resolved_to_goto(
     resolved: resolver::ResolvedType,
+    index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
-    if let (Some(def_uri), Some(def_range)) = (resolved.def_uri, resolved.def_range) {
+    if let Some(location) = resolved.def_location {
+        let def_uri = index.summary_uri(location.uri_id)?;
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri.clone(),
-            range: def_range.into(),
+            range: location.range.into(),
         }));
     }
 

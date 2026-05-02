@@ -19,31 +19,38 @@ pub struct ResolvedLocation {
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub type_fact: TypeFact,
-    // `def_location` is the migrated internal identity used by consumers that
-    // can resolve through WorkspaceAggregation. `def_uri`/`def_range` remain as
-    // URI-facing compatibility fields for paths that still build protocol
-    // responses or need fallback lookups.
-    pub def_uri: Option<Uri>,
+    /// Byte range of the defining symbol when known.
     pub def_range: Option<ByteRange>,
+    /// Definition location for protocol-facing consumers that need a range.
     pub def_location: Option<ResolvedLocation>,
+    /// Owning file identity for per-file values such as `TableShapeId` and
+    /// `FunctionSummaryId`. This can be present even when no definition range
+    /// exists, for example a module return table.
+    pub owner_uri_id: Option<UriId>,
 }
 
 impl ResolvedType {
     fn unknown() -> Self {
-        Self { type_fact: TypeFact::Unknown, def_uri: None, def_range: None, def_location: None }
+        Self { type_fact: TypeFact::Unknown, def_range: None, def_location: None, owner_uri_id: None }
     }
 
     fn from_fact(fact: TypeFact) -> Self {
-        Self { type_fact: fact, def_uri: None, def_range: None, def_location: None }
+        Self { type_fact: fact, def_range: None, def_location: None, owner_uri_id: None }
     }
 
-    fn with_location(fact: TypeFact, uri: Uri, range: ByteRange, uri_id: Option<UriId>) -> Self {
+    fn with_location(fact: TypeFact, uri_id: UriId, range: ByteRange) -> Self {
         Self {
             type_fact: fact,
-            def_uri: Some(uri),
             def_range: Some(range),
-            def_location: uri_id.map(|id| ResolvedLocation { uri_id: id, range }),
+            def_location: Some(ResolvedLocation { uri_id, range }),
+            owner_uri_id: Some(uri_id),
         }
+    }
+
+    pub fn source_uri_id(&self) -> Option<UriId> {
+        self.def_location
+            .map(|location| location.uri_id)
+            .or(self.owner_uri_id)
     }
 }
 
@@ -75,8 +82,8 @@ pub fn resolve_field_chain(
 /// URI-aware variant of `resolve_field_chain` for bases that are
 /// **file-local** table shapes. When the base is `Known(Table(shape_id))`,
 /// `TableShapeId` is per-file so the plain chain resolver returns
-/// `Unknown` (no `source_uri` hint to locate the shape). This seeds the
-/// uri and keeps it threaded through intermediate `Known(Table)` results
+/// `Unknown` (no source-file hint to locate the shape). This seeds the
+/// UriId and keeps it threaded through intermediate `Known(Table)` results
 /// so deep nested writes like `a.b.c = 1` hover-resolve correctly.
 pub fn resolve_field_chain_in_file(
     uri: &Uri,
@@ -84,7 +91,17 @@ pub fn resolve_field_chain_in_file(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(base_fact, fields, agg, Some(uri), false)
+    let uri_id = agg.summary_id(uri);
+    resolve_field_chain_inner(base_fact, fields, agg, uri_id, false)
+}
+
+pub fn resolve_field_chain_in_file_id(
+    uri_id: UriId,
+    base_fact: &TypeFact,
+    fields: &[String],
+    agg: &WorkspaceAggregation,
+) -> ResolvedType {
+    resolve_field_chain_inner(base_fact, fields, agg, Some(uri_id), false)
 }
 
 /// Resolve a chain that will be used as the base for another field lookup.
@@ -99,12 +116,13 @@ pub(crate) fn resolve_field_chain_prefix_in_file(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(base_fact, fields, agg, Some(uri), true)
+    let uri_id = agg.summary_id(uri);
+    resolve_field_chain_inner(base_fact, fields, agg, uri_id, true)
 }
 
 /// Shared core of `resolve_field_chain` and `resolve_field_chain_in_file`.
 ///
-/// When `uri_hint` is `Some`, the resolver seeds the initial `def_uri` for
+/// When `uri_hint` is `Some`, the resolver seeds the initial owner UriId for
 /// `Known(Table)` bases and preserves it across intermediate table results,
 /// enabling per-file `TableShapeId` lookups. When `None`, the resolver
 /// behaves like the original `resolve_field_chain`.
@@ -112,21 +130,21 @@ fn resolve_field_chain_inner(
     base_fact: &TypeFact,
     fields: &[String],
     agg: &WorkspaceAggregation,
-    uri_hint: Option<&Uri>,
+    uri_hint: Option<UriId>,
     preserve_tail_resolved_location: bool,
 ) -> ResolvedType {
     let mut visited = HashSet::new();
 
     // When a URI hint is provided and the base is already a Table, seed
-    // the def_uri so that resolve_table_field can locate the shape.
+    // the owner UriId so that resolve_table_field can locate the shape.
     let mut current = if uri_hint.is_some()
         && matches!(base_fact, TypeFact::Known(KnownType::Table(_)))
     {
         ResolvedType {
             type_fact: base_fact.clone(),
-            def_uri: uri_hint.cloned(),
             def_range: None,
             def_location: None,
+            owner_uri_id: uri_hint,
         }
     } else {
         resolve_recursive(base_fact, agg, 0, &mut visited)
@@ -147,7 +165,7 @@ fn resolve_field_chain_inner(
         let result = if uri_hint.is_some() {
             match &current.type_fact {
                 TypeFact::Known(KnownType::Table(shape_id)) => {
-                    resolve_table_field(*shape_id, field, &current.def_uri, agg)
+                    resolve_table_field(*shape_id, field, current.source_uri_id(), agg)
                 }
                 _ => resolve_field_access(&current.type_fact, field, agg, 0, &mut visited),
             }
@@ -155,7 +173,7 @@ fn resolve_field_chain_inner(
             resolve_field_access(&current.type_fact, field, agg, 0, &mut visited)
         };
 
-        if result.type_fact == TypeFact::Unknown && result.def_uri.is_none() {
+        if result.type_fact == TypeFact::Unknown && result.source_uri_id().is_none() {
             if let Some(ref prefix) = global_prefix {
                 let qualified = format!("{}.{}", prefix, field);
                 let is_chain_tail = idx + 1 == fields.len();
@@ -167,7 +185,7 @@ fn resolve_field_chain_inner(
                         &mut visited,
                         !is_chain_tail || preserve_tail_resolved_location,
                     );
-                if fallback.type_fact != TypeFact::Unknown || fallback.def_uri.is_some() {
+                if fallback.type_fact != TypeFact::Unknown || fallback.source_uri_id().is_some() {
                     current = fallback;
                     global_prefix = Some(qualified);
                     continue;
@@ -178,19 +196,19 @@ fn resolve_field_chain_inner(
         // Preserve uri hint when stepping into another file-local Table.
         //
         // Edge case: `resolve_field_access`'s Union branch may return a
-        // `Known(Table)` with `def_uri: None` when no variant has a
-        // best-location. In that narrow case we'll re-stamp the caller's
-        // uri even though the shape may actually live in a different
-        // file. Because `TableShapeId` is per-file, a mismatched uri
+        // `Known(Table)` without an owner when no variant has a best
+        // location. In that narrow case we'll re-stamp the caller's
+        // UriId even though the shape may actually live in a different
+        // file. Because `TableShapeId` is per-file, a mismatched UriId
         // causes `resolve_table_field` to miss silently and return
         // `Unknown` — never wrong data, just a lost goto/hover hit.
         // Accepting that trade for simpler data flow.
         let kept_uri = uri_hint.is_some()
             && matches!(result.type_fact, TypeFact::Known(KnownType::Table(_)))
-            && result.def_uri.is_none();
+            && result.source_uri_id().is_none();
         current = result;
         if kept_uri {
-            current.def_uri = uri_hint.cloned();
+            current.owner_uri_id = uri_hint;
             current.def_location = None;
         }
 
@@ -236,14 +254,12 @@ pub fn get_fields_for_type(
         if let Some(node) = agg.global_shard.get_node(name) {
             for (child_name, child_node) in &node.children {
                 if let Some(c) = child_node.candidates.first() {
-                    let candidate_uri = agg.candidate_uri(c).cloned();
                     let is_func = is_function_type(&c.type_fact)
                         || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
                     global_prefix_fields.push(FieldCompletion {
                         name: child_name.clone(),
                         type_display: format!("{}", c.type_fact),
                         is_function: is_func,
-                        def_uri: candidate_uri,
                         def_range: Some(c.selection_range),
                     });
                 }
@@ -252,8 +268,10 @@ pub fn get_fields_for_type(
     }
 
     let resolved = resolve_type(fact, agg);
-    let uri = resolved.def_uri.as_ref().or(source_uri_hint).cloned();
-    let mut fields = collect_fields(&resolved.type_fact, &uri, agg);
+    let source_uri_id = resolved
+        .source_uri_id()
+        .or_else(|| source_uri_hint.and_then(|uri| agg.summary_id(uri)));
+    let mut fields = collect_fields(&resolved.type_fact, source_uri_id, agg);
 
     // Merge global prefix fields, deduplicating by name
     for gf in global_prefix_fields {
@@ -270,7 +288,6 @@ pub struct FieldCompletion {
     pub name: String,
     pub type_display: String,
     pub is_function: bool,
-    pub def_uri: Option<Uri>,
     pub def_range: Option<ByteRange>,
 }
 
@@ -348,13 +365,13 @@ fn resolve_require(
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
-    let target_uri = match agg.resolve_module_to_uri(module_path) {
-        Some(u) => u,
+    let target_uri_id = match agg.resolve_module_to_id(module_path) {
+        Some(id) => id,
         None => return ResolvedType::unknown(),
     };
 
     let return_fact = {
-        let summary = match agg.summary(&target_uri) {
+        let summary = match agg.summary_by_id(target_uri_id) {
             Some(s) => s,
             None => return ResolvedType::unknown(),
         };
@@ -369,9 +386,8 @@ fn resolve_require(
     };
 
     let mut result = resolve_recursive(&return_fact, agg, depth + 1, visited);
-    if result.def_uri.is_none() {
-        result.def_uri = Some(target_uri);
-        result.def_location = None;
+    if result.source_uri_id().is_none() {
+        result.owner_uri_id = Some(target_uri_id);
     }
     result
 }
@@ -397,13 +413,13 @@ fn resolve_global(
         depth + 1,
         visited,
     );
-    if resolved.def_uri.is_none() && resolved.def_range.is_none() {
-        resolved.def_uri = agg.candidate_uri(&candidate).cloned();
+    if resolved.source_uri_id().is_none() && resolved.def_range.is_none() {
         resolved.def_range = Some(candidate.selection_range);
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
             range: candidate.selection_range,
         });
+        resolved.owner_uri_id = Some(candidate.source_uri_id());
     }
     resolved
 }
@@ -429,13 +445,13 @@ fn try_global_shard_qualified(
         depth + 1,
         visited,
     );
-    if !preserve_resolved_location || resolved.def_uri.is_none() {
-        resolved.def_uri = agg.candidate_uri(&candidate).cloned();
+    if !preserve_resolved_location || resolved.source_uri_id().is_none() {
         resolved.def_range = Some(candidate.selection_range);
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
             range: candidate.selection_range,
         });
+        resolved.owner_uri_id = Some(candidate.source_uri_id());
     }
     resolved
 }
@@ -448,15 +464,10 @@ fn resolve_emmy_type(
         Some(candidates) if !candidates.is_empty() => &candidates[0],
         _ => return ResolvedType::from_fact(TypeFact::Known(KnownType::EmmyType(name.to_string()))),
     };
-    let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
-        return ResolvedType::from_fact(TypeFact::Known(KnownType::EmmyType(name.to_string())));
-    };
-
     ResolvedType::with_location(
         TypeFact::Known(KnownType::EmmyType(name.to_string())),
-        candidate_uri.clone(),
+        candidate.source_uri_id(),
         candidate.range,
-        Some(candidate.source_uri_id()),
     )
 }
 
@@ -509,9 +520,9 @@ fn resolve_call_return(
     // When the base resolves to a Table shape (e.g. `local M = {}` returned
     // via `require()`), look up the function field directly in the shape.
     if let TypeFact::Known(KnownType::Table(shape_id)) = &base_resolved.type_fact {
-        if let Some(ref uri) = base_resolved.def_uri {
+        if let Some(uri_id) = base_resolved.source_uri_id() {
             let ret = {
-                let summary = match agg.summary(uri) {
+                let summary = match agg.summary_by_id(uri_id) {
                     Some(s) => s,
                     None => return ResolvedType::unknown(),
                 };
@@ -554,9 +565,9 @@ fn resolve_call_return(
     }
 
     // If base resolved to a known type, look for the function in its source
-    if let Some(ref uri) = base_resolved.def_uri {
+    if let Some(uri_id) = base_resolved.source_uri_id() {
         let return_type = {
-            let summary = match agg.summary(uri) {
+            let summary = match agg.summary_by_id(uri_id) {
                 Some(s) => s,
                 None => return ResolvedType::unknown(),
             };
@@ -597,30 +608,30 @@ fn resolve_call_return(
                 TypeFact::Known(KnownType::Function(ref sig)) => {
                     if let Some(ret) = sig.returns.first() {
                         let mut ret_resolved = resolve_recursive(ret, agg, depth + 1, visited);
-                        if ret_resolved.def_uri.is_none() {
-                            ret_resolved.def_uri = agg.candidate_uri(&c).cloned();
+                        if ret_resolved.source_uri_id().is_none() {
                             ret_resolved.def_range = Some(c.selection_range);
                             ret_resolved.def_location = Some(ResolvedLocation {
                                 uri_id: c.source_uri_id(),
                                 range: c.selection_range,
                             });
+                            ret_resolved.owner_uri_id = Some(c.source_uri_id());
                         }
                         return ret_resolved;
                     }
                 }
                 TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                    if let Some(ref uri) = resolved.def_uri {
-                        if let Some(summary) = agg.summary(uri) {
+                    if let Some(uri_id) = resolved.source_uri_id() {
+                        if let Some(summary) = agg.summary_by_id(uri_id) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
                                 if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
                                     let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
-                                    if ret_resolved.def_uri.is_none() {
-                                        ret_resolved.def_uri = agg.candidate_uri(&c).cloned();
+                                    if ret_resolved.source_uri_id().is_none() {
                                         ret_resolved.def_range = Some(c.selection_range);
                                         ret_resolved.def_location = Some(ResolvedLocation {
                                             uri_id: c.source_uri_id(),
                                             range: c.selection_range,
                                         });
+                                        ret_resolved.owner_uri_id = Some(c.source_uri_id());
                                     }
                                     return ret_resolved;
                                 }
@@ -630,14 +641,10 @@ fn resolve_call_return(
                 }
                 _ => {}
             }
-            let Some(candidate_uri) = agg.candidate_uri(&c) else {
-                return ResolvedType::unknown();
-            };
             return ResolvedType::with_location(
                 c.type_fact.clone(),
-                candidate_uri.clone(),
+                c.source_uri_id(),
                 c.selection_range,
-                Some(c.source_uri_id()),
             );
         }
     }
@@ -653,8 +660,8 @@ fn first_function_return_with_call_args(
     match &result.type_fact {
         TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
-            let uri = result.def_uri.as_ref()?;
-            let summary = agg.summary(uri)?;
+            let uri_id = result.source_uri_id()?;
+            let summary = agg.summary_by_id(uri_id)?;
             let fs = summary.function_summaries.get(fid)?;
             function_return_with_call_args(fs, call_arg_types)
         }
@@ -710,9 +717,9 @@ pub fn resolve_require_global_name(
     module_path: &str,
     agg: &WorkspaceAggregation,
 ) -> Option<String> {
-    agg.resolve_module_to_uri(module_path)
-        .and_then(|target_uri| {
-            agg.summary(&target_uri)
+    agg.resolve_module_to_id(module_path)
+        .and_then(|target_uri_id| {
+            agg.summary_by_id(target_uri_id)
                 .and_then(|s| s.module_return_type.as_ref())
                 .and_then(|ret| match ret {
                     TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
@@ -736,7 +743,7 @@ fn resolve_field_access(
 
     match &base_resolved.type_fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            resolve_table_field(*shape_id, field, &base_resolved.def_uri, agg)
+            resolve_table_field(*shape_id, field, base_resolved.source_uri_id(), agg)
         }
 
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
@@ -758,14 +765,10 @@ fn resolve_field_access(
             let qualified = format!("{}.{}", name, field);
             if let Some(candidates) = agg.global_shard.get(&qualified).cloned() {
                 if let Some(c) = candidates.first() {
-                    let Some(candidate_uri) = agg.candidate_uri(c) else {
-                        return ResolvedType::unknown();
-                    };
                     return ResolvedType::with_location(
                         c.type_fact.clone(),
-                        candidate_uri.clone(),
+                        c.source_uri_id(),
                         c.selection_range,
-                        Some(c.source_uri_id()),
                     );
                 }
             }
@@ -775,16 +778,13 @@ fn resolve_field_access(
 
         TypeFact::Union(types) => {
             let mut resolved_types = Vec::new();
-            let mut best_location: Option<(Uri, ByteRange, Option<UriId>)> = None;
+            let mut best_location: Option<(ByteRange, UriId)> = None;
             for t in types {
                 let result = resolve_field_access(t, field, agg, depth + 1, visited);
                 if result.type_fact != TypeFact::Unknown {
                     if best_location.is_none() {
-                        if let (Some(u), Some(r)) = (&result.def_uri, &result.def_range) {
-                            let uri_id = result.def_location
-                                .map(|location| location.uri_id)
-                                .or_else(|| agg.summary_id(u));
-                            best_location = Some((u.clone(), *r, uri_id));
+                        if let (Some(r), Some(uri_id)) = (result.def_range, result.source_uri_id()) {
+                            best_location = Some((r, uri_id));
                         }
                     }
                     if !resolved_types.contains(&result.type_fact) {
@@ -796,16 +796,16 @@ fn resolve_field_access(
                 0 => ResolvedType::unknown(),
                 1 => {
                     let fact = resolved_types.into_iter().next().unwrap();
-                    if let Some((uri, range, uri_id)) = best_location {
-                        ResolvedType::with_location(fact, uri, range, uri_id)
+                    if let Some((range, uri_id)) = best_location {
+                        ResolvedType::with_location(fact, uri_id, range)
                     } else {
                         ResolvedType::from_fact(fact)
                     }
                 }
                 _ => {
                     let fact = TypeFact::Union(resolved_types);
-                    if let Some((uri, range, uri_id)) = best_location {
-                        ResolvedType::with_location(fact, uri, range, uri_id)
+                    if let Some((range, uri_id)) = best_location {
+                        ResolvedType::with_location(fact, uri_id, range)
                     } else {
                         ResolvedType::from_fact(fact)
                     }
@@ -820,17 +820,16 @@ fn resolve_field_access(
 fn resolve_table_field(
     shape_id: TableShapeId,
     field: &str,
-    source_uri: &Option<Uri>,
+    source_uri_id: Option<UriId>,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
     // TableShapeId is a per-file counter, so we MUST know which file it
-    // belongs to.  Without source_uri we could match a wrong file's shape.
-    let uri = match source_uri {
-        Some(u) => u,
+    // belongs to. Without a source UriId we could match a wrong file's shape.
+    let uri_id = match source_uri_id {
+        Some(id) => id,
         None => return ResolvedType::unknown(),
     };
-    let uri_id = agg.summary_id(uri);
-    let summary = match agg.summary(uri) {
+    let summary = match agg.summary_by_id(uri_id) {
         Some(s) => s,
         None => return ResolvedType::unknown(),
     };
@@ -838,10 +837,10 @@ fn resolve_table_field(
         if let Some(fi) = shape.fields.get(field) {
             return ResolvedType {
                 type_fact: fi.type_fact.clone(),
-                def_uri: Some(uri.clone()),
                 def_range: fi.def_range,
                 def_location: fi.def_range
-                    .and_then(|range| uri_id.map(|id| ResolvedLocation { uri_id: id, range })),
+                    .map(|range| ResolvedLocation { uri_id, range }),
+                owner_uri_id: Some(uri_id),
             };
         }
     }
@@ -868,17 +867,14 @@ fn resolve_emmy_field_with_visited(
 
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
-                continue;
-            };
-            if let Some(summary) = agg.summary(candidate_uri) {
+            if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
 
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
                             if let Some(TypeFact::Known(KnownType::EmmyType(ref aliased_name))) = td.alias_type {
                                 let result = resolve_emmy_field_with_visited(aliased_name, field, agg, visited_types);
-                                if result.type_fact != TypeFact::Unknown || result.def_uri.is_some() {
+                                if result.type_fact != TypeFact::Unknown || result.source_uri_id().is_some() {
                                     return result;
                                 }
                             }
@@ -888,12 +884,12 @@ fn resolve_emmy_field_with_visited(
                             if tf.name == field {
                                 return ResolvedType {
                                     type_fact: tf.type_fact.clone(),
-                                    def_uri: Some(candidate_uri.clone()),
                                     def_range: Some(tf.range),
                                     def_location: Some(ResolvedLocation {
                                         uri_id: candidate.source_uri_id(),
                                         range: tf.range,
                                     }),
+                                    owner_uri_id: Some(candidate.source_uri_id()),
                                 };
                             }
                         }
@@ -908,12 +904,12 @@ fn resolve_emmy_field_with_visited(
                                 if let Some(fi) = shape.fields.get(field) {
                                     return ResolvedType {
                                         type_fact: fi.type_fact.clone(),
-                                        def_uri: Some(candidate_uri.clone()),
                                         def_range: fi.def_range,
                                         def_location: fi.def_range.map(|range| ResolvedLocation {
                                             uri_id: candidate.source_uri_id(),
                                             range,
                                         }),
+                                        owner_uri_id: Some(candidate.source_uri_id()),
                                     };
                                 }
                             }
@@ -921,7 +917,7 @@ fn resolve_emmy_field_with_visited(
 
                         for parent in &td.parents {
                             let result = resolve_emmy_field_with_visited(parent, field, agg, visited_types);
-                            if result.type_fact != TypeFact::Unknown || result.def_uri.is_some() {
+                            if result.type_fact != TypeFact::Unknown || result.source_uri_id().is_some() {
                                 return result;
                             }
                         }
@@ -938,14 +934,10 @@ fn resolve_emmy_field_with_visited(
         let qualified = format!("{}.{}", type_name, field);
         if let Some(global_candidates) = agg.global_shard.get(&qualified) {
             if let Some(c) = global_candidates.first() {
-                let Some(candidate_uri) = agg.candidate_uri(c) else {
-                    return ResolvedType::unknown();
-                };
                 return ResolvedType::with_location(
                     c.type_fact.clone(),
-                    candidate_uri.clone(),
+                    c.source_uri_id(),
                     c.selection_range,
-                    Some(c.source_uri_id()),
                 );
             }
         }
@@ -956,24 +948,23 @@ fn resolve_emmy_field_with_visited(
 
 fn collect_fields(
     fact: &TypeFact,
-    source_uri: &Option<Uri>,
+    source_uri_id: Option<UriId>,
     agg: &WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
     let mut fields = Vec::new();
 
     match fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            // TableShapeId is per-file, so we need source_uri to avoid
+            // TableShapeId is per-file, so we need source_uri_id to avoid
             // cross-file collisions.
-            if let Some(uri) = source_uri {
-                if let Some(summary) = agg.summary(uri) {
+            if let Some(uri_id) = source_uri_id {
+                if let Some(summary) = agg.summary_by_id(uri_id) {
                     if let Some(shape) = summary.table_shapes.get(shape_id) {
                         for (name, fi) in &shape.fields {
                             fields.push(FieldCompletion {
                                 name: name.clone(),
                                 type_display: format!("{}", fi.type_fact),
                                 is_function: is_function_type(&fi.type_fact),
-                                def_uri: Some(uri.clone()),
                                 def_range: fi.def_range,
                             });
                         }
@@ -1006,7 +997,7 @@ fn collect_fields(
 
         TypeFact::Union(types) => {
             for t in types {
-                fields.extend(collect_fields(t, source_uri, agg));
+                fields.extend(collect_fields(t, source_uri_id, agg));
             }
             fields.sort_by(|a, b| a.name.cmp(&b.name));
             fields.dedup_by(|a, b| a.name == b.name);
@@ -1029,10 +1020,7 @@ fn collect_emmy_fields_recursive(
     }
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
-                continue;
-            };
-            if let Some(summary) = agg.summary(candidate_uri) {
+            if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 for td in &summary.type_definitions {
                     if td.name == type_name {
                         if td.kind == crate::summary::TypeDefinitionKind::Alias {
@@ -1046,7 +1034,6 @@ fn collect_emmy_fields_recursive(
                                 name: tf.name.clone(),
                                 type_display: format!("{}", tf.type_fact),
                                 is_function: is_function_type(&tf.type_fact),
-                                def_uri: Some(candidate_uri.clone()),
                                 def_range: Some(tf.range),
                             });
                         }
@@ -1062,7 +1049,6 @@ fn collect_emmy_fields_recursive(
                                             name: fname.clone(),
                                             type_display: format!("{}", fi.type_fact),
                                             is_function: is_function_type(&fi.type_fact),
-                                            def_uri: Some(candidate_uri.clone()),
                                             def_range: fi.def_range,
                                         });
                                     }
@@ -1094,10 +1080,7 @@ fn is_function_type(fact: &TypeFact) -> bool {
 fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<String> {
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
-            let Some(candidate_uri) = agg.type_candidate_uri(candidate) else {
-                continue;
-            };
-            if let Some(summary) = agg.summary(candidate_uri) {
+            if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 for td in &summary.type_definitions {
                     if td.name == type_name && !td.generic_params.is_empty() {
                         return td.generic_params.clone();
@@ -1121,19 +1104,19 @@ pub fn resolve_method_return_with_generics(
     actual_params: &[TypeFact],
     agg: &WorkspaceAggregation,
 ) -> TypeFact {
-    // Find the source URI for this type so we can look up function_summaries.
-    let source_uri = agg.type_shard.get(type_name)
+    // Find the source UriId for this type so we can look up function_summaries.
+    let source_uri_id = agg.type_shard.get(type_name)
         .and_then(|candidates| candidates.first())
-        .and_then(|c| agg.type_candidate_uri(c).cloned());
+        .map(|c| c.source_uri_id());
 
-    if let Some(uri) = source_uri {
+    if let Some(uri_id) = source_uri_id {
         // Try qualified name `TypeName:method` or `TypeName.method` in
         // function_summaries (the summary builder registers colon methods
         // under `TypeName:method`).
         let qualified_colon = format!("{}:{}", type_name, method_name);
         let qualified_dot = format!("{}.{}", type_name, method_name);
 
-        let ret = agg.summary(&uri).and_then(|summary| {
+        let ret = agg.summary_by_id(uri_id).and_then(|summary| {
             let fs = summary.get_function_by_name(&qualified_colon)
                 .or_else(|| summary.get_function_by_name(&qualified_dot));
             fs.and_then(|fs| fs.signature.returns.first().cloned())
@@ -1156,8 +1139,8 @@ pub fn resolve_method_return_with_generics(
                 }
             }
             TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                if let Some(ref uri) = resolved.def_uri {
-                    if let Some(summary) = agg.summary(uri) {
+                if let Some(uri_id) = resolved.source_uri_id() {
+                    if let Some(summary) = agg.summary_by_id(uri_id) {
                         if let Some(fs) = summary.function_summaries.get(fid) {
                             if let Some(ret) = fs.signature.returns.first() {
                                 return substitute_generics(ret, type_name, actual_params, agg);

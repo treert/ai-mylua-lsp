@@ -366,7 +366,7 @@ impl WorkspaceAggregation {
         self.summaries.get(uri_id)
     }
 
-    pub(crate) fn summary_id(&self, uri: &Uri) -> Option<UriId> {
+    pub fn summary_id(&self, uri: &Uri) -> Option<UriId> {
         self.summary_uri_ids.get(uri).copied()
     }
 
@@ -662,6 +662,14 @@ impl WorkspaceAggregation {
         self.find_best_match(&resolved)
     }
 
+    pub(crate) fn resolve_module_to_id(&self, module_path: &str) -> Option<UriId> {
+        use crate::workspace_scanner::normalize_require_path;
+
+        let normalized = normalize_require_path(module_path);
+        let resolved = self.apply_alias_expansion(&normalized);
+        self.find_best_match_id(&resolved)
+    }
+
     /// Apply alias expansion: find the longest matching alias prefix
     /// and replace it. E.g. aliases={"@": "src", "@utils": "src.utils"},
     /// "@utils.foo" → "src.utils.foo" (longest prefix "@utils" wins).
@@ -707,6 +715,11 @@ impl WorkspaceAggregation {
     /// Uses last-segment lookup + strict suffix matching.
     /// A candidate matches if it equals the query or ends with `.{query}`.
     fn find_best_match(&self, module_path: &str) -> Option<Uri> {
+        let uri_id = self.find_best_match_id(module_path)?;
+        self.module_uris.get(&uri_id).cloned()
+    }
+
+    fn find_best_match_id(&self, module_path: &str) -> Option<UriId> {
         use crate::workspace_scanner::module_last_segment;
 
         let query_last = module_last_segment(module_path);
@@ -717,7 +730,7 @@ impl WorkspaceAggregation {
             if candidate_name == module_path
                 || candidate_name.ends_with(dot_query.as_str())
             {
-                return self.module_uris.get(candidate_uri_id).cloned();
+                return Some(*candidate_uri_id);
             }
         }
 

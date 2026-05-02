@@ -103,7 +103,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
                         ctx.index,
                     );
                     if field_resolved.type_fact == TypeFact::Unknown
-                        && field_resolved.def_uri.is_none()
+                        && field_resolved.source_uri_id().is_none()
                     {
                         let qualified = format!("{}.{}", type_name, field_name);
                         if !ctx.index.global_shard.contains_key(&qualified) {
@@ -174,7 +174,8 @@ fn check_dotted_field(
                     std::slice::from_ref(field_name),
                     ctx.index,
                 );
-                if field_resolved.type_fact == TypeFact::Unknown && field_resolved.def_uri.is_none()
+                if field_resolved.type_fact == TypeFact::Unknown
+                    && field_resolved.source_uri_id().is_none()
                 {
                     let qualified = format!("{}.{}", type_name, field_name);
                     if !ctx.index.global_shard.contains_key(&qualified) {
@@ -193,8 +194,10 @@ fn check_dotted_field(
             }
         }
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            let table_uri = resolved_base.def_uri.as_ref().unwrap_or(ctx.uri);
-            if let Some(summary) = ctx.index.summary(table_uri) {
+            let table_uri_id = resolved_base
+                .source_uri_id()
+                .or_else(|| ctx.index.summary_id(ctx.uri));
+            if let Some(summary) = table_uri_id.and_then(|uri_id| ctx.index.summary_by_id(uri_id)) {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     if !shape.fields.contains_key(field_name) {
                         let field_is_global = field_global_prefixes(

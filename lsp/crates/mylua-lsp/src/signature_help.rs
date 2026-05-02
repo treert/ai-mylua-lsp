@@ -137,9 +137,8 @@ pub(crate) fn resolve_call_signatures(
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
             let summary = resolved
-                .def_location
-                .and_then(|location| index.summary_by_id(location.uri_id))
-                .or_else(|| resolved.def_uri.as_ref().and_then(|uri| index.summary(uri)));
+                .source_uri_id()
+                .and_then(|uri_id| index.summary_by_id(uri_id));
             if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
@@ -243,7 +242,8 @@ fn lookup_function_signatures_by_field(
                 // merge via `lookup_overloads_via_global_shard`).
             }
         }
-        // The @field-declared signature lives in `def_uri`, but the actual
+        // The @field-declared signature lives in the resolved definition file,
+        // but the actual
         // Lua body + extra `@overload` annotations may live in a different
         // file. Look up `{class}:{field}` / `{class}.{field}` in
         // `global_shard` and merge any overloads we find there.
@@ -268,17 +268,16 @@ fn lookup_function_signatures_by_field(
                 }
             }
         }
-        // Either `def_uri` was missing, or the impl file was the same as
-        // `def_uri` (already exhausted by the block above) and its summary
+        // Either the definition file was missing, or the impl file was the same as
+        // the definition file (already exhausted by the block above) and its summary
         // carried no `function_summaries` entry for this name. Fall back
         // to the single signature we already have from `@field`.
         return vec![sig.clone()];
     }
     if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
         let summary = resolved
-            .def_location
-            .and_then(|location| index.summary_by_id(location.uri_id))
-            .or_else(|| resolved.def_uri.as_ref().and_then(|uri| index.summary(uri)));
+            .source_uri_id()
+            .and_then(|uri_id| index.summary_by_id(uri_id));
         if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
             return primary_plus_overloads(fs);
         }
