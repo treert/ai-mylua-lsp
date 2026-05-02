@@ -19,6 +19,10 @@ pub struct ResolvedLocation {
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub type_fact: TypeFact,
+    // `def_location` is the migrated internal identity used by consumers that
+    // can resolve through WorkspaceAggregation. `def_uri`/`def_range` remain as
+    // URI-facing compatibility fields for paths that still build protocol
+    // responses or need fallback lookups.
     pub def_uri: Option<Uri>,
     pub def_range: Option<ByteRange>,
     pub def_location: Option<ResolvedLocation>,
