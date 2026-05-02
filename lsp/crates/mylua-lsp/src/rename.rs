@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
-use crate::document::Document;
+use crate::document::{Document, DocumentLookup};
 use crate::references;
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
@@ -41,7 +41,7 @@ pub fn rename(
     position: Position,
     new_name: &str,
     index: &WorkspaceAggregation,
-    all_docs: &HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> RenameResult {
     if !is_valid_lua_identifier(new_name) {
         return Err("New name is not a valid Lua identifier");

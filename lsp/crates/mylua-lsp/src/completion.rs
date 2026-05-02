@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
-use crate::document::Document;
+use crate::document::{Document, DocumentLookup};
 use crate::type_inference;
 use crate::resolver;
 use crate::util::{node_text, walk_ancestors};
@@ -381,7 +381,7 @@ fn collect_global_completions(
 pub fn resolve_completion(
     item: CompletionItem,
     index: &WorkspaceAggregation,
-    documents: &std::collections::HashMap<Uri, Document>,
+    documents: &impl DocumentLookup,
 ) -> CompletionItem {
     // Extract fields up front (owned Strings) so we can freely
     // hand `item` into the per-kind helpers without clashing with
@@ -464,11 +464,11 @@ fn resolve_global_item(
 
 fn resolve_local_item(
     mut item: CompletionItem,
-    documents: &std::collections::HashMap<Uri, Document>,
+    documents: &impl DocumentLookup,
     uri: &Uri,
     name: &str,
 ) -> CompletionItem {
-    let Some(doc) = documents.get(uri) else {
+    let Some(doc) = documents.get_document(uri) else {
         return item;
     };
     // Without position context, find the last declaration matching the name

@@ -731,7 +731,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri, position, &idx, &docs))
+        Ok(hover::hover(doc, uri, position, &idx, &*docs))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -752,7 +752,7 @@ impl LanguageServer for Backend {
     ) -> Result<CompletionItem> {
         let idx = self.index.lock().unwrap();
         let docs = self.documents.lock().unwrap();
-        Ok(completion::resolve_completion(item, &idx, &docs))
+        Ok(completion::resolve_completion(item, &idx, &*docs))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -771,7 +771,7 @@ impl LanguageServer for Backend {
             position,
             include_declaration,
             &idx,
-            &docs,
+            &*docs,
             &ref_strategy,
         ))
     }
@@ -795,7 +795,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        match rename::rename(doc, uri, position, &params.new_name, &idx, &docs) {
+        match rename::rename(doc, uri, position, &params.new_name, &idx, &*docs) {
             Ok(edit) => Ok(edit),
             Err(msg) => Err(tower_lsp_server::jsonrpc::Error {
                 code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,

@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
-use crate::document::Document;
+use crate::document::{Document, DocumentLookup};
 use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_emmy_comments, format_annotations_markdown};
 use crate::resolver;
 use crate::type_system::TypeFact;
@@ -14,7 +14,7 @@ pub fn hover(
     uri: &Uri,
     position: Position,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
@@ -166,7 +166,7 @@ pub fn hover(
                             parts.push(fields_md.join("\n"));
                         }
                         // Include doc comments from the definition site
-                        if let Some(def_doc) = all_docs.get(candidate.source_uri()) {
+                        if let Some(def_doc) = all_docs.get_document(candidate.source_uri()) {
                             let def_byte = Some(td.range.start_byte);
                             if let Some(db) = def_byte {
                                 if let Some(def_node) = def_doc.tree.root_node()
@@ -243,7 +243,7 @@ pub fn hover(
 fn hover_type_name(
     name: &str,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
@@ -287,7 +287,7 @@ fn hover_type_name(
             parts.push(fields_md.join("\n"));
         }
         // Include doc comments from the definition site.
-        if let Some(def_doc) = all_docs.get(candidate.source_uri()) {
+        if let Some(def_doc) = all_docs.get_document(candidate.source_uri()) {
             if let Some(def_node) = def_doc.tree.root_node()
                 .descendant_for_byte_range(td.range.start_byte, td.range.start_byte)
             {
@@ -413,7 +413,7 @@ fn hover_method_call(
     doc: &Document,
     uri: &Uri,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
@@ -430,7 +430,7 @@ fn hover_variable_field(
     doc: &Document,
     uri: &Uri,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
@@ -469,7 +469,7 @@ fn build_field_hover(
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = node_text(name_node, source).to_string();
@@ -496,7 +496,7 @@ fn build_field_chain_hover(
     uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = fields.last()?.clone();
@@ -517,7 +517,7 @@ fn build_field_chain_hover(
     let type_display = format_resolved_type(&resolved.type_fact);
 
     if let (Some(def_uri), Some(def_range)) = (&resolved.def_uri, &resolved.def_range) {
-        if all_docs.contains_key(def_uri) {
+        if all_docs.contains_document(def_uri) {
             let synth_def = crate::types::Definition {
                 name: field_name.clone(),
                 kind: DefKind::GlobalVariable,
@@ -594,10 +594,10 @@ fn format_signature(sig: &crate::type_system::FunctionSignature) -> String {
 
 fn build_hover_for_definition(
     def: &crate::types::Definition,
-    all_docs: &std::collections::HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
     type_info: Option<&str>,
 ) -> Option<Hover> {
-    let doc = all_docs.get(&def.uri)?;
+    let doc = all_docs.get_document(&def.uri)?;
     let source = doc.source();
 
     let def_start_byte = def.range.start_byte;

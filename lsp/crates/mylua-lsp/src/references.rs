@@ -1,7 +1,6 @@
-use std::collections::HashMap;
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
-use crate::document::Document;
+use crate::document::{Document, DocumentLookup};
 use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 use crate::type_inference::infer_node_type;
@@ -49,7 +48,7 @@ pub fn find_references(
     position: Position,
     include_declaration: bool,
     index: &WorkspaceAggregation,
-    all_docs: &HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
@@ -93,7 +92,7 @@ pub fn find_references(
                 collect_global_declarations(name, index, strategy, &mut locations);
             }
             // Scan all files
-            for (doc_uri, file_doc) in all_docs {
+            all_docs.for_each_document(|doc_uri, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
@@ -106,7 +105,7 @@ pub fn find_references(
                         });
                     }
                 }
-            }
+            });
             // Also scan Emmy annotations for references to this name
             // (e.g. if it's also a type name)
             if index.type_shard.contains_key(name.as_str()) {
@@ -122,7 +121,7 @@ pub fn find_references(
                 });
             }
             // Scan all files for the field name
-            for (doc_uri, file_doc) in all_docs {
+            all_docs.for_each_document(|doc_uri, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, field_name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, field_name.len()) else {
@@ -139,7 +138,7 @@ pub fn find_references(
                         });
                     }
                 }
-            }
+            });
         }
         Identity::TypeName { name } => {
             // Declarations from type_shard
@@ -178,7 +177,7 @@ pub fn find_references(
             }
             // Scan all files: both as global identifier references and as
             // Emmy annotation text references
-            for (doc_uri, file_doc) in all_docs {
+            all_docs.for_each_document(|doc_uri, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
@@ -191,7 +190,7 @@ pub fn find_references(
                         });
                     }
                 }
-            }
+            });
             // Emmy annotation text matches (type names in comments)
             collect_emmy_type_references(name, all_docs, &mut locations);
         }
@@ -217,7 +216,7 @@ fn identify_at_cursor(
     uri: &Uri,
     byte_offset: usize,
     index: &WorkspaceAggregation,
-    _all_docs: &HashMap<Uri, Document>,
+    _all_docs: &impl DocumentLookup,
 ) -> Option<Identity> {
     // 1. Check if cursor is on a type name inside an Emmy annotation
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
@@ -614,9 +613,9 @@ fn collect_global_declarations(
 fn range_from_byte_range(
     uri: &Uri,
     byte_range: ByteRange,
-    all_docs: &HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
 ) -> Range {
-    if let Some(doc) = all_docs.get(uri) {
+    if let Some(doc) = all_docs.get_document(uri) {
         let start = doc.line_index().byte_offset_to_position(doc.source(), byte_range.start_byte);
         let end = doc.line_index().byte_offset_to_position(doc.source(), byte_range.end_byte);
         if let (Some(s), Some(e)) = (start, end) {
@@ -679,14 +678,14 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
 /// match against raw line text with ASCII word boundaries.
 fn collect_emmy_type_references(
     type_name: &str,
-    all_docs: &HashMap<Uri, Document>,
+    all_docs: &impl DocumentLookup,
     locations: &mut Vec<Location>,
 ) {
-    for (doc_uri, doc) in all_docs {
+    all_docs.for_each_document(|doc_uri, doc| {
         let source = doc.source();
         let mut cursor = doc.tree.root_node().walk();
         scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations, doc.line_index());
-    }
+    });
 }
 
 fn scan_type_in_comments(
