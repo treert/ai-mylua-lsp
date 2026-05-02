@@ -66,6 +66,15 @@ impl<'a> DocumentStoreView<'a> {
     }
 }
 
+pub(crate) fn find_document<'a>(
+    documents: &'a HashMap<UriId, Document>,
+    uri_interner: &UriInterner,
+    uri: &Uri,
+) -> Option<(UriId, &'a Document)> {
+    let uri_id = uri_interner.get(uri)?;
+    documents.get(&uri_id).map(|doc| (uri_id, doc))
+}
+
 impl DocumentLookup for DocumentStoreView<'_> {
     fn get_document(&self, uri: &Uri) -> Option<&Document> {
         let uri_id = self.uri_interner.get(uri)?;
@@ -78,5 +87,23 @@ impl DocumentLookup for DocumentStoreView<'_> {
                 f(&uri, doc);
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{find_document, Document};
+    use crate::uri_id::{UriId, UriInterner};
+    use std::collections::HashMap;
+    use tower_lsp_server::ls_types::Uri;
+
+    #[test]
+    fn find_document_does_not_intern_unknown_uri() {
+        let interner = UriInterner::new();
+        let documents: HashMap<UriId, Document> = HashMap::new();
+        let uri: Uri = "file:///tmp/missing.lua".parse().unwrap();
+
+        assert!(find_document(&documents, &interner, &uri).is_none());
+        assert!(interner.get(&uri).is_none());
     }
 }
