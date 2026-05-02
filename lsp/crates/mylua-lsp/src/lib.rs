@@ -29,8 +29,7 @@ pub mod table_shape;
 pub mod type_inference;
 pub mod type_system;
 pub mod types;
-#[allow(dead_code)]
-pub(crate) mod uri_id;
+pub mod uri_id;
 pub mod util;
 pub mod summary_cache;
 pub mod workspace_scanner;
@@ -79,6 +78,7 @@ use tower_lsp_server::Client;
 use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
+use uri_id::UriInterner;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
@@ -170,6 +170,9 @@ pub struct Backend {
     /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
     /// spawns and the cold-start `publish_diagnostics_for_open_files`.
     pub(crate) scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    /// Session-local URI interner used while gradually migrating
+    /// hot internal paths from full `Uri` keys to compact `UriId` keys.
+    pub(crate) uri_interner: Arc<UriInterner>,
 }
 
 pub(crate) struct ParsedFile {
@@ -208,6 +211,7 @@ impl Backend {
             open_uris: Arc::new(Mutex::new(HashSet::new())),
             library_uris: Arc::new(Mutex::new(HashSet::new())),
             scheduler: diagnostic_scheduler::DiagnosticScheduler::new(),
+            uri_interner: Arc::new(UriInterner::new()),
         }
     }
 
@@ -371,7 +375,8 @@ impl Backend {
             } else {
                 diagnostic_scheduler::Priority::Cold
             };
-            self.scheduler.schedule(uri.clone(), pri);
+            let uri_id = self.uri_interner.intern(uri.clone());
+            self.scheduler.schedule(uri_id, pri);
 
             // Cascade: signature-fingerprint change → re-diagnose other
             // files. Scope config (Full | OpenOnly) decides the set.
@@ -383,7 +388,8 @@ impl Backend {
                         config::DiagnosticScope::OpenOnly => {
                             for dep_uri in &open {
                                 if *dep_uri != uri {
-                                    self.scheduler.schedule(dep_uri.clone(), diagnostic_scheduler::Priority::Hot);
+                                    let dep_uri_id = self.uri_interner.intern(dep_uri.clone());
+                                    self.scheduler.schedule(dep_uri_id, diagnostic_scheduler::Priority::Hot);
                                 }
                             }
                         }
@@ -398,7 +404,8 @@ impl Backend {
                                 } else {
                                     diagnostic_scheduler::Priority::Cold
                                 };
-                                self.scheduler.schedule(dep_uri, pri);
+                                let dep_uri_id = self.uri_interner.intern(dep_uri);
+                                self.scheduler.schedule(dep_uri_id, pri);
                             }
                         }
                     }

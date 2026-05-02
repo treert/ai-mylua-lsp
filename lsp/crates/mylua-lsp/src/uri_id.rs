@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::HashMap;
 use std::sync::Mutex;
 
@@ -7,7 +5,7 @@ use tower_lsp_server::ls_types::Uri;
 
 #[repr(transparent)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub(crate) struct UriId(i32);
+pub struct UriId(i32);
 
 impl UriId {
     pub(crate) fn new(raw: i32) -> Self {
@@ -15,13 +13,14 @@ impl UriId {
         Self(raw)
     }
 
+    #[cfg(test)]
     pub(crate) fn raw(self) -> i32 {
         self.0
     }
 }
 
 #[derive(Debug)]
-pub(crate) struct UriInterner {
+pub struct UriInterner {
     inner: Mutex<Inner>,
 }
 
@@ -33,12 +32,12 @@ struct Inner {
 }
 
 impl UriInterner {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         Self::with_next_id(1)
     }
 
     #[cfg(test)]
-    pub(crate) fn for_test_next_id(next_id: i32) -> Self {
+    pub fn for_test_next_id(next_id: i32) -> Self {
         Self::with_next_id(next_id)
     }
 
@@ -53,7 +52,7 @@ impl UriInterner {
         }
     }
 
-    pub(crate) fn intern(&self, uri: Uri) -> UriId {
+    pub fn intern(&self, uri: Uri) -> UriId {
         let mut inner = self.inner.lock().unwrap();
         if let Some(id) = inner.by_uri.get(&uri).copied() {
             return id;
@@ -71,7 +70,11 @@ impl UriInterner {
         id
     }
 
-    pub(crate) fn resolve(&self, id: UriId) -> Option<Uri> {
+    pub fn get(&self, uri: &Uri) -> Option<UriId> {
+        self.inner.lock().unwrap().by_uri.get(uri).copied()
+    }
+
+    pub fn resolve(&self, id: UriId) -> Option<Uri> {
         self.inner.lock().unwrap().by_id.get(&id).cloned()
     }
 }

@@ -111,6 +111,7 @@ impl LanguageServer for Backend {
         // start before `initialized` fires / workspace scan completes.
         start_diagnostic_consumer(
             self.scheduler.clone(),
+            self.uri_interner.clone(),
             self.documents.clone(),
             self.index.clone(),
             self.config.clone(),
@@ -251,6 +252,7 @@ impl LanguageServer for Backend {
         let documents = self.documents.clone();
         let open_uris = self.open_uris.clone();
         let scheduler = self.scheduler.clone();
+        let uri_interner = self.uri_interner.clone();
         let index_state = self.index_state.clone();
 
         tokio::spawn(async move {
@@ -264,6 +266,7 @@ impl LanguageServer for Backend {
                 documents,
                 open_uris,
                 scheduler,
+                uri_interner,
                 index_state,
                 started_at,
             )
@@ -314,8 +317,9 @@ impl LanguageServer for Backend {
         };
         if text_matches {
             self.open_uris.lock().unwrap().insert(uri.clone());
+            let uri_id = self.uri_interner.intern(uri.clone());
             self.scheduler
-                .schedule(uri, diagnostic_scheduler::Priority::Hot);
+                .schedule(uri_id, diagnostic_scheduler::Priority::Hot);
             return;
         }
 
@@ -497,7 +501,9 @@ impl LanguageServer for Backend {
                 FileChangeType::DELETED => {
                     self.index.lock().unwrap().remove_file(&change.uri);
                     self.documents.lock().unwrap().remove(&change.uri);
-                    self.scheduler.invalidate(&change.uri);
+                    if let Some(uri_id) = self.uri_interner.get(&change.uri) {
+                        self.scheduler.invalidate(&uri_id);
+                    }
                     self.open_uris.lock().unwrap().remove(&change.uri);
                     self.edit_locks.lock().unwrap().remove(&change.uri);
                     self.semantic_tokens_cache.lock().unwrap().remove(&change.uri);

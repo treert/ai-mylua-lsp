@@ -21,6 +21,7 @@ use crate::document::Document;
 use crate::summary;
 use crate::summary_builder;
 use crate::summary_cache;
+use crate::uri_id::UriInterner;
 use crate::util;
 use crate::workspace_scanner;
 use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
@@ -106,6 +107,7 @@ pub async fn run_workspace_scan(
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
     open_uris: Arc<Mutex<HashSet<Uri>>>,
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    uri_interner: Arc<UriInterner>,
     index_state: Arc<Mutex<IndexState>>,
     started_at: std::time::Instant,
 ) {
@@ -443,9 +445,11 @@ pub async fn run_workspace_scan(
     let all_uris: Vec<Uri> = documents.lock().unwrap().keys().cloned().collect();
     let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
     let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter().partition(|u| open.contains(u));
-    scheduler.seed_bulk(hot, diagnostic_scheduler::Priority::Hot);
+    let hot_ids = hot.into_iter().map(|uri| uri_interner.intern(uri)).collect();
+    scheduler.seed_bulk(hot_ids, diagnostic_scheduler::Priority::Hot);
     if matches!(diag_scope, config::DiagnosticScope::Full) {
-        scheduler.seed_bulk(cold, diagnostic_scheduler::Priority::Cold);
+        let cold_ids = cold.into_iter().map(|uri| uri_interner.intern(uri)).collect();
+        scheduler.seed_bulk(cold_ids, diagnostic_scheduler::Priority::Cold);
     }
 
     client
@@ -473,6 +477,7 @@ pub async fn run_workspace_scan(
 /// the existing queue without loss.
 pub(crate) fn start_diagnostic_consumer(
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    uri_interner: Arc<UriInterner>,
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
@@ -537,6 +542,7 @@ pub(crate) fn start_diagnostic_consumer(
     tokio::spawn(async move {
         loop {
             let s = scheduler.clone();
+            let ui = uri_interner.clone();
             let d = documents.clone();
             let i = index.clone();
             let c = config.clone();
@@ -545,7 +551,7 @@ pub(crate) fn start_diagnostic_consumer(
             let cl = client.clone();
 
             let handle = tokio::spawn(async move {
-                consumer_loop(s, d, i, c, st, lu, cl).await;
+                consumer_loop(s, ui, d, i, c, st, lu, cl).await;
             });
 
             match handle.await {
@@ -579,6 +585,7 @@ pub(crate) fn start_diagnostic_consumer(
 /// duration and never across `.await`.
 async fn consumer_loop(
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
+    uri_interner: Arc<UriInterner>,
     documents: Arc<Mutex<HashMap<Uri, Document>>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
@@ -593,8 +600,11 @@ async fn consumer_loop(
         }
 
         let uri = loop {
-            if let Some(u) = scheduler.pop() {
-                break u;
+            if let Some(uri_id) = scheduler.pop() {
+                let Some(uri) = uri_interner.resolve(uri_id) else {
+                    continue;
+                };
+                break uri;
             }
             scheduler.notified().await;
         };

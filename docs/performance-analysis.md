@@ -14,7 +14,7 @@
 |------|------|
 | 并行冷启动 | 5 阶段流水线，rayon 全量并行 parse，后台化不阻塞 UI |
 | 增量 reparse | `tree.edit` + `parse(new, Some(old))`，未变区域子树复用 |
-| 诊断调度 | Hot/Cold 双队列 + 300ms debounce + per-URI gen 去重 |
+| 诊断调度 | Hot/Cold 双队列 + 300ms debounce + `UriId` key 的 per-file gen 去重 |
 | 级联精细化 | 签名指纹不变不级联；双向反向索引覆盖 require 与类型依赖 |
 | 磁盘缓存 | 三维失效（schema_version / exe_mtime / content_hash） |
 | Fast path | `did_open`/`did_close` 内容未变时跳过 reparse |

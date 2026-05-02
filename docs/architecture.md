@@ -90,7 +90,7 @@ flowchart TB
 ### 3.4 诊断
 
 - **分层策略**：Emmy 路径严格（`error`），Lua 路径保守（高确定性才报）
-- **调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双优先级队列
+- **调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双优先级队列；队列内部使用 session-local `UriId`，在 LSP 发布边界再解析回 `Uri`
 - **配置**：`mylua.diagnostics.scope`（`full` / `openOnly`）控制范围
 
 **模块结构**（`src/diagnostics/`）：

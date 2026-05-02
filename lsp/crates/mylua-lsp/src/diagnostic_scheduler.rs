@@ -7,13 +7,14 @@
 //! 生产者侧 `schedule` 带 300ms debounce（`diag_gen` 代数过滤过期任务）。
 //! 冷启动 `seed_bulk` 绕过 debounce，批量入队后统一 notify 一次。
 //!
-//! 设计细节见 `docs/architecture.md` §3.7 与 `docs/performance-analysis.md` §6。
+//! 设计细节见 `docs/architecture.md` §3.4 与 `docs/performance-analysis.md` §6。
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
-use tower_lsp_server::ls_types::Uri;
+
+use crate::uri_id::UriId;
 
 pub const DIAGNOSTIC_DEBOUNCE_MS: u64 = 300;
 
@@ -24,14 +25,14 @@ pub enum Priority {
 }
 
 struct Inner {
-    hot: VecDeque<Uri>,
-    cold: VecDeque<Uri>,
+    hot: VecDeque<UriId>,
+    cold: VecDeque<UriId>,
     /// 每个当前在队列里的 URI 的优先级；Cold→Hot 升级时更新为 Hot。
-    enqueued: HashMap<Uri, Priority>,
+    enqueued: HashMap<UriId, Priority>,
     /// cold 队列里被升级过的 URI 集合；pop cold 时遇到则跳过。
-    cold_tombstones: HashSet<Uri>,
+    cold_tombstones: HashSet<UriId>,
     /// Per-URI 单调代数；`schedule` 生产者侧 debounce 过滤过期任务用。
-    diag_gen: HashMap<Uri, u64>,
+    diag_gen: HashMap<UriId, u64>,
 }
 
 pub struct DiagnosticScheduler {
@@ -55,28 +56,28 @@ impl DiagnosticScheduler {
 
     /// Internal enqueue shared by `schedule` 的 debounce task 与 `seed_bulk`。
     /// 调用者负责在适当时机 `notify_one`（seed_bulk 批量时仅末尾一次）。
-    fn push_to_queue(inner: &mut Inner, uri: Uri, priority: Priority) {
-        match (inner.enqueued.get(&uri).copied(), priority) {
+    fn push_to_queue(inner: &mut Inner, uri_id: UriId, priority: Priority) {
+        match (inner.enqueued.get(&uri_id).copied(), priority) {
             (Some(Priority::Hot), _) => {}
             (Some(Priority::Cold), Priority::Hot) => {
-                inner.cold_tombstones.insert(uri.clone());
-                inner.hot.push_back(uri.clone());
-                inner.enqueued.insert(uri, Priority::Hot);
+                inner.cold_tombstones.insert(uri_id);
+                inner.hot.push_back(uri_id);
+                inner.enqueued.insert(uri_id, Priority::Hot);
             }
             (Some(Priority::Cold), Priority::Cold) => {}
             (None, Priority::Hot) => {
-                inner.hot.push_back(uri.clone());
-                inner.enqueued.insert(uri, Priority::Hot);
+                inner.hot.push_back(uri_id);
+                inner.enqueued.insert(uri_id, Priority::Hot);
             }
             (None, Priority::Cold) => {
-                inner.cold.push_back(uri.clone());
-                inner.enqueued.insert(uri, Priority::Cold);
+                inner.cold.push_back(uri_id);
+                inner.enqueued.insert(uri_id, Priority::Cold);
             }
         }
     }
 
     /// Pop 下一个待诊断的 URI。Hot 严格优先于 Cold；cold tombstone 会被跳过。
-    pub fn pop(&self) -> Option<Uri> {
+    pub fn pop(&self) -> Option<UriId> {
         let mut inner = self.inner.lock().unwrap();
         if let Some(u) = inner.hot.pop_front() {
             inner.enqueued.remove(&u);
@@ -100,10 +101,10 @@ impl DiagnosticScheduler {
     /// 调度一个 URI 的 semantic 诊断计算。经 300ms debounce 窗口后入队。
     /// 连续多次 schedule 同一 URI → 所有 debounce task 里只有最后一个
     /// 真正 push（gen 代数过滤）；消费者只 compute 一次。
-    pub fn schedule(self: &Arc<Self>, uri: Uri, priority: Priority) {
+    pub fn schedule(self: &Arc<Self>, uri_id: UriId, priority: Priority) {
         let gen = {
             let mut inner = self.inner.lock().unwrap();
-            let entry = inner.diag_gen.entry(uri.clone()).or_insert(0);
+            let entry = inner.diag_gen.entry(uri_id).or_insert(0);
             *entry += 1;
             *entry
         };
@@ -117,25 +118,25 @@ impl DiagnosticScheduler {
             // 原子合并更优雅）。notify_one 放在锁释放之后。
             {
                 let mut inner = scheduler.inner.lock().unwrap();
-                let latest = inner.diag_gen.get(&uri).copied().unwrap_or(0);
+                let latest = inner.diag_gen.get(&uri_id).copied().unwrap_or(0);
                 if latest != gen {
                     return;
                 }
-                Self::push_to_queue(&mut inner, uri, priority);
+                Self::push_to_queue(&mut inner, uri_id, priority);
             }
             scheduler.notify.notify_one();
         });
     }
 
     /// 批量入队（冷启动专用）。绕过 debounce，末尾统一 notify 一次。
-    pub fn seed_bulk(&self, uris: Vec<Uri>, priority: Priority) {
-        if uris.is_empty() {
+    pub fn seed_bulk(&self, uri_ids: Vec<UriId>, priority: Priority) {
+        if uri_ids.is_empty() {
             return;
         }
         {
             let mut inner = self.inner.lock().unwrap();
-            for uri in uris {
-                Self::push_to_queue(&mut inner, uri, priority);
+            for uri_id in uri_ids {
+                Self::push_to_queue(&mut inner, uri_id, priority);
             }
         }
         self.notify.notify_one();
@@ -157,11 +158,11 @@ impl DiagnosticScheduler {
     /// 文件已 DELETED，consumer `documents.get(&uri)` 返回 None 会跳过；
     /// 若同 URI 之后再被 CREATED 并 `schedule(Cold)`，最多一次冗余
     /// compute（无副作用，publish 走一致性检查兜底）。
-    pub fn invalidate(&self, uri: &Uri) {
+    pub fn invalidate(&self, uri_id: &UriId) {
         let mut inner = self.inner.lock().unwrap();
-        inner.enqueued.remove(uri);
-        inner.cold_tombstones.remove(uri);
-        inner.diag_gen.remove(uri);
+        inner.enqueued.remove(uri_id);
+        inner.cold_tombstones.remove(uri_id);
+        inner.diag_gen.remove(uri_id);
     }
 }
 
@@ -169,8 +170,8 @@ impl DiagnosticScheduler {
 mod tests {
     use super::*;
 
-    fn uri(s: &str) -> Uri {
-        format!("file:///{}", s).parse().unwrap()
+    fn id(raw: i32) -> UriId {
+        UriId::new(raw)
     }
 
     #[test]
@@ -178,14 +179,14 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("b"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("c"), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(2), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(3), Priority::Hot);
         }
 
-        assert_eq!(s.pop(), Some(uri("c")));
-        assert_eq!(s.pop(), Some(uri("a")));
-        assert_eq!(s.pop(), Some(uri("b")));
+        assert_eq!(s.pop(), Some(id(3)));
+        assert_eq!(s.pop(), Some(id(1)));
+        assert_eq!(s.pop(), Some(id(2)));
         assert_eq!(s.pop(), None);
     }
 
@@ -194,11 +195,11 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Hot);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Hot);
         }
 
-        assert_eq!(s.pop(), Some(uri("a")));
+        assert_eq!(s.pop(), Some(id(1)));
         assert_eq!(s.pop(), None);
     }
 
@@ -207,16 +208,16 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("b"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("c"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("b"), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(2), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(3), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(2), Priority::Hot);
         }
 
-        assert_eq!(s.pop(), Some(uri("b"))); // Hot 先
-        assert_eq!(s.pop(), Some(uri("a"))); // cold[0]
+        assert_eq!(s.pop(), Some(id(2))); // Hot 先
+        assert_eq!(s.pop(), Some(id(1))); // cold[0]
         // b 在 cold 的残影被 tombstone 跳过
-        assert_eq!(s.pop(), Some(uri("c"))); // cold[2]
+        assert_eq!(s.pop(), Some(id(3))); // cold[2]
         assert_eq!(s.pop(), None);
     }
 
@@ -225,11 +226,11 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Hot);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Cold); // 试图降级
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Cold); // 试图降级
         }
 
-        assert_eq!(s.pop(), Some(uri("a")));
+        assert_eq!(s.pop(), Some(id(1)));
         // 降级不生效，cold 里不应有残留
         assert_eq!(s.pop(), None);
     }
@@ -238,17 +239,17 @@ mod tests {
     async fn schedule_debounces_300ms_with_gen_collapse() {
         let s = DiagnosticScheduler::new();
 
-        s.schedule(uri("a"), Priority::Hot);
+        s.schedule(id(1), Priority::Hot);
         tokio::time::sleep(Duration::from_millis(50)).await;
-        s.schedule(uri("a"), Priority::Hot);
+        s.schedule(id(1), Priority::Hot);
         tokio::time::sleep(Duration::from_millis(50)).await;
-        s.schedule(uri("a"), Priority::Hot);
+        s.schedule(id(1), Priority::Hot);
 
         assert_eq!(s.pop(), None);
 
         tokio::time::sleep(Duration::from_millis(400)).await;
 
-        assert_eq!(s.pop(), Some(uri("a")));
+        assert_eq!(s.pop(), Some(id(1)));
         assert_eq!(s.pop(), None);
     }
 
@@ -268,26 +269,26 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        s.schedule(uri("a"), Priority::Hot);
+        s.schedule(id(1), Priority::Hot);
 
         let got = tokio::time::timeout(Duration::from_millis(500), handle)
             .await
             .expect("consumer should wake up within 500ms")
             .expect("task finished");
-        assert_eq!(got, uri("a"));
+        assert_eq!(got, id(1));
     }
 
     #[test]
     fn seed_bulk_bypasses_debounce_immediately_pops() {
         let s = DiagnosticScheduler::new();
         s.seed_bulk(
-            vec![uri("a"), uri("b"), uri("c")],
+            vec![id(1), id(2), id(3)],
             Priority::Cold,
         );
 
-        assert_eq!(s.pop(), Some(uri("a")));
-        assert_eq!(s.pop(), Some(uri("b")));
-        assert_eq!(s.pop(), Some(uri("c")));
+        assert_eq!(s.pop(), Some(id(1)));
+        assert_eq!(s.pop(), Some(id(2)));
+        assert_eq!(s.pop(), Some(id(3)));
         assert_eq!(s.pop(), None);
     }
 
@@ -301,11 +302,11 @@ mod tests {
     #[test]
     fn seed_bulk_hot_upgrades_cold_via_tombstone() {
         let s = DiagnosticScheduler::new();
-        s.seed_bulk(vec![uri("a"), uri("b")], Priority::Cold);
-        s.seed_bulk(vec![uri("a")], Priority::Hot);
+        s.seed_bulk(vec![id(1), id(2)], Priority::Cold);
+        s.seed_bulk(vec![id(1)], Priority::Hot);
 
-        assert_eq!(s.pop(), Some(uri("a"))); // Hot 优先
-        assert_eq!(s.pop(), Some(uri("b"))); // cold 残余
+        assert_eq!(s.pop(), Some(id(1))); // Hot 优先
+        assert_eq!(s.pop(), Some(id(2))); // cold 残余
         assert_eq!(s.pop(), None); // uri a 的 cold tombstone 被跳过
     }
 
@@ -317,14 +318,14 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Cold);
-            DiagnosticScheduler::push_to_queue(&mut inner, uri("a"), Priority::Hot);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Cold);
+            DiagnosticScheduler::push_to_queue(&mut inner, id(1), Priority::Hot);
         }
-        assert_eq!(s.pop(), Some(uri("a"))); // Hot 被取走
+        assert_eq!(s.pop(), Some(id(1))); // Hot 被取走
         // 此时 cold 还有 stale(a)，tomb={a}
-        s.invalidate(&uri("a"));
+        s.invalidate(&id(1));
         // Doc-spec: stale 残影因 tomb 被清而能被 pop 出来一次
-        assert_eq!(s.pop(), Some(uri("a")));
+        assert_eq!(s.pop(), Some(id(1)));
         assert_eq!(s.pop(), None);
     }
 
@@ -333,16 +334,16 @@ mod tests {
         let s = DiagnosticScheduler::new();
         {
             let mut inner = s.inner.lock().unwrap();
-            inner.diag_gen.insert(uri("a"), 5);
-            inner.cold_tombstones.insert(uri("a"));
-            inner.enqueued.insert(uri("a"), Priority::Hot);
+            inner.diag_gen.insert(id(1), 5);
+            inner.cold_tombstones.insert(id(1));
+            inner.enqueued.insert(id(1), Priority::Hot);
         }
 
-        s.invalidate(&uri("a"));
+        s.invalidate(&id(1));
 
         let inner = s.inner.lock().unwrap();
-        assert!(!inner.diag_gen.contains_key(&uri("a")));
-        assert!(!inner.cold_tombstones.contains(&uri("a")));
-        assert!(!inner.enqueued.contains_key(&uri("a")));
+        assert!(!inner.diag_gen.contains_key(&id(1)));
+        assert!(!inner.cold_tombstones.contains(&id(1)));
+        assert!(!inner.enqueued.contains_key(&id(1)));
     }
 }
