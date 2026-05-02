@@ -463,13 +463,20 @@ pub async fn run_workspace_scan(
         .await;
 
     if let Some(cache) = &cache {
-        let summaries = index.lock().unwrap().summaries.clone();
+        let summaries: Vec<summary::DocumentSummary> = index
+            .lock()
+            .unwrap()
+            .summaries
+            .values()
+            .cloned()
+            .collect();
+        let summary_count = summaries.len();
         tokio::task::spawn_blocking({
             let cache_dir = cache.cache_dir().to_path_buf();
             move || {
                 let c = summary_cache::SummaryCache::new_from_dir(cache_dir);
-                c.save_all(&summaries);
-                lsp_log!("[mylua-lsp] saved {} summaries to cache", summaries.len());
+                c.save_all(summaries);
+                lsp_log!("[mylua-lsp] saved {} summaries to cache", summary_count);
             }
         });
     }

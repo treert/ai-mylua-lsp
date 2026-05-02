@@ -110,7 +110,10 @@ impl SummaryCache {
         result
     }
 
-    pub fn save_all(&self, summaries: &HashMap<tower_lsp_server::ls_types::Uri, DocumentSummary>) {
+    pub fn save_all<I>(&self, summaries: I)
+    where
+        I: IntoIterator<Item = DocumentSummary>,
+    {
         let entries_dir = self.cache_dir.join("entries");
         if let Err(e) = std::fs::create_dir_all(&entries_dir) {
             crate::lsp_log!("[mylua-lsp] cache: failed to create dir {:?}: {}", entries_dir, e);
@@ -152,12 +155,12 @@ impl SummaryCache {
         }
 
         let mut write_errors = 0u32;
-        for (uri, summary) in summaries {
+        for summary in summaries {
             let entry = CacheEntry {
                 content_hash: summary.content_hash,
-                summary: summary.clone(),
+                summary,
             };
-            let filename = uri_to_cache_filename(&uri.to_string());
+            let filename = uri_to_cache_filename(&entry.summary.uri.to_string());
             let path = entries_dir.join(format!("{}.json", filename));
             match serde_json::to_vec(&entry) {
                 Ok(data) => {
@@ -298,7 +301,7 @@ mod tests {
         let root = TempRoot::new("gitignore-default");
         let cache = SummaryCache::new(root.path());
 
-        cache.save_all(&HashMap::new());
+        cache.save_all(Vec::<DocumentSummary>::new());
 
         let gitignore = root
             .path()
@@ -328,7 +331,7 @@ mod tests {
         std::fs::write(&gitignore, custom).unwrap();
 
         let cache = SummaryCache::new(root.path());
-        cache.save_all(&HashMap::new());
+        cache.save_all(Vec::<DocumentSummary>::new());
 
         let content = std::fs::read_to_string(&gitignore).expect("gitignore exists");
         assert_eq!(
