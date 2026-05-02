@@ -157,16 +157,6 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
 pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     let mut hasher = DefaultHasher::new();
 
-    // Hash require bindings (affect cross-file resolution)
-    let mut requires: Vec<_> = ctx.require_bindings.iter()
-        .map(|r| (&r.local_name, &r.module_path))
-        .collect();
-    requires.sort();
-    for (name, path) in &requires {
-        name.hash(&mut hasher);
-        path.hash(&mut hasher);
-    }
-
     // Hash global contributions including their type facts
     let mut globals: Vec<_> = ctx.global_contributions.iter().collect();
     globals.sort_by(|a, b| {
