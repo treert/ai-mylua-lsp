@@ -130,7 +130,7 @@ impl Notification for IndexStatusNotification {
 pub struct Backend {
     pub(crate) client: Client,
     pub(crate) parser: Mutex<tree_sitter::Parser>,
-    pub(crate) documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    pub(crate) documents: Arc<Mutex<HashMap<UriId, Document>>>,
     pub(crate) index: Arc<Mutex<WorkspaceAggregation>>,
     pub(crate) workspace_roots: Mutex<Vec<PathBuf>>,
     pub(crate) config: Arc<Mutex<LspConfig>>,
@@ -287,6 +287,10 @@ impl Backend {
             .clone()
     }
 
+    pub(crate) fn document_id(&self, uri: &Uri) -> UriId {
+        self.uri_interner.intern(uri.clone())
+    }
+
     pub(crate) fn parse_and_store(&self, uri: Uri, text: String) {
         self.parse_and_store_with_old_tree(uri, text, None);
     }
@@ -326,8 +330,9 @@ impl Backend {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
                     let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
+                    let uri_id = self.document_id(&uri);
                     self.documents.lock().unwrap().insert(
-                        uri,
+                        uri_id,
                         Document { lua_source, tree: old, scope_tree },
                     );
                 }
@@ -358,10 +363,10 @@ impl Backend {
                 old_fp.is_some_and(|old| old != new_fp)
             };
 
-            self.documents.lock().unwrap().insert(
-                uri.clone(),
-                Document { lua_source, tree, scope_tree },
-            );
+            self.documents
+                .lock()
+                .unwrap()
+                .insert(uri_id, Document { lua_source, tree, scope_tree });
 
             // All diagnostics (both syntax and semantic) flow through
             // the unified scheduler → consumer_loop, which recomputes
@@ -398,7 +403,12 @@ impl Backend {
                             }
                         }
                         config::DiagnosticScope::Full => {
-                            let all_uris: Vec<Uri> = self.documents.lock().unwrap().keys().cloned().collect();
+                            let all_uris: Vec<Uri> = self.documents
+                                .lock()
+                                .unwrap()
+                                .keys()
+                                .filter_map(|id| self.uri_interner.resolve(*id))
+                                .collect();
                             for dep_uri in all_uris {
                                 if dep_uri == uri {
                                     continue;
@@ -451,7 +461,7 @@ impl Backend {
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri, Document { lua_source, tree, scope_tree });
+                .insert(uri_id, Document { lua_source, tree, scope_tree });
         }
     }
 
@@ -506,7 +516,7 @@ impl Backend {
         }
         let diags = {
             let docs = self.documents.lock().unwrap();
-            let Some(doc) = docs.get(uri) else {
+            let Some(doc) = docs.get(&uri_id) else {
                 return;
             };
             let syntax = diagnostics::collect_diagnostics(

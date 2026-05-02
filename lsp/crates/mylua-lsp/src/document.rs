@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use crate::scope::ScopeTree;
+use crate::uri_id::{UriId, UriInterner};
 use crate::util::{LineIndex, LuaSource};
 use tower_lsp_server::ls_types::Uri;
 
@@ -50,6 +51,32 @@ impl DocumentLookup for HashMap<Uri, Document> {
     fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
         for (uri, doc) in self {
             f(uri, doc);
+        }
+    }
+}
+
+pub struct DocumentStoreView<'a> {
+    documents: &'a HashMap<UriId, Document>,
+    uri_interner: &'a UriInterner,
+}
+
+impl<'a> DocumentStoreView<'a> {
+    pub fn new(documents: &'a HashMap<UriId, Document>, uri_interner: &'a UriInterner) -> Self {
+        Self { documents, uri_interner }
+    }
+}
+
+impl DocumentLookup for DocumentStoreView<'_> {
+    fn get_document(&self, uri: &Uri) -> Option<&Document> {
+        let uri_id = self.uri_interner.get(uri)?;
+        self.documents.get(&uri_id)
+    }
+
+    fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
+        for (uri_id, doc) in self.documents {
+            if let Some(uri) = self.uri_interner.resolve(*uri_id) {
+                f(&uri, doc);
+            }
         }
     }
 }

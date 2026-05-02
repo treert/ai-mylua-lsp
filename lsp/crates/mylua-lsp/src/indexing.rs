@@ -104,7 +104,7 @@ pub async fn run_workspace_scan(
     library_file_uris: HashSet<Uri>,
     config: Arc<Mutex<LspConfig>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
-    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    documents: Arc<Mutex<HashMap<UriId, Document>>>,
     open_uris: Arc<Mutex<HashSet<UriId>>>,
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
     uri_interner: Arc<UriInterner>,
@@ -391,7 +391,7 @@ pub async fn run_workspace_scan(
             }
             summaries_to_merge.push(pf.summary);
             docs.insert(
-                pf.uri,
+                uri_id,
                 Document {
                     lua_source: pf.lua_source,
                     tree: pf.tree,
@@ -446,7 +446,12 @@ pub async fn run_workspace_scan(
     // Seed the diagnostics scheduler now that `IndexState::Ready` is
     // set. `documents` is fully populated at this point.
     let open: HashSet<UriId> = open_uris.lock().unwrap().clone();
-    let all_uris: Vec<Uri> = documents.lock().unwrap().keys().cloned().collect();
+    let all_uris: Vec<Uri> = documents
+        .lock()
+        .unwrap()
+        .keys()
+        .filter_map(|id| uri_interner.resolve(*id))
+        .collect();
     let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
     let (hot, cold): (Vec<_>, Vec<_>) = all_uris.into_iter()
         .map(|uri| uri_interner.intern(uri))
@@ -490,7 +495,7 @@ pub async fn run_workspace_scan(
 pub(crate) fn start_diagnostic_consumer(
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
     uri_interner: Arc<UriInterner>,
-    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    documents: Arc<Mutex<HashMap<UriId, Document>>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
@@ -598,7 +603,7 @@ pub(crate) fn start_diagnostic_consumer(
 async fn consumer_loop(
     scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
     uri_interner: Arc<UriInterner>,
-    documents: Arc<Mutex<HashMap<Uri, Document>>>,
+    documents: Arc<Mutex<HashMap<UriId, Document>>>,
     index: Arc<Mutex<WorkspaceAggregation>>,
     config: Arc<Mutex<LspConfig>>,
     index_state: Arc<Mutex<IndexState>>,
@@ -635,7 +640,7 @@ async fn consumer_loop(
 
         let snapshot = {
             let docs = documents.lock().unwrap();
-            let Some(doc) = docs.get(&uri) else {
+            let Some(doc) = docs.get(&uri_id) else {
                 continue;
             };
             doc.text().to_string()
@@ -643,7 +648,7 @@ async fn consumer_loop(
 
         let diags = {
             let docs = documents.lock().unwrap();
-            let Some(doc) = docs.get(&uri) else {
+            let Some(doc) = docs.get(&uri_id) else {
                 continue;
             };
             let mut syntax =
@@ -673,7 +678,7 @@ async fn consumer_loop(
         // The newer edit already re-scheduled its own compute.
         let stale = {
             let docs = documents.lock().unwrap();
-            match docs.get(&uri) {
+            match docs.get(&uri_id) {
                 Some(doc) => doc.text() != snapshot,
                 None => true,
             }

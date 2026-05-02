@@ -41,7 +41,7 @@
 
 ## 3. 设计权衡：全内存驻留
 
-全工作区 `text + tree + scope_tree` 常驻 `documents`，不做 LRU 驱逐。
+全工作区 `text + tree + scope_tree` 常驻 `documents`，不做 LRU 驱逐。`documents` 内部使用 session-local `UriId` 作为 key，避免在热路径 HashMap 中反复哈希完整 URI。
 
 **5 万文件内存估算**（平均 5KB 源码）：
 
