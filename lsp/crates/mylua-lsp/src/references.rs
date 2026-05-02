@@ -147,7 +147,7 @@ pub fn find_references(
                 if let Some(candidates) = index.type_shard.get(name.as_str()) {
                     for candidate in candidates {
                         locations.push(Location {
-                            uri: candidate.source_uri.clone(),
+                            uri: candidate.source_uri().clone(),
                             range: candidate.range.into(),
                         });
                     }
@@ -160,7 +160,7 @@ pub fn find_references(
                         ReferencesStrategy::Best => {
                             if let Some(best) = candidates.first() {
                                 locations.push(Location {
-                                    uri: best.source_uri.clone(),
+                                    uri: best.source_uri().clone(),
                                     range: best.selection_range.into(),
                                 });
                             }
@@ -168,7 +168,7 @@ pub fn find_references(
                         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
                             for c in candidates {
                                 locations.push(Location {
-                                    uri: c.source_uri.clone(),
+                                    uri: c.source_uri().clone(),
                                     range: c.selection_range.into(),
                                 });
                             }
@@ -575,7 +575,7 @@ fn collect_global_declarations(
             if let Some(candidates) = index.global_shard.get(name) {
                 if let Some(best) = candidates.first() {
                     locations.push(Location {
-                        uri: best.source_uri.clone(),
+                        uri: best.source_uri().clone(),
                         range: best.selection_range.into(),
                     });
                 }
@@ -583,7 +583,7 @@ fn collect_global_declarations(
             if let Some(candidates) = index.type_shard.get(name) {
                 if let Some(best) = candidates.first() {
                     locations.push(Location {
-                        uri: best.source_uri.clone(),
+                        uri: best.source_uri().clone(),
                         range: best.range.into(),
                     });
                 }
@@ -593,7 +593,7 @@ fn collect_global_declarations(
             if let Some(candidates) = index.global_shard.get(name) {
                 for candidate in candidates {
                     locations.push(Location {
-                        uri: candidate.source_uri.clone(),
+                        uri: candidate.source_uri().clone(),
                         range: candidate.selection_range.into(),
                     });
                 }
@@ -601,7 +601,7 @@ fn collect_global_declarations(
             if let Some(candidates) = index.type_shard.get(name) {
                 for candidate in candidates {
                     locations.push(Location {
-                        uri: candidate.source_uri.clone(),
+                        uri: candidate.source_uri().clone(),
                         range: candidate.range.into(),
                     });
                 }

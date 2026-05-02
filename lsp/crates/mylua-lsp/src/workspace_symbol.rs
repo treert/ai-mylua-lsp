@@ -55,7 +55,7 @@ pub fn search_workspace_symbols(
                 let key = (
                     display_name.clone(),
                     container.clone(),
-                    candidate.source_uri.to_string(),
+                    candidate.source_uri().to_string(),
                 );
                 if !member_keys.insert(key) {
                     continue;
@@ -68,7 +68,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate.source_uri.clone(),
+                    uri: candidate.source_uri().clone(),
                     range: candidate.selection_range.into(),
                 },
                 container_name: container.clone(),
@@ -93,7 +93,7 @@ pub fn search_workspace_symbols(
             // Look up via the owning summary because `TypeShardEntry`
             // only carries the coarse anchor range.
             let location_range = index
-                .summary(&candidate.source_uri)
+                .summary(candidate.source_uri())
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
@@ -108,7 +108,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate.source_uri.clone(),
+                    uri: candidate.source_uri().clone(),
                     range: location_range.into(),
                 },
                 container_name: None,
@@ -194,7 +194,7 @@ fn candidate_symbol_kind(
     };
 
     if let Some(id) = func_id {
-        if let Some(summary) = index.summary(&candidate.source_uri) {
+        if let Some(summary) = index.summary(candidate.source_uri()) {
             if let Some(func) = summary.function_summaries.get(&id) {
                 // FunctionSummary.name preserves the original colon form
                 // (e.g. "Foo:myMethod"), while GlobalContribution.name is

@@ -130,7 +130,7 @@ pub fn hover(
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
     if let Some(candidates) = index.type_shard.get(ident_text) {
         if let Some(candidate) = candidates.first() {
-            if let Some(summary) = index.summary(&candidate.source_uri) {
+            if let Some(summary) = index.summary(candidate.source_uri()) {
                 for td in &summary.type_definitions {
                     if td.name == ident_text {
                         let mut parts = Vec::new();
@@ -166,7 +166,7 @@ pub fn hover(
                             parts.push(fields_md.join("\n"));
                         }
                         // Include doc comments from the definition site
-                        if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
+                        if let Some(def_doc) = all_docs.get(candidate.source_uri()) {
                             let def_byte = Some(td.range.start_byte);
                             if let Some(db) = def_byte {
                                 if let Some(def_node) = def_doc.tree.root_node()
@@ -210,8 +210,8 @@ pub fn hover(
             kind: def_kind,
             range: candidate.range,
             selection_range: candidate.selection_range,
-            uri: candidate.source_uri.clone(),
-        }, candidates.len(), candidate.source_uri.clone()))
+            uri: candidate.source_uri().clone(),
+        }, candidates.len(), candidate.source_uri().clone()))
     });
     if let Some((synth_def, entry_count, source_uri)) = global_info {
         let resolved = resolver::resolve_type(
@@ -247,7 +247,7 @@ fn hover_type_name(
 ) -> Option<Hover> {
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
-    let summary = index.summary(&candidate.source_uri)?;
+    let summary = index.summary(candidate.source_uri())?;
 
     for td in &summary.type_definitions {
         if td.name != name {
@@ -287,7 +287,7 @@ fn hover_type_name(
             parts.push(fields_md.join("\n"));
         }
         // Include doc comments from the definition site.
-        if let Some(def_doc) = all_docs.get(&candidate.source_uri) {
+        if let Some(def_doc) = all_docs.get(candidate.source_uri()) {
             if let Some(def_node) = def_doc.tree.root_node()
                 .descendant_for_byte_range(td.range.start_byte, td.range.start_byte)
             {

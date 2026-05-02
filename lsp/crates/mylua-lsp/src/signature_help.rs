@@ -150,7 +150,7 @@ pub(crate) fn resolve_call_signatures(
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
     for c in &candidates {
-        if let Some(target_summary) = index.summary(&c.source_uri) {
+        if let Some(target_summary) = index.summary(c.source_uri()) {
             if let Some(fs) = target_summary.get_function_by_name(&name) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
@@ -160,7 +160,7 @@ pub(crate) fn resolve_call_signatures(
             return Some((vec![sig.clone()], false, name));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
-            if let Some(summary) = index.summary(&c.source_uri) {
+            if let Some(summary) = index.summary(c.source_uri()) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     let sigs = primary_plus_overloads(fs);
                     return Some((sigs, false, name));
@@ -309,20 +309,21 @@ fn lookup_overloads_via_global_shard(
         .get(&qualified)
         .and_then(|v| v.first().cloned())
     {
-        if let Some(summary) = index.summary(&candidate.source_uri) {
+        let source_uri = candidate.source_uri().clone();
+        if let Some(summary) = index.summary(&source_uri) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
             if let Some(fs) = summary.get_function_by_name(&candidate.name) {
-                return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
+                return Some((source_uri, primary_plus_overloads(fs)));
             }
         }
         if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
-            return Some((candidate.source_uri.clone(), vec![sig]));
+            return Some((source_uri, vec![sig]));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = candidate.type_fact {
-            if let Some(summary) = index.summary(&candidate.source_uri) {
+            if let Some(summary) = index.summary(&source_uri) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
-                    return Some((candidate.source_uri.clone(), primary_plus_overloads(fs)));
+                    return Some((source_uri, primary_plus_overloads(fs)));
                 }
             }
         }

@@ -102,7 +102,7 @@ pub fn prepare_call_hierarchy(
             return vec![build_item(
                 name,
                 kind,
-                c.source_uri.clone(),
+                c.source_uri().clone(),
                 r,
                 sr,
             )];
@@ -375,13 +375,13 @@ fn resolve_outgoing_target(
         if let Some(c) = candidates.first() {
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
-            if let Some(summary) = index.summary(&c.source_uri) {
+            if let Some(summary) = index.summary(c.source_uri()) {
                 if let Some(fs) = summary.get_function_by_name(name) {
                     let lsp_range: Range = fs.range.into();
                     return build_item(
                         name.to_string(),
                         SymbolKind::FUNCTION,
-                        c.source_uri.clone(),
+                        c.source_uri().clone(),
                         lsp_range,
                         lsp_range,
                     );
@@ -397,7 +397,7 @@ fn resolve_outgoing_target(
             return build_item(
                 name.to_string(),
                 kind,
-                c.source_uri.clone(),
+                c.source_uri().clone(),
                 r,
                 sr,
             );

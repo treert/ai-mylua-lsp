@@ -48,6 +48,12 @@ pub struct GlobalCandidate {
     pub source_uri: Uri,
 }
 
+impl GlobalCandidate {
+    pub fn source_uri(&self) -> &Uri {
+        &self.source_uri
+    }
+}
+
 // ---------------------------------------------------------------------------
 // GlobalShard — tree-structured global name index
 // ---------------------------------------------------------------------------
@@ -329,6 +335,12 @@ pub struct TypeCandidate {
     pub kind: crate::summary::TypeDefinitionKind,
     pub source_uri: Uri,
     pub range: ByteRange,
+}
+
+impl TypeCandidate {
+    pub fn source_uri(&self) -> &Uri {
+        &self.source_uri
+    }
 }
 
 /// Priority key for sorting candidates (smaller = higher priority):

@@ -78,7 +78,7 @@ pub fn goto_definition(
     if let Some(candidates) = index.type_shard.get(name) {
         if let Some(candidate) = candidates.first() {
             return Some(GotoDefinitionResponse::Scalar(Location {
-                uri: candidate.source_uri.clone(),
+                uri: candidate.source_uri().clone(),
                 range: candidate.range.into(),
             }));
         }
@@ -88,7 +88,7 @@ pub fn goto_definition(
         let locations: Vec<Location> = candidates
             .iter()
             .map(|c| Location {
-                uri: c.source_uri.clone(),
+                uri: c.source_uri().clone(),
                 range: c.selection_range.into(),
             })
             .collect();
@@ -219,7 +219,7 @@ fn type_definition_for_name(
     let locations: Vec<Location> = candidates
         .iter()
         .map(|c| Location {
-            uri: c.source_uri.clone(),
+            uri: c.source_uri().clone(),
             range: c.range.into(),
         })
         .collect();
