@@ -3,6 +3,7 @@ use tower_lsp_server::ls_types::Uri;
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
+use crate::uri_id::UriId;
 use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.
@@ -19,10 +20,16 @@ pub struct WorkspaceAggregation {
     /// Emmy type name → candidate definitions.
     pub type_shard: HashMap<String, Vec<TypeCandidate>>,
 
-    /// Module index: last_segment → Vec<(full_module_name, Uri)>.
+    /// Module index: last_segment → Vec<(full_module_name, UriId)>.
     /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
     /// followed by longest-suffix matching among candidates.
-    pub module_index: HashMap<String, Vec<(String, Uri)>>,
+    module_index: HashMap<String, Vec<(String, UriId)>>,
+    /// Boundary lookup for `module_index` entries. Keeps existing
+    /// `resolve_module_to_uri` callers on LSP-facing `Uri` until the
+    /// rest of the aggregation layer migrates to `UriId`.
+    module_uris: HashMap<UriId, Uri>,
+    module_uri_ids: HashMap<Uri, UriId>,
+    next_module_uri_id: i32,
     /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
     /// The longest matching prefix alias is chosen.
     pub require_aliases: HashMap<String, String>,
@@ -321,6 +328,9 @@ impl WorkspaceAggregation {
             global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
             module_index: HashMap::new(),
+            module_uris: HashMap::new(),
+            module_uri_ids: HashMap::new(),
+            next_module_uri_id: 1,
             require_aliases: HashMap::new(),
         }
     }
@@ -440,10 +450,19 @@ impl WorkspaceAggregation {
     pub fn remove_file(&mut self, uri: &Uri) {
         self.remove_contributions(uri);
         // Remove this URI from the module_index.
+        let removed_ids: HashSet<UriId> = self.module_uris
+            .iter()
+            .filter_map(|(id, u)| if u == uri { Some(*id) } else { None })
+            .collect();
         self.module_index.retain(|_, entries| {
-            entries.retain(|(_, u)| u != uri);
+            entries.retain(|(_, id)| !removed_ids.contains(id));
             !entries.is_empty()
         });
+        for id in removed_ids {
+            if let Some(removed_uri) = self.module_uris.remove(&id) {
+                self.module_uri_ids.remove(&removed_uri);
+            }
+        }
         self.summaries.remove(uri);
     }
 
@@ -453,11 +472,25 @@ impl WorkspaceAggregation {
     pub fn set_require_mapping(&mut self, module_name: String, uri: Uri) {
         use crate::workspace_scanner::module_last_segment;
         let last_seg = module_last_segment(&module_name).to_string();
+        let uri_id = self.module_uri_id(&uri);
         let entries = self.module_index.entry(last_seg).or_default();
         // Avoid duplicates: if this exact (module_name, uri) pair exists, skip.
-        if !entries.iter().any(|(m, u)| m == &module_name && u == &uri) {
-            entries.push((module_name, uri));
+        if !entries.iter().any(|(m, id)| m == &module_name && *id == uri_id) {
+            entries.push((module_name, uri_id));
         }
+    }
+
+    fn module_uri_id(&mut self, uri: &Uri) -> UriId {
+        if let Some(id) = self.module_uri_ids.get(uri).copied() {
+            return id;
+        }
+
+        let raw = self.next_module_uri_id;
+        let id = UriId::new(raw);
+        self.next_module_uri_id = raw.checked_add(1).expect("module UriId exhausted");
+        self.module_uri_ids.insert(uri.clone(), id);
+        self.module_uris.insert(id, uri.clone());
+        id
     }
 
     /// Get all registered module names (for completion).
@@ -578,11 +611,11 @@ impl WorkspaceAggregation {
         let candidates = self.module_index.get(query_last)?;
         let dot_query = format!(".{}", module_path);
 
-        for (candidate_name, candidate_uri) in candidates {
+        for (candidate_name, candidate_uri_id) in candidates {
             if candidate_name == module_path
                 || candidate_name.ends_with(dot_query.as_str())
             {
-                return Some(candidate_uri.clone());
+                return self.module_uris.get(candidate_uri_id).cloned();
             }
         }
 
