@@ -130,7 +130,7 @@
 | `diagnostics.luaFieldError` | severity | `"warning"` | Lua 高确定性字段错误 |
 | `diagnostics.luaFieldWarning` | severity | `"warning"` | Lua 保守字段警告 |
 | `diagnostics.duplicateTableKey` | severity | `"warning"` | 重复 table key |
-| `diagnostics.unusedLocal` | severity | `"warning"` | 未使用局部变量 |
+| `diagnostics.unusedLocal` | severity | `"hint"` | 未使用局部变量 |
 | `diagnostics.argumentCountMismatch` | severity | `"warning"` | 参数数量不匹配 |
 | `diagnostics.argumentTypeMismatch` | severity | `"warning"` | 参数类型不匹配 |
 | `diagnostics.returnMismatch` | severity | `"warning"` | 返回值不匹配 |

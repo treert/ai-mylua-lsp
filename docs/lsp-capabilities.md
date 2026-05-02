@@ -129,7 +129,7 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 | Table shape 未知字段 | `luaFieldError`/`luaFieldWarning` | Warning |
 | 类型不匹配 | `emmyTypeMismatch` | Warning |
 | 重复 table key | `duplicateTableKey` | Warning |
-| 未使用 local | `unusedLocal` | Warning |
+| 未使用 local | `unusedLocal` | Hint |
 | 参数个数不匹配 | `argumentCountMismatch` | Warning |
 | 参数类型不匹配 | `argumentTypeMismatch` | Warning |
 | return 不匹配 | `returnMismatch` | Warning |

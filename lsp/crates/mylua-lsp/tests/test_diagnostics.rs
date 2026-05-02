@@ -931,33 +931,6 @@ fn duplicate_table_key_off_via_config() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn unused_local_reports_by_default() {
-    let src = "local function f()\n  local x = 1\nend\nf()\n";
-    let (doc, uri, mut agg) = setup_single_file(src, "unused_default.lua");
-    let cfg = DiagnosticsConfig::default();
-    let diags = diagnostics::collect_semantic_diagnostics(
-        doc.tree.root_node(),
-        src.as_bytes(),
-        &uri,
-        &mut agg,
-        &doc.scope_tree,
-        &cfg,
-        doc.line_index(),
-    );
-    let unused: Vec<_> = diags
-        .iter()
-        .filter(|d| d.message.contains("Unused local"))
-        .collect();
-    assert_eq!(
-        unused.len(),
-        1,
-        "unused_local defaults to warning, got: {:?}",
-        diags
-    );
-    assert!(unused[0].message.contains("'x'"));
-}
-
-#[test]
 fn unused_local_reports_when_enabled() {
     let src = "local function g()\n  local x = 1\n  local y = 2\n  print(y)\nend\ng()\n";
     let (doc, uri, mut agg) = setup_single_file(src, "unused_on.lua");

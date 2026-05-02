@@ -174,7 +174,7 @@
         "mylua.diagnostics.unusedLocal": {
           "type": "string",
           "enum": ["error", "warning", "hint", "off"],
-          "default": "warning",
+          "default": "hint",
           "description": "Severity for local variables declared but never read. `_`/`_prefix` names are always skipped."
         },
         "mylua.diagnostics.argumentCountMismatch": {
