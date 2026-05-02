@@ -465,10 +465,16 @@ git commit -m "refactor: consume resolver locations by UriId"
 - Modify: `lsp/crates/mylua-lsp/src/signature_help.rs`
 - Modify: `lsp/crates/mylua-lsp/src/resolver.rs`
 - Modify: `lsp/crates/mylua-lsp/src/references.rs`
+- Modify: `lsp/crates/mylua-lsp/src/completion.rs`
+- Modify: `lsp/crates/mylua-lsp/src/goto.rs`
+- Modify: `lsp/crates/mylua-lsp/src/call_hierarchy.rs`
 - Test: `lsp/crates/mylua-lsp/tests/test_workspace_symbol.rs`
 - Test: `lsp/crates/mylua-lsp/tests/test_hover.rs`
 - Test: `lsp/crates/mylua-lsp/tests/test_signature_help.rs`
 - Test: `lsp/crates/mylua-lsp/tests/test_type_definition.rs`
+- Test: `lsp/crates/mylua-lsp/tests/test_completion.rs`
+- Test: `lsp/crates/mylua-lsp/tests/test_goto.rs`
+- Test: `lsp/crates/mylua-lsp/tests/test_call_hierarchy.rs`
 
 - [ ] **Step 1: Add explicit candidate URI resolver methods**
 
@@ -516,7 +522,7 @@ let Some(uri) = index.candidate_uri(candidate) else {
 };
 ```
 
-Expected files include `workspace_symbol.rs`, `hover.rs`, `signature_help.rs`, `resolver.rs`, and `references.rs`.
+Expected files include `workspace_symbol.rs`, `hover.rs`, `signature_help.rs`, `resolver.rs`, `references.rs`, `completion.rs`, `goto.rs`, and `call_hierarchy.rs`.
 
 - [ ] **Step 3: Remove `source_uri: Uri` from candidates**
 
@@ -621,7 +627,7 @@ Expected: no matches outside comments that explicitly describe removed legacy be
 Run:
 
 ```bash
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp && cargo test --test test_workspace_symbol --test test_hover --test test_signature_help --test test_type_definition --test test_references
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp && cargo test --test test_workspace_symbol --test test_hover --test test_signature_help --test test_type_definition --test test_references --test test_completion --test test_goto --test test_call_hierarchy
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp && cargo build
 ```
 
@@ -639,7 +645,7 @@ If review passes:
 
 ```bash
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp
-git add lsp/crates/mylua-lsp/src/aggregation.rs lsp/crates/mylua-lsp/src/workspace_symbol.rs lsp/crates/mylua-lsp/src/hover.rs lsp/crates/mylua-lsp/src/signature_help.rs lsp/crates/mylua-lsp/src/resolver.rs lsp/crates/mylua-lsp/src/references.rs lsp/crates/mylua-lsp/tests/test_workspace_symbol.rs lsp/crates/mylua-lsp/tests/test_hover.rs lsp/crates/mylua-lsp/tests/test_signature_help.rs lsp/crates/mylua-lsp/tests/test_type_definition.rs lsp/crates/mylua-lsp/tests/test_references.rs
+git add lsp/crates/mylua-lsp/src/aggregation.rs lsp/crates/mylua-lsp/src/workspace_symbol.rs lsp/crates/mylua-lsp/src/hover.rs lsp/crates/mylua-lsp/src/signature_help.rs lsp/crates/mylua-lsp/src/resolver.rs lsp/crates/mylua-lsp/src/references.rs lsp/crates/mylua-lsp/src/completion.rs lsp/crates/mylua-lsp/src/goto.rs lsp/crates/mylua-lsp/src/call_hierarchy.rs lsp/crates/mylua-lsp/tests/test_workspace_symbol.rs lsp/crates/mylua-lsp/tests/test_hover.rs lsp/crates/mylua-lsp/tests/test_signature_help.rs lsp/crates/mylua-lsp/tests/test_type_definition.rs lsp/crates/mylua-lsp/tests/test_references.rs lsp/crates/mylua-lsp/tests/test_completion.rs lsp/crates/mylua-lsp/tests/test_goto.rs lsp/crates/mylua-lsp/tests/test_call_hierarchy.rs
 git commit -m "refactor: store aggregation candidate sources as UriId"
 ```
 
