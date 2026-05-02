@@ -5,6 +5,7 @@ use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 use crate::type_inference::infer_node_type;
 use crate::resolver;
+use crate::resolver::ResolvedLocation;
 
 // ---------------------------------------------------------------------------
 // Semantic Identity — what entity the cursor points to
@@ -25,12 +26,11 @@ enum Identity {
         name: String,
     },
     /// Field/method on a type: identified by the declaration location
-    /// (def_uri + def_range). Naturally handles inheritance: `Bar:Foo`
+    /// (UriId + range). Naturally handles inheritance: `Bar:Foo`
     /// accessing an inherited field resolves to the same declaration in Foo.
     Field {
         field_name: String,
-        def_uri: Uri,
-        def_range: ByteRange,
+        location: ResolvedLocation,
     },
     /// An Emmy type name (e.g. `Foo` in `---@class Foo` or `---@type Foo`).
     TypeName {
@@ -112,12 +112,16 @@ pub fn find_references(
                 collect_emmy_type_references(name, all_docs, &mut locations);
             }
         }
-        Identity::Field { field_name, def_uri: identity_def_uri, def_range: identity_def_range } => {
+        Identity::Field { field_name, location } => {
+            let Some(identity_def_uri) = index.summary_uri(location.uri_id) else {
+                return None;
+            };
+            let identity_def_range = location.range;
             // Declaration: the def_range itself
             if include_declaration {
                 locations.push(Location {
                     uri: identity_def_uri.clone(),
-                    range: range_from_byte_range(identity_def_uri, *identity_def_range, all_docs),
+                    range: range_from_byte_range(identity_def_uri, identity_def_range, all_docs),
                 });
             }
             // Scan all files for the field name
@@ -131,7 +135,7 @@ pub fn find_references(
                     if doc_uri == identity_def_uri && node.start_byte() == identity_def_range.start_byte {
                         continue;
                     }
-                    if verify_field(node, identity_def_uri, identity_def_range, field_name, source, doc_uri, &file_doc.scope_tree, index) {
+                    if verify_field(node, *location, field_name, source, doc_uri, &file_doc.scope_tree, index) {
                         locations.push(Location {
                             uri: doc_uri.clone(),
                             range: file_doc.line_index().ts_node_to_range(node, source),
@@ -334,8 +338,7 @@ fn try_identify_field(
             )?;
             return Some(Identity::Field {
                 field_name,
-                def_uri: resolved.0,
-                def_range: resolved.1,
+                location: resolved,
             });
         }
         _ => return None,
@@ -347,13 +350,11 @@ fn try_identify_field(
         uri, &base_fact, &[field_name.clone()], index,
     );
 
-    let def_uri = resolved.def_uri?;
-    let def_range = resolved.def_range?;
+    let location = resolved.def_location?;
 
     Some(Identity::Field {
         field_name,
-        def_uri,
-        def_range,
+        location,
     })
 }
 
@@ -372,7 +373,7 @@ fn resolve_segments_to_field(
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     lookup_byte: usize,
-) -> Option<(Uri, ByteRange)> {
+) -> Option<ResolvedLocation> {
     // First, infer the type of the root segment.
     // Prefer bound_class (@class binding) over resolve_type, because @class
     // is the most explicit type declaration. When a local has both
@@ -404,7 +405,7 @@ fn resolve_segments_to_field(
     let resolved = resolver::resolve_field_chain_in_file(
         uri, &base_fact, &[field_name.to_string()], index,
     );
-    Some((resolved.def_uri?, resolved.def_range?))
+    resolved.def_location
 }
 
 // ---------------------------------------------------------------------------
@@ -436,11 +437,10 @@ fn verify_global(
 }
 
 /// Verify that a candidate identifier node is a field access that resolves
-/// to the same declaration (def_uri + def_range).
+/// to the same declaration (UriId + range).
 fn verify_field(
     node: tree_sitter::Node,
-    target_def_uri: &Uri,
-    target_def_range: &ByteRange,
+    target_location: ResolvedLocation,
     field_name: &str,
     source: &[u8],
     doc_uri: &Uri,
@@ -488,10 +488,10 @@ fn verify_field(
             }
             if segments.is_empty() { return false; }
             // Resolve through segments
-            if let Some((def_uri, def_range)) = resolve_segments_to_field(
+            if let Some(location) = resolve_segments_to_field(
                 &segments, field_name, source, doc_uri, scope_tree, index, first_segment_byte,
             ) {
-                return &def_uri == target_def_uri && &def_range == target_def_range;
+                return location == target_location;
             }
             return false;
         }
@@ -504,10 +504,7 @@ fn verify_field(
         doc_uri, &base_fact, &[field_name.to_string()], index,
     );
 
-    match (resolved.def_uri, resolved.def_range) {
-        (Some(ref u), Some(ref r)) => u == target_def_uri && r == target_def_range,
-        _ => false,
-    }
+    resolved.def_location == Some(target_location)
 }
 
 // ---------------------------------------------------------------------------

@@ -323,6 +323,41 @@ print(b.name)"#;
 }
 
 #[test]
+fn references_field_across_files_returns_definition_and_usage_uris() {
+    let def_src = r#"---@class Player
+---@field hp number
+local Player = {}
+return Player"#;
+    let use_src = r#"---@type Player
+local player = require("player")
+player.hp = 100"#;
+
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("player.lua", def_src),
+        ("main.lua", use_src),
+    ]);
+    let def_uri = make_uri("player.lua");
+    let use_uri = make_uri("main.lua");
+    let use_doc = docs.get(&use_uri).unwrap();
+
+    let locations = references::find_references(
+        use_doc, &use_uri, pos(2, 7), true, &agg, &docs, &ReferencesStrategy::Best,
+    )
+    .expect("should find cross-file field references for hp");
+
+    assert!(
+        locations.iter().any(|loc| loc.uri == def_uri),
+        "field references should include the declaration URI: {:?}",
+        locations,
+    );
+    assert!(
+        locations.iter().any(|loc| loc.uri == use_uri),
+        "field references should include the usage URI: {:?}",
+        locations,
+    );
+}
+
+#[test]
 fn references_field_inference_fails_no_false_positive() {
     // When the base type cannot be inferred, the field should not be reported.
     let src = r#"local unknown = getStuff()
