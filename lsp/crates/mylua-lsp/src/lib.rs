@@ -29,6 +29,8 @@ pub mod table_shape;
 pub mod type_inference;
 pub mod type_system;
 pub mod types;
+#[allow(dead_code)]
+pub(crate) mod uri_id;
 pub mod util;
 pub mod summary_cache;
 pub mod workspace_scanner;
@@ -570,6 +572,70 @@ mod tests {
         let uri: Uri = "file:///Users/%E4%B8%AD%E6%96%87/x.lua".parse().unwrap();
         let path = uri_to_path(&uri).expect("should decode");
         assert_eq!(path.to_string_lossy(), "/Users/中文/x.lua");
+    }
+}
+
+#[cfg(test)]
+mod uri_id_tests {
+    use crate::uri_id::{UriId, UriInterner};
+    use tower_lsp_server::ls_types::Uri;
+
+    #[test]
+    fn intern_returns_stable_positive_ids() {
+        let interner = UriInterner::new();
+        let first: Uri = "file:///tmp/a.lua".parse().unwrap();
+        let second: Uri = "file:///tmp/b.lua".parse().unwrap();
+
+        let first_id = interner.intern(first.clone());
+        let first_again = interner.intern(first);
+        let second_id = interner.intern(second);
+
+        assert_eq!(first_id, first_again);
+        assert_ne!(first_id, second_id);
+        assert_eq!(first_id.raw(), 1);
+        assert_eq!(second_id.raw(), 2);
+    }
+
+    #[test]
+    fn resolve_returns_original_uri() {
+        let interner = UriInterner::new();
+        let uri: Uri = "file:///tmp/a.lua".parse().unwrap();
+        let id = interner.intern(uri.clone());
+
+        assert_eq!(interner.resolve(id), Some(uri));
+    }
+
+    #[test]
+    #[should_panic(expected = "UriId must be positive")]
+    fn uri_id_rejects_zero() {
+        let _ = UriId::new(0);
+    }
+
+    #[test]
+    #[should_panic(expected = "UriId must be positive")]
+    fn uri_id_rejects_negative_values() {
+        let _ = UriId::new(-1);
+    }
+
+    #[test]
+    fn interner_allocates_i32_max_then_panics_on_next_id() {
+        let interner = UriInterner::for_test_next_id(i32::MAX);
+        let first: Uri = "file:///tmp/a.lua".parse().unwrap();
+        let second: Uri = "file:///tmp/b.lua".parse().unwrap();
+
+        assert_eq!(interner.intern(first).raw(), i32::MAX);
+        let panic = std::panic::catch_unwind(|| {
+            let _ = interner.intern(second);
+        });
+
+        assert!(panic.is_err());
+        let message = panic
+            .unwrap_err()
+            .downcast::<String>()
+            .map(|s| *s)
+            .or_else(|payload| payload.downcast::<&'static str>().map(|s| s.to_string()))
+            .expect("panic payload should be a string");
+        assert_eq!(message, "UriId exhausted");
     }
 }
 
