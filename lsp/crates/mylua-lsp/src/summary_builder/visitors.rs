@@ -1517,7 +1517,8 @@ fn visit_function_body(
 
         // Phase 2: resolve bound_class for self. If the class_prefix
         // (e.g. "ABC" from "function ABC:method()") has a bound class,
-        // use the class name as self's type and record bound_class.
+        // use the class name as self's type and record bound_class. Plain
+        // local table methods use the table shape so `self.field` can resolve.
         let (self_type, self_bound_class) = if !class_prefix.is_empty() {
             let bound = ctx
                 .resolve_bound_class_for_at(class_prefix, func_body.start_byte())
@@ -1527,6 +1528,10 @@ fn visit_function_body(
                     Some(TypeFact::Known(KnownType::EmmyType(class_name.clone()))),
                     Some(class_name.clone()),
                 )
+            } else if let Some(decl) =
+                ctx.resolve_visible_in_build_scopes(class_prefix, func_body.start_byte())
+            {
+                (decl.type_fact.clone(), None)
             } else {
                 (
                     Some(TypeFact::Known(KnownType::EmmyType(

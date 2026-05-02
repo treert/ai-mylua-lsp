@@ -1256,6 +1256,28 @@ print(sum)
 }
 
 #[test]
+fn hover_self_field_in_local_table_method_uses_shape() {
+    let src = r#"local obj = { value = 42 }
+function obj:inspect()
+    return self.value
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_table_method_self.lua");
+    let docs = HashMap::from([(uri.clone(), doc)]);
+    let doc = docs.get(&uri).unwrap();
+
+    // Line 2: `    return self.value`, hover on `value`.
+    let result = hover::hover(doc, &uri, pos(2, 18), &mut agg, &docs)
+        .expect("hover on self.value should use obj's table shape");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("Type: `number`"),
+        "self.value should resolve through the local table shape, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_cross_file_require_dotted_function() {
     // Cross-file scenario: `require("math_utils")` returns a local table
     // with `function M.add(a, b)`. Hovering on `math_utils.add` in the
