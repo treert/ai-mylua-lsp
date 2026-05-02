@@ -38,6 +38,35 @@ foo(1, "x")"#;
 }
 
 #[test]
+fn signature_help_require_returned_local_function() {
+    let module_src = r#"---@param amount number
+---@param label string
+local function make(amount, label) end
+
+return make"#;
+    let main_src = r#"local make = require("maker")
+make(1, "x")"#;
+    let (docs, mut agg, _) = setup_workspace(&[
+        ("maker.lua", module_src),
+        ("main.lua", main_src),
+    ]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&uri).expect("main.lua document");
+
+    let help = signature_help::signature_help(doc, &uri, pos(1, 8), &mut agg)
+        .expect("signatureHelp should resolve required local function");
+
+    assert_eq!(help.signatures.len(), 1);
+    let label = &help.signatures[0].label;
+    assert!(
+        label.contains("amount: number") && label.contains("label: string"),
+        "label should include required function params, got: {}",
+        label,
+    );
+    assert_eq!(help.active_parameter, Some(1));
+}
+
+#[test]
 fn signature_help_active_parameter_progression() {
     let src = r#"function foo(a, b, c) end
 foo(1, 2, 3)"#;

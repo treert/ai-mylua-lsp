@@ -136,13 +136,13 @@ pub(crate) fn resolve_call_signatures(
             return Some((vec![sig.clone()], false, name));
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
-            if let Some(location) = resolved.def_location {
-                if let Some(summary) = index.summary_by_id(location.uri_id) {
-                    if let Some(fs) = summary.function_summaries.get(fid) {
-                        let sigs = primary_plus_overloads(fs);
-                        return Some((sigs, false, name));
-                    }
-                }
+            let summary = resolved
+                .def_location
+                .and_then(|location| index.summary_by_id(location.uri_id))
+                .or_else(|| resolved.def_uri.as_ref().and_then(|uri| index.summary(uri)));
+            if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
+                let sigs = primary_plus_overloads(fs);
+                return Some((sigs, false, name));
             }
         }
         _ => {}
