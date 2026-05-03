@@ -774,7 +774,7 @@ print(Audit.enabled)
 
     // Now resolve the field chain — must succeed, not return Unknown.
     let resolved =
-        resolver::resolve_field_chain_in_file(&uri, &base, &["enabled".to_string()], &mut agg);
+        resolver::resolve_field_chain_in_file_id(uri_id, &base, &["enabled".to_string()], &mut agg);
     assert!(
         !matches!(resolved.type_fact, TypeFact::Unknown),
         "warm-cache resolve_field_chain_in_file must find 'Audit.enabled', got Unknown"
@@ -844,7 +844,7 @@ local c = getContainer()
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;
     let resolved =
-        resolver::resolve_local_in_file(&uri, "c", byte_offset, &doc.scope_tree, &mut agg);
+        resolver::resolve_local_in_file("c", byte_offset, &doc.scope_tree, &mut agg);
     let field_result =
         resolver::resolve_field_chain(&resolved.type_fact, &["value".to_string()], &mut agg);
     assert!(

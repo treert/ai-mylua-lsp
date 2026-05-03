@@ -24,7 +24,7 @@
 
 ### 2.1 每文件摘要 `DocumentSummary`
 
-每个 URI 对应一份 Summary，与版本/内容哈希绑定；进程内由 `uri_id::URI_REGISTRY` 分配进程级、只增不删的 `UriId`，聚合层只消费这个 ID 作为 `summaries` 的 HashMap key。`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 边界与缓存持久化来源。
+每个 URI 对应一份 Summary，与版本/内容哈希绑定；进程内由 `uri_id::URI_REGISTRY` 分配进程级、只增不删的 `UriId`。聚合层、`documents` 存储、feature 内部查询与跨文件位置都以这个 ID 作为主键；`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 输出边界与缓存持久化来源。
 
 | 数据 | 说明 |
 |------|------|
@@ -51,7 +51,7 @@
 │           工作区聚合层                   │
 │  GlobalShard    树结构全局名索引        │
 │  TypeShard      name → [候选定义…]      │
-│  RequireByReturn  URI → [依赖方…]      │
+│  RequireByReturn  UriId → [依赖方…]    │
 │  TypeDependants   类型反向依赖          │
 │  ResolutionCache  stub → resolved_type │
 └────────────────────────────────────────┘
@@ -65,7 +65,7 @@
 | `summaries` | 进程级 `UriId` → `DocumentSummary`；另维护不分配 ID 的 URI 反查缓存供边界 API O(1) 查询 | `build_initial` 全量重建 / `upsert_summary` 接收外层已 intern 的 `UriId` |
 | `GlobalShard` | 按 `.` / `:` 切段的树（`roots["UE4"].children["FVector"]`），叶/中间节点可挂 `[候选定义…]`；候选只携带进程级 `UriId`，反向索引用 `UriId`→路径 | `push_candidate` 插入 / `remove_by_uri` 按 `UriId` 精准删除 |
 | `TypeShard` | 类型裸名 → [候选定义…] | 同上 |
-| `RequireByReturn` | 目标 URI → [(来源文件, 局部名)…] | 绑定增删 |
+| `RequireByReturn` | 目标 `UriId` → [(来源文件 `UriId`, 局部名)…] | 绑定增删 |
 | `TypeDependants` | 类型名 → [依赖文件…] | 类型变更时失效依赖方缓存 |
 
 更新粒度是**名字级**（不是文件级）：`GlobalShard` 通过候选携带的进程级 `UriId`→路径反向索引精准定位一个文件贡献的所有路径，增量更新只触及这些路径上的节点。
@@ -247,7 +247,7 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 
 | 通道 | 键类型 | 正向查询 | 反向查询 |
 |------|--------|---------|---------|
-| **require 绑定** | 模块路径字符串 | `require("x")` → 目标 URI → return 类型 | `RequireByReturn[URI]` → 依赖方 |
+| **require 绑定** | 模块路径字符串 | `require("x")` → 目标 `UriId` → return 类型 | `RequireByReturn[UriId]` → 依赖方 |
 | **全局名引用** | 全局名字符串 | `GlobalShard["Mgr"]` → 候选定义 | 来源文件变更 → 引用方 |
 | **Emmy 类型名** | 类型名字符串 | `TypeShard["PlayerData"]` → 类型定义 | 定义变更 → 引用方 |
 

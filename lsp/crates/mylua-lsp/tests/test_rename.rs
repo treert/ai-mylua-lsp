@@ -1,6 +1,9 @@
 mod test_helpers;
 
+use std::collections::HashMap;
+use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::rename;
+use mylua_lsp::uri_id::intern;
 use test_helpers::*;
 
 /// Collect all text edits from a WorkspaceEdit across all URIs,
@@ -36,10 +39,12 @@ fn collect_edits(
 fn rename_local_variable() {
     let src = "local x = 1\nlocal y = x + 1\nprint(x)\n";
     let (doc, uri, agg) = setup_single_file(src, "a.lua");
-    let docs = std::collections::HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let uri_id = intern(uri.clone());
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&uri_id).unwrap();
 
-    let result = rename::rename(doc, &uri, pos(0, 6), "xx", &agg, &docs)
+    let result = rename::rename(doc, uri_id, pos(0, 6), "xx", &agg, &view)
         .expect("rename ok")
         .expect("should produce an edit");
     let edits = collect_edits(&result);
@@ -51,15 +56,17 @@ fn rename_local_variable() {
 fn rename_rejects_invalid_new_name() {
     let src = "local x = 1\n";
     let (doc, uri, agg) = setup_single_file(src, "a.lua");
-    let docs = std::collections::HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let uri_id = intern(uri.clone());
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&uri_id).unwrap();
 
     // Starts with digit
-    assert!(rename::rename(doc, &uri, pos(0, 6), "1bad", &agg, &docs).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "1bad", &agg, &view).is_err());
     // Contains space
-    assert!(rename::rename(doc, &uri, pos(0, 6), "bad name", &agg, &docs).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "bad name", &agg, &view).is_err());
     // Lua keyword
-    assert!(rename::rename(doc, &uri, pos(0, 6), "local", &agg, &docs).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "local", &agg, &view).is_err());
 }
 
 #[test]
@@ -68,10 +75,13 @@ fn rename_global_function_across_files() {
     let b = ("b.lua", "print(helper())\n");
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let doc = docs.get(&a_uri).unwrap();
+    let a_uri_id = intern(a_uri.clone());
+    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&a_uri_id).unwrap();
 
     // Click on `helper` in the declaration
-    let result = rename::rename(doc, &a_uri, pos(0, 10), "utility", &agg, &docs)
+    let result = rename::rename(doc, a_uri_id, pos(0, 10), "utility", &agg, &view)
         .expect("rename ok")
         .expect("should produce edit");
     let edits = collect_edits(&result);
@@ -96,10 +106,13 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     );
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let doc = docs.get(&a_uri).unwrap();
+    let a_uri_id = intern(a_uri.clone());
+    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&a_uri_id).unwrap();
 
     // Click `Foo` in its `@class Foo` declaration — line 0, col 11.
-    let result = rename::rename(doc, &a_uri, pos(0, 11), "Gadget", &agg, &docs)
+    let result = rename::rename(doc, a_uri_id, pos(0, 11), "Gadget", &agg, &view)
         .expect("rename ok")
         .expect("should produce edit for Emmy class");
     let edits = collect_edits(&result);
@@ -136,10 +149,13 @@ fn rename_emmy_class_field_in_annotation() {
     );
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let doc = docs.get(&a_uri).unwrap();
+    let a_uri_id = intern(a_uri.clone());
+    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&a_uri_id).unwrap();
 
     // Click on `bar` in `---@field bar integer` — line 1, col 10.
-    let maybe = rename::rename(doc, &a_uri, pos(1, 10), "value", &agg, &docs)
+    let maybe = rename::rename(doc, a_uri_id, pos(1, 10), "value", &agg, &view)
         .expect("rename ok");
 
     // Emmy @field renames may or may not be fully supported yet

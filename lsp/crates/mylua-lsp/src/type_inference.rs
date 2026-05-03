@@ -7,13 +7,11 @@
 //! signature help, diagnostics), so they live in their own module to
 //! avoid circular / unnatural dependencies.
 
-use tower_lsp_server::ls_types::Uri;
-
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::scope::ScopeTree;
 use crate::type_system::TypeFact;
-use crate::uri_id::{intern, UriId};
+use crate::uri_id::UriId;
 use crate::util::{node_text, extract_string_literal};
 
 /// Recursively infer the type of an AST expression node.
@@ -31,21 +29,10 @@ use crate::util::{node_text, extract_string_literal};
 ///   `CallReturn` stub so the resolver can track declared `@return`
 ///   types through the chain — this is what makes `make().field` hover
 ///   work when `make`'s summary has `@return Foo`.
-pub fn infer_node_type(
-    node: tree_sitter::Node,
-    source: &[u8],
-    uri: &Uri,
-    scope_tree: &ScopeTree,
-    index: &WorkspaceAggregation,
-) -> TypeFact {
-    infer_node_type_in_file_id(node, source, intern(uri.clone()), uri, scope_tree, index)
-}
-
 pub(crate) fn infer_node_type_in_file_id(
     node: tree_sitter::Node,
     source: &[u8],
     uri_id: UriId,
-    uri: &Uri,
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> TypeFact {
@@ -55,7 +42,7 @@ pub(crate) fn infer_node_type_in_file_id(
                 node.child_by_field_name("object"),
                 node.child_by_field_name("field"),
             ) {
-                let base_fact = infer_node_type_in_file_id(object, source, uri_id, uri, scope_tree, index);
+                let base_fact = infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
                 let field_name = node_text(field, source).to_string();
                 let resolved = resolver::resolve_field_chain_in_file_id(
                     uri_id, &base_fact, &[field_name], index,
@@ -69,7 +56,7 @@ pub(crate) fn infer_node_type_in_file_id(
                 node.child_by_field_name("object"),
                 node.child_by_field_name("index"),
             ) {
-                let base_fact = infer_node_type_in_file_id(object, source, uri_id, uri, scope_tree, index);
+                let base_fact = infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
                 if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact {
                     if let Some(summary) = index.summary_by_id(uri_id) {
                         if let Some(shape) = summary.table_shapes.get(shape_id) {
@@ -104,11 +91,11 @@ pub(crate) fn infer_node_type_in_file_id(
             // `summary_builder::infer_call_return_type` but works off the
             // workspace aggregation + summary cache rather than the
             // per-file `BuildContext`.
-            infer_call_return_fact(node, source, uri_id, uri, scope_tree, index)
+            infer_call_return_fact(node, source, uri_id, scope_tree, index)
         }
         "parenthesized_expression" => {
             node.named_child(0)
-                .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, uri, scope_tree, index))
+                .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, scope_tree, index))
                 .unwrap_or(TypeFact::Unknown)
         }
         "identifier" => {
@@ -178,21 +165,10 @@ fn infer_table_array_element_type(
 
 /// Collect the inferred types of actual arguments at a function call site.
 /// Used by function-level generic inference.
-pub fn collect_call_arg_types(
-    call_node: tree_sitter::Node,
-    source: &[u8],
-    uri: &Uri,
-    scope_tree: &ScopeTree,
-    index: &WorkspaceAggregation,
-) -> Vec<TypeFact> {
-    collect_call_arg_types_in_file_id(call_node, source, intern(uri.clone()), uri, scope_tree, index)
-}
-
 fn collect_call_arg_types_in_file_id(
     call_node: tree_sitter::Node,
     source: &[u8],
     uri_id: UriId,
-    uri: &Uri,
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Vec<TypeFact> {
@@ -201,7 +177,7 @@ fn collect_call_arg_types_in_file_id(
     };
     crate::util::extract_call_arg_nodes(args, source)
         .into_iter()
-        .map(|e| infer_node_type_in_file_id(e, source, uri_id, uri, scope_tree, index))
+        .map(|e| infer_node_type_in_file_id(e, source, uri_id, scope_tree, index))
         .collect()
 }
 
@@ -217,7 +193,6 @@ fn infer_call_return_fact(
     node: tree_sitter::Node,
     source: &[u8],
     uri_id: UriId,
-    uri: &Uri,
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> TypeFact {
@@ -243,7 +218,7 @@ fn infer_call_return_fact(
     // `obj:m()` — grammar sets `method` field on the call node itself.
     if let Some(method_node) = node.child_by_field_name("method") {
         let method_name = node_text(method_node, source).to_string();
-        let base_fact = infer_node_type_in_file_id(callee, source, uri_id, uri, scope_tree, index);
+        let base_fact = infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
 
         // When the base is a generic class instance (e.g. `Stack<string>`),
         // resolve the method's return type eagerly and substitute generic
@@ -287,7 +262,7 @@ fn infer_call_return_fact(
         let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, callee, source);
         let mut call_arg_types = Vec::with_capacity(1);
         call_arg_types.push(base_fact.clone());
-        call_arg_types.extend(collect_call_arg_types_in_file_id(node, source, uri_id, uri, scope_tree, index));
+        call_arg_types.extend(collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index));
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
             func_name: method_name,
@@ -304,9 +279,9 @@ fn infer_call_return_fact(
             callee.child_by_field_name("field"),
         ) {
             let func_name = node_text(field_node, source).to_string();
-            let base_fact = infer_node_type_in_file_id(base_node, source, uri_id, uri, scope_tree, index);
+            let base_fact = infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
             let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
-            let call_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, uri, scope_tree, index);
+            let call_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             return TypeFact::Stub(SymbolicStub::CallReturn {
                 base: Box::new(base_stub),
                 func_name,
@@ -353,7 +328,7 @@ fn infer_call_return_fact(
         // Function-level generic inference: if the callee has @generic params,
         // try to unify them from the actual argument types at the call site.
         if !generic_params.is_empty() {
-            let actual_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, uri, scope_tree, index);
+            let actual_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             if let Some(substituted_returns) = resolver::unify_function_generics(
                 &generic_params,
                 &formal_params,

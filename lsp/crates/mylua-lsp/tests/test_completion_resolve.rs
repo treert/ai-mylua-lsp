@@ -2,6 +2,8 @@ mod test_helpers;
 
 use std::collections::HashMap;
 use mylua_lsp::completion;
+use mylua_lsp::document::DocumentStoreView;
+use mylua_lsp::uri_id::intern;
 use test_helpers::*;
 use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind};
 
@@ -19,9 +21,10 @@ fn completion_items_carry_resolve_data() {
     // completion filters by prefix.
     let src = "local foo = 1\nfunction bar() end\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
+    let uri_id = intern(uri);
 
     // Probe 1: cursor after `f` on line 2
-    let items_f = completion::complete(&doc, &uri, pos(2, 0), &mut agg);
+    let items_f = completion::complete(&doc, uri_id, pos(2, 0), &mut agg);
     let foo = find_item(&items_f, "foo").expect("foo local in empty-prefix completion");
     assert!(foo.data.is_some(), "local completion should have data for resolve");
     assert_eq!(foo.data.as_ref().unwrap()["kind"], "local");
@@ -37,12 +40,14 @@ fn completion_resolve_enriches_global_with_detail() {
     // Global `bar()` → resolve should attach `detail` with type info.
     let src = "function bar() return 1 end\nb";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let items = completion::complete(&doc, &uri, pos(1, 1), &mut agg);
+    let uri_id = intern(uri);
+    let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let bar = find_item(&items, "bar").cloned().expect("bar");
     assert!(bar.detail.is_none(), "initial item should have no detail");
 
-    let docs = HashMap::from([(uri, doc)]);
-    let resolved = completion::resolve_completion(bar, &agg, &docs);
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let resolved = completion::resolve_completion(bar, &agg, &view, None);
     assert!(
         resolved.detail.is_some(),
         "resolve should attach detail, got: {:?}", resolved,
@@ -59,11 +64,13 @@ fn completion_resolve_enriches_local_with_type() {
     // Local `foo: number` → resolve should attach typed detail.
     let src = "local foo = 42\nf";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let items = completion::complete(&doc, &uri, pos(1, 1), &mut agg);
+    let uri_id = intern(uri);
+    let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let foo = find_item(&items, "foo").cloned().expect("foo");
 
-    let docs = HashMap::from([(uri, doc)]);
-    let resolved = completion::resolve_completion(foo, &agg, &docs);
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let resolved = completion::resolve_completion(foo, &agg, &view, Some(uri_id));
     let detail = resolved
         .detail
         .as_deref()
@@ -86,7 +93,8 @@ fn completion_resolve_preserves_items_without_data() {
     };
     let (_, _, agg) = setup_single_file("", "a.lua");
     let docs = HashMap::new();
-    let resolved = completion::resolve_completion(keyword_item.clone(), &agg, &docs);
+    let view = DocumentStoreView::new(&docs);
+    let resolved = completion::resolve_completion(keyword_item.clone(), &agg, &view, None);
     assert_eq!(resolved.label, keyword_item.label);
     assert_eq!(resolved.kind, keyword_item.kind);
     assert!(resolved.detail.is_none());
@@ -100,11 +108,13 @@ fn completion_resolve_function_adds_markdown_signature() {
     // signature.
     let src = "function doWork(a, b, c) return a end\nd";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let items = completion::complete(&doc, &uri, pos(1, 1), &mut agg);
+    let uri_id = intern(uri);
+    let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let item = find_item(&items, "doWork").cloned().expect("doWork");
 
-    let docs = HashMap::from([(uri, doc)]);
-    let resolved = completion::resolve_completion(item, &agg, &docs);
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let resolved = completion::resolve_completion(item, &agg, &view, None);
     match &resolved.documentation {
         Some(tower_lsp_server::ls_types::Documentation::MarkupContent(m)) => {
             assert!(

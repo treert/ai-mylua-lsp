@@ -54,6 +54,7 @@ flowchart TB
 
 - **TextMate** 负责编辑器基色（含 `---@…` 样式）
 - **Semantic Tokens** 仅补充 TextMate 无法静态判定的语义类别（全局 `defaultLibrary`、全局 vs 局部、Emmy 类型名）
+- **URI 边界**：LSP params 与文件扫描层接收/产生 `Uri`；进入 handler 后先 intern 为 `UriId`，`documents`、feature 逻辑、resolver 与诊断队列均以 `UriId` 作为文档身份。只有在构造 `Location`、`WorkspaceEdit`、`CallHierarchyItem`、诊断发布等协议输出时，才通过 URI registry 解析回 `Uri`。
 
 ## 3. 核心子系统
 

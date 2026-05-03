@@ -26,9 +26,6 @@ pub fn document_highlight(
     _uri: &Uri,
     position: Position,
 ) -> Option<Vec<DocumentHighlight>> {
-    // `_uri` is accepted for symmetry with other LSP handlers but
-    // unused: documentHighlight is strictly same-file and `ScopeTree`
-    // doesn't need the URI for a decl-byte lookup.
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let clicked = find_node_at_position(doc.tree.root_node(), byte_offset)?;
     let source = doc.source();

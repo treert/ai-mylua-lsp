@@ -65,6 +65,22 @@ pub fn path(id: UriId) -> &'static str {
     registry().path(id)
 }
 
+pub trait IntoUriId {
+    fn into_uri_id(self) -> UriId;
+}
+
+impl IntoUriId for UriId {
+    fn into_uri_id(self) -> UriId {
+        self
+    }
+}
+
+impl IntoUriId for &Uri {
+    fn into_uri_id(self) -> UriId {
+        intern(self.clone())
+    }
+}
+
 /// Return the precomputed candidate ordering key for an id.
 pub fn priority(id: UriId) -> UriPriority {
     registry().priority(id)

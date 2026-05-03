@@ -594,11 +594,11 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, position, &idx);
+        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, uri_id, position, &idx);
         if items.is_empty() {
             Ok(None)
         } else {
@@ -630,12 +630,12 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let cfg = self.config.lock().unwrap().inlay_hint.clone();
-        Ok(Some(inlay_hint::inlay_hints(doc, uri, params.range, &idx, &cfg)))
+        Ok(Some(inlay_hint::inlay_hints(doc, uri_id, params.range, &idx, &cfg)))
     }
 
     async fn selection_range(
@@ -669,14 +669,14 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         let result = goto::goto_definition(
             doc,
-            uri,
+            uri_id,
             position,
             &idx,
             &strategy,
@@ -707,12 +707,12 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_type_definition(doc, uri, position, &idx, &strategy))
+        Ok(goto::goto_type_definition(doc, uri_id, position, &idx, &strategy))
     }
 
     /// Lua has no distinct forward-declaration concept: "declaration"
@@ -726,14 +726,14 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         Ok(goto::goto_definition(
             doc,
-            uri,
+            uri_id,
             position,
             &idx,
             &strategy,
@@ -744,22 +744,22 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri, position, &idx, &DocumentStoreView::new(&docs)))
+        Ok(hover::hover(doc, uri_id, position, &idx, &DocumentStoreView::new(&docs)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let items = completion::complete(doc, uri, position, &idx);
+        let items = completion::complete(doc, uri_id, position, &idx);
         Ok(Some(CompletionResponse::Array(items)))
     }
 
@@ -767,9 +767,15 @@ impl LanguageServer for Backend {
         &self,
         item: CompletionItem,
     ) -> Result<CompletionItem> {
+        let local_uri_id = completion_resolve_local_uri_id(&item);
         let idx = self.index.lock().unwrap();
         let docs = self.documents.lock().unwrap();
-        Ok(completion::resolve_completion(item, &idx, &DocumentStoreView::new(&docs)))
+        Ok(completion::resolve_completion(
+            item,
+            &idx,
+            &DocumentStoreView::new(&docs),
+            local_uri_id,
+        ))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -777,14 +783,14 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let ref_strategy = self.config.lock().unwrap().references.strategy.clone();
         Ok(references::find_references(
             doc,
-            uri,
+            uri_id,
             position,
             include_declaration,
             &idx,
@@ -808,11 +814,11 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        match rename::rename(doc, uri, position, &params.new_name, &idx, &DocumentStoreView::new(&docs)) {
+        match rename::rename(doc, uri_id, position, &params.new_name, &idx, &DocumentStoreView::new(&docs)) {
             Ok(edit) => Ok(edit),
             Err(msg) => Err(tower_lsp_server::jsonrpc::Error {
                 code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
@@ -835,11 +841,11 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(signature_help::signature_help(doc, uri, position, &idx))
+        Ok(signature_help::signature_help(doc, uri_id, position, &idx))
     }
 
     async fn semantic_tokens_full(
@@ -959,4 +965,14 @@ impl LanguageServer for Backend {
             data,
         })))
     }
+}
+
+fn completion_resolve_local_uri_id(item: &CompletionItem) -> Option<crate::uri_id::UriId> {
+    let data = item.data.as_ref()?;
+    if data.get("kind").and_then(|v| v.as_str()) != Some("local") {
+        return None;
+    }
+    let uri = data.get("uri").and_then(|v| v.as_str())?;
+    let uri = uri.parse::<Uri>().ok()?;
+    Some(intern_uri(uri))
 }

@@ -5,6 +5,7 @@ use crate::document::{Document, DocumentLookup};
 use crate::references;
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
+use crate::uri_id::UriId;
 
 pub fn prepare_rename(
     doc: &Document,
@@ -37,7 +38,7 @@ pub type RenameResult = std::result::Result<Option<WorkspaceEdit>, &'static str>
 
 pub fn rename(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     position: Position,
     new_name: &str,
     index: &WorkspaceAggregation,
@@ -52,7 +53,7 @@ pub fn rename(
 
     let locations = match references::find_references(
         doc,
-        uri,
+        uri_id,
         position,
         true,
         index,

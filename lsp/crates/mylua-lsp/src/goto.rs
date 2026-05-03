@@ -4,22 +4,22 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::uri_id::resolve;
+use crate::uri_id::{resolve, IntoUriId, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
 
 pub fn goto_definition(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    goto_definition_inner(doc, uri, position, index, strategy)
+    goto_definition_inner(doc, uri_id.into_uri_id(), position, index, strategy)
 }
 
 fn goto_definition_inner(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
@@ -55,7 +55,7 @@ fn goto_definition_inner(
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
-                return Some(goto_variable_field(p, doc, uri, index));
+                return Some(goto_variable_field(p, doc, uri_id, index));
             }
         }
         // `obj:method(...)` — the `method` identifier on a `function_call`
@@ -67,7 +67,7 @@ fn goto_definition_inner(
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
-                return Some(goto_method_call(p, doc, uri, index));
+                return Some(goto_method_call(p, doc, uri_id, index));
             }
         }
         None
@@ -78,7 +78,7 @@ fn goto_definition_inner(
         return result;
     }
 
-    if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
+    if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def.uri,
             range: def.selection_range.into(),
@@ -139,11 +139,12 @@ fn goto_definition_inner(
 /// nothing when Go-to-Definition would have worked.
 pub fn goto_type_definition(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
+    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     // Identifier AST path — click on a Lua identifier. Resolve to a
@@ -153,8 +154,8 @@ pub fn goto_type_definition(
     // `goto_definition` so the feature never goes silent.
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         let name = node_text(ident_node, doc.source());
-        if let Some(def) = doc.scope_tree.resolve(byte_offset, name, uri) {
-            if let Some(target) = type_definition_for_local(&def.uri, &def.name, byte_offset, &doc.scope_tree, index, strategy) {
+        if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
+            if let Some(target) = type_definition_for_local(&def.name, byte_offset, &doc.scope_tree, index, strategy) {
                 return Some(target);
             }
         }
@@ -163,7 +164,7 @@ pub fn goto_type_definition(
         // collision (`local Foo` in a workspace that also declares
         // `@class Foo`) must not jump us to the class. Fall back to
         // plain `goto_definition` instead.
-        return goto_definition(doc, uri, position, index, strategy);
+        return goto_definition(doc, uri_id, position, index, strategy);
     }
 
     // Word-extraction fallback — cursor is inside an `emmy_line` text
@@ -179,7 +180,6 @@ pub fn goto_type_definition(
 /// stored `TypeFact` via scope_tree and map it to a `type_shard` candidate range
 /// when the fact identifies an Emmy type.
 fn type_definition_for_local(
-    _def_uri: &Uri,
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
@@ -253,21 +253,21 @@ fn type_definition_for_name(
 fn goto_variable_field(
     var_node: tree_sitter::Node,
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
         let base_fact =
-            crate::type_inference::infer_node_type(base_node, source, uri, &doc.scope_tree, index);
+            crate::type_inference::infer_node_type_in_file_id(base_node, source, uri_id, &doc.scope_tree, index);
         let resolved =
-            resolver::resolve_field_chain_in_file(uri, &base_fact, &fields, index);
+            resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &fields, index);
         return resolved_to_goto(resolved, index);
     }
 
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index)
+    goto_field_or_method(base_node, name_node, source, uri_id, &doc.scope_tree, index)
 }
 
 /// AST-driven goto for a method call: `obj:method(...)`. The clicked
@@ -277,13 +277,13 @@ fn goto_variable_field(
 fn goto_method_call(
     call_node: tree_sitter::Node,
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    goto_field_or_method(base_node, name_node, source, uri, &doc.scope_tree, index)
+    goto_field_or_method(base_node, name_node, source, uri_id, &doc.scope_tree, index)
 }
 
 /// Shared goto helper for dotted field access (`a.b`) and method calls
@@ -293,16 +293,16 @@ fn goto_field_or_method(
     base_node: tree_sitter::Node,
     name_node: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
     let base_fact =
-        crate::type_inference::infer_node_type(base_node, source, uri, scope_tree, index);
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[field_name], index,
+        crate::type_inference::infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        uri_id, &base_fact, &[field_name], index,
     );
 
     resolved_to_goto(resolved, index)

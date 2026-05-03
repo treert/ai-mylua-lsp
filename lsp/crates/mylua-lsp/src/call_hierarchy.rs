@@ -32,7 +32,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
 use crate::type_system::FunctionSummaryId;
-use crate::uri_id::intern as intern_uri;
+use crate::uri_id::{intern as intern_uri, UriId};
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
@@ -42,10 +42,10 @@ use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 pub fn prepare_call_hierarchy(
     doc: &Document,
     uri: &Uri,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyItem> {
-    let uri_id = intern_uri(uri.clone());
     let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
     };

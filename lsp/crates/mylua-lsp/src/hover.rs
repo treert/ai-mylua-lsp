@@ -5,17 +5,18 @@ use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_em
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
-use crate::uri_id::intern as intern_uri;
+use crate::uri_id::{IntoUriId, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
+    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
         return hover_type_name(&type_name, index, all_docs);
@@ -71,7 +72,7 @@ pub fn hover(
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
-                return Some(hover_variable_field(p, doc, uri, index, all_docs));
+                return Some(hover_variable_field(p, doc, uri_id, index, all_docs));
             }
         }
         // `obj:method(...)` — the `method` identifier on a `function_call`
@@ -83,7 +84,7 @@ pub fn hover(
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
-                return Some(hover_method_call(p, doc, uri, index, all_docs));
+                return Some(hover_method_call(p, doc, uri_id, index, all_docs));
             }
         }
         if p.kind() == "function_name" {
@@ -117,8 +118,8 @@ pub fn hover(
         // Match hit but no hover produced — fall through.
     }
 
-    if let Some(def) = doc.scope_tree.resolve(byte_offset, ident_text, uri) {
-        let type_info = resolve_local_type_info(uri, ident_text, byte_offset, &doc.scope_tree, index);
+    if let Some(def) = doc.scope_tree.resolve_id(byte_offset, ident_text, uri_id) {
+        let type_info = resolve_local_type_info(uri_id, ident_text, byte_offset, &doc.scope_tree, index);
         lsp_log!(
             "[hover] scope resolved '{}', type_info={:?}",
             ident_text,
@@ -130,7 +131,7 @@ pub fn hover(
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
     if let Some(candidates) = index.type_shard.get(ident_text) {
         if let Some(candidate) = candidates.first() {
-            if let Some(candidate_uri) = index.type_candidate_uri(candidate) {
+            if index.type_candidate_uri(candidate).is_some() {
                 if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
                     for td in &summary.type_definitions {
                         if td.name == ident_text {
@@ -167,7 +168,7 @@ pub fn hover(
                                 parts.push(fields_md.join("\n"));
                             }
                             // Include doc comments from the definition site
-                            if let Some(def_doc) = all_docs.get_document(candidate_uri) {
+                            if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
                                 let def_byte = Some(td.range.start_byte);
                                 if let Some(db) = def_byte {
                                     if let Some(def_node) = def_doc.tree.root_node()
@@ -213,6 +214,7 @@ pub fn hover(
             kind: def_kind,
             range: candidate.range,
             selection_range: candidate.selection_range,
+            uri_id: candidate.source_uri_id(),
             uri: source_uri.clone(),
         }, candidates.len(), source_uri, candidate.source_uri_id()))
     });
@@ -250,7 +252,7 @@ fn hover_type_name(
 ) -> Option<Hover> {
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
-    let candidate_uri = index.type_candidate_uri(candidate)?;
+    index.type_candidate_uri(candidate)?;
     let summary = index.summary_by_id(candidate.source_uri_id())?;
 
     for td in &summary.type_definitions {
@@ -291,7 +293,7 @@ fn hover_type_name(
             parts.push(fields_md.join("\n"));
         }
         // Include doc comments from the definition site.
-        if let Some(def_doc) = all_docs.get_document(candidate_uri) {
+        if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
             if let Some(def_node) = def_doc.tree.root_node()
                 .descendant_for_byte_range(td.range.start_byte, td.range.start_byte)
             {
@@ -415,14 +417,14 @@ fn hover_at_declaration(
 fn hover_method_call(
     call_node: tree_sitter::Node,
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    build_field_hover(base_node, name_node, "method", source, uri, &doc.scope_tree, index, all_docs, doc.line_index())
+    build_field_hover(base_node, name_node, "method", source, uri_id, &doc.scope_tree, index, all_docs, doc.line_index())
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -432,7 +434,7 @@ fn hover_method_call(
 fn hover_variable_field(
     var_node: tree_sitter::Node,
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
@@ -445,7 +447,7 @@ fn hover_variable_field(
             name_node,
             "field",
             source,
-            uri,
+            uri_id,
             &doc.scope_tree,
             index,
             all_docs,
@@ -455,7 +457,7 @@ fn hover_variable_field(
 
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    build_field_hover(base_node, name_node, "field", source, uri, &doc.scope_tree, index, all_docs, doc.line_index())
+    build_field_hover(base_node, name_node, "field", source, uri_id, &doc.scope_tree, index, all_docs, doc.line_index())
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -470,7 +472,7 @@ fn build_field_hover(
     name_node: tree_sitter::Node,
     kind_label: &str,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
@@ -483,7 +485,7 @@ fn build_field_hover(
         name_node,
         kind_label,
         source,
-        uri,
+        uri_id,
         scope_tree,
         index,
         all_docs,
@@ -497,17 +499,16 @@ fn build_field_chain_hover(
     name_node: tree_sitter::Node,
     kind_label: &str,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = fields.last()?.clone();
-    let uri_id = intern_uri(uri.clone());
 
     let base_fact = crate::type_inference::infer_node_type_in_file_id(
-        base_node, source, uri_id, uri, scope_tree, index,
+        base_node, source, uri_id, scope_tree, index,
     );
     lsp_log!(
         "[hover_{kind}] base='{}' base_fact={:?} fields={:?}",
@@ -527,11 +528,8 @@ fn build_field_chain_hover(
         let Some(location) = resolved.def_location else {
             return None;
         };
-        let Some(def_uri) = index.summary_uri(location.uri_id) else {
-            return None;
-        };
         let def_range = location.range;
-        if !all_docs.contains_document(def_uri) {
+        if !all_docs.contains_document_id(location.uri_id) {
             return None;
         }
         Some(crate::types::Definition {
@@ -539,7 +537,8 @@ fn build_field_chain_hover(
             kind: DefKind::GlobalVariable,
             range: def_range,
             selection_range: def_range,
-            uri: def_uri.clone(),
+            uri_id: location.uri_id,
+            uri: crate::uri_id::resolve(location.uri_id),
         })
     })();
     if let Some(synth_def) = synth_def {
@@ -573,7 +572,7 @@ fn fallback_field_hover(
 }
 
 fn resolve_local_type_info(
-    uri: &Uri,
+    uri_id: UriId,
     name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
@@ -582,7 +581,6 @@ fn resolve_local_type_info(
     // FunctionRef hover fix: resolve to readable signature via scope_tree
     if let Some(type_fact) = scope_tree.resolve_type(byte_offset, name) {
         if let TypeFact::Known(crate::type_system::KnownType::FunctionRef(id)) = type_fact {
-            let uri_id = intern_uri(uri.clone());
             if let Some(summary) = index.summary_by_id(uri_id) {
                 if let Some(fs) = summary.function_summaries.get(id) {
                     return Some(format_signature(&fs.signature));
@@ -591,7 +589,7 @@ fn resolve_local_type_info(
         }
     }
 
-    let resolved = resolver::resolve_local_in_file(uri, name, byte_offset, scope_tree, index);
+    let resolved = resolver::resolve_local_in_file(name, byte_offset, scope_tree, index);
     let display = format_resolved_type(&resolved.type_fact);
     if display == "unknown" {
         None
@@ -626,7 +624,7 @@ fn build_hover_for_definition(
     all_docs: &impl DocumentLookup,
     type_info: Option<&str>,
 ) -> Option<Hover> {
-    let doc = all_docs.get_document(&def.uri)?;
+    let doc = all_docs.get_document_by_id(def.uri_id)?;
     let source = doc.source();
 
     let def_start_byte = def.range.start_byte;

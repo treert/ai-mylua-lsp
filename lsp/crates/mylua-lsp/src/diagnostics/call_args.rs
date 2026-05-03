@@ -1,6 +1,7 @@
 use super::type_compat::{infer_argument_type, is_type_compatible};
 use crate::aggregation::WorkspaceAggregation;
 use crate::type_system::TypeFact;
+use crate::uri_id::UriId;
 use crate::util::LineIndex;
 use tower_lsp_server::ls_types::*;
 
@@ -20,7 +21,7 @@ use tower_lsp_server::ls_types::*;
 pub(super) fn check_call_argument_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
     scope_tree: &crate::scope::ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
@@ -37,7 +38,7 @@ pub(super) fn check_call_argument_diagnostics(
 
     for call in calls {
         let Some((sigs, is_method, display)) =
-            crate::signature_help::resolve_call_signatures(call, source, uri, scope_tree, index)
+            crate::signature_help::resolve_call_signatures(call, source, uri_id, scope_tree, index)
         else {
             continue;
         };

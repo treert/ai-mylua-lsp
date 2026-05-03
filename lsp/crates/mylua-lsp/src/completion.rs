@@ -4,18 +4,19 @@ use tower_lsp_server::ls_types::*;
 use crate::document::{Document, DocumentLookup};
 use crate::type_inference;
 use crate::resolver;
+use crate::uri_id::{resolve as resolve_uri, IntoUriId, UriId};
 use crate::util::{node_text, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
 
 /// Build the resolve-payload attached to a completion item so that
 /// `completion_resolve` can re-locate the symbol on demand.
-fn resolve_data(kind: &str, uri: Option<&Uri>, name: &str) -> serde_json::Value {
+fn resolve_data(kind: &str, uri_id: Option<UriId>, name: &str) -> serde_json::Value {
     let mut obj = serde_json::Map::new();
     obj.insert("kind".into(), serde_json::Value::String(kind.to_string()));
     obj.insert("name".into(), serde_json::Value::String(name.to_string()));
-    if let Some(u) = uri {
-        obj.insert("uri".into(), serde_json::Value::String(u.to_string()));
+    if let Some(id) = uri_id {
+        obj.insert("uri".into(), serde_json::Value::String(resolve_uri(id).to_string()));
     }
     serde_json::Value::Object(obj)
 }
@@ -30,10 +31,11 @@ const EMMY_TAGS: &[&str] = &[
 
 pub fn complete(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CompletionItem> {
+    let uri_id = uri_id.into_uri_id();
     // `require("<here>")` string-literal completion — highest priority.
     if let Some(items) = try_require_path_completion(doc, position, index) {
         return items;
@@ -45,7 +47,7 @@ pub fn complete(
     }
 
     // Dot / method completion.
-    if let Some(items) = try_dot_completion_ast(doc, uri, position, index) {
+    if let Some(items) = try_dot_completion_ast(doc, uri_id, position, index) {
         return items;
     }
 
@@ -54,7 +56,7 @@ pub fn complete(
     let mut items = Vec::new();
     let mut seen = HashSet::new();
 
-    collect_scope_completions(doc, uri, position, &prefix, &mut items, &mut seen);
+    collect_scope_completions(doc, uri_id, position, &prefix, &mut items, &mut seen);
     collect_global_completions(index, &prefix, &mut items, &mut seen);
     collect_keyword_completions(&prefix, &mut items, &mut seen);
 
@@ -188,7 +190,7 @@ fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool
 /// subscripts (`arr[1].`) are treated via the resolver chain.
 fn try_dot_completion_ast(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
@@ -215,9 +217,9 @@ fn try_dot_completion_ast(
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
     let base_node = find_base_expression_node(doc.tree.root_node(), base_end)?;
-let base_fact = type_inference::infer_node_type(base_node, bytes, uri, &doc.scope_tree, index);
+    let base_fact = type_inference::infer_node_type_in_file_id(base_node, bytes, uri_id, &doc.scope_tree, index);
 
-    let fields = resolver::get_fields_for_type(&base_fact, Some(uri), index);
+    let fields = resolver::get_fields_for_type_id(&base_fact, Some(uri_id), index);
     if fields.is_empty() {
         return None;
     }
@@ -315,7 +317,7 @@ fn get_prefix(doc: &Document, position: Position) -> String {
 
 fn collect_scope_completions(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     position: Position,
     prefix: &str,
     items: &mut Vec<CompletionItem>,
@@ -334,7 +336,7 @@ fn collect_scope_completions(
             items.push(CompletionItem {
                 label: decl.name.clone(),
                 kind: Some(kind),
-                data: Some(resolve_data("local", Some(uri), &decl.name)),
+                data: Some(resolve_data("local", Some(uri_id), &decl.name)),
                 ..Default::default()
             });
         }
@@ -382,15 +384,15 @@ pub fn resolve_completion(
     item: CompletionItem,
     index: &WorkspaceAggregation,
     documents: &impl DocumentLookup,
+    local_uri_id: Option<UriId>,
 ) -> CompletionItem {
     // Extract fields up front (owned Strings) so we can freely
     // hand `item` into the per-kind helpers without clashing with
     // the borrow.
-    let (kind, name, uri_str) = match item.data.as_ref() {
+    let (kind, name) = match item.data.as_ref() {
         Some(data) => (
             data.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string(),
             data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            data.get("uri").and_then(|v| v.as_str()).unwrap_or("").to_string(),
         ),
         None => return item,
     };
@@ -398,10 +400,10 @@ pub fn resolve_completion(
     match kind.as_str() {
         "global" => resolve_global_item(item, index, &name),
         "local" => {
-            let Ok(uri) = uri_str.parse::<Uri>() else {
+            let Some(uri_id) = local_uri_id else {
                 return item;
             };
-            resolve_local_item(item, documents, &uri, &name)
+            resolve_local_item(item, documents, uri_id, &name)
         }
         _ => item,
     }
@@ -467,10 +469,10 @@ fn resolve_global_item(
 fn resolve_local_item(
     mut item: CompletionItem,
     documents: &impl DocumentLookup,
-    uri: &Uri,
+    uri_id: UriId,
     name: &str,
 ) -> CompletionItem {
-    let Some(doc) = documents.get_document(uri) else {
+    let Some(doc) = documents.get_document_by_id(uri_id) else {
         return item;
     };
     // Without position context, find the last declaration matching the name

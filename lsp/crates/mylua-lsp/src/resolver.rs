@@ -1,5 +1,4 @@
 use std::collections::HashSet;
-use tower_lsp_server::ls_types::Uri;
 
 use crate::aggregation::WorkspaceAggregation;
 use crate::table_shape::TableShapeId;
@@ -79,21 +78,12 @@ pub fn resolve_field_chain(
     resolve_field_chain_inner(base_fact, fields, agg, None, false)
 }
 
-/// URI-aware variant of `resolve_field_chain` for bases that are
+/// UriId-aware variant of `resolve_field_chain` for bases that are
 /// **file-local** table shapes. When the base is `Known(Table(shape_id))`,
 /// `TableShapeId` is per-file so the plain chain resolver returns
 /// `Unknown` (no source-file hint to locate the shape). This seeds the
 /// UriId and keeps it threaded through intermediate `Known(Table)` results
 /// so deep nested writes like `a.b.c = 1` hover-resolve correctly.
-pub fn resolve_field_chain_in_file(
-    uri: &Uri,
-    base_fact: &TypeFact,
-    fields: &[String],
-    agg: &WorkspaceAggregation,
-) -> ResolvedType {
-    resolve_field_chain_in_file_id(crate::uri_id::intern(uri.clone()), base_fact, fields, agg)
-}
-
 pub fn resolve_field_chain_in_file_id(
     uri_id: UriId,
     base_fact: &TypeFact,
@@ -216,7 +206,6 @@ fn resolve_field_chain_inner(
 
 /// Given a file URI and a local variable name, resolve its type via the scope tree.
 pub fn resolve_local_in_file(
-    _uri: &Uri,
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
@@ -233,15 +222,6 @@ pub fn resolve_local_in_file(
 ///
 /// `source_uri_hint` provides the file where the base expression lives,
 /// used to disambiguate per-file `TableShapeId` values.
-pub fn get_fields_for_type(
-    fact: &TypeFact,
-    source_uri_hint: Option<&Uri>,
-    agg: &WorkspaceAggregation,
-) -> Vec<FieldCompletion> {
-    let source_uri_hint = source_uri_hint.map(|uri| crate::uri_id::intern(uri.clone()));
-    get_fields_for_type_id(fact, source_uri_hint, agg)
-}
-
 pub fn get_fields_for_type_id(
     fact: &TypeFact,
     source_uri_hint: Option<UriId>,

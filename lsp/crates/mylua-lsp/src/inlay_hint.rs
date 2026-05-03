@@ -23,6 +23,7 @@ use crate::config::InlayHintConfig;
 use crate::document::Document;
 use crate::signature_help;
 use crate::type_system::{KnownType, TypeFact};
+use crate::uri_id::UriId;
 use crate::util::{node_text, LineIndex};
 
 /// Shared context for the inlay-hint tree walk, avoiding a long
@@ -30,7 +31,7 @@ use crate::util::{node_text, LineIndex};
 struct InlayCtx<'a> {
     source: &'a [u8],
     line_index: &'a LineIndex,
-    uri: &'a Uri,
+    uri_id: UriId,
     scope_tree: &'a crate::scope::ScopeTree,
     index: &'a WorkspaceAggregation,
     cfg: &'a InlayHintConfig,
@@ -41,7 +42,7 @@ struct InlayCtx<'a> {
 
 pub fn inlay_hints(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     range: Range,
     index: &WorkspaceAggregation,
     cfg: &InlayHintConfig,
@@ -56,7 +57,7 @@ pub fn inlay_hints(
 
     let mut out = Vec::new();
     let mut ctx = InlayCtx {
-        source, line_index: doc.line_index(), uri, scope_tree: &doc.scope_tree, index, cfg, range_start, range_end, out: &mut out,
+        source, line_index: doc.line_index(), uri_id, scope_tree: &doc.scope_tree, index, cfg, range_start, range_end, out: &mut out,
     };
     let mut cursor = doc.tree.root_node().walk();
     walk(&mut cursor, &mut ctx);
@@ -75,10 +76,10 @@ fn walk(
 
     match node.kind() {
         "function_call" if ctx.cfg.parameter_names => {
-            collect_parameter_name_hints(node, ctx.source, ctx.uri, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
+            collect_parameter_name_hints(node, ctx.source, ctx.uri_id, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
         }
         "local_declaration" if ctx.cfg.variable_types => {
-            collect_variable_type_hints(node, ctx.source, ctx.uri, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
+            collect_variable_type_hints(node, ctx.source, ctx.scope_tree, ctx.out, ctx.line_index);
         }
         _ => {}
     }
@@ -97,7 +98,7 @@ fn walk(
 fn collect_parameter_name_hints(
     call: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
@@ -109,7 +110,7 @@ fn collect_parameter_name_hints(
     // method calls, dot calls, and simple identifier calls are all
     // covered uniformly.
     let Some((sigs, is_method, _name)) =
-        signature_help::resolve_call_signatures(call, source, uri, scope_tree, index)
+        signature_help::resolve_call_signatures(call, source, uri_id, scope_tree, index)
     else {
         return;
     };
@@ -175,9 +176,7 @@ fn emit_param_hint(
 fn collect_variable_type_hints(
     decl: tree_sitter::Node,
     source: &[u8],
-    _uri: &Uri,
     scope_tree: &crate::scope::ScopeTree,
-    _index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {

@@ -35,21 +35,23 @@ pub fn collect_diagnostics(
     diagnostics
 }
 
+/// Version-aware variant — `runtime_version` (e.g. `"5.3"` / `"5.4"`
+/// / `"luajit"`) selects which built-in identifiers are considered
+/// defined so that `undefinedGlobal` and related checks stay
+/// accurate per runtime.
 pub fn collect_semantic_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    protocol_uri: &Uri,
     index: &WorkspaceAggregation,
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
-    let uri_id = intern_uri(uri.clone());
     collect_semantic_diagnostics_with_version_id(
         root,
         source,
-        uri,
-        uri_id,
+        intern_uri(protocol_uri.clone()),
         index,
         scope_tree,
         diag_config,
@@ -58,26 +60,20 @@ pub fn collect_semantic_diagnostics(
     )
 }
 
-/// Version-aware variant — `runtime_version` (e.g. `"5.3"` / `"5.4"`
-/// / `"luajit"`) selects which built-in identifiers are considered
-/// defined so that `undefinedGlobal` and related checks stay
-/// accurate per runtime.
 pub fn collect_semantic_diagnostics_with_version(
     root: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    protocol_uri: &Uri,
     index: &WorkspaceAggregation,
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
     runtime_version: &str,
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
-    let uri_id = intern_uri(uri.clone());
     collect_semantic_diagnostics_with_version_id(
         root,
         source,
-        uri,
-        uri_id,
+        intern_uri(protocol_uri.clone()),
         index,
         scope_tree,
         diag_config,
@@ -89,7 +85,6 @@ pub fn collect_semantic_diagnostics_with_version(
 pub(crate) fn collect_semantic_diagnostics_with_version_id(
     root: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
     uri_id: UriId,
     index: &WorkspaceAggregation,
     scope_tree: &ScopeTree,
@@ -133,7 +128,6 @@ pub(crate) fn collect_semantic_diagnostics_with_version_id(
         field_access::check_field_access_diagnostics(
             root,
             source,
-            uri,
             uri_id,
             index,
             scope_tree,
@@ -172,7 +166,7 @@ pub(crate) fn collect_semantic_diagnostics_with_version_id(
         call_args::check_call_argument_diagnostics(
             root,
             source,
-            uri,
+            uri_id,
             index,
             scope_tree,
             &mut diagnostics,

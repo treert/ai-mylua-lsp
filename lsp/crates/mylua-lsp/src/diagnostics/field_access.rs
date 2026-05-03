@@ -10,7 +10,6 @@ use tower_lsp_server::ls_types::*;
 struct FieldDiagCtx<'a> {
     source: &'a [u8],
     line_index: &'a LineIndex,
-    uri: &'a Uri,
     uri_id: UriId,
     scope_tree: &'a crate::scope::ScopeTree,
     index: &'a WorkspaceAggregation,
@@ -23,7 +22,6 @@ struct FieldDiagCtx<'a> {
 pub(super) fn check_field_access_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
     uri_id: UriId,
     index: &WorkspaceAggregation,
     scope_tree: &crate::scope::ScopeTree,
@@ -36,7 +34,6 @@ pub(super) fn check_field_access_diagnostics(
     let mut ctx = FieldDiagCtx {
         source,
         line_index,
-        uri,
         uri_id,
         scope_tree,
         index,
@@ -93,7 +90,6 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
                 callee,
                 ctx.source,
                 ctx.uri_id,
-                ctx.uri,
                 ctx.scope_tree,
                 ctx.index,
             );
@@ -157,7 +153,6 @@ fn check_dotted_field(
         base_node,
         ctx.source,
         ctx.uri_id,
-        ctx.uri,
         ctx.scope_tree,
         ctx.index,
     );

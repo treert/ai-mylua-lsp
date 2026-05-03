@@ -15,22 +15,23 @@ use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
-use crate::uri_id::{intern as intern_uri, UriId};
+use crate::uri_id::{IntoUriId, UriId};
 use crate::util::node_text;
 
 pub fn signature_help(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
+    let uri_id = uri_id.into_uri_id();
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let source = doc.source();
 
     // Find the enclosing function call whose argument list contains the cursor.
     let call = find_enclosing_call(doc.tree.root_node(), offset)?;
     let (signatures, is_method, primary_name) =
-        resolve_call_signatures(call, source, uri, &doc.scope_tree, index)?;
+        resolve_call_signatures(call, source, uri_id, &doc.scope_tree, index)?;
     if signatures.is_empty() {
         return None;
     }
@@ -76,18 +77,17 @@ fn find_enclosing_call(root: tree_sitter::Node, byte_offset: usize) -> Option<tr
 pub(crate) fn resolve_call_signatures(
     call: tree_sitter::Node,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
-    let uri_id = intern_uri(uri.clone());
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
 
     // `obj:method(...)`
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
-        let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, uri, scope_tree, index);
+        let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
         let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
@@ -100,7 +100,7 @@ pub(crate) fn resolve_call_signatures(
             callee.child_by_field_name("field"),
         ) {
             let field_name = node_text(field, source).to_string();
-            let base_fact = type_inference::infer_node_type_in_file_id(object, source, uri_id, uri, scope_tree, index);
+            let base_fact = type_inference::infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
             let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
@@ -131,7 +131,7 @@ pub(crate) fn resolve_call_signatures(
     // function(a, b) ... end` or cross-file `require` returning a
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
-    let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, uri, scope_tree, index);
+    let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
     let resolved = resolver::resolve_type(&base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {

@@ -1,5 +1,5 @@
-use tower_lsp_server::ls_types::Uri;
 use crate::types::{DefKind, Definition};
+use crate::uri_id::{resolve as resolve_uri, UriId};
 use crate::util::ByteRange;
 
 // ---------------------------------------------------------------------------
@@ -70,14 +70,15 @@ impl ScopeTree {
 }
 
 impl ScopeTree {
-    pub fn resolve(&self, byte_offset: usize, name: &str, uri: &Uri) -> Option<Definition> {
+    pub fn resolve_id(&self, byte_offset: usize, name: &str, uri_id: UriId) -> Option<Definition> {
         let decl = self.resolve_decl(byte_offset, name)?;
         Some(Definition {
             name: decl.name.clone(),
             kind: decl.kind.clone(),
             range: decl.range,
             selection_range: decl.selection_range,
-            uri: uri.clone(),
+            uri_id,
+            uri: resolve_uri(uri_id),
         })
     }
 

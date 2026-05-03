@@ -3,10 +3,9 @@ use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
 use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
-use crate::type_inference::infer_node_type;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
-use crate::uri_id::intern as intern_uri;
+use crate::uri_id::{resolve as resolve_uri, IntoUriId, UriId};
 
 // ---------------------------------------------------------------------------
 // Semantic Identity — what entity the cursor points to
@@ -45,21 +44,23 @@ enum Identity {
 
 pub fn find_references(
     doc: &Document,
-    uri: &Uri,
+    uri_id: impl IntoUriId,
     position: Position,
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
+    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
-    let identity = identify_at_cursor(doc, uri, byte_offset, index, all_docs)?;
+    let identity = identify_at_cursor(doc, uri_id, byte_offset, index, all_docs)?;
 
     let mut locations = Vec::new();
 
     match &identity {
         Identity::Local { name, decl_byte } => {
+            let uri = resolve_uri(uri_id);
             // Declaration
             if include_declaration {
                 if let Some(decl) = doc.scope_tree.resolve_decl(*decl_byte, name) {
@@ -93,7 +94,8 @@ pub fn find_references(
                 collect_global_declarations(name, index, strategy, &mut locations);
             }
             // Scan all files
-            all_docs.for_each_document(|doc_uri, file_doc| {
+            all_docs.for_each_document_id(|doc_uri_id, file_doc| {
+                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
@@ -122,23 +124,24 @@ pub fn find_references(
                 };
                 locations.push(Location {
                     uri: identity_def_uri.clone(),
-                    range: range_from_byte_range(identity_def_uri, identity_def_range, all_docs),
+                    range: range_from_byte_range(location.uri_id, identity_def_range, all_docs),
                 });
             }
             // Scan all files for the field name
-            all_docs.for_each_document(|doc_uri, file_doc| {
+            all_docs.for_each_document_id(|doc_uri_id, file_doc| {
+                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, field_name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, field_name.len()) else {
                         continue;
                     };
                     // Skip the declaration position itself
-                    if intern_uri(doc_uri.clone()) == location.uri_id
+                    if doc_uri_id == location.uri_id
                         && node.start_byte() == identity_def_range.start_byte
                     {
                         continue;
                     }
-                    if verify_field(node, *location, field_name, source, doc_uri, &file_doc.scope_tree, index) {
+                    if verify_field(node, *location, field_name, source, doc_uri_id, &file_doc.scope_tree, index) {
                         locations.push(Location {
                             uri: doc_uri.clone(),
                             range: file_doc.line_index().ts_node_to_range(node, source),
@@ -192,7 +195,8 @@ pub fn find_references(
             }
             // Scan all files: both as global identifier references and as
             // Emmy annotation text references
-            all_docs.for_each_document(|doc_uri, file_doc| {
+            all_docs.for_each_document_id(|doc_uri_id, file_doc| {
+                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
@@ -228,7 +232,7 @@ pub fn find_references(
 
 fn identify_at_cursor(
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     byte_offset: usize,
     index: &WorkspaceAggregation,
     _all_docs: &impl DocumentLookup,
@@ -263,7 +267,7 @@ fn identify_at_cursor(
     let ident_node = ident_node.unwrap();
 
     // 3. Check if in field/method position → Field identity
-    if let Some(identity) = try_identify_field(ident_node, doc, uri, index) {
+    if let Some(identity) = try_identify_field(ident_node, doc, uri_id, index) {
         return Some(identity);
     }
 
@@ -289,7 +293,7 @@ fn identify_at_cursor(
 fn try_identify_field(
     ident_node: tree_sitter::Node,
     doc: &Document,
-    uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
 ) -> Option<Identity> {
     let source = doc.source();
@@ -345,7 +349,7 @@ fn try_identify_field(
             }
             // Resolve the owner type through the segments chain
             let resolved = resolve_segments_to_field(
-                &segments, &field_name, source, uri, &doc.scope_tree, index, first_segment_byte,
+                &segments, &field_name, source, uri_id, &doc.scope_tree, index, first_segment_byte,
             )?;
             return Some(Identity::Field {
                 field_name,
@@ -356,9 +360,11 @@ fn try_identify_field(
     };
 
     // Infer base type and resolve the field
-    let base_fact = infer_node_type(base_node, source, uri, &doc.scope_tree, index);
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[field_name.clone()], index,
+    let base_fact = crate::type_inference::infer_node_type_in_file_id(
+        base_node, source, uri_id, &doc.scope_tree, index,
+    );
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        uri_id, &base_fact, &[field_name.clone()], index,
     );
 
     let location = resolved.def_location?;
@@ -380,7 +386,7 @@ fn resolve_segments_to_field(
     segments: &[String],
     field_name: &str,
     _source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
     lookup_byte: usize,
@@ -406,15 +412,15 @@ fn resolve_segments_to_field(
     let base_fact = if intermediate_fields.is_empty() {
         root_fact
     } else {
-        let resolved = resolver::resolve_field_chain_in_file(
-            uri, &root_fact, &intermediate_fields, index,
+        let resolved = resolver::resolve_field_chain_in_file_id(
+            uri_id, &root_fact, &intermediate_fields, index,
         );
         resolved.type_fact
     };
 
     // Now resolve the final field
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &[field_name.to_string()], index,
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        uri_id, &base_fact, &[field_name.to_string()], index,
     );
     resolved.def_location
 }
@@ -454,7 +460,7 @@ fn verify_field(
     target_location: ResolvedLocation,
     field_name: &str,
     source: &[u8],
-    doc_uri: &Uri,
+    doc_uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> bool {
@@ -500,7 +506,7 @@ fn verify_field(
             if segments.is_empty() { return false; }
             // Resolve through segments
             if let Some(location) = resolve_segments_to_field(
-                &segments, field_name, source, doc_uri, scope_tree, index, first_segment_byte,
+                &segments, field_name, source, doc_uri_id, scope_tree, index, first_segment_byte,
             ) {
                 return location == target_location;
             }
@@ -510,9 +516,11 @@ fn verify_field(
     };
 
     // Infer base type → resolve field → compare declaration location
-    let base_fact = infer_node_type(base_node, source, doc_uri, scope_tree, index);
-    let resolved = resolver::resolve_field_chain_in_file(
-        doc_uri, &base_fact, &[field_name.to_string()], index,
+    let base_fact = crate::type_inference::infer_node_type_in_file_id(
+        base_node, source, doc_uri_id, scope_tree, index,
+    );
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        doc_uri_id, &base_fact, &[field_name.to_string()], index,
     );
 
     resolved.def_location == Some(target_location)
@@ -631,11 +639,11 @@ fn collect_global_declarations(
 
 /// Convert a ByteRange to an LSP Range by looking up the document.
 fn range_from_byte_range(
-    uri: &Uri,
+    uri_id: UriId,
     byte_range: ByteRange,
     all_docs: &impl DocumentLookup,
 ) -> Range {
-    if let Some(doc) = all_docs.get_document(uri) {
+    if let Some(doc) = all_docs.get_document_by_id(uri_id) {
         let start = doc.line_index().byte_offset_to_position(doc.source(), byte_range.start_byte);
         let end = doc.line_index().byte_offset_to_position(doc.source(), byte_range.end_byte);
         if let (Some(s), Some(e)) = (start, end) {
@@ -701,10 +709,10 @@ fn collect_emmy_type_references(
     all_docs: &impl DocumentLookup,
     locations: &mut Vec<Location>,
 ) {
-    all_docs.for_each_document(|doc_uri, doc| {
+    all_docs.for_each_document_id(|doc_uri_id, doc| {
         let source = doc.source();
         let mut cursor = doc.tree.root_node().walk();
-        scan_type_in_comments(&mut cursor, type_name, source, doc_uri, locations, doc.line_index());
+        scan_type_in_comments(&mut cursor, type_name, source, doc_uri_id, locations, doc.line_index());
     });
 }
 
@@ -712,21 +720,21 @@ fn scan_type_in_comments(
     cursor: &mut tree_sitter::TreeCursor,
     type_name: &str,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     locations: &mut Vec<Location>,
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
     match node.kind() {
         "emmy_line" | "comment" => {
-            emit_type_matches_in_node(node, type_name, source, uri, locations, line_index);
+            emit_type_matches_in_node(node, type_name, source, uri_id, locations, line_index);
             return;
         }
         _ => {}
     }
     if cursor.goto_first_child() {
         loop {
-            scan_type_in_comments(cursor, type_name, source, uri, locations, line_index);
+            scan_type_in_comments(cursor, type_name, source, uri_id, locations, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -739,7 +747,7 @@ fn emit_type_matches_in_node(
     node: tree_sitter::Node,
     type_name: &str,
     source: &[u8],
-    uri: &Uri,
+    uri_id: UriId,
     locations: &mut Vec<Location>,
     line_index: &LineIndex,
 ) {
@@ -767,7 +775,7 @@ fn emit_type_matches_in_node(
                     line_index.byte_offset_to_position(source, abs_end),
                 ) {
                     locations.push(Location {
-                        uri: uri.clone(),
+                        uri: resolve_uri(uri_id),
                         range: Range { start, end },
                     });
                 }

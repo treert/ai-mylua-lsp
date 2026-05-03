@@ -31,28 +31,15 @@ impl Document {
     }
 }
 
-/// URI-facing lookup abstraction used while the backing document store
-/// migrates from `Uri` keys to compact internal IDs.
+/// Document lookup abstraction keyed by compact internal IDs.
 pub trait DocumentLookup {
-    fn get_document(&self, uri: &Uri) -> Option<&Document>;
+    fn get_document_by_id(&self, uri_id: UriId) -> Option<&Document>;
 
-    fn contains_document(&self, uri: &Uri) -> bool {
-        self.get_document(uri).is_some()
+    fn contains_document_id(&self, uri_id: UriId) -> bool {
+        self.get_document_by_id(uri_id).is_some()
     }
 
-    fn for_each_document(&self, f: impl FnMut(&Uri, &Document));
-}
-
-impl DocumentLookup for HashMap<Uri, Document> {
-    fn get_document(&self, uri: &Uri) -> Option<&Document> {
-        self.get(uri)
-    }
-
-    fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
-        for (uri, doc) in self {
-            f(uri, doc);
-        }
-    }
+    fn for_each_document_id(&self, f: impl FnMut(UriId, &Document));
 }
 
 pub struct DocumentStoreView<'a> {
@@ -74,15 +61,25 @@ pub(crate) fn find_document<'a>(
 }
 
 impl DocumentLookup for DocumentStoreView<'_> {
-    fn get_document(&self, uri: &Uri) -> Option<&Document> {
-        let uri_id = intern(uri.clone());
+    fn get_document_by_id(&self, uri_id: UriId) -> Option<&Document> {
         self.documents.get(&uri_id)
     }
 
-    fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
+    fn for_each_document_id(&self, mut f: impl FnMut(UriId, &Document)) {
         for (uri_id, doc) in self.documents {
-            let uri = resolve(*uri_id);
-            f(&uri, doc);
+            f(*uri_id, doc);
+        }
+    }
+}
+
+impl DocumentLookup for HashMap<Uri, Document> {
+    fn get_document_by_id(&self, uri_id: UriId) -> Option<&Document> {
+        self.get(&resolve(uri_id))
+    }
+
+    fn for_each_document_id(&self, mut f: impl FnMut(UriId, &Document)) {
+        for (uri, doc) in self {
+            f(intern(uri.clone()), doc);
         }
     }
 }

@@ -658,7 +658,6 @@ async fn consumer_loop(
             let semantic = diagnostics::collect_semantic_diagnostics_with_version_id(
                 doc.tree.root_node(),
                 doc.source(),
-                &uri,
                 uri_id,
                 &idx,
                 &doc.scope_tree,
