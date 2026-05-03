@@ -82,10 +82,7 @@ fn resolve_module_target(
     index: &WorkspaceAggregation,
     module_path: &str,
 ) -> Option<Uri> {
-    if let Some(uri_id) = index.resolve_module_to_id(module_path) {
-        return Some(resolve(uri_id));
-    }
-    index.resolve_module_to_uri(module_path)
+    index.resolve_module_to_id(module_path).map(resolve)
 }
 
 /// When `call.callee` is the literal identifier `require` and the

@@ -130,8 +130,8 @@ fn require_map_survives_upsert() {
     agg.upsert_summary(mod_uri_id, mod_summary);
 
     assert_eq!(
-        agg.resolve_module_to_uri("mymod").as_ref(),
-        Some(&mod_uri),
+        agg.resolve_module_to_id("mymod"),
+        Some(mod_uri_id),
         "baseline: require(\"mymod\") should resolve before any edit"
     );
 
@@ -141,14 +141,14 @@ fn require_map_survives_upsert() {
     agg.upsert_summary(mod_uri_id, new_summary);
 
     assert_eq!(
-        agg.resolve_module_to_uri("mymod").as_ref(),
-        Some(&mod_uri),
+        agg.resolve_module_to_id("mymod"),
+        Some(mod_uri_id),
         "after re-upserting (editing) mymod.lua, require(\"mymod\") must still resolve to it",
     );
 
     agg.remove_file(mod_uri_id);
     assert!(
-        agg.resolve_module_to_uri("mymod").is_none(),
+        agg.resolve_module_to_id("mymod").is_none(),
         "after remove_file, require(\"mymod\") should no longer resolve",
     );
 }

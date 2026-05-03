@@ -120,7 +120,8 @@ pub fn search_workspace_symbols(
     }
 
     // --- Class fields: `@field x integer` in any file's @class ---
-    for (uri, summary) in index.summaries_iter() {
+    for (uri_id, summary) in index.summaries_iter_id() {
+        let uri = resolve_uri(uri_id);
         for td in &summary.type_definitions {
             for fd in &td.fields {
                 if !matches_query(&fd.name, &query_lower, query.is_empty()) {

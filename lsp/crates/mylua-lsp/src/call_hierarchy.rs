@@ -214,12 +214,13 @@ pub fn incoming_calls(
     // expressions do not merge into one incoming caller.
     let mut groups: HashMap<(Uri, String, Option<FunctionSummaryId>), (CallHierarchyItem, Vec<Range>)> = HashMap::new();
 
-    for (uri, summary) in index.summaries_iter() {
+    for (uri_id, summary) in index.summaries_iter_id() {
+        let uri = resolve_uri(uri_id);
         for cs in &summary.call_sites {
             if last_segment(&cs.callee_name) != target {
                 continue;
             }
-            let caller_item = resolve_caller_item(uri, cs, summary);
+            let caller_item = resolve_caller_item(&uri, cs, summary);
             let lsp_range: Range = cs.range.into();
             let key = (uri.clone(), cs.caller_name.clone(), cs.caller_id);
             groups

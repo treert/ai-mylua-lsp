@@ -1,9 +1,8 @@
 use std::collections::{HashMap, HashSet};
-use tower_lsp_server::ls_types::Uri;
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
-use crate::uri_id::{priority as uri_priority, resolve as resolve_uri, UriId, UriPriority};
+use crate::uri_id::{priority as uri_priority, UriId, UriPriority};
 use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.
@@ -21,7 +20,7 @@ pub struct WorkspaceAggregation {
     pub type_shard: HashMap<String, Vec<TypeCandidate>>,
 
     /// Module index: last_segment → Vec<(full_module_name, UriId)>.
-    /// Used by `resolve_module_to_uri` for O(1) last-segment lookup
+    /// Used by `resolve_module_to_id` for O(1) last-segment lookup
     /// followed by longest-suffix matching among candidates.
     module_index: HashMap<String, Vec<(String, UriId)>>,
     /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
@@ -337,8 +336,8 @@ impl WorkspaceAggregation {
         self.summaries.get(&uri_id)
     }
 
-    pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {
-        self.summaries.values().map(|summary| (&summary.uri, summary))
+    pub fn summaries_iter_id(&self) -> impl Iterator<Item = (UriId, &DocumentSummary)> {
+        self.summaries.iter().map(|(uri_id, summary)| (*uri_id, summary))
     }
 
     pub fn summaries_values(&self) -> impl Iterator<Item = &DocumentSummary> {
@@ -352,7 +351,7 @@ impl WorkspaceAggregation {
     /// Build the initial global index atomically from a complete set of
     /// file summaries. This is the cold-start path: all summaries are
     /// available at once, so we skip `remove_contributions` (nothing to
-    /// remove) and `resolve_module_to_uri` benefits from a fully
+    /// remove) and `resolve_module_to_id` benefits from a fully
     /// populated `require_map` + `summaries` — eliminating the
     /// batch-ordering bug where early files couldn't resolve modules
     /// defined in later batches.
@@ -547,7 +546,7 @@ impl WorkspaceAggregation {
         });
     }
 
-    /// Resolve a `require("module.path")` string to a file URI.
+    /// Resolve a `require("module.path")` string to a file id.
     ///
     /// Algorithm:
     /// 1. Normalize the module path (lowercase, strip trailing `.init`).
@@ -555,19 +554,7 @@ impl WorkspaceAggregation {
     /// 3. Look up candidates by last segment (O(1) HashMap lookup).
     /// 4. Among candidates whose last segment matches, pick the one
     ///    with the longest matching suffix (by `.`-separated segments).
-    pub fn resolve_module_to_uri(&self, module_path: &str) -> Option<Uri> {
-        use crate::workspace_scanner::normalize_require_path;
-
-        let normalized = normalize_require_path(module_path);
-
-        // Step 1: Try alias expansion (longest-prefix match first).
-        let resolved = self.apply_alias_expansion(&normalized);
-
-        // Step 2: Look up by last segment.
-        self.find_best_match(&resolved)
-    }
-
-    pub(crate) fn resolve_module_to_id(&self, module_path: &str) -> Option<UriId> {
+    pub fn resolve_module_to_id(&self, module_path: &str) -> Option<UriId> {
         use crate::workspace_scanner::normalize_require_path;
 
         let normalized = normalize_require_path(module_path);
@@ -616,14 +603,9 @@ impl WorkspaceAggregation {
         }
     }
 
-    /// Find the best matching URI for a normalized module path.
+    /// Find the best matching URI id for a normalized module path.
     /// Uses last-segment lookup + strict suffix matching.
     /// A candidate matches if it equals the query or ends with `.{query}`.
-    fn find_best_match(&self, module_path: &str) -> Option<Uri> {
-        let uri_id = self.find_best_match_id(module_path)?;
-        Some(resolve_uri(uri_id))
-    }
-
     fn find_best_match_id(&self, module_path: &str) -> Option<UriId> {
         use crate::workspace_scanner::module_last_segment;
 

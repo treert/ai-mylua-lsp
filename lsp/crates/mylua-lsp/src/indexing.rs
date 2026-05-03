@@ -388,7 +388,7 @@ pub async fn run_workspace_scan(
         // module_index — it only clears summaries, global_shard,
         // type_shard.
         // So module_index is already ready for
-        // resolve_module_to_uri during the merge.
+        // resolve_module_to_id during the merge.
 
         // Separate parsed files into two sets: those already open in
         // the editor (skip — buffer version wins) and the rest.
