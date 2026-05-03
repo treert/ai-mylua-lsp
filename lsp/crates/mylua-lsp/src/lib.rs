@@ -498,9 +498,7 @@ impl Backend {
         if *self.index_state.lock().unwrap() == IndexState::Ready {
             return;
         }
-        let Some(uri_id) = self.uri_interner.get(uri) else {
-            return;
-        };
+        let uri_id = self.uri_interner.intern(uri.clone());
         if !self.open_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
@@ -604,7 +602,7 @@ mod uri_id_tests {
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
-    fn intern_returns_stable_positive_ids() {
+    fn intern_returns_stable_ids_for_same_uri_and_distinct_ids_for_distinct_uris() {
         let interner = UriInterner::new();
         let first: Uri = "file:///tmp/a.lua".parse().unwrap();
         let second: Uri = "file:///tmp/b.lua".parse().unwrap();
@@ -615,50 +613,29 @@ mod uri_id_tests {
 
         assert_eq!(first_id, first_again);
         assert_ne!(first_id, second_id);
-        assert_eq!(first_id.raw(), 1);
-        assert_eq!(second_id.raw(), 2);
     }
 
     #[test]
-    fn resolve_returns_original_uri() {
+    fn resolve_returns_original_uri_for_interned_id() {
         let interner = UriInterner::new();
         let uri: Uri = "file:///tmp/a.lua".parse().unwrap();
         let id = interner.intern(uri.clone());
 
-        assert_eq!(interner.resolve(id), Some(uri));
+        assert_eq!(interner.resolve(id), uri);
     }
 
     #[test]
-    #[should_panic(expected = "UriId must be positive")]
-    fn uri_id_rejects_zero() {
-        let _ = UriId::new(0);
+    fn zero_uri_id_resolves_to_empty_uri() {
+        let interner = UriInterner::new();
+        let empty_uri: Uri = "file:".parse().unwrap();
+
+        assert_eq!(interner.resolve(UriId::new(0)), empty_uri);
     }
 
     #[test]
-    #[should_panic(expected = "UriId must be positive")]
+    #[should_panic(expected = "UriId must be non-negative")]
     fn uri_id_rejects_negative_values() {
         let _ = UriId::new(-1);
-    }
-
-    #[test]
-    fn interner_allocates_i32_max_then_panics_on_next_id() {
-        let interner = UriInterner::for_test_next_id(i32::MAX);
-        let first: Uri = "file:///tmp/a.lua".parse().unwrap();
-        let second: Uri = "file:///tmp/b.lua".parse().unwrap();
-
-        assert_eq!(interner.intern(first).raw(), i32::MAX);
-        let panic = std::panic::catch_unwind(|| {
-            let _ = interner.intern(second);
-        });
-
-        assert!(panic.is_err());
-        let message = panic
-            .unwrap_err()
-            .downcast::<String>()
-            .map(|s| *s)
-            .or_else(|payload| payload.downcast::<&'static str>().map(|s| s.to_string()))
-            .expect("panic payload should be a string");
-        assert_eq!(message, "UriId exhausted");
     }
 }
 

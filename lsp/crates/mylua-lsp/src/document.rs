@@ -71,21 +71,20 @@ pub(crate) fn find_document<'a>(
     uri_interner: &UriInterner,
     uri: &Uri,
 ) -> Option<(UriId, &'a Document)> {
-    let uri_id = uri_interner.get(uri)?;
+    let uri_id = uri_interner.intern(uri.clone());
     documents.get(&uri_id).map(|doc| (uri_id, doc))
 }
 
 impl DocumentLookup for DocumentStoreView<'_> {
     fn get_document(&self, uri: &Uri) -> Option<&Document> {
-        let uri_id = self.uri_interner.get(uri)?;
+        let uri_id = self.uri_interner.intern(uri.clone());
         self.documents.get(&uri_id)
     }
 
     fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
         for (uri_id, doc) in self.documents {
-            if let Some(uri) = self.uri_interner.resolve(*uri_id) {
-                f(&uri, doc);
-            }
+            let uri = self.uri_interner.resolve(*uri_id);
+            f(&uri, doc);
         }
     }
 }
@@ -98,12 +97,11 @@ mod tests {
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
-    fn find_document_does_not_intern_unknown_uri() {
+    fn find_document_returns_none_for_unknown_uri() {
         let interner = UriInterner::new();
         let documents: HashMap<UriId, Document> = HashMap::new();
         let uri: Uri = "file:///tmp/missing.lua".parse().unwrap();
 
         assert!(find_document(&documents, &interner, &uri).is_none());
-        assert!(interner.get(&uri).is_none());
     }
 }

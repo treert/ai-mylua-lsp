@@ -86,11 +86,8 @@ fn resolve_module_target(
     module_path: &str,
 ) -> Option<Uri> {
     if let Some(uri_interner) = uri_interner {
-        if let Some(uri) = index
-            .resolve_module_to_id(module_path)
-            .and_then(|uri_id| uri_interner.resolve(uri_id))
-        {
-            return Some(uri);
+        if let Some(uri_id) = index.resolve_module_to_id(module_path) {
+            return Some(uri_interner.resolve(uri_id));
         }
     }
     index.resolve_module_to_uri(module_path)

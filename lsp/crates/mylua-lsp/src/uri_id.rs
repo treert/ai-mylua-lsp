@@ -9,13 +9,8 @@ pub struct UriId(i32);
 
 impl UriId {
     pub(crate) fn new(raw: i32) -> Self {
-        assert!(raw > 0, "UriId must be positive");
+        assert!(raw >= 0, "UriId must be non-negative");
         Self(raw)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn raw(self) -> i32 {
-        self.0
     }
 }
 
@@ -26,28 +21,19 @@ pub struct UriInterner {
 
 #[derive(Debug)]
 struct Inner {
-    next_id: Option<i32>,
     by_uri: HashMap<Uri, UriId>,
-    by_id: HashMap<UriId, Uri>,
+    by_id: Vec<Uri>,
 }
 
 impl UriInterner {
     pub fn new() -> Self {
-        Self::with_next_id(1)
-    }
-
-    #[cfg(test)]
-    pub fn for_test_next_id(next_id: i32) -> Self {
-        Self::with_next_id(next_id)
-    }
-
-    fn with_next_id(next_id: i32) -> Self {
-        assert!(next_id > 0, "UriId must be positive");
+        let empty_uri = empty_uri();
+        let mut by_uri = HashMap::new();
+        by_uri.insert(empty_uri.clone(), UriId::new(0));
         Self {
             inner: Mutex::new(Inner {
-                next_id: Some(next_id),
-                by_uri: HashMap::new(),
-                by_id: HashMap::new(),
+                by_uri,
+                by_id: vec![empty_uri],
             }),
         }
     }
@@ -58,23 +44,25 @@ impl UriInterner {
             return id;
         }
 
-        let raw = inner.next_id.expect("UriId exhausted");
+        let raw = i32::try_from(inner.by_id.len()).expect("UriId exhausted");
         let id = UriId::new(raw);
-        inner.next_id = if raw == i32::MAX {
-            None
-        } else {
-            Some(raw + 1)
-        };
         inner.by_uri.insert(uri.clone(), id);
-        inner.by_id.insert(id, uri);
+        inner.by_id.push(uri);
         id
     }
 
-    pub fn get(&self, uri: &Uri) -> Option<UriId> {
-        self.inner.lock().unwrap().by_uri.get(uri).copied()
+    pub fn resolve(&self, id: UriId) -> Uri {
+        let raw = usize::try_from(id.0).expect("UriId must be non-negative");
+        self.inner
+            .lock()
+            .unwrap()
+            .by_id
+            .get(raw)
+            .cloned()
+            .expect("UriId must be registered before resolve")
     }
+}
 
-    pub fn resolve(&self, id: UriId) -> Option<Uri> {
-        self.inner.lock().unwrap().by_id.get(&id).cloned()
-    }
+fn empty_uri() -> Uri {
+    "file:".parse().expect("empty path URI should be valid")
 }

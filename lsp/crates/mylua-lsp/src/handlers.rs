@@ -357,10 +357,8 @@ impl LanguageServer for Backend {
             let mut docs = self.documents.lock().unwrap();
             let mut text;
             let mut tree: Option<tree_sitter::Tree>;
-            let old_doc = self
-                .uri_interner
-                .get(&uri)
-                .and_then(|uri_id| docs.remove(&uri_id));
+            let uri_id = self.uri_interner.intern(uri.clone());
+            let old_doc = docs.remove(&uri_id);
             if let Some(doc) = old_doc {
                 text = doc.lua_source.into_text();
                 tree = Some(doc.tree);
@@ -412,14 +410,11 @@ impl LanguageServer for Backend {
         // `open_uris` is a plain `std::sync::Mutex` held only for the
         // remove call, it can't race with any other lock in the
         // `edit_lock → open_uris → documents → index` order used elsewhere.
-        if let Some(uri_id) = self.uri_interner.get(&uri) {
-            self.open_uris.lock().unwrap().remove(&uri_id);
-        }
+        let uri_id = self.uri_interner.intern(uri.clone());
+        self.open_uris.lock().unwrap().remove(&uri_id);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
-        if let Some(uri_id) = self.uri_interner.get(&uri) {
-            self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
-        }
+        self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
 
         // Workspace-indexing LSP: diagnostics for closed files remain
         // valid based on the index, so we do NOT clear them. If we
@@ -513,25 +508,23 @@ impl LanguageServer for Backend {
                     }
                 }
                 FileChangeType::DELETED => {
-                    let uri_id = uri_to_path(&change.uri)
+                    let uri = uri_to_path(&change.uri)
                         .and_then(|path| workspace_scanner::path_to_uri(&path))
-                        .and_then(|uri| self.uri_interner.get(&uri))
-                        .or_else(|| self.uri_interner.get(&change.uri));
-                    if let Some(uri_id) = uri_id {
-                        self.index.lock().unwrap().remove_file(uri_id);
-                        self.documents.lock().unwrap().remove(&uri_id);
-                        self.scheduler.invalidate(&uri_id);
-                        self.open_uris.lock().unwrap().remove(&uri_id);
-                        self.edit_locks.lock().unwrap().remove(&uri_id);
-                        self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
-                        // Also drop from `library_uris` so a deleted
-                        // library file doesn't leave a stale entry
-                        // behind — otherwise a later file CREATED at
-                        // the same path (perhaps of different content)
-                        // would still be force-flagged meta just because
-                        // its URI was previously registered.
-                        self.library_uris.lock().unwrap().remove(&uri_id);
-                    }
+                        .unwrap_or_else(|| change.uri.clone());
+                    let uri_id = self.uri_interner.intern(uri);
+                    self.index.lock().unwrap().remove_file(uri_id);
+                    self.documents.lock().unwrap().remove(&uri_id);
+                    self.scheduler.invalidate(&uri_id);
+                    self.open_uris.lock().unwrap().remove(&uri_id);
+                    self.edit_locks.lock().unwrap().remove(&uri_id);
+                    self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
+                    // Also drop from `library_uris` so a deleted
+                    // library file doesn't leave a stale entry
+                    // behind — otherwise a later file CREATED at
+                    // the same path (perhaps of different content)
+                    // would still be force-flagged meta just because
+                    // its URI was previously registered.
+                    self.library_uris.lock().unwrap().remove(&uri_id);
                 }
                 _ => {}
             }

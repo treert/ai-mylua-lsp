@@ -416,9 +416,7 @@ pub async fn run_workspace_scan(
         // build_initial replaces the entire aggregation state, so
         // we must include them.
         for uri_id in open_held.iter() {
-            let Some(uri) = uri_interner.resolve(*uri_id) else {
-                continue;
-            };
+            let uri = uri_interner.resolve(*uri_id);
             if let Some(existing) = idx.summary(&uri) {
                 summaries_to_merge.push((*uri_id, existing.clone()));
             }
@@ -627,9 +625,7 @@ async fn consumer_loop(
 
         let (uri_id, uri) = loop {
             if let Some(uri_id) = scheduler.pop() {
-                let Some(uri) = uri_interner.resolve(uri_id) else {
-                    continue;
-                };
+                let uri = uri_interner.resolve(uri_id);
                 break (uri_id, uri);
             }
             scheduler.notified().await;

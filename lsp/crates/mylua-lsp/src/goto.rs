@@ -385,9 +385,11 @@ fn try_require_goto(
     let module_path = extract_string_literal(string_node, doc.source())?;
 
     let target_uri_id = index.resolve_module_to_id(&module_path)?;
-    let target_uri = uri_interner
-        .and_then(|uri_interner| uri_interner.resolve(target_uri_id))
-        .or_else(|| index.summary_uri(target_uri_id).cloned())?;
+    let target_uri = if let Some(uri_interner) = uri_interner {
+        uri_interner.resolve(target_uri_id)
+    } else {
+        index.summary_uri(target_uri_id).cloned()?
+    };
 
     // Prefer the file-level `return` statement's range (what the require
     // expression actually evaluates to). Fall back to the first global
