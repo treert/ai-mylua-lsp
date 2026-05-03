@@ -120,7 +120,7 @@ fn require_map_survives_upsert() {
 
     let mut parser = new_parser();
     let mod_uri = make_uri("mymod.lua");
-    let mod_uri_id = intern(mod_uri.clone());
+    let mod_uri_id = intern(&mod_uri);
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
     let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
@@ -159,7 +159,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
 
     let mut parser = new_parser();
     let main_uri = make_uri("main.lua");
-    let main_uri_id = intern(main_uri.clone());
+    let main_uri_id = intern(&main_uri);
     let main_doc = parse_doc(&mut parser, "local Player = require(\"player\")\n");
     let main_summary = summary_builder::build_file_analysis(
         &main_uri,
@@ -169,7 +169,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     ).0;
 
     let player_uri = make_uri("player.lua");
-    let player_uri_id = intern(player_uri.clone());
+    let player_uri_id = intern(&player_uri);
     let player_doc = parse_doc(&mut parser, "Player = {}\nreturn Player\n");
     let player_summary = summary_builder::build_file_analysis(
         &player_uri,

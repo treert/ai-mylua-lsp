@@ -14,7 +14,7 @@ fn uri(s: &str) -> Uri {
 }
 
 fn id(s: &str) -> UriId {
-    intern(uri(s))
+    intern(&uri(s))
 }
 
 #[test]

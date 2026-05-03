@@ -316,7 +316,7 @@ impl LanguageServer for Backend {
                 .is_some_and(|d| d.text() == params.text_document.text)
         };
         if text_matches {
-            let uri_id = intern_uri(uri.clone());
+            let uri_id = intern_uri(&uri);
             self.open_uris.lock().unwrap().insert(uri_id);
             self.scheduler
                 .schedule(uri_id, diagnostic_scheduler::Priority::Hot);
@@ -328,7 +328,7 @@ impl LanguageServer for Backend {
         // queue. Otherwise the very first did_open of a fresh URI
         // would route to Cold (steady state after workspace Ready,
         // no seed_bulk tombstone upgrade to save us).
-        let uri_id = intern_uri(uri.clone());
+        let uri_id = intern_uri(&uri);
         self.open_uris.lock().unwrap().insert(uri_id);
         self.parse_and_store(uri.clone(), params.text_document.text);
 
@@ -355,7 +355,7 @@ impl LanguageServer for Backend {
             let mut docs = self.documents.lock().unwrap();
             let mut text;
             let mut tree: Option<tree_sitter::Tree>;
-            let uri_id = intern_uri(uri.clone());
+            let uri_id = intern_uri(&uri);
             let old_doc = docs.remove(&uri_id);
             if let Some(doc) = old_doc {
                 text = doc.lua_source.into_text();
@@ -408,7 +408,7 @@ impl LanguageServer for Backend {
         // `open_uris` is a plain `std::sync::Mutex` held only for the
         // remove call, it can't race with any other lock in the
         // `edit_lock → open_uris → documents → index` order used elsewhere.
-        let uri_id = intern_uri(uri.clone());
+        let uri_id = intern_uri(&uri);
         self.open_uris.lock().unwrap().remove(&uri_id);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
@@ -509,7 +509,7 @@ impl LanguageServer for Backend {
                     let uri = uri_to_path(&change.uri)
                         .and_then(|path| workspace_scanner::path_to_uri(&path))
                         .unwrap_or_else(|| change.uri.clone());
-                    let uri_id = intern_uri(uri);
+                    let uri_id = intern_uri(&uri);
                     self.index.lock().unwrap().remove_file(uri_id);
                     self.documents.lock().unwrap().remove(&uri_id);
                     self.scheduler.invalidate(&uri_id);
@@ -974,5 +974,5 @@ fn completion_resolve_local_uri_id(item: &CompletionItem) -> Option<crate::uri_i
     }
     let uri = data.get("uri").and_then(|v| v.as_str())?;
     let uri = uri.parse::<Uri>().ok()?;
-    Some(intern_uri(uri))
+    Some(intern_uri(&uri))
 }

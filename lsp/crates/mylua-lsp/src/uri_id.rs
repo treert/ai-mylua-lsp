@@ -25,7 +25,7 @@ struct UriRegistry {
 
 #[derive(Debug)]
 struct Inner {
-    by_uri: HashMap<Uri, UriId>,
+    by_uri: HashMap<&'static str, UriId>,
     by_id: Vec<UriMeta>,
 }
 
@@ -46,7 +46,7 @@ pub struct UriPriority {
 static URI_REGISTRY: OnceLock<UriRegistry> = OnceLock::new();
 
 /// Intern a URI into the process-global append-only registry.
-pub fn intern(uri: Uri) -> UriId {
+pub fn intern(uri: &Uri) -> UriId {
     registry().intern(uri)
 }
 
@@ -74,9 +74,9 @@ pub fn priority(id: UriId) -> UriPriority {
 impl UriRegistry {
     fn new() -> Self {
         let empty_uri = empty_uri();
-        let empty_meta = UriMeta::new(empty_uri.clone());
+        let empty_meta = UriMeta::new(empty_uri);
         let mut by_uri = HashMap::new();
-        by_uri.insert(empty_uri.clone(), UriId::new(0));
+        by_uri.insert(empty_meta.path, UriId::new(0));
         Self {
             inner: Mutex::new(Inner {
                 by_uri,
@@ -85,16 +85,16 @@ impl UriRegistry {
         }
     }
 
-    fn intern(&self, uri: Uri) -> UriId {
+    fn intern(&self, uri: &Uri) -> UriId {
         let mut inner = self.inner.lock().unwrap();
-        if let Some(id) = inner.by_uri.get(&uri).copied() {
+        if let Some(id) = inner.by_uri.get(uri.as_str()).copied() {
             return id;
         }
 
         let raw = i32::try_from(inner.by_id.len()).expect("UriId exhausted");
         let id = UriId::new(raw);
         let meta = UriMeta::new(uri.clone());
-        inner.by_uri.insert(uri.clone(), id);
+        inner.by_uri.insert(meta.path, id);
         inner.by_id.push(meta);
         id
     }

@@ -10,7 +10,7 @@ fn complete_local_variable() {
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // cursor at end of "abc" (line 1, col 3)
-    let items = completion::complete(&doc, intern(uri.clone()), pos(1, 3), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(1, 3), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"abcdef"),
@@ -27,7 +27,7 @@ abcdefg."#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // cursor right after the dot (line 2, col 8)
-    let items = completion::complete(&doc, intern(uri.clone()), pos(2, 8), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(2, 8), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"abc"),
@@ -43,7 +43,7 @@ fn complete_emmy_class_methods() {
 
     // After "uiButton:" at line 47, the user types inside setY1 body
     // Try completing after `self:` — line 45, col 22 (inside setY1)
-    let items = completion::complete(&doc, intern(uri.clone()), pos(45, 22), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(45, 22), &mut agg);
     // Should list methods like setX, setY, etc.
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     // At minimum the function should not panic; methods may appear
@@ -57,7 +57,7 @@ local xyz2 = 2
 xy"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
-    let items = completion::complete(&doc, intern(uri.clone()), pos(2, 2), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(2, 2), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(labels.contains(&"xyz"), "should contain xyz");
     assert!(labels.contains(&"xyz2"), "should contain xyz2");
@@ -76,7 +76,7 @@ fn complete_fixture_test4_table_field() {
     let doc2 = parse_doc(&mut parser, &src_with_dot);
     let summary = mylua_lsp::summary_builder::build_file_analysis(&uri, &doc2.tree, doc2.source(), doc2.line_index()).0;
     let mut agg2 = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg2.upsert_summary(uri_id, summary);
 
     let lines: Vec<&str> = src_with_dot.lines().collect();
@@ -95,7 +95,7 @@ fn complete_keywords_present() {
     let src = "lo";
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
-    let items = completion::complete(&doc, intern(uri.clone()), pos(0, 2), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(0, 2), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"local"),
@@ -109,7 +109,7 @@ fn complete_emmy_tag_after_at() {
     // Typing `---@cl` should list emmy tags starting with "cl" (e.g. class).
     let src = "---@cl\nlocal x = 1";
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_tag.lua");
-    let items = completion::complete(&doc, intern(uri.clone()), pos(0, 6), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(0, 6), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     assert!(
         labels.contains(&"class"),
@@ -128,7 +128,7 @@ fn complete_emmy_tag_after_at() {
 fn complete_emmy_tag_bare_at() {
     let src = "---@\nlocal x = 1";
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_bare.lua");
-    let items = completion::complete(&doc, intern(uri.clone()), pos(0, 4), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(0, 4), &mut agg);
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
     for expected in &["class", "field", "param", "return", "type", "overload"] {
         assert!(
@@ -146,16 +146,16 @@ fn complete_require_path_from_index() {
     let mut parser = new_parser();
     let caller_src = "local m = require(\"\")";
     let caller_uri = make_uri("caller.lua");
-    let caller_uri_id = intern(caller_uri.clone());
+    let caller_uri_id = intern(&caller_uri);
     let caller_doc = parse_doc(&mut parser, caller_src);
     let caller_summary = summary_builder::build_file_analysis(
         &caller_uri, &caller_doc.tree, caller_doc.source(), caller_doc.line_index(),
     ).0;
 
     let mut agg = WorkspaceAggregation::new();
-    agg.set_require_mapping("game.player".to_string(), intern(make_uri("player.lua")));
-    agg.set_require_mapping("game.world".to_string(), intern(make_uri("world.lua")));
-    agg.set_require_mapping("util.log".to_string(), intern(make_uri("log.lua")));
+    agg.set_require_mapping("game.player".to_string(), intern(&make_uri("player.lua")));
+    agg.set_require_mapping("game.world".to_string(), intern(&make_uri("world.lua")));
+    agg.set_require_mapping("util.log".to_string(), intern(&make_uri("log.lua")));
     agg.upsert_summary(caller_uri_id, caller_summary);
 
     // Cursor inside the empty string `""` at line 0, col 19 (just inside the quote).
@@ -191,7 +191,7 @@ function Obj:get() return self end
 Obj:get()."#;
     let (doc, uri, mut agg) = setup_single_file(src, "chain.lua");
     // Cursor right after `.` (line 4, col 10)
-    let items = completion::complete(&doc, intern(uri.clone()), pos(4, 10), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(4, 10), &mut agg);
     // No assertion on exact content — just ensure we didn't crash and
     // didn't spill the whole identifier table (which old splitn path did
     // when base resolution failed).
@@ -208,7 +208,7 @@ fn complete_empty_prefix_no_panic() {
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // At start of empty line
-    let items = completion::complete(&doc, intern(uri.clone()), pos(1, 0), &mut agg);
+    let items = completion::complete(&doc, intern(&uri), pos(1, 0), &mut agg);
     // Should not panic; may return keywords/locals
     let _ = items;
 }

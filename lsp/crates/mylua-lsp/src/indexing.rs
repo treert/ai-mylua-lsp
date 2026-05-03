@@ -164,13 +164,13 @@ pub async fn run_workspace_scan(
         .into_iter()
         .filter_map(|path| {
             let uri = workspace_scanner::path_to_uri(&path)?;
-            let uri_id = intern(uri.clone());
+            let uri_id = intern(&uri);
             Some((path, uri, uri_id))
         })
         .collect();
     let module_entries: Vec<(String, UriId)> = module_entries
         .into_iter()
-        .map(|(module, uri)| (module, intern(uri)))
+        .map(|(module, uri)| (module, intern(&uri)))
         .collect();
     let total = file_entries.len();
 

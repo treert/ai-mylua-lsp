@@ -170,9 +170,11 @@ impl DiagnosticScheduler {
 mod tests {
     use super::*;
     use crate::uri_id::intern;
+    use tower_lsp_server::ls_types::Uri;
 
     fn id(raw: i32) -> UriId {
-        intern(format!("file:///diagnostic_scheduler/{}.lua", raw).parse().unwrap())
+        let uri: Uri = format!("file:///diagnostic_scheduler/{}.lua", raw).parse().unwrap();
+        intern(&uri)
     }
 
     #[test]

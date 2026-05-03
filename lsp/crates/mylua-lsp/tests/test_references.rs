@@ -12,11 +12,11 @@ fn references_local_variable() {
 print(abc)
 local x = abc + 1"#;
     let (doc, uri, agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Find references to `abc` (defined line 0, col 6)
-    let result = references::find_references(doc, intern(uri.clone()), pos(0, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
+    let result = references::find_references(doc, intern(&uri), pos(0, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
     assert!(result.is_some(), "should find references for `abc`");
     let locs = result.unwrap();
     assert!(
@@ -33,11 +33,11 @@ fn references_function_parameter() {
     return param
 end"#;
     let (doc, uri, agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Find references to `param` at line 1, col 10
-    let result = references::find_references(doc, intern(uri.clone()), pos(1, 10), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
+    let result = references::find_references(doc, intern(&uri), pos(1, 10), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
     assert!(result.is_some(), "should find references for `param`");
     let locs = result.unwrap();
     assert!(
@@ -51,11 +51,11 @@ end"#;
 fn references_no_result_for_keyword() {
     let src = "local x = 1";
     let (doc, uri, agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // `local` keyword at line 0, col 0
-    let result = references::find_references(doc, intern(uri.clone()), pos(0, 0), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
+    let result = references::find_references(doc, intern(&uri), pos(0, 0), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
     // Should not panic; result may be None
     let _ = result;
 }
@@ -67,12 +67,12 @@ fn references_local_rebind_does_not_claim_outer_rhs() {
     // must not return the RHS occurrence as a reference.
     let src = "local x = 1\ndo\n  local x = x + 1\n  print(x)\nend";
     let (doc, uri, agg) = setup_single_file(src, "rebind.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click the inner `local x` on line 2 column 8
     let result = references::find_references(
-        doc, intern(uri.clone()), pos(2, 8), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(2, 8), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find references for inner x");
 
@@ -99,12 +99,12 @@ fn references_shadowed_outer_not_claimed_by_inner() {
     // uses after shadowing.
     let src = "local x = 1\nprint(x)\ndo\n  local x = 2\n  print(x)\nend\nprint(x)";
     let (doc, uri, agg) = setup_single_file(src, "shadow.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click the outer `local x` on line 0 col 6
     let result = references::find_references(
-        doc, intern(uri.clone()), pos(0, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(0, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find references for outer x");
 
@@ -160,8 +160,8 @@ Bar = {}"#;
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
-    let defn_uri_id = intern(defn_uri.clone());
-    let user_uri_id = intern(user_uri.clone());
+    let defn_uri_id = intern(&defn_uri);
+    let user_uri_id = intern(&user_uri);
     agg.upsert_summary(defn_uri_id, defn_summary);
     agg.upsert_summary(user_uri_id, user_summary);
 
@@ -169,7 +169,7 @@ Bar = {}"#;
         (defn_uri_id, defn_doc),
         (user_uri_id, user_doc),
     ]);
-    let defn_doc_ref = docs.get(&intern(defn_uri.clone())).unwrap();
+    let defn_doc_ref = docs.get(&intern(&defn_uri)).unwrap();
 
     // Click on `Foo` in its `---@class Foo` header (line 0, col 10).
     let locs = references::find_references(
@@ -223,8 +223,8 @@ fn references_emmy_type_word_boundary() {
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
-    let defn_uri_id = intern(defn_uri.clone());
-    let user_uri_id = intern(user_uri.clone());
+    let defn_uri_id = intern(&defn_uri);
+    let user_uri_id = intern(&user_uri);
     agg.upsert_summary(defn_uri_id, defn_summary);
     agg.upsert_summary(user_uri_id, user_summary);
 
@@ -232,7 +232,7 @@ fn references_emmy_type_word_boundary() {
         (defn_uri_id, defn_doc),
         (user_uri_id, user_doc),
     ]);
-    let defn_doc_ref = docs.get(&intern(defn_uri.clone())).unwrap();
+    let defn_doc_ref = docs.get(&intern(&defn_uri)).unwrap();
 
     let locs = references::find_references(
         defn_doc_ref, defn_uri_id, pos(0, 10), true,
@@ -253,11 +253,11 @@ fn references_exclude_declaration() {
 print(myvar)
 print(myvar)"#;
     let (doc, uri, agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
-    let with_decl = references::find_references(doc, intern(uri.clone()), pos(1, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
-    let without_decl = references::find_references(doc, intern(uri.clone()), pos(1, 6), false, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
+    let with_decl = references::find_references(doc, intern(&uri), pos(1, 6), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
+    let without_decl = references::find_references(doc, intern(&uri), pos(1, 6), false, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best);
 
     if let (Some(with), Some(without)) = (with_decl, without_decl) {
         assert!(
@@ -301,15 +301,15 @@ print(b.name)"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg.upsert_summary(uri_id, result.0);
 
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click on `hp` in `a.hp = 100` (line 6, col 2)
     let locs = references::find_references(
-        doc, intern(uri.clone()), pos(6, 2), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(6, 2), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find field references for hp");
 
@@ -344,10 +344,10 @@ player.hp = 100"#;
     ]);
     let def_uri = make_uri("player.lua");
     let use_uri = make_uri("main.lua");
-    let use_doc = docs.get(&intern(use_uri.clone())).unwrap();
+    let use_doc = docs.get(&intern(&use_uri)).unwrap();
 
     let locations = references::find_references(
-        use_doc, intern(use_uri.clone()), pos(2, 7), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        use_doc, intern(&use_uri), pos(2, 7), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find cross-file field references for hp");
 
@@ -372,12 +372,12 @@ unknown.foo = 1
 local other = getOther()
 other.foo = 2"#;
     let (doc, uri, agg) = setup_single_file(src, "no_type.lua");
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click on `foo` in `unknown.foo` (line 1, col 8)
     let result = references::find_references(
-        doc, intern(uri.clone()), pos(1, 8), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(1, 8), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     );
     // Should return Some (can still be a global identity or produce empty
     // results) — the key assertion is it must NOT panic and must NOT include
@@ -432,15 +432,15 @@ d.legs = 4"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg.upsert_summary(uri_id, result.0);
 
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click on `legs` in `a.legs = 4` (line 8, col 2)
     let locs = references::find_references(
-        doc, intern(uri.clone()), pos(8, 2), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(8, 2), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find field references for legs");
 
@@ -493,15 +493,15 @@ end"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg.upsert_summary(uri_id, result.0);
 
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click on `bbb` in `function ClassB1:bbb()` (line 3, col 18)
     let locs = references::find_references(
-        doc, intern(uri.clone()), pos(3, 18), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(3, 18), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find references for method bbb on local class");
 
@@ -554,21 +554,21 @@ end"#;
     };
 
     let mut agg = WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg.upsert_summary(uri_id, result.0);
 
-    let docs = HashMap::from([(intern(uri.clone()), doc)]);
-    let doc = docs.get(&intern(uri.clone())).unwrap();
+    let docs = HashMap::from([(intern(&uri), doc)]);
+    let doc = docs.get(&intern(&uri)).unwrap();
 
     // Click on `hello` at declaration: `function MyObj:hello()` (line 3, col 15)
     let from_decl = references::find_references(
-        doc, intern(uri.clone()), pos(3, 15), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(3, 15), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find references for hello from declaration");
 
     // Click on `hello` at usage: `self:hello()` (line 8, col 9)
     let from_usage = references::find_references(
-        doc, intern(uri.clone()), pos(8, 9), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
+        doc, intern(&uri), pos(8, 9), true, &agg, &mylua_lsp::document::DocumentStoreView::new(&docs), &ReferencesStrategy::Best,
     )
     .expect("should find references for hello from usage");
 

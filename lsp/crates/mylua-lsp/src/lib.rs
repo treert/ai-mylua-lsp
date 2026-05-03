@@ -260,7 +260,6 @@ impl Backend {
         if !library_file_uris.is_empty() {
             *self.library_uris.lock().unwrap() = library_file_uris
                 .iter()
-                .cloned()
                 .map(intern_uri)
                 .collect();
             lsp_log!(
@@ -274,7 +273,7 @@ impl Backend {
     /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
     /// `lock()` to serialize document mutations for a single URI.
     pub(crate) fn edit_lock_for(&self, uri: &Uri) -> Arc<tokio::sync::Mutex<()>> {
-        let uri_id = intern_uri(uri.clone());
+        let uri_id = intern_uri(uri);
         let mut locks = self.edit_locks.lock().unwrap();
         locks
             .entry(uri_id)
@@ -321,7 +320,7 @@ impl Backend {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
                     let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
-                    let uri_id = intern_uri(uri.clone());
+                    let uri_id = intern_uri(&uri);
                     self.documents.lock().unwrap().insert(
                         uri_id,
                         Document { lua_source, tree: old, scope_tree },
@@ -334,7 +333,7 @@ impl Backend {
         {
             let lua_source = util::LuaSource::new(text);
             let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
-            let uri_id = intern_uri(uri.clone());
+            let uri_id = intern_uri(&uri);
             // Library stubs retain their meta treatment across edits.
             // `summary_builder::build_file_analysis` infers `is_meta` from
             // `---@meta` headers, and bundled stdlib stubs typically
@@ -443,7 +442,7 @@ impl Backend {
             // library path inside the workspace tree) would flip the
             // flag back to false and surface `undefinedGlobal`
             // warnings inside the stub file.
-            let uri_id = intern_uri(uri.clone());
+            let uri_id = intern_uri(&uri);
             if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
@@ -493,7 +492,7 @@ impl Backend {
         if *self.index_state.lock().unwrap() == IndexState::Ready {
             return;
         }
-        let uri_id = intern_uri(uri.clone());
+        let uri_id = intern_uri(uri);
         if !self.open_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
@@ -601,9 +600,9 @@ mod uri_id_tests {
         let first: Uri = "file:///tmp/a.lua".parse().unwrap();
         let second: Uri = "file:///tmp/b.lua".parse().unwrap();
 
-        let first_id = intern(first.clone());
-        let first_again = intern(first);
-        let second_id = intern(second);
+        let first_id = intern(&first);
+        let first_again = intern(&first);
+        let second_id = intern(&second);
 
         assert_eq!(first_id, first_again);
         assert_ne!(first_id, second_id);
@@ -612,7 +611,7 @@ mod uri_id_tests {
     #[test]
     fn resolve_returns_original_uri_for_interned_id() {
         let uri: Uri = "file:///tmp/a.lua".parse().unwrap();
-        let id = intern(uri.clone());
+        let id = intern(&uri);
 
         assert_eq!(resolve(id), uri);
         assert_eq!(path(id), uri.as_str());
@@ -621,15 +620,17 @@ mod uri_id_tests {
     #[test]
     fn zero_uri_id_resolves_to_empty_uri() {
         let empty_uri: Uri = "file:".parse().unwrap();
-        let empty_id = intern(empty_uri.clone());
+        let empty_id = intern(&empty_uri);
 
         assert_eq!(resolve(empty_id), empty_uri);
     }
 
     #[test]
     fn priority_prefers_annotation_paths() {
-        let annotation_id = intern("file:///tmp/annotation/a.lua".parse().unwrap());
-        let regular_id = intern("file:///tmp/a.lua".parse().unwrap());
+        let annotation_uri: Uri = "file:///tmp/annotation/a.lua".parse().unwrap();
+        let regular_uri: Uri = "file:///tmp/a.lua".parse().unwrap();
+        let annotation_id = intern(&annotation_uri);
+        let regular_id = intern(&regular_uri);
 
         assert!(priority(annotation_id) < priority(regular_id));
     }

@@ -21,7 +21,7 @@ fn completion_items_carry_resolve_data() {
     // completion filters by prefix.
     let src = "local foo = 1\nfunction bar() end\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(uri);
+    let uri_id = intern(&uri);
 
     // Probe 1: cursor after `f` on line 2
     let items_f = completion::complete(&doc, uri_id, pos(2, 0), &mut agg);
@@ -40,7 +40,7 @@ fn completion_resolve_enriches_global_with_detail() {
     // Global `bar()` → resolve should attach `detail` with type info.
     let src = "function bar() return 1 end\nb";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(uri);
+    let uri_id = intern(&uri);
     let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let bar = find_item(&items, "bar").cloned().expect("bar");
     assert!(bar.detail.is_none(), "initial item should have no detail");
@@ -64,7 +64,7 @@ fn completion_resolve_enriches_local_with_type() {
     // Local `foo: number` → resolve should attach typed detail.
     let src = "local foo = 42\nf";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(uri);
+    let uri_id = intern(&uri);
     let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let foo = find_item(&items, "foo").cloned().expect("foo");
 
@@ -108,7 +108,7 @@ fn completion_resolve_function_adds_markdown_signature() {
     // signature.
     let src = "function doWork(a, b, c) return a end\nd";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(uri);
+    let uri_id = intern(&uri);
     let items = completion::complete(&doc, uri_id, pos(1, 1), &mut agg);
     let item = find_item(&items, "doWork").cloned().expect("doWork");
 

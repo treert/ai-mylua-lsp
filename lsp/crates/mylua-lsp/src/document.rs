@@ -56,7 +56,7 @@ pub(crate) fn find_document<'a>(
     documents: &'a HashMap<UriId, Document>,
     uri: &Uri,
 ) -> Option<(UriId, &'a Document)> {
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(uri);
     documents.get(&uri_id).map(|doc| (uri_id, doc))
 }
 

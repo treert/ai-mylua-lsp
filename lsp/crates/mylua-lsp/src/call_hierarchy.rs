@@ -318,7 +318,7 @@ pub fn outgoing_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyOutgoingCall> {
-    let item_uri_id = intern_uri(item.uri.clone());
+    let item_uri_id = intern_uri(&item.uri);
     let Some(summary) = index.summary_by_id(item_uri_id) else { return Vec::new() };
 
     // Find all call sites for this item. Prefer FunctionSummaryId when the

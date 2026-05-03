@@ -799,10 +799,10 @@ print(Audit.enabled)
     );
 
     // Full hover path sanity: we just verify it returns something.
-    let docs = std::collections::HashMap::from([(intern(uri.clone()), doc)]);
-    let d = docs.get(&intern(uri.clone())).unwrap();
+    let docs = std::collections::HashMap::from([(intern(&uri), doc)]);
+    let d = docs.get(&intern(&uri)).unwrap();
     // `Audit.enabled` — `enabled` starts at col 12 (0-based) on line 4 (`print(Audit.enabled)`).
-    let hv = hover::hover(d, intern(uri.clone()), pos(4, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let hv = hover::hover(d, intern(&uri), pos(4, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         hv.is_some(),
         "hover on Audit.enabled after warm cache should produce a result"
@@ -839,7 +839,7 @@ local c = getContainer()
         scope_tree,
     };
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_id = intern(uri.clone());
+    let uri_id = intern(&uri);
     agg.upsert_summary(uri_id, summary);
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;
@@ -1336,7 +1336,7 @@ fn argument_count_stdlib_math_max_accepts_varargs() {
     let (docs, mut agg, _parser, _library_uris) =
         setup_workspace_with_library(&[user_file], &[lib]);
     let uri = make_uri("math_max_user.lua");
-    let doc = docs.get(&intern(uri.clone())).expect("user document present");
+    let doc = docs.get(&intern(&uri)).expect("user document present");
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
 
@@ -2144,13 +2144,13 @@ utils2.hello()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern(uri_b.clone())).expect("file_b document present");
+    let doc_b = docs.get(&intern(&uri_b)).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc_b.tree.root_node(),
         file_b.as_bytes(),
-        intern(uri_b.clone()),
+        intern(&uri_b),
         &mut agg,
         &doc_b.scope_tree,
         &cfg,
@@ -2185,13 +2185,13 @@ print(utils2.bar)
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern(uri_b.clone())).expect("file_b document present");
+    let doc_b = docs.get(&intern(&uri_b)).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc_b.tree.root_node(),
         file_b.as_bytes(),
-        intern(uri_b.clone()),
+        intern(&uri_b),
         &mut agg,
         &doc_b.scope_tree,
         &cfg,
@@ -2232,13 +2232,13 @@ utils2.sub.hello()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("nested_def.lua", file_a), ("nested_use.lua", file_b)]);
     let uri_b = make_uri("nested_use.lua");
-    let doc_b = docs.get(&intern(uri_b.clone())).expect("file_b document present");
+    let doc_b = docs.get(&intern(&uri_b)).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc_b.tree.root_node(),
         file_b.as_bytes(),
-        intern(uri_b.clone()),
+        intern(&uri_b),
         &mut agg,
         &doc_b.scope_tree,
         &cfg,
@@ -2275,13 +2275,13 @@ utils2.doesnotexist()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern(uri_b.clone())).expect("file_b document present");
+    let doc_b = docs.get(&intern(&uri_b)).expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc_b.tree.root_node(),
         file_b.as_bytes(),
-        intern(uri_b.clone()),
+        intern(&uri_b),
         &mut agg,
         &doc_b.scope_tree,
         &cfg,
@@ -2321,7 +2321,7 @@ print(utils.test_const.ON_Evt_HAHA1)
         ("use_const.lua", use_src),
     ]);
     let uri = make_uri("use_const.lua");
-    let doc = docs.get(&intern(uri.clone())).expect("use document present");
+    let doc = docs.get(&intern(&uri)).expect("use document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2370,7 +2370,7 @@ end
         ("use_const.lua", use_src),
     ]);
     let uri = make_uri("use_const.lua");
-    let doc = docs.get(&intern(uri.clone())).expect("use document present");
+    let doc = docs.get(&intern(&uri)).expect("use document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2472,7 +2472,7 @@ local name = hero:getName()
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern(main_uri.clone())).expect("main.lua document present");
+    let main_doc = docs.get(&intern(&main_uri)).expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2513,7 +2513,7 @@ local hero = P.new("Alice")
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern(main_uri.clone())).expect("main.lua document present");
+    let main_doc = docs.get(&intern(&main_uri)).expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2591,7 +2591,7 @@ hero:describe()
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern(main_uri.clone())).expect("main.lua document present");
+    let main_doc = docs.get(&intern(&main_uri)).expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
