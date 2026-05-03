@@ -15,6 +15,7 @@ use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
+use crate::uri_id::{intern as intern_uri, UriId};
 use crate::util::node_text;
 
 pub fn signature_help(
@@ -79,14 +80,15 @@ pub(crate) fn resolve_call_signatures(
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
+    let uri_id = intern_uri(uri.clone());
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
 
     // `obj:method(...)`
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
-        let base_fact = type_inference::infer_node_type(callee, source, uri, scope_tree, index);
-        let sigs = lookup_function_signatures_by_field(uri, &base_fact, &method_name, index);
+        let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, uri, scope_tree, index);
+        let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
     }
@@ -98,8 +100,8 @@ pub(crate) fn resolve_call_signatures(
             callee.child_by_field_name("field"),
         ) {
             let field_name = node_text(field, source).to_string();
-            let base_fact = type_inference::infer_node_type(object, source, uri, scope_tree, index);
-            let sigs = lookup_function_signatures_by_field(uri, &base_fact, &field_name, index);
+            let base_fact = type_inference::infer_node_type_in_file_id(object, source, uri_id, uri, scope_tree, index);
+            let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
         }
@@ -107,7 +109,7 @@ pub(crate) fn resolve_call_signatures(
 
     // Simple identifier / variable callee: `foo(...)`
     let name = node_text(callee, source).to_string();
-    if let Some(summary) = index.summary(uri) {
+    if let Some(summary) = index.summary_by_id(uri_id) {
         // Local function via scope tree → FunctionRef(id) → rich summary
         // with overloads. Must be checked before the global path because
         // a local `f` shadows any global `f`.
@@ -129,7 +131,7 @@ pub(crate) fn resolve_call_signatures(
     // function(a, b) ... end` or cross-file `require` returning a
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
-    let base_fact = type_inference::infer_node_type(callee, source, uri, scope_tree, index);
+    let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, uri, scope_tree, index);
     let resolved = resolver::resolve_type(&base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {
@@ -149,24 +151,20 @@ pub(crate) fn resolve_call_signatures(
     // Global function (any file)
     let candidates = index.global_shard.get(&name).cloned().unwrap_or_default();
     for c in &candidates {
-        if let Some(target_uri) = index.candidate_uri(c) {
-            if let Some(target_summary) = index.summary(target_uri) {
-                if let Some(fs) = target_summary.get_function_by_name(&name) {
-                    let sigs = primary_plus_overloads(fs);
-                    return Some((sigs, false, name));
-                }
+        if let Some(target_summary) = index.summary_by_id(c.source_uri_id()) {
+            if let Some(fs) = target_summary.get_function_by_name(&name) {
+                let sigs = primary_plus_overloads(fs);
+                return Some((sigs, false, name));
             }
         }
         if let TypeFact::Known(KnownType::Function(ref sig)) = c.type_fact {
             return Some((vec![sig.clone()], false, name));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
-            if let Some(target_uri) = index.candidate_uri(c) {
-                if let Some(summary) = index.summary(target_uri) {
-                    if let Some(fs) = summary.function_summaries.get(fid) {
-                        let sigs = primary_plus_overloads(fs);
-                        return Some((sigs, false, name));
-                    }
+            if let Some(summary) = index.summary_by_id(c.source_uri_id()) {
+                if let Some(fs) = summary.function_summaries.get(fid) {
+                    let sigs = primary_plus_overloads(fs);
+                    return Some((sigs, false, name));
                 }
             }
         }
@@ -195,7 +193,7 @@ pub(crate) fn resolve_call_signatures(
 /// primaries are filtered to avoid duplicate or blank entries in the
 /// client's signature popup.
 fn lookup_function_signatures_by_field(
-    caller_uri: &Uri,
+    caller_uri_id: UriId,
     base_fact: &TypeFact,
     field_name: &str,
     index: &WorkspaceAggregation,
@@ -207,15 +205,15 @@ fn lookup_function_signatures_by_field(
     };
     // URI-aware chain resolve so `a.b.c` style callers whose base is a
     // per-file Table shape can still find the signature.
-    let resolved = resolver::resolve_field_chain_in_file(
-        caller_uri, base_fact, &[field_name.to_string()], index,
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        caller_uri_id, base_fact, &[field_name.to_string()], index,
     );
     if let TypeFact::Known(KnownType::Function(sig)) = &resolved.type_fact {
-        let def_uri = resolved
+        let def_uri_id = resolved
             .def_location
-            .and_then(|location| index.summary_uri(location.uri_id));
-        if let Some(def_uri) = def_uri {
-            if let Some(summary) = index.summary(def_uri) {
+            .map(|location| location.uri_id);
+        if let Some(def_uri_id) = def_uri_id {
+            if let Some(summary) = index.summary_by_id(def_uri_id) {
                 // Try exact `{class}:{field}` / `{class}.{field}` lookup
                 // when we know the owner class (covers methods declared
                 // via `function Foo:m() end` or `function Foo.m() end`).
@@ -251,7 +249,7 @@ fn lookup_function_signatures_by_field(
             if let Some((impl_uri, impl_sigs)) =
                 lookup_overloads_via_global_shard(cls, field_name, index)
             {
-                if Some(&impl_uri) != def_uri {
+                if Some(&impl_uri) != def_uri_id.and_then(|id| index.summary_uri(id)) {
                     let mut merged = vec![sig.clone()];
                     for s in impl_sigs {
                         // Skip entries that would render as duplicates of
@@ -316,7 +314,7 @@ fn lookup_overloads_via_global_shard(
         .and_then(|v| v.first().cloned())
     {
         let source_uri = index.candidate_uri(&candidate)?.clone();
-        if let Some(summary) = index.summary(&source_uri) {
+        if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
             if let Some(fs) = summary.get_function_by_name(&candidate.name) {
@@ -327,7 +325,7 @@ fn lookup_overloads_via_global_shard(
             return Some((source_uri, vec![sig]));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = candidate.type_fact {
-            if let Some(summary) = index.summary(&source_uri) {
+            if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
                     return Some((source_uri, primary_plus_overloads(fs)));
                 }

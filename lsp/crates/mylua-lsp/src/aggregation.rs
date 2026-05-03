@@ -15,9 +15,6 @@ use crate::util::ByteRange;
 pub struct WorkspaceAggregation {
     /// All file summaries, keyed by the server session-local UriId.
     summaries: HashMap<UriId, DocumentSummary>,
-    /// Reverse lookup for URI-facing APIs. This is only a cache of
-    /// caller-provided UriIds; aggregation never allocates UriIds.
-    summary_uri_to_id: HashMap<Uri, UriId>,
     /// Global name tree — candidate definitions from all files.
     pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
@@ -329,7 +326,6 @@ impl WorkspaceAggregation {
     pub fn new() -> Self {
         Self {
             summaries: HashMap::new(),
-            summary_uri_to_id: HashMap::new(),
             global_shard: GlobalShard::new(),
             type_shard: HashMap::new(),
             module_index: HashMap::new(),
@@ -337,21 +333,10 @@ impl WorkspaceAggregation {
         }
     }
 
-    pub fn summary(&self, uri: &Uri) -> Option<&DocumentSummary> {
-        let uri_id = self.summary_uri_to_id.get(uri)?;
-        self.summaries.get(uri_id)
-    }
-
-    pub fn summary_id(&self, uri: &Uri) -> Option<UriId> {
-        self.summary_uri_to_id.get(uri).copied()
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn summary_by_id(&self, uri_id: UriId) -> Option<&DocumentSummary> {
+    pub fn summary_by_id(&self, uri_id: UriId) -> Option<&DocumentSummary> {
         self.summaries.get(&uri_id)
     }
 
-    #[allow(dead_code)]
     pub(crate) fn summary_uri(&self, uri_id: UriId) -> Option<&Uri> {
         self.summaries.get(&uri_id).map(|summary| &summary.uri)
     }
@@ -389,10 +374,9 @@ impl WorkspaceAggregation {
         // Clear all shards — build_initial is a full rebuild. Any
         // contributions from did_open's upsert_summary during the
         // cold-start window are included in `summaries` (the caller
-        // collects them via `idx.summary(...)` for open URIs), so we
+        // collects them via `idx.summary_by_id(...)` for open UriIds), so we
         // must wipe the shards to avoid duplicates.
         self.summaries.clear();
-        self.summary_uri_to_id.clear();
         self.global_shard.clear();
         self.type_shard.clear();
 
@@ -400,7 +384,6 @@ impl WorkspaceAggregation {
         //    deep-cloning every DocumentSummary) so later shard builds can
         //    see every file's summary in a single consistent snapshot.
         for (uri_id, summary) in summaries {
-            self.summary_uri_to_id.insert(summary.uri.clone(), uri_id);
             self.summaries.insert(uri_id, summary);
         }
 
@@ -460,8 +443,6 @@ impl WorkspaceAggregation {
     /// Performs a name-level diff: removes old contributions from this URI
     /// and inserts new ones.
     pub fn upsert_summary(&mut self, uri_id: UriId, summary: DocumentSummary) {
-        let uri = summary.uri.clone();
-
         self.remove_contributions(uri_id);
         let summary_priorities: HashMap<UriId, UriPriority> = self.summaries
             .iter()
@@ -505,7 +486,6 @@ impl WorkspaceAggregation {
         }
 
         self.summaries.insert(uri_id, summary);
-        self.summary_uri_to_id.insert(uri, uri_id);
     }
 
     /// Remove a file from the aggregation layer entirely.
@@ -516,9 +496,7 @@ impl WorkspaceAggregation {
             entries.retain(|(_, id)| *id != uri_id);
             !entries.is_empty()
         });
-        if let Some(summary) = self.summaries.remove(&uri_id) {
-            self.summary_uri_to_id.remove(&summary.uri);
-        }
+        self.summaries.remove(&uri_id);
     }
 
     /// Register a module name → URI mapping in the module index.

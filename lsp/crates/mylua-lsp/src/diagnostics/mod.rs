@@ -13,6 +13,7 @@ mod unused_local;
 use crate::aggregation::WorkspaceAggregation;
 use crate::config::DiagnosticsConfig;
 use crate::scope::ScopeTree;
+use crate::uri_id::{intern as intern_uri, UriId};
 use crate::util::LineIndex;
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -43,10 +44,12 @@ pub fn collect_semantic_diagnostics(
     diag_config: &DiagnosticsConfig,
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
-    collect_semantic_diagnostics_with_version(
+    let uri_id = intern_uri(uri.clone());
+    collect_semantic_diagnostics_with_version_id(
         root,
         source,
         uri,
+        uri_id,
         index,
         scope_tree,
         diag_config,
@@ -69,6 +72,31 @@ pub fn collect_semantic_diagnostics_with_version(
     runtime_version: &str,
     line_index: &LineIndex,
 ) -> Vec<Diagnostic> {
+    let uri_id = intern_uri(uri.clone());
+    collect_semantic_diagnostics_with_version_id(
+        root,
+        source,
+        uri,
+        uri_id,
+        index,
+        scope_tree,
+        diag_config,
+        runtime_version,
+        line_index,
+    )
+}
+
+pub(crate) fn collect_semantic_diagnostics_with_version_id(
+    root: tree_sitter::Node,
+    source: &[u8],
+    uri: &Uri,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
+    scope_tree: &ScopeTree,
+    diag_config: &DiagnosticsConfig,
+    runtime_version: &str,
+    line_index: &LineIndex,
+) -> Vec<Diagnostic> {
     if !diag_config.enable {
         return Vec::new();
     }
@@ -83,7 +111,7 @@ pub fn collect_semantic_diagnostics_with_version(
     // many of the identifiers they reference are intentionally not
     // declared in the workspace. Skip `undefinedGlobal` there to
     // avoid a wall of noise on a legitimate stub file.
-    let is_meta = index.summary(uri).map(|s| s.is_meta).unwrap_or(false);
+    let is_meta = index.summary_by_id(uri_id).map(|s| s.is_meta).unwrap_or(false);
     if let Some(severity) = diag_config.undefined_global.to_lsp_severity() {
         if !is_meta {
             undefined_global::check_undefined_globals(
@@ -106,6 +134,7 @@ pub fn collect_semantic_diagnostics_with_version(
             root,
             source,
             uri,
+            uri_id,
             index,
             scope_tree,
             &mut diagnostics,

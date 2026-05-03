@@ -6,8 +6,9 @@ use std::path::PathBuf;
 use mylua_lsp::aggregation::WorkspaceAggregation;
 use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
+use mylua_lsp::summary::DocumentSummary;
 use mylua_lsp::summary_builder;
-use mylua_lsp::uri_id::intern;
+use mylua_lsp::uri_id::{intern, UriId};
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
@@ -73,6 +74,23 @@ pub fn make_uri(name: &str) -> Uri {
     format!("file:///test/{}", name)
         .parse()
         .expect("invalid URI")
+}
+
+pub fn summary_by_uri<'a>(
+    agg: &'a WorkspaceAggregation,
+    uri: &Uri,
+) -> Option<&'a DocumentSummary> {
+    agg.summary_by_id(intern(uri.clone()))
+}
+
+pub fn summary_id_by_uri(agg: &WorkspaceAggregation, uri: &Uri) -> UriId {
+    let uri_id = intern(uri.clone());
+    assert!(
+        agg.summary_by_id(uri_id).is_some(),
+        "summary for URI {:?} should be indexed",
+        uri
+    );
+    uri_id
 }
 
 /// Convenience: `Position { line, character }` (both 0-based).

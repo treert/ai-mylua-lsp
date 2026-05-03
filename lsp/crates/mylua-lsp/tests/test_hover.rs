@@ -385,7 +385,7 @@ return test_const"#,
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main doc");
     let target_uri = make_uri("test_const.lua");
-    let target_uri_id = agg.summary_id(&target_uri).expect("test_const.lua summary id");
+    let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("test_const".to_string(), target_uri_id);
 
     let result = hover::hover(main_doc, &main_uri, pos(0, 23), &mut agg, &docs)
@@ -440,7 +440,7 @@ return settings"#,
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&main_uri).expect("main doc");
     let target_uri = make_uri("settings.lua");
-    let target_uri_id = agg.summary_id(&target_uri).expect("settings.lua summary id");
+    let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("settings".to_string(), target_uri_id);
 
     let result = hover::hover(main_doc, &main_uri, pos(1, 15), &mut agg, &docs)
@@ -1397,7 +1397,7 @@ print(sum)
     ]);
     // Register require mapping
     let mod_uri = make_uri("math_utils.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("math_utils.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("math_utils".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
@@ -1440,7 +1440,7 @@ mm.hi()
         ("main.lua", main_src),
     ]);
     let mod_uri = make_uri("test_create_module.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("test_create_module.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("test_create_module".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
@@ -1487,7 +1487,7 @@ local name = hero:getName()
         ("main.lua", main_src),
     ]);
     let mod_uri = make_uri("player.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
@@ -1581,7 +1581,7 @@ hero:pick_up("sword")
         ("main.lua", main_src),
     ]);
     let mod_uri = make_uri("player.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");

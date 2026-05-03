@@ -763,7 +763,7 @@ Audit = { enabled = true }
 print(Audit.enabled)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "warm_cache.lua");
-    let uri_id = agg.summary_id(&uri).expect("warm_cache.lua should be indexed");
+    let uri_id = summary_id_by_uri(&agg, &uri);
 
     // Warm the resolution cache first (diagnostics does this in real
     // LSP sessions before any hover arrives).
@@ -2468,7 +2468,7 @@ local name = hero:getName()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
@@ -2587,7 +2587,7 @@ hero:describe()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
-    let mod_uri_id = agg.summary_id(&mod_uri).expect("player.lua summary id");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");

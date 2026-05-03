@@ -128,8 +128,7 @@ fn library_files_are_forced_meta() {
     );
 
     for uri in &library_uris {
-        let summary = agg
-            .summary(uri)
+        let summary = summary_by_uri(&agg, uri)
             .unwrap_or_else(|| panic!("library URI {:?} missing from summaries", uri));
         assert!(
             summary.is_meta,
@@ -157,9 +156,7 @@ fn user_files_remain_non_meta_when_library_is_configured() {
         !library_uris.contains(&user_uri),
         "user URI must not be in library_uris set"
     );
-    let s = agg
-        .summary(&user_uri)
-        .expect("user file summary present");
+    let s = summary_by_uri(&agg, &user_uri).expect("user file summary present");
     assert!(
         !s.is_meta,
         "plain user file must remain is_meta=false even with library configured"

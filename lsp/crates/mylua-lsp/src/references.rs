@@ -6,6 +6,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::type_inference::infer_node_type;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
+use crate::uri_id::intern as intern_uri;
 
 // ---------------------------------------------------------------------------
 // Semantic Identity — what entity the cursor points to
@@ -132,7 +133,7 @@ pub fn find_references(
                         continue;
                     };
                     // Skip the declaration position itself
-                    if index.summary_id(doc_uri) == Some(location.uri_id)
+                    if intern_uri(doc_uri.clone()) == location.uri_id
                         && node.start_byte() == identity_def_range.start_byte
                     {
                         continue;

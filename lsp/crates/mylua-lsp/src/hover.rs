@@ -5,7 +5,7 @@ use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_em
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
-use crate::type_inference::infer_node_type;
+use crate::uri_id::intern as intern_uri;
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
@@ -131,7 +131,7 @@ pub fn hover(
     if let Some(candidates) = index.type_shard.get(ident_text) {
         if let Some(candidate) = candidates.first() {
             if let Some(candidate_uri) = index.type_candidate_uri(candidate) {
-                if let Some(summary) = index.summary(candidate_uri) {
+                if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
                     for td in &summary.type_definitions {
                         if td.name == ident_text {
                             let mut parts = Vec::new();
@@ -214,9 +214,9 @@ pub fn hover(
             range: candidate.range,
             selection_range: candidate.selection_range,
             uri: source_uri.clone(),
-        }, candidates.len(), source_uri))
+        }, candidates.len(), source_uri, candidate.source_uri_id()))
     });
-    if let Some((synth_def, entry_count, source_uri)) = global_info {
+    if let Some((synth_def, entry_count, _source_uri, source_uri_id)) = global_info {
         let resolved = resolver::resolve_type(
             &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                 name: ident_text.to_string(),
@@ -227,7 +227,7 @@ pub fn hover(
         if entry_count > 1 {
             let _ = write!(type_info, " ({} definitions)", entry_count);
         }
-        if let Some(summary) = index.summary(&source_uri) {
+        if let Some(summary) = index.summary_by_id(source_uri_id) {
             if let Some(fs) = summary.get_function_by_name(ident_text) {
                 if !fs.overloads.is_empty() {
                     type_info.push_str("\n\nOverloads:");
@@ -251,7 +251,7 @@ fn hover_type_name(
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
     let candidate_uri = index.type_candidate_uri(candidate)?;
-    let summary = index.summary(candidate_uri)?;
+    let summary = index.summary_by_id(candidate.source_uri_id())?;
 
     for td in &summary.type_definitions {
         if td.name != name {
@@ -504,8 +504,11 @@ fn build_field_chain_hover(
     line_index: &LineIndex,
 ) -> Option<Hover> {
     let field_name = fields.last()?.clone();
+    let uri_id = intern_uri(uri.clone());
 
-    let base_fact = infer_node_type(base_node, source, uri, scope_tree, index);
+    let base_fact = crate::type_inference::infer_node_type_in_file_id(
+        base_node, source, uri_id, uri, scope_tree, index,
+    );
     lsp_log!(
         "[hover_{kind}] base='{}' base_fact={:?} fields={:?}",
         node_text(base_node, source),
@@ -513,8 +516,8 @@ fn build_field_chain_hover(
         fields,
         kind = kind_label,
     );
-    let resolved = resolver::resolve_field_chain_in_file(
-        uri, &base_fact, &fields, index,
+    let resolved = resolver::resolve_field_chain_in_file_id(
+        uri_id, &base_fact, &fields, index,
     );
     lsp_log!("[hover_{kind}] resolved={:?}", resolved.type_fact, kind = kind_label);
 
@@ -579,7 +582,8 @@ fn resolve_local_type_info(
     // FunctionRef hover fix: resolve to readable signature via scope_tree
     if let Some(type_fact) = scope_tree.resolve_type(byte_offset, name) {
         if let TypeFact::Known(crate::type_system::KnownType::FunctionRef(id)) = type_fact {
-            if let Some(summary) = index.summary(uri) {
+            let uri_id = intern_uri(uri.clone());
+            if let Some(summary) = index.summary_by_id(uri_id) {
                 if let Some(fs) = summary.function_summaries.get(id) {
                     return Some(format_signature(&fs.signature));
                 }

@@ -15,7 +15,7 @@ use test_helpers::*;
 fn get_function_by_name_finds_global_function() {
     let src = "function greet() return 'hi' end\n";
     let (_doc, uri, agg) = setup_single_file(src, "global_fn.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     assert!(
         summary.get_function_by_name("greet").is_some(),
         "global function must be found via get_function_by_name",
@@ -26,7 +26,7 @@ fn get_function_by_name_finds_global_function() {
 fn get_function_by_name_finds_qualified_global_dot() {
     let src = "M = {}\nfunction M.foo() end\n";
     let (_doc, uri, agg) = setup_single_file(src, "qualified_dot.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     // function_name_index normalizes colon → dot; dot form is identity.
     assert!(
         summary.get_function_by_name("M.foo").is_some(),
@@ -38,7 +38,7 @@ fn get_function_by_name_finds_qualified_global_dot() {
 fn get_function_by_name_normalizes_colon_to_dot() {
     let src = "Player = {}\nfunction Player:new() end\n";
     let (_doc, uri, agg) = setup_single_file(src, "colon_norm.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     // Querying with colon form should work (normalized internally).
     assert!(
         summary.get_function_by_name("Player:new").is_some(),
@@ -59,7 +59,7 @@ fn get_function_by_name_normalizes_colon_to_dot() {
 fn get_function_by_name_does_not_find_local_function() {
     let src = "local function helper() return 1 end\n";
     let (_doc, uri, agg) = setup_single_file(src, "local_fn.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     assert!(
         summary.get_function_by_name("helper").is_none(),
         "local function must NOT be found via get_function_by_name",
@@ -78,7 +78,7 @@ local M = {}
 function M:foo() end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "local_method.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     // M is local, so M:foo should NOT be in function_name_index.
     assert!(
         summary.get_function_by_name("M:foo").is_none(),
@@ -101,7 +101,7 @@ do
 end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "shadow.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     let fs = summary.get_function_by_name("f").expect("global f must be found");
     // The global declaration is on line 1 (0-indexed).
     assert!(
@@ -128,7 +128,7 @@ local function outer()
 end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "caller_id.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     // There should be a call site for `print` inside `outer`.
     let cs = summary.call_sites.iter()
         .find(|cs| cs.callee_name == "print")
@@ -148,7 +148,7 @@ end
 fn call_site_caller_id_none_at_top_level() {
     let src = "print('top')\n";
     let (_doc, uri, agg) = setup_single_file(src, "top_level.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     let cs = summary.call_sites.iter()
         .find(|cs| cs.callee_name == "print")
         .expect("print call site");
@@ -164,7 +164,7 @@ function G()
 end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "global_caller.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     let cs = summary.call_sites.iter()
         .find(|cs| cs.callee_name == "print")
         .expect("print call site");

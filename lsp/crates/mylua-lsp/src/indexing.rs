@@ -415,8 +415,7 @@ pub async fn run_workspace_scan(
         // build_initial replaces the entire aggregation state, so
         // we must include them.
         for uri_id in open_held.iter() {
-            let uri = resolve(*uri_id);
-            if let Some(existing) = idx.summary(&uri) {
+            if let Some(existing) = idx.summary_by_id(*uri_id) {
                 summaries_to_merge.push((*uri_id, existing.clone()));
             }
         }
@@ -656,10 +655,11 @@ async fn consumer_loop(
                 diagnostics::collect_diagnostics(doc.tree.root_node(), doc.source(), doc.line_index());
             let idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
-            let semantic = diagnostics::collect_semantic_diagnostics_with_version(
+            let semantic = diagnostics::collect_semantic_diagnostics_with_version_id(
                 doc.tree.root_node(),
                 doc.source(),
                 &uri,
+                uri_id,
                 &idx,
                 &doc.scope_tree,
                 &cfg.diagnostics,

@@ -32,6 +32,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
 use crate::type_system::FunctionSummaryId;
+use crate::uri_id::intern as intern_uri;
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
@@ -44,6 +45,7 @@ pub fn prepare_call_hierarchy(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyItem> {
+    let uri_id = intern_uri(uri.clone());
     let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
         return Vec::new();
     };
@@ -64,7 +66,7 @@ pub fn prepare_call_hierarchy(
     // Case 2: the cursor is on some other identifier occurrence (e.g.
     // a call site). Try scope tree first (handles local functions via
     // FunctionRef(id)), then global function_name_index, then global_shard.
-    if let Some(summary) = index.summary(uri) {
+    if let Some(summary) = index.summary_by_id(uri_id) {
         // Local function via scope tree → FunctionRef(id)
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),
@@ -317,7 +319,8 @@ pub fn outgoing_calls(
     item: &CallHierarchyItem,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyOutgoingCall> {
-    let Some(summary) = index.summary(&item.uri) else { return Vec::new() };
+    let item_uri_id = intern_uri(item.uri.clone());
+    let Some(summary) = index.summary_by_id(item_uri_id) else { return Vec::new() };
 
     // Find all call sites for this item. Prefer FunctionSummaryId when the
     // item can be tied back to one; otherwise fall back to name matching.
@@ -387,7 +390,7 @@ fn resolve_outgoing_target(
             };
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
-            if let Some(summary) = index.summary(candidate_uri) {
+            if let Some(summary) = index.summary_by_id(c.source_uri_id()) {
                 if let Some(fs) = summary.get_function_by_name(name) {
                     let lsp_range: Range = fs.range.into();
                     return build_item(

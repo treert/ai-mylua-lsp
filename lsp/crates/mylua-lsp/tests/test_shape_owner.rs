@@ -14,7 +14,7 @@ fn local_binding_anchors_owner() {
 local t = { name = "hello" }
 "#;
     let (doc, uri, agg) = setup_single_file(src, "owner_local.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     let end_offset = src.len();
     let tf = doc.scope_tree.resolve_type(end_offset, "t").expect("t type");
     match tf {
@@ -32,7 +32,7 @@ fn global_assignment_anchors_owner() {
 Foo = { x = 1 }
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "owner_global.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
     // The global contribution carries the type_fact; look up shape via its id.
     let contrib = summary
         .global_contributions
@@ -59,7 +59,7 @@ local t1 = { m = function() return 1 end }
 local t2 = { m = function() return "s" end }
 "#;
     let (doc, uri, agg) = setup_single_file(src, "owner_two.lua");
-    let summary = agg.summary(&uri).expect("summary");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
 
     // Use scope_tree to look up the types of t1 and t2
     // (offset 0 won't resolve because visible_after_byte is at statement end;

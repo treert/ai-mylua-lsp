@@ -99,7 +99,7 @@ pub fn search_workspace_symbols(
             // Look up via the owning summary because `TypeShardEntry`
             // only carries the coarse anchor range.
             let location_range = index
-                .summary(candidate_uri)
+                .summary_by_id(candidate.source_uri_id())
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
@@ -200,18 +200,16 @@ fn candidate_symbol_kind(
     };
 
     if let Some(id) = func_id {
-        if let Some(candidate_uri) = index.candidate_uri(candidate) {
-            if let Some(summary) = index.summary(candidate_uri) {
-                if let Some(func) = summary.function_summaries.get(&id) {
-                    // FunctionSummary.name preserves the original colon form
-                    // (e.g. "Foo:myMethod"), while GlobalContribution.name is
-                    // normalized to dot. Check for colon in the name.
-                    return if func.name.contains(':') {
-                        SymbolKind::METHOD
-                    } else {
-                        SymbolKind::FUNCTION
-                    };
-                }
+        if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
+            if let Some(func) = summary.function_summaries.get(&id) {
+                // FunctionSummary.name preserves the original colon form
+                // (e.g. "Foo:myMethod"), while GlobalContribution.name is
+                // normalized to dot. Check for colon in the name.
+                return if func.name.contains(':') {
+                    SymbolKind::METHOD
+                } else {
+                    SymbolKind::FUNCTION
+                };
             }
         }
         return SymbolKind::FUNCTION;

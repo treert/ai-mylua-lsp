@@ -545,11 +545,11 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let summary = idx.summary(&params.text_document.uri);
+        let summary = idx.summary_by_id(uri_id);
         let syms = symbols::collect_document_symbols(
             doc.tree.root_node(),
             doc.source(),

@@ -1,6 +1,7 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
+use crate::uri_id::UriId;
 use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
@@ -10,6 +11,7 @@ struct FieldDiagCtx<'a> {
     source: &'a [u8],
     line_index: &'a LineIndex,
     uri: &'a Uri,
+    uri_id: UriId,
     scope_tree: &'a crate::scope::ScopeTree,
     index: &'a WorkspaceAggregation,
     diagnostics: &'a mut Vec<Diagnostic>,
@@ -22,6 +24,7 @@ pub(super) fn check_field_access_diagnostics(
     root: tree_sitter::Node,
     source: &[u8],
     uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
     scope_tree: &crate::scope::ScopeTree,
     diagnostics: &mut Vec<Diagnostic>,
@@ -34,6 +37,7 @@ pub(super) fn check_field_access_diagnostics(
         source,
         line_index,
         uri,
+        uri_id,
         scope_tree,
         index,
         diagnostics,
@@ -85,9 +89,10 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
             node.child_by_field_name("callee"),
             node.child_by_field_name("method"),
         ) {
-            let base_fact = crate::type_inference::infer_node_type(
+            let base_fact = crate::type_inference::infer_node_type_in_file_id(
                 callee,
                 ctx.source,
+                ctx.uri_id,
                 ctx.uri,
                 ctx.scope_tree,
                 ctx.index,
@@ -148,9 +153,10 @@ fn check_dotted_field(
         return;
     };
 
-    let base_fact = crate::type_inference::infer_node_type(
+    let base_fact = crate::type_inference::infer_node_type_in_file_id(
         base_node,
         ctx.source,
+        ctx.uri_id,
         ctx.uri,
         ctx.scope_tree,
         ctx.index,
@@ -158,8 +164,8 @@ fn check_dotted_field(
     let resolved_base = if fields.len() == 1 {
         resolver::resolve_type(&base_fact, ctx.index)
     } else {
-        resolver::resolve_field_chain_prefix_in_file(
-            ctx.uri,
+        resolver::resolve_field_chain_prefix_in_file_id(
+            ctx.uri_id,
             &base_fact,
             &fields[..fields.len() - 1],
             ctx.index,
@@ -196,7 +202,7 @@ fn check_dotted_field(
         TypeFact::Known(KnownType::Table(shape_id)) => {
             let table_uri_id = resolved_base
                 .source_uri_id()
-                .or_else(|| ctx.index.summary_id(ctx.uri));
+                .or(Some(ctx.uri_id));
             if let Some(summary) = table_uri_id.and_then(|uri_id| ctx.index.summary_by_id(uri_id)) {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     if !shape.fields.contains_key(field_name) {

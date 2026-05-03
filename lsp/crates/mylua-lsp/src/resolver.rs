@@ -91,8 +91,7 @@ pub fn resolve_field_chain_in_file(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    let uri_id = agg.summary_id(uri);
-    resolve_field_chain_inner(base_fact, fields, agg, uri_id, false)
+    resolve_field_chain_in_file_id(crate::uri_id::intern(uri.clone()), base_fact, fields, agg)
 }
 
 pub fn resolve_field_chain_in_file_id(
@@ -104,20 +103,13 @@ pub fn resolve_field_chain_in_file_id(
     resolve_field_chain_inner(base_fact, fields, agg, Some(uri_id), false)
 }
 
-/// Resolve a chain that will be used as the base for another field lookup.
-///
-/// This preserves the resolved owner's URI even when the requested chain is
-/// itself the tail of this call. Diagnostics use this for prefixes such as
-/// `utils.test_const` before checking `ON_Evt_LALA`; the table owner must stay
-/// at `test_const.lua`, not the `utils.test_const = require(...)` assignment.
-pub(crate) fn resolve_field_chain_prefix_in_file(
-    uri: &Uri,
+pub(crate) fn resolve_field_chain_prefix_in_file_id(
+    uri_id: UriId,
     base_fact: &TypeFact,
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    let uri_id = agg.summary_id(uri);
-    resolve_field_chain_inner(base_fact, fields, agg, uri_id, true)
+    resolve_field_chain_inner(base_fact, fields, agg, Some(uri_id), true)
 }
 
 /// Shared core of `resolve_field_chain` and `resolve_field_chain_in_file`.
@@ -246,6 +238,15 @@ pub fn get_fields_for_type(
     source_uri_hint: Option<&Uri>,
     agg: &WorkspaceAggregation,
 ) -> Vec<FieldCompletion> {
+    let source_uri_hint = source_uri_hint.map(|uri| crate::uri_id::intern(uri.clone()));
+    get_fields_for_type_id(fact, source_uri_hint, agg)
+}
+
+pub fn get_fields_for_type_id(
+    fact: &TypeFact,
+    source_uri_hint: Option<UriId>,
+    agg: &WorkspaceAggregation,
+) -> Vec<FieldCompletion> {
     // Collect global_shard direct children BEFORE resolving, so that
     // table-extension globals (e.g. `UE4.Foo`) are included even though
     // they live in global_shard rather than in a table shape.
@@ -270,7 +271,7 @@ pub fn get_fields_for_type(
     let resolved = resolve_type(fact, agg);
     let source_uri_id = resolved
         .source_uri_id()
-        .or_else(|| source_uri_hint.and_then(|uri| agg.summary_id(uri)));
+        .or(source_uri_hint);
     let mut fields = collect_fields(&resolved.type_fact, source_uri_id, agg);
 
     // Merge global prefix fields, deduplicating by name
