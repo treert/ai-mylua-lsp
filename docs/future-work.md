@@ -12,7 +12,7 @@
 
 - **问题**：文件级单一 hash，任何一个对外 API 变动都让整个下游链路失效。对"挂了几十个 global 的 `Mgr.lua`"影响尤为明显。
 - **方案**：改为 **per-name fingerprint**（`HashMap<String, u64>`），按名字逐个 diff，只标脏变化的名字。文件级 hash 保留作 quick check。
-- **验收**：改一个 class 的单个 field，其他 class 的 cache 不被标脏。
+- **验收**：改一个 class 的单个 field，其他 class 的下游文件不被标脏。
 
 ### 1.3 [P4] 诊断路径请求级局部缓存（resolve_type local_cache）
 
@@ -70,7 +70,7 @@
 ## 4. 推荐落地顺序
 
 1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
-2. **1.1** per-name fingerprint — 改动较大，对大型工作区 cache 命中率有实质提升
+2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
 3. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
 4. **3.1** 语法树 LRU 缓存 — 依赖引用反向索引，否则淘汰收益受限
 5. 其余 P3 项按需补做
@@ -80,7 +80,6 @@
 ## 5. 维护约定
 
 - 已完成的条目直接从本文件删除；如涉及架构变更，同一次提交更新相关文档（`index-architecture.md`、`architecture.md` 等）。
-- 涉及 `DocumentSummary` / `TypeCandidate` 等可序列化结构变化时，bump `CACHE_SCHEMA_VERSION`。
 - 新增条目模板：
 
 ```markdown

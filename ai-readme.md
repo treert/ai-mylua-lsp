@@ -47,7 +47,7 @@ ai-mylua-lsp/
 
 > 详细实现描述见 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
 
-**基础**：initialize / shutdown / 文档同步（Incremental）/ 位置编码（UTF-16）/ 配置体系（20 项）/ 外部库索引（`workspace.library`）
+**基础**：initialize / shutdown / 文档同步（Incremental）/ 位置编码（UTF-16）/ 配置体系 / 外部库索引（`workspace.library`）
 
 **导航**：goto definition / goto declaration / goto typeDefinition / references / rename / callHierarchy / documentLink
 
@@ -91,7 +91,6 @@ ai-mylua-lsp/
 - **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
 - **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
 - **诊断调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双队列
-- **磁盘持久化缓存**：`CacheMeta` 三维失效（默认纯内存模式）
 - **文件过滤**：`workspace.include` / `workspace.exclude` glob
 
 命令：

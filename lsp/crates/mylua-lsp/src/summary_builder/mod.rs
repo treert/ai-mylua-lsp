@@ -17,7 +17,7 @@ use crate::util::{node_text, LineIndex};
 use crate::scope::{Scope, ScopeKind, ScopeDecl, ScopeTree};
 
 use call_sites::collect_call_sites;
-use fingerprint::{hash_bytes, compute_signature_fingerprint};
+use fingerprint::compute_signature_fingerprint;
 use visitors::visit_top_level;
 
 // Re-export the public API so external callers don't need to change.
@@ -66,7 +66,6 @@ pub fn build_file_analysis(
     // time — we scan the scope-registered declarations after traversal.
     backfill_anchor_shape_ids(&mut ctx);
 
-    let content_hash = hash_bytes(source);
     let signature_fingerprint = compute_signature_fingerprint(&ctx);
     let call_sites = collect_call_sites(
         root,
@@ -81,7 +80,6 @@ pub fn build_file_analysis(
 
     let summary = DocumentSummary {
         uri: uri.clone(),
-        content_hash,
         global_contributions: ctx.global_contributions,
         function_summaries: ctx.function_summaries,
         function_name_index: ctx.function_name_index,

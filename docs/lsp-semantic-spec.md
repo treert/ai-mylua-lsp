@@ -121,7 +121,6 @@
 | `workspace.indexMode` | `"merged"` \| `"isolated"` | `"merged"` | 多根工作区策略 |
 | `workspace.library` | string[] | `[]` | 额外索引目录（只读，抑制诊断） |
 | `workspace.useBundledStdlib` | boolean | `true` | 自动注入内置 stdlib stubs |
-| `index.cacheMode` | `"summary"` \| `"memory"` | `"memory"` | 索引持久化模式 |
 | `diagnostics.enable` | boolean | `true` | 总开关 |
 | `diagnostics.scope` | `"full"` \| `"openOnly"` | `"full"` | 诊断范围 |
 | `diagnostics.undefinedGlobal` | severity | `"warning"` | 未定义全局变量 |

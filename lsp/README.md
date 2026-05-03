@@ -41,10 +41,9 @@ lsp/
 | `completion.rs` / `signature_help.rs` | 自动补全 / 签名帮助 |
 | `rename.rs` / `call_hierarchy.rs` | 重命名 / 调用层次 |
 | `semantic_tokens.rs` / `symbols.rs` | 语义着色 / 文档符号 + 工作区符号 |
-| `config.rs` | 配置体系（20 项） |
+| `config.rs` | 配置体系 |
 | `document_link.rs` / `document_highlight.rs` | require 链接 / 高亮 |
 | `folding_range.rs` / `selection_range.rs` / `inlay_hint.rs` | 折叠 / 选区 / 内嵌提示 |
-| `summary_cache.rs` | 磁盘持久化缓存 |
 
 ### 架构要点
 

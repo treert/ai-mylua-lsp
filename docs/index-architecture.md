@@ -24,7 +24,7 @@
 
 ### 2.1 每文件摘要 `DocumentSummary`
 
-每个 URI 对应一份 Summary，与版本/内容哈希绑定；进程内由 `uri_id::URI_REGISTRY` 分配进程级、只增不删的 `UriId`。聚合层、`documents` 存储、feature 内部查询与跨文件位置都以这个 ID 作为主键；`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 输出边界与缓存持久化来源。
+每个 URI 对应一份 Summary；进程内由 `uri_id::URI_REGISTRY` 分配进程级、只增不删的 `UriId`。聚合层、`documents` 存储、feature 内部查询与跨文件位置都以这个 ID 作为主键；`DocumentSummary.uri` 仍保留原始 URI 作为 LSP 输出边界。
 
 | 数据 | 说明 |
 |------|------|
@@ -216,12 +216,11 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 
 实践中，函数内部逻辑修改大多不改变签名指纹，不会触发级联。
 
-### 6.4 持久化缓存
+### 6.4 冷启动重建
 
-- 默认纯内存索引（`memory` 模式）
-- 可启用 `DocumentSummary` 级别磁盘缓存（`summary` 模式）
-- 聚合层不缓存，冷启动 Phase 3 从 summaries 原子重建
-- 失效维度：文件内容哈希、grammar/schema 版本、可执行文件 mtime
+- 冷启动始终从源码并行 parse，生成每文件 `DocumentSummary`
+- 聚合层不持久化，Phase 3 从 summaries 原子重建
+- 增量更新只维护内存中的当前工作区状态
 
 ---
 

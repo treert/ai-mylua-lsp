@@ -16,7 +16,6 @@
 | 增量 reparse | `tree.edit` + `parse(new, Some(old))`，未变区域子树复用 |
 | 诊断调度 | Hot/Cold 双队列 + 300ms debounce + `UriId` key 的 per-file gen 去重 |
 | 级联精细化 | 签名指纹不变不级联；双向反向索引覆盖 require 与类型依赖 |
-| 磁盘缓存 | 三维失效（schema_version / exe_mtime / content_hash） |
 | Fast path | `did_open`/`did_close` 内容未变时跳过 reparse |
 | 冷启动抢跑 | Ready 前打开的文件立即发 syntax-only 诊断 |
 | 模块解析 | last-segment 索引 + 最长后缀匹配，O(1) 查找无 fallback |
@@ -25,13 +24,7 @@
 
 ## 2. 已知瓶颈
 
-### 2.1 `cache.load_all()` 同步阻塞
-
-`run_workspace_scan` 中 `cache.load_all()` 同步反序列化所有 bincode 文件。5 万文件时可能占后台线程 1–5s 不 yield。
-
-**改进方向**：搬到 `spawn_blocking` 与 parse 批次并行；或按需流式读取。
-
-### 2.2 `references` 全量线性扫
+### 2.1 `references` 全量线性扫
 
 `find_references` 对所有索引文件做文本匹配。5 万文件级别单次查询可能进入秒级。
 
@@ -72,22 +65,14 @@
 
 ## 5. 优化路线图
 
-### Tier 1 — 低垂果实（半天内）
+### Tier 1 — 架构调整（1–3 天）
 
 | 项目 | 瓶颈 | 预期收益 |
 |------|------|----------|
-| `cache.load_all()` → `spawn_blocking` | §2.1 | IO 不占 tokio worker，与 parse 并行 |
+| References 反向索引 | §2.1 | 查询延迟秒级 → 毫秒级 |
 
-### Tier 2 — 架构调整（1–3 天）
+### Tier 2 — 高级优化（项目稳定后）
 
-| 项目 | 瓶颈 | 预期收益 |
-|------|------|----------|
-| References 反向索引持久化 | §2.2 | 查询延迟秒级 → 毫秒级 |
-
-### Tier 3 — 高级优化（项目稳定后）
-
-- Summary 增量落盘（每文件独立 bincode）
-- Aggregation 层持久化，冷启动跳过重建
 - 冷启动分段调度（先索引 open tabs）
 
 ---
@@ -116,7 +101,6 @@
 | **Peak RSS**（进程驻留内存峰值） | macOS Activity Monitor / Linux `ps -o rss=` |
 | **Incremental edit latency**（从 `did_change` 到 `publishDiagnostics`） | LSP 消息日志时间差 |
 | **References query latency** | client 侧请求发出到响应接收 |
-| **Cache hit ratio** | 日志 `[mylua-lsp] cache hits: X/Y` |
 
 测试 fixture 建议准备三档：
 - 小：`tests/lua-root/` 本身（~20 文件）

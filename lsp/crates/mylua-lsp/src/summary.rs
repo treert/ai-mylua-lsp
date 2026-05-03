@@ -13,8 +13,6 @@ use crate::util::ByteRange;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentSummary {
     pub uri: Uri,
-    /// Hash of source text; used for cache invalidation.
-    pub content_hash: u64,
     /// Globals defined/extended by this file.
     pub global_contributions: Vec<GlobalContribution>,
     /// Top-level and named function summaries, keyed by `FunctionSummaryId`.

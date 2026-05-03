@@ -124,12 +124,6 @@
           "default": true,
           "markdownDescription": "When enabled, the extension auto-injects the bundled Lua stdlib stubs (`<extension>/assets/lua<version>/`) into `#mylua.workspace.library#`, so `print`, `string.format`, `table.concat`, etc. have hover / goto / signature help without any user configuration. Disable only if you want to supply your own complete stdlib annotations via `#mylua.workspace.library#`. The version selected follows `#mylua.runtime.version#`."
         },
-        "mylua.index.cacheMode": {
-          "type": "string",
-          "enum": ["summary", "memory"],
-          "default": "memory",
-          "description": "Index persistence: 'summary' caches DocumentSummary to disk, 'memory' is in-process only."
-        },
         "mylua.diagnostics.enable": {
           "type": "boolean",
           "default": true,

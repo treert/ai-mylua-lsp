@@ -7,7 +7,6 @@ pub struct LspConfig {
     pub runtime: RuntimeConfig,
     pub require: RequireConfig,
     pub workspace: WorkspaceConfig,
-    pub index: IndexConfig,
     pub diagnostics: DiagnosticsConfig,
     #[serde(rename = "gotoDefinition")]
     pub goto_definition: GotoDefinitionConfig,
@@ -117,28 +116,6 @@ impl Default for WorkspaceConfig {
 pub enum IndexMode {
     Merged,
     Isolated,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(default)]
-pub struct IndexConfig {
-    #[serde(rename = "cacheMode")]
-    pub cache_mode: CacheMode,
-}
-
-impl Default for IndexConfig {
-    fn default() -> Self {
-        Self {
-            cache_mode: CacheMode::Memory,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum CacheMode {
-    Summary,
-    Memory,
 }
 
 #[derive(Debug, Clone, Deserialize)]

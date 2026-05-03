@@ -31,7 +31,6 @@ pub mod type_system;
 pub mod types;
 pub mod uri_id;
 pub mod util;
-pub mod summary_cache;
 pub mod workspace_scanner;
 pub mod workspace_symbol;
 mod handlers;

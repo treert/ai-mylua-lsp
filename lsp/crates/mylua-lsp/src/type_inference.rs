@@ -89,7 +89,7 @@ pub(crate) fn infer_node_type_in_file_id(
             // `require("…")`) so the resolver can pick up declared
             // `@return` types. Mirrors the logic in
             // `summary_builder::infer_call_return_type` but works off the
-            // workspace aggregation + summary cache rather than the
+            // workspace aggregation + current summaries rather than the
             // per-file `BuildContext`.
             infer_call_return_fact(node, source, uri_id, scope_tree, index)
         }

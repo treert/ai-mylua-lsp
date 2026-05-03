@@ -8,7 +8,7 @@
 |------|------|
 | 文档同步 | Incremental sync + tree-sitter 增量 reparse |
 | 位置编码 | UTF-16 code unit，中文/emoji 正确对齐 |
-| 配置体系 | 20 项配置，`initializationOptions` + `didChangeConfiguration` 下发 |
+| 配置体系 | `initializationOptions` + `didChangeConfiguration` 下发 |
 | `runtime.version` | 支持 `5.1`/`5.2`/`5.3`/`5.4`/`luajit`，影响内置标识符集合和诊断 |
 | `workspace.library` | 外部库路径解析为额外 scan root，库文件强制 `is_meta = true`，不产生诊断 |
 | 内置 stdlib | 扩展侧自动注入 `<extensionPath>/assets/lua<version>/` 的 stub 文件 |

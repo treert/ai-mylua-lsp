@@ -35,10 +35,6 @@ pub(super) fn merge_types(a: TypeFact, b: TypeFact) -> TypeFact {
 // Hashing / fingerprints
 // ---------------------------------------------------------------------------
 
-pub(super) fn hash_bytes(data: &[u8]) -> u64 {
-    crate::util::hash_bytes(data)
-}
-
 pub(super) fn hash_function_signature(sig: &FunctionSignature) -> u64 {
     let mut hasher = DefaultHasher::new();
     hash_signature(sig, &mut hasher);

@@ -86,9 +86,6 @@ function collectLspConfig(
       indexMode: cfg.get('workspace.indexMode'),
       library,
     },
-    index: {
-      cacheMode: cfg.get('index.cacheMode'),
-    },
     diagnostics: {
       enable: cfg.get('diagnostics.enable'),
       undefinedGlobal: cfg.get('diagnostics.undefinedGlobal'),

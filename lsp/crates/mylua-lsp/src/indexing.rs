@@ -20,7 +20,6 @@ use crate::diagnostics;
 use crate::document::Document;
 use crate::summary;
 use crate::summary_builder;
-use crate::summary_cache;
 use crate::uri_id::{intern, resolve, UriId};
 use crate::util;
 use crate::workspace_scanner;
@@ -110,12 +109,11 @@ pub async fn run_workspace_scan(
     index_state: Arc<Mutex<IndexState>>,
     started_at: std::time::Instant,
 ) {
-    let (require_config, workspace_config, cache_mode, index_mode) = {
+    let (require_config, workspace_config, index_mode) = {
         let cfg = config.lock().unwrap();
         (
             cfg.require.clone(),
             cfg.workspace.clone(),
-            cfg.index.cache_mode.clone(),
             cfg.workspace.index_mode.clone(),
         )
     };
@@ -159,17 +157,6 @@ pub async fn run_workspace_scan(
             );
         }
     }
-
-    let use_disk_cache = cache_mode == config::CacheMode::Summary;
-    let cache = if use_disk_cache {
-        roots
-            .first()
-            .map(|r| summary_cache::SummaryCache::new(r))
-    } else {
-        None
-    };
-
-    let cached_summaries = Arc::new(cache.as_ref().map_or_else(HashMap::new, |c| c.load_all()));
 
     let (module_entries, files) =
         workspace_scanner::scan_and_collect_lua_files(&all_roots, &require_config, &workspace_config);
@@ -242,7 +229,6 @@ pub async fn run_workspace_scan(
     // tracks progress for periodic status updates without holding any
     // locks during the parse phase.
     let parse_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let cache_hits = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     // Spawn a progress-reporting task that periodically reads the
     // atomic counter and pushes status updates to the client. This
@@ -278,8 +264,6 @@ pub async fn run_workspace_scan(
 
     let parsed: Vec<ParsedFile> = {
         let library_uris = library_file_uris.clone();
-        let cached = cached_summaries.clone();
-        let hits = cache_hits.clone();
         let counter = parse_counter.clone();
 
         tokio::task::spawn_blocking(move || {
@@ -289,41 +273,16 @@ pub async fn run_workspace_scan(
                 .filter_map(|(path, uri, uri_id)| {
                     let file_started = std::time::Instant::now();
                     let text = std::fs::read_to_string(path).ok()?;
-                    let content_hash = content_hash(&text);
                     let is_library = library_uris.contains(&uri);
 
                     let lua_source = util::LuaSource::new(text);
-
-                    let result = if let Some(cached_summary) = cached.get(&uri.to_string()) {
-                        if cached_summary.content_hash == content_hash {
-                            hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                            let mut parser = new_parser();
-                            let tree = parser.parse(lua_source.source(), None)?;
-                            let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
-                            let mut summary = cached_summary.clone();
-                            if is_library {
-                                summary.is_meta = true;
-                            }
-                            Some((tree, summary, scope_tree))
-                        } else {
-                            None // cache miss — fall through to fresh parse
-                        }
-                    } else {
-                        None
-                    };
-
-                    let (tree, summary, scope_tree) = if let Some(hit) = result {
-                        hit
-                    } else {
-                        let mut parser = new_parser();
-                        let tree = parser.parse(lua_source.source(), None)?;
-                        let (mut summary, scope_tree) =
-                            summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
-                        if is_library {
-                            summary.is_meta = true;
-                        }
-                        (tree, summary, scope_tree)
-                    };
+                    let mut parser = new_parser();
+                    let tree = parser.parse(lua_source.source(), None)?;
+                    let (mut summary, scope_tree) =
+                        summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+                    if is_library {
+                        summary.is_meta = true;
+                    }
 
                     let elapsed_ms = file_started.elapsed().as_millis();
                     if elapsed_ms > 500 {
@@ -351,12 +310,10 @@ pub async fn run_workspace_scan(
     progress_task.abort();
 
     let phase2_ms = phase2_started.elapsed().as_millis();
-    let hits = cache_hits.load(std::sync::atomic::Ordering::Relaxed);
     lsp_log!(
-        "[scan] phase 2 (parse): {} files parsed in {} ms (cache hits: {})",
+        "[scan] phase 2 (parse): {} files parsed in {} ms",
         parsed.len(),
-        phase2_ms,
-        hits
+        phase2_ms
     );
 
     // ── Phase 3: Merge (atomic) ────────────────────────────────────
@@ -472,23 +429,6 @@ pub async fn run_workspace_scan(
         .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
         .await;
 
-    if let Some(cache) = &cache {
-        let summaries: Vec<summary::DocumentSummary> = index
-            .lock()
-            .unwrap()
-            .summaries_values()
-            .cloned()
-            .collect();
-        let summary_count = summaries.len();
-        tokio::task::spawn_blocking({
-            let cache_dir = cache.cache_dir().to_path_buf();
-            move || {
-                let c = summary_cache::SummaryCache::new_from_dir(cache_dir);
-                c.save_all(summaries);
-                lsp_log!("[mylua-lsp] saved {} summaries to cache", summary_count);
-            }
-        });
-    }
 }
 
 // ── Diagnostic consumer ────────────────────────────────────────────
@@ -691,8 +631,3 @@ async fn consumer_loop(
     }
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
-
-pub(crate) fn content_hash(s: &str) -> u64 {
-    util::hash_bytes(s.as_bytes())
-}
