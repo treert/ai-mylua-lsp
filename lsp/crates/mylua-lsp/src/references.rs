@@ -7,6 +7,12 @@ use crate::resolver;
 use crate::resolver::ResolvedLocation;
 use crate::uri_id::{resolve as resolve_uri, UriId};
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceLocation {
+    pub uri_id: UriId,
+    pub range: Range,
+}
+
 // ---------------------------------------------------------------------------
 // Semantic Identity — what entity the cursor points to
 // ---------------------------------------------------------------------------
@@ -51,6 +57,26 @@ pub fn find_references(
     all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
+    find_references_by_uri_id(doc, uri_id, position, include_declaration, index, all_docs, strategy)
+        .map(|hits| {
+            hits.into_iter()
+                .map(|hit| Location {
+                    uri: resolve_uri(hit.uri_id),
+                    range: hit.range,
+                })
+                .collect()
+        })
+}
+
+pub fn find_references_by_uri_id(
+    doc: &Document,
+    uri_id: UriId,
+    position: Position,
+    include_declaration: bool,
+    index: &WorkspaceAggregation,
+    all_docs: &impl DocumentLookup,
+    strategy: &ReferencesStrategy,
+) -> Option<Vec<ReferenceLocation>> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     let identity = identify_at_cursor(doc, uri_id, byte_offset, index, all_docs)?;
@@ -59,12 +85,11 @@ pub fn find_references(
 
     match &identity {
         Identity::Local { name, decl_byte } => {
-            let uri = resolve_uri(uri_id);
             // Declaration
             if include_declaration {
                 if let Some(decl) = doc.scope_tree.resolve_decl(*decl_byte, name) {
-                    locations.push(Location {
-                        uri: uri.clone(),
+                    locations.push(ReferenceLocation {
+                        uri_id,
                         range: decl.selection_range.into(),
                     });
                 }
@@ -80,8 +105,8 @@ pub fn find_references(
                     continue;
                 }
                 if verify_local(node, name, *decl_byte, &doc.scope_tree) {
-                    locations.push(Location {
-                        uri: uri.clone(),
+                    locations.push(ReferenceLocation {
+                        uri_id,
                         range: doc.line_index().ts_node_to_range(node, source),
                     });
                 }
@@ -94,15 +119,14 @@ pub fn find_references(
             }
             // Scan all files
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
-                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
-                        locations.push(Location {
-                            uri: doc_uri.clone(),
+                        locations.push(ReferenceLocation {
+                            uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
                         });
                     }
@@ -118,15 +142,13 @@ pub fn find_references(
             let identity_def_range = location.range;
             // Declaration: the def_range itself
             if include_declaration {
-                let identity_def_uri = resolve_uri(location.uri_id);
-                locations.push(Location {
-                    uri: identity_def_uri.clone(),
+                locations.push(ReferenceLocation {
+                    uri_id: location.uri_id,
                     range: range_from_byte_range(location.uri_id, identity_def_range, all_docs),
                 });
             }
             // Scan all files for the field name
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
-                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, field_name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, field_name.len()) else {
@@ -139,8 +161,8 @@ pub fn find_references(
                         continue;
                     }
                     if verify_field(node, *location, field_name, source, doc_uri_id, &file_doc.scope_tree, index) {
-                        locations.push(Location {
-                            uri: doc_uri.clone(),
+                        locations.push(ReferenceLocation {
+                            uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
                         });
                     }
@@ -152,9 +174,8 @@ pub fn find_references(
             if include_declaration {
                 if let Some(candidates) = index.type_shard.get(name.as_str()) {
                     for candidate in candidates {
-                        let candidate_uri = resolve_uri(candidate.source_uri_id());
-                        locations.push(Location {
-                            uri: candidate_uri,
+                        locations.push(ReferenceLocation {
+                            uri_id: candidate.source_uri_id(),
                             range: candidate.range.into(),
                         });
                     }
@@ -167,9 +188,8 @@ pub fn find_references(
                         ReferencesStrategy::Best => {
                             if let Some(best) = candidates.first() {
                                 {
-                                    let best_uri = resolve_uri(best.source_uri_id());
-                                    locations.push(Location {
-                                        uri: best_uri.clone(),
+                                    locations.push(ReferenceLocation {
+                                        uri_id: best.source_uri_id(),
                                         range: best.selection_range.into(),
                                     });
                                 }
@@ -177,9 +197,8 @@ pub fn find_references(
                         }
                         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
                             for c in candidates {
-                                let candidate_uri = resolve_uri(c.source_uri_id());
-                                locations.push(Location {
-                                    uri: candidate_uri,
+                                locations.push(ReferenceLocation {
+                                    uri_id: c.source_uri_id(),
                                     range: c.selection_range.into(),
                                 });
                             }
@@ -190,15 +209,14 @@ pub fn find_references(
             // Scan all files: both as global identifier references and as
             // Emmy annotation text references
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
-                let doc_uri = resolve_uri(doc_uri_id);
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
                     let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
-                        locations.push(Location {
-                            uri: doc_uri.clone(),
+                        locations.push(ReferenceLocation {
+                            uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
                         });
                     }
@@ -211,11 +229,13 @@ pub fn find_references(
 
     // Deduplicate
     locations.sort_by(|a, b| {
-        a.uri.to_string().cmp(&b.uri.to_string())
+        a.uri_id.cmp(&b.uri_id)
             .then(a.range.start.line.cmp(&b.range.start.line))
             .then(a.range.start.character.cmp(&b.range.start.character))
+            .then(a.range.end.line.cmp(&b.range.end.line))
+            .then(a.range.end.character.cmp(&b.range.end.character))
     });
-    locations.dedup_by(|a, b| a.uri == b.uri && a.range == b.range);
+    locations.dedup_by(|a, b| a.uri_id == b.uri_id && a.range == b.range);
 
     Some(locations)
 }
@@ -577,24 +597,22 @@ fn collect_global_declarations(
     name: &str,
     index: &WorkspaceAggregation,
     strategy: &ReferencesStrategy,
-    locations: &mut Vec<Location>,
+    locations: &mut Vec<ReferenceLocation>,
 ) {
     match strategy {
         ReferencesStrategy::Best => {
             if let Some(candidates) = index.global_shard.get(name) {
                 if let Some(best) = candidates.first() {
-                    let best_uri = resolve_uri(best.source_uri_id());
-                    locations.push(Location {
-                        uri: best_uri,
+                    locations.push(ReferenceLocation {
+                        uri_id: best.source_uri_id(),
                         range: best.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 if let Some(best) = candidates.first() {
-                    let best_uri = resolve_uri(best.source_uri_id());
-                    locations.push(Location {
-                        uri: best_uri,
+                    locations.push(ReferenceLocation {
+                        uri_id: best.source_uri_id(),
                         range: best.range.into(),
                     });
                 }
@@ -603,18 +621,16 @@ fn collect_global_declarations(
         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
             if let Some(candidates) = index.global_shard.get(name) {
                 for candidate in candidates {
-                    let candidate_uri = resolve_uri(candidate.source_uri_id());
-                    locations.push(Location {
-                        uri: candidate_uri,
+                    locations.push(ReferenceLocation {
+                        uri_id: candidate.source_uri_id(),
                         range: candidate.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 for candidate in candidates {
-                    let candidate_uri = resolve_uri(candidate.source_uri_id());
-                    locations.push(Location {
-                        uri: candidate_uri,
+                    locations.push(ReferenceLocation {
+                        uri_id: candidate.source_uri_id(),
                         range: candidate.range.into(),
                     });
                 }
@@ -693,7 +709,7 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
 fn collect_emmy_type_references(
     type_name: &str,
     all_docs: &impl DocumentLookup,
-    locations: &mut Vec<Location>,
+    locations: &mut Vec<ReferenceLocation>,
 ) {
     all_docs.for_each_document_id(|doc_uri_id, doc| {
         let source = doc.source();
@@ -707,7 +723,7 @@ fn scan_type_in_comments(
     type_name: &str,
     source: &[u8],
     uri_id: UriId,
-    locations: &mut Vec<Location>,
+    locations: &mut Vec<ReferenceLocation>,
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
@@ -734,7 +750,7 @@ fn emit_type_matches_in_node(
     type_name: &str,
     source: &[u8],
     uri_id: UriId,
-    locations: &mut Vec<Location>,
+    locations: &mut Vec<ReferenceLocation>,
     line_index: &LineIndex,
 ) {
     let node_start_byte = node.start_byte();
@@ -760,8 +776,8 @@ fn emit_type_matches_in_node(
                     line_index.byte_offset_to_position(source, abs_start),
                     line_index.byte_offset_to_position(source, abs_end),
                 ) {
-                    locations.push(Location {
-                        uri: resolve_uri(uri_id),
+                    locations.push(ReferenceLocation {
+                        uri_id,
                         range: Range { start, end },
                     });
                 }

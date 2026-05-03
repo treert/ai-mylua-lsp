@@ -4,7 +4,7 @@ use std::sync::{Mutex, OnceLock};
 use tower_lsp_server::ls_types::Uri;
 
 #[repr(transparent)]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct UriId(i32);
 
 impl UriId {
