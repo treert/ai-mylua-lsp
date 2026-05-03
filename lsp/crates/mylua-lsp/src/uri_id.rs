@@ -8,7 +8,7 @@ use tower_lsp_server::ls_types::Uri;
 pub struct UriId(i32);
 
 impl UriId {
-    pub(crate) fn new(raw: i32) -> Self {
+    fn new(raw: i32) -> Self {
         assert!(raw >= 0, "UriId must be non-negative");
         Self(raw)
     }

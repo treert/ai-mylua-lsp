@@ -594,7 +594,7 @@ mod tests {
 
 #[cfg(test)]
 mod uri_id_tests {
-    use crate::uri_id::{intern, path, priority, resolve, UriId};
+    use crate::uri_id::{intern, path, priority, resolve};
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
@@ -622,8 +622,9 @@ mod uri_id_tests {
     #[test]
     fn zero_uri_id_resolves_to_empty_uri() {
         let empty_uri: Uri = "file:".parse().unwrap();
+        let empty_id = intern(empty_uri.clone());
 
-        assert_eq!(resolve(UriId::new(0)), empty_uri);
+        assert_eq!(resolve(empty_id), empty_uri);
     }
 
     #[test]
@@ -632,12 +633,6 @@ mod uri_id_tests {
         let regular_id = intern("file:///tmp/a.lua".parse().unwrap());
 
         assert!(priority(annotation_id) < priority(regular_id));
-    }
-
-    #[test]
-    #[should_panic(expected = "UriId must be non-negative")]
-    fn uri_id_rejects_negative_values() {
-        let _ = UriId::new(-1);
     }
 }
 

@@ -169,9 +169,10 @@ impl DiagnosticScheduler {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::uri_id::intern;
 
     fn id(raw: i32) -> UriId {
-        UriId::new(raw)
+        intern(format!("file:///diagnostic_scheduler/{}.lua", raw).parse().unwrap())
     }
 
     #[test]
