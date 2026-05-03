@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::uri_id::UriInterner;
+use crate::uri_id::resolve;
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
 
 pub fn goto_definition(
@@ -14,18 +14,7 @@ pub fn goto_definition(
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    goto_definition_inner(doc, uri, position, index, strategy, None)
-}
-
-pub(crate) fn goto_definition_with_uri_interner(
-    doc: &Document,
-    uri: &Uri,
-    position: Position,
-    index: &WorkspaceAggregation,
-    strategy: &GotoStrategy,
-    uri_interner: &UriInterner,
-) -> Option<GotoDefinitionResponse> {
-    goto_definition_inner(doc, uri, position, index, strategy, Some(uri_interner))
+    goto_definition_inner(doc, uri, position, index, strategy)
 }
 
 fn goto_definition_inner(
@@ -34,7 +23,6 @@ fn goto_definition_inner(
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
-    uri_interner: Option<&UriInterner>,
 ) -> Option<GotoDefinitionResponse> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
@@ -48,7 +36,7 @@ fn goto_definition_inner(
     // If clicking on the LHS name of `local x = require("mod")`, prefer
     // jumping to the required module's `return` statement over resolving
     // to the (same) local declaration itself.
-    if let Some(target) = try_require_goto(doc, ident_node, index, uri_interner) {
+    if let Some(target) = try_require_goto(doc, ident_node, index) {
         return Some(target);
     }
 
@@ -339,7 +327,6 @@ fn try_require_goto(
     doc: &Document,
     ident_node: tree_sitter::Node,
     index: &WorkspaceAggregation,
-    uri_interner: Option<&UriInterner>,
 ) -> Option<GotoDefinitionResponse> {
     // Walk up to the enclosing local_declaration if the clicked identifier
     // is one of its LHS names (directly, or nested inside `name_list`).
@@ -385,11 +372,7 @@ fn try_require_goto(
     let module_path = extract_string_literal(string_node, doc.source())?;
 
     let target_uri_id = index.resolve_module_to_id(&module_path)?;
-    let target_uri = if let Some(uri_interner) = uri_interner {
-        uri_interner.resolve(target_uri_id)
-    } else {
-        index.summary_uri(target_uri_id).cloned()?
-    };
+    let target_uri = resolve(target_uri_id);
 
     // Prefer the file-level `return` statement's range (what the require
     // expression actually evaluates to). Fall back to the first global

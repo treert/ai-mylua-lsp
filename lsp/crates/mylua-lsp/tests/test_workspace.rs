@@ -3,6 +3,7 @@ mod test_helpers;
 use test_helpers::*;
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::{hover, completion, goto};
+use mylua_lsp::uri_id::intern;
 
 /// Tests using the real `tests/hover/` directory as a workspace.
 /// This exercises multi-file require resolution.
@@ -116,12 +117,10 @@ fn workspace_global_priority_by_path_depth() {
 #[test]
 fn require_map_survives_upsert() {
     use mylua_lsp::summary_builder;
-    use mylua_lsp::uri_id::UriInterner;
 
     let mut parser = new_parser();
     let mod_uri = make_uri("mymod.lua");
-    let uri_interner = UriInterner::new();
-    let mod_uri_id = uri_interner.intern(mod_uri.clone());
+    let mod_uri_id = intern(mod_uri.clone());
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
     let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
@@ -157,12 +156,10 @@ fn require_map_survives_upsert() {
 #[test]
 fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     use mylua_lsp::{resolver, summary_builder};
-    use mylua_lsp::uri_id::UriInterner;
 
     let mut parser = new_parser();
-    let uri_interner = UriInterner::new();
     let main_uri = make_uri("main.lua");
-    let main_uri_id = uri_interner.intern(main_uri.clone());
+    let main_uri_id = intern(main_uri.clone());
     let main_doc = parse_doc(&mut parser, "local Player = require(\"player\")\n");
     let main_summary = summary_builder::build_file_analysis(
         &main_uri,
@@ -172,7 +169,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     ).0;
 
     let player_uri = make_uri("player.lua");
-    let player_uri_id = uri_interner.intern(player_uri.clone());
+    let player_uri_id = intern(player_uri.clone());
     let player_doc = parse_doc(&mut parser, "Player = {}\nreturn Player\n");
     let player_summary = summary_builder::build_file_analysis(
         &player_uri,

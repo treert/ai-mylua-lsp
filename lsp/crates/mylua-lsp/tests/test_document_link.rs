@@ -2,6 +2,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use mylua_lsp::document_link;
+use mylua_lsp::uri_id::intern;
 
 #[test]
 fn document_link_resolves_require_paren_form() {
@@ -15,7 +16,6 @@ fn document_link_resolves_require_paren_form() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert_eq!(links.len(), 1, "exactly one require link, got: {:?}", links);
@@ -41,16 +41,14 @@ fn document_link_resolves_from_module_map_before_summary_exists() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, "local u = require(\"util\")\n");
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
     let util_uri = make_uri("util.lua");
-    let util_uri_id = uri_interner.intern(util_uri.clone());
+    let util_uri_id = intern(util_uri.clone());
     agg.set_require_mapping("util".to_string(), util_uri_id);
 
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        Some(&uri_interner),
         doc.line_index(),
     );
 
@@ -72,7 +70,6 @@ fn document_link_resolves_require_short_call() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert_eq!(
@@ -94,7 +91,6 @@ fn document_link_ignores_unresolved_module() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert!(
@@ -116,7 +112,6 @@ fn document_link_ignores_non_require_calls() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert!(
@@ -141,7 +136,6 @@ fn document_link_rejects_aliased_require() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert!(
@@ -166,7 +160,6 @@ fn document_link_multi_require_each_get_link() {
         doc.tree.root_node(),
         doc.source(),
         &agg,
-        None,
         doc.line_index(),
     );
     assert_eq!(links.len(), 2, "two distinct require calls → two links, got: {:?}", links);

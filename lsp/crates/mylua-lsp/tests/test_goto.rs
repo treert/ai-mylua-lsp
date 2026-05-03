@@ -3,6 +3,7 @@ mod test_helpers;
 use test_helpers::*;
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
+use mylua_lsp::uri_id::intern;
 
 #[test]
 fn goto_unresolved_dotted_field_does_not_fallback_to_bare_global_name() {
@@ -319,9 +320,8 @@ fn goto_require_jumps_to_module_return() {
     let caller_doc = Document { lua_source: caller_lua_source, tree: caller_tree, scope_tree: caller_scope };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
-    let mod_uri_id = uri_interner.intern(mod_uri.clone());
-    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    let mod_uri_id = intern(mod_uri.clone());
+    let caller_uri_id = intern(caller_uri.clone());
     agg.set_require_mapping("mymod".to_string(), mod_uri_id);
     agg.upsert_summary(mod_uri_id, mod_summary);
     agg.upsert_summary(caller_uri_id, caller_summary);
@@ -378,9 +378,8 @@ fn goto_require_with_attribute_before_target() {
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
-    let mod_uri_id = uri_interner.intern(mod_uri.clone());
-    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    let mod_uri_id = intern(mod_uri.clone());
+    let caller_uri_id = intern(caller_uri.clone());
     agg.set_require_mapping("attr_mod".to_string(), mod_uri_id);
     agg.upsert_summary(mod_uri_id, mod_summary);
     agg.upsert_summary(caller_uri_id, caller_summary);
@@ -571,9 +570,8 @@ local hero = Player.new("Alice")"#;
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
-    let mod_uri_id = uri_interner.intern(mod_uri.clone());
-    let caller_uri_id = uri_interner.intern(caller_uri.clone());
+    let mod_uri_id = intern(mod_uri.clone());
+    let caller_uri_id = intern(caller_uri.clone());
     agg.set_require_mapping("player".to_string(), mod_uri_id);
     agg.upsert_summary(mod_uri_id, mod_summary);
     agg.upsert_summary(caller_uri_id, caller_summary);

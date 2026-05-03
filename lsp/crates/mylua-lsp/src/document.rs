@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::scope::ScopeTree;
-use crate::uri_id::{UriId, UriInterner};
+use crate::uri_id::{intern, resolve, UriId};
 use crate::util::{LineIndex, LuaSource};
 use tower_lsp_server::ls_types::Uri;
 
@@ -57,33 +57,31 @@ impl DocumentLookup for HashMap<Uri, Document> {
 
 pub struct DocumentStoreView<'a> {
     documents: &'a HashMap<UriId, Document>,
-    uri_interner: &'a UriInterner,
 }
 
 impl<'a> DocumentStoreView<'a> {
-    pub fn new(documents: &'a HashMap<UriId, Document>, uri_interner: &'a UriInterner) -> Self {
-        Self { documents, uri_interner }
+    pub fn new(documents: &'a HashMap<UriId, Document>) -> Self {
+        Self { documents }
     }
 }
 
 pub(crate) fn find_document<'a>(
     documents: &'a HashMap<UriId, Document>,
-    uri_interner: &UriInterner,
     uri: &Uri,
 ) -> Option<(UriId, &'a Document)> {
-    let uri_id = uri_interner.intern(uri.clone());
+    let uri_id = intern(uri.clone());
     documents.get(&uri_id).map(|doc| (uri_id, doc))
 }
 
 impl DocumentLookup for DocumentStoreView<'_> {
     fn get_document(&self, uri: &Uri) -> Option<&Document> {
-        let uri_id = self.uri_interner.intern(uri.clone());
+        let uri_id = intern(uri.clone());
         self.documents.get(&uri_id)
     }
 
     fn for_each_document(&self, mut f: impl FnMut(&Uri, &Document)) {
         for (uri_id, doc) in self.documents {
-            let uri = self.uri_interner.resolve(*uri_id);
+            let uri = resolve(*uri_id);
             f(&uri, doc);
         }
     }
@@ -92,16 +90,15 @@ impl DocumentLookup for DocumentStoreView<'_> {
 #[cfg(test)]
 mod tests {
     use super::{find_document, Document};
-    use crate::uri_id::{UriId, UriInterner};
+    use crate::uri_id::UriId;
     use std::collections::HashMap;
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
     fn find_document_returns_none_for_unknown_uri() {
-        let interner = UriInterner::new();
         let documents: HashMap<UriId, Document> = HashMap::new();
         let uri: Uri = "file:///tmp/missing.lua".parse().unwrap();
 
-        assert!(find_document(&documents, &interner, &uri).is_none());
+        assert!(find_document(&documents, &uri).is_none());
     }
 }

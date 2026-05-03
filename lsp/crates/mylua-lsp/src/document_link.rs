@@ -19,14 +19,14 @@
 //! - We deliberately do NOT follow aliases to their `require_aliases`
 //!   expansion text inside the link range; the range is always the
 //!   string content itself, and the target URI is resolved from
-//!   `module_index` through the session URI interner when available.
+//!   `module_index` through the process URI registry.
 //! - `m = require; m("foo")` aliased call chains are out of scope —
 //!   the callee must be the literal identifier `require`.
 
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::uri_id::UriInterner;
+use crate::uri_id::resolve;
 use crate::util::{node_text, LineIndex};
 
 /// Collect all `require("mod")` document links in `tree`. Strings that
@@ -36,12 +36,11 @@ pub fn document_links(
     root: tree_sitter::Node,
     source: &[u8],
     index: &WorkspaceAggregation,
-    uri_interner: Option<&UriInterner>,
     line_index: &LineIndex,
 ) -> Vec<DocumentLink> {
     let mut out = Vec::new();
     let mut cursor = root.walk();
-    collect_recursive(&mut cursor, source, index, uri_interner, &mut out, line_index);
+    collect_recursive(&mut cursor, source, index, &mut out, line_index);
     out
 }
 
@@ -49,14 +48,13 @@ fn collect_recursive(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     index: &WorkspaceAggregation,
-    uri_interner: Option<&UriInterner>,
     out: &mut Vec<DocumentLink>,
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
     if node.kind() == "function_call" {
         if let Some((string_node, module_path)) = extract_require_argument(node, source) {
-            if let Some(target) = resolve_module_target(index, uri_interner, &module_path) {
+            if let Some(target) = resolve_module_target(index, &module_path) {
                 // Narrow the link range to the string *contents*
                 // (inside the quotes) when we can, so a click on the
                 // quotes themselves doesn't feel off; fall back to
@@ -71,7 +69,7 @@ fn collect_recursive(
     }
     if cursor.goto_first_child() {
         loop {
-            collect_recursive(cursor, source, index, uri_interner, out, line_index);
+            collect_recursive(cursor, source, index, out, line_index);
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -82,13 +80,10 @@ fn collect_recursive(
 
 fn resolve_module_target(
     index: &WorkspaceAggregation,
-    uri_interner: Option<&UriInterner>,
     module_path: &str,
 ) -> Option<Uri> {
-    if let Some(uri_interner) = uri_interner {
-        if let Some(uri_id) = index.resolve_module_to_id(module_path) {
-            return Some(uri_interner.resolve(uri_id));
-        }
+    if let Some(uri_id) = index.resolve_module_to_id(module_path) {
+        return Some(resolve(uri_id));
     }
     index.resolve_module_to_uri(module_path)
 }

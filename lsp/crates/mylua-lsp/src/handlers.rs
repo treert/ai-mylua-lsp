@@ -26,6 +26,7 @@ use crate::selection_range;
 use crate::semantic_tokens;
 use crate::signature_help;
 use crate::symbols;
+use crate::uri_id::intern as intern_uri;
 use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{
@@ -112,7 +113,6 @@ impl LanguageServer for Backend {
         // start before `initialized` fires / workspace scan completes.
         start_diagnostic_consumer(
             self.scheduler.clone(),
-            self.uri_interner.clone(),
             self.documents.clone(),
             self.index.clone(),
             self.config.clone(),
@@ -253,7 +253,6 @@ impl LanguageServer for Backend {
         let documents = self.documents.clone();
         let open_uris = self.open_uris.clone();
         let scheduler = self.scheduler.clone();
-        let uri_interner = self.uri_interner.clone();
         let index_state = self.index_state.clone();
 
         tokio::spawn(async move {
@@ -267,7 +266,6 @@ impl LanguageServer for Backend {
                 documents,
                 open_uris,
                 scheduler,
-                uri_interner,
                 index_state,
                 started_at,
             )
@@ -313,12 +311,12 @@ impl LanguageServer for Backend {
         // sufficient.
         let text_matches = {
             let docs = self.documents.lock().unwrap();
-            find_document(&docs, &self.uri_interner, &uri)
+            find_document(&docs, &uri)
                 .map(|(_, doc)| doc)
                 .is_some_and(|d| d.text() == params.text_document.text)
         };
         if text_matches {
-            let uri_id = self.uri_interner.intern(uri.clone());
+            let uri_id = intern_uri(uri.clone());
             self.open_uris.lock().unwrap().insert(uri_id);
             self.scheduler
                 .schedule(uri_id, diagnostic_scheduler::Priority::Hot);
@@ -330,7 +328,7 @@ impl LanguageServer for Backend {
         // queue. Otherwise the very first did_open of a fresh URI
         // would route to Cold (steady state after workspace Ready,
         // no seed_bulk tombstone upgrade to save us).
-        let uri_id = self.uri_interner.intern(uri.clone());
+        let uri_id = intern_uri(uri.clone());
         self.open_uris.lock().unwrap().insert(uri_id);
         self.parse_and_store(uri.clone(), params.text_document.text);
 
@@ -357,7 +355,7 @@ impl LanguageServer for Backend {
             let mut docs = self.documents.lock().unwrap();
             let mut text;
             let mut tree: Option<tree_sitter::Tree>;
-            let uri_id = self.uri_interner.intern(uri.clone());
+            let uri_id = intern_uri(uri.clone());
             let old_doc = docs.remove(&uri_id);
             if let Some(doc) = old_doc {
                 text = doc.lua_source.into_text();
@@ -410,7 +408,7 @@ impl LanguageServer for Backend {
         // `open_uris` is a plain `std::sync::Mutex` held only for the
         // remove call, it can't race with any other lock in the
         // `edit_lock → open_uris → documents → index` order used elsewhere.
-        let uri_id = self.uri_interner.intern(uri.clone());
+        let uri_id = intern_uri(uri.clone());
         self.open_uris.lock().unwrap().remove(&uri_id);
         // The client won't retry a stale `previous_result_id` after
         // closing the file, so drop the cache entry to free memory.
@@ -450,7 +448,7 @@ impl LanguageServer for Backend {
                     // need to reset the index to disk state.
                     let already_matches = {
                         let docs = self.documents.lock().unwrap();
-                        find_document(&docs, &self.uri_interner, &uri)
+                        find_document(&docs, &uri)
                             .map(|(_, doc)| doc)
                             .is_some_and(|d| d.text() == text)
                     };
@@ -511,7 +509,7 @@ impl LanguageServer for Backend {
                     let uri = uri_to_path(&change.uri)
                         .and_then(|path| workspace_scanner::path_to_uri(&path))
                         .unwrap_or_else(|| change.uri.clone());
-                    let uri_id = self.uri_interner.intern(uri);
+                    let uri_id = intern_uri(uri);
                     self.index.lock().unwrap().remove_file(uri_id);
                     self.documents.lock().unwrap().remove(&uri_id);
                     self.scheduler.invalidate(&uri_id);
@@ -547,7 +545,7 @@ impl LanguageServer for Backend {
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -566,7 +564,7 @@ impl LanguageServer for Backend {
         params: FoldingRangeParams,
     ) -> Result<Option<Vec<FoldingRange>>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         Ok(Some(folding_range::folding_range(doc)))
@@ -577,7 +575,7 @@ impl LanguageServer for Backend {
         params: DocumentLinkParams,
     ) -> Result<Option<Vec<DocumentLink>>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -585,7 +583,6 @@ impl LanguageServer for Backend {
             doc.tree.root_node(),
             doc.source(),
             &idx,
-            Some(&self.uri_interner),
             doc.line_index(),
         )))
     }
@@ -597,7 +594,7 @@ impl LanguageServer for Backend {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &uri) else {
+        let Some((_, doc)) = find_document(&docs, &uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -633,7 +630,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -646,7 +643,7 @@ impl LanguageServer for Backend {
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         Ok(Some(selection_range::selection_range(doc, &params.positions)))
@@ -659,7 +656,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         Ok(document_highlight::document_highlight(doc, uri, position))
@@ -672,18 +669,17 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        let result = goto::goto_definition_with_uri_interner(
+        let result = goto::goto_definition(
             doc,
             uri,
             position,
             &idx,
             &strategy,
-            &self.uri_interner,
         );
         match &result {
             Some(GotoDefinitionResponse::Scalar(loc)) => {
@@ -711,7 +707,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -730,18 +726,17 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_definition_with_uri_interner(
+        Ok(goto::goto_definition(
             doc,
             uri,
             position,
             &idx,
             &strategy,
-            &self.uri_interner,
         ))
     }
 
@@ -749,18 +744,18 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri, position, &idx, &DocumentStoreView::new(&docs, &self.uri_interner)))
+        Ok(hover::hover(doc, uri, position, &idx, &DocumentStoreView::new(&docs)))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -774,7 +769,7 @@ impl LanguageServer for Backend {
     ) -> Result<CompletionItem> {
         let idx = self.index.lock().unwrap();
         let docs = self.documents.lock().unwrap();
-        Ok(completion::resolve_completion(item, &idx, &DocumentStoreView::new(&docs, &self.uri_interner)))
+        Ok(completion::resolve_completion(item, &idx, &DocumentStoreView::new(&docs)))
     }
 
     async fn references(&self, params: ReferenceParams) -> Result<Option<Vec<Location>>> {
@@ -782,7 +777,7 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -793,7 +788,7 @@ impl LanguageServer for Backend {
             position,
             include_declaration,
             &idx,
-            &DocumentStoreView::new(&docs, &self.uri_interner),
+            &DocumentStoreView::new(&docs),
             &ref_strategy,
         ))
     }
@@ -803,7 +798,7 @@ impl LanguageServer for Backend {
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         Ok(rename::prepare_rename(doc, params.position))
@@ -813,11 +808,11 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        match rename::rename(doc, uri, position, &params.new_name, &idx, &DocumentStoreView::new(&docs, &self.uri_interner)) {
+        match rename::rename(doc, uri, position, &params.new_name, &idx, &DocumentStoreView::new(&docs)) {
             Ok(edit) => Ok(edit),
             Err(msg) => Err(tower_lsp_server::jsonrpc::Error {
                 code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
@@ -840,7 +835,7 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, uri) else {
+        let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -853,7 +848,7 @@ impl LanguageServer for Backend {
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
         let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &self.uri_interner, &uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
@@ -889,7 +884,7 @@ impl LanguageServer for Backend {
 
         // Load the current tokens regardless of cache state.
         let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &self.uri_interner, &uri) else {
+        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
@@ -947,7 +942,7 @@ impl LanguageServer for Backend {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
         let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &self.uri_interner, &params.text_document.uri) else {
+        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();

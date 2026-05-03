@@ -2,6 +2,7 @@ mod test_helpers;
 
 use mylua_lsp::config::{DiagnosticSeverityOption, DiagnosticsConfig};
 use mylua_lsp::diagnostics;
+use mylua_lsp::uri_id::intern;
 use test_helpers::*;
 
 #[test]
@@ -838,8 +839,7 @@ local c = getContainer()
         scope_tree,
     };
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
-    let uri_interner = mylua_lsp::uri_id::UriInterner::new();
-    let uri_id = uri_interner.intern(uri.clone());
+    let uri_id = intern(uri.clone());
     agg.upsert_summary(uri_id, summary);
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;

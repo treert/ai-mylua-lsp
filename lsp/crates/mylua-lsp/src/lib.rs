@@ -78,7 +78,7 @@ use tower_lsp_server::Client;
 use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
-use uri_id::{UriId, UriInterner};
+use uri_id::{intern as intern_uri, UriId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
@@ -170,9 +170,6 @@ pub struct Backend {
     /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
     /// spawns and the cold-start `publish_diagnostics_for_open_files`.
     pub(crate) scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
-    /// Session-local URI interner used while gradually migrating
-    /// hot internal paths from full `Uri` keys to compact `UriId` keys.
-    pub(crate) uri_interner: Arc<UriInterner>,
 }
 
 pub(crate) struct ParsedFile {
@@ -211,7 +208,6 @@ impl Backend {
             open_uris: Arc::new(Mutex::new(HashSet::new())),
             library_uris: Arc::new(Mutex::new(HashSet::new())),
             scheduler: diagnostic_scheduler::DiagnosticScheduler::new(),
-            uri_interner: Arc::new(UriInterner::new()),
         }
     }
 
@@ -266,7 +262,7 @@ impl Backend {
             *self.library_uris.lock().unwrap() = library_file_uris
                 .iter()
                 .cloned()
-                .map(|uri| self.uri_interner.intern(uri))
+                .map(intern_uri)
                 .collect();
             lsp_log!(
                 "[mylua-lsp] library files to index: {}",
@@ -279,7 +275,7 @@ impl Backend {
     /// Fetch (or create) the per-URI async edit lock. Callers `.await` its
     /// `lock()` to serialize document mutations for a single URI.
     pub(crate) fn edit_lock_for(&self, uri: &Uri) -> Arc<tokio::sync::Mutex<()>> {
-        let uri_id = self.uri_interner.intern(uri.clone());
+        let uri_id = intern_uri(uri.clone());
         let mut locks = self.edit_locks.lock().unwrap();
         locks
             .entry(uri_id)
@@ -326,7 +322,7 @@ impl Backend {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
                     let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
-                    let uri_id = self.uri_interner.intern(uri.clone());
+                    let uri_id = intern_uri(uri.clone());
                     self.documents.lock().unwrap().insert(
                         uri_id,
                         Document { lua_source, tree: old, scope_tree },
@@ -339,7 +335,7 @@ impl Backend {
         {
             let lua_source = util::LuaSource::new(text);
             let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
-            let uri_id = self.uri_interner.intern(uri.clone());
+            let uri_id = intern_uri(uri.clone());
             // Library stubs retain their meta treatment across edits.
             // `summary_builder::build_file_analysis` infers `is_meta` from
             // `---@meta` headers, and bundled stdlib stubs typically
@@ -448,7 +444,7 @@ impl Backend {
             // library path inside the workspace tree) would flip the
             // flag back to false and surface `undefinedGlobal`
             // warnings inside the stub file.
-            let uri_id = self.uri_interner.intern(uri.clone());
+            let uri_id = intern_uri(uri.clone());
             if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
@@ -498,7 +494,7 @@ impl Backend {
         if *self.index_state.lock().unwrap() == IndexState::Ready {
             return;
         }
-        let uri_id = self.uri_interner.intern(uri.clone());
+        let uri_id = intern_uri(uri.clone());
         if !self.open_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
@@ -598,18 +594,17 @@ mod tests {
 
 #[cfg(test)]
 mod uri_id_tests {
-    use crate::uri_id::{UriId, UriInterner};
+    use crate::uri_id::{intern, path, priority, resolve, UriId};
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
     fn intern_returns_stable_ids_for_same_uri_and_distinct_ids_for_distinct_uris() {
-        let interner = UriInterner::new();
         let first: Uri = "file:///tmp/a.lua".parse().unwrap();
         let second: Uri = "file:///tmp/b.lua".parse().unwrap();
 
-        let first_id = interner.intern(first.clone());
-        let first_again = interner.intern(first);
-        let second_id = interner.intern(second);
+        let first_id = intern(first.clone());
+        let first_again = intern(first);
+        let second_id = intern(second);
 
         assert_eq!(first_id, first_again);
         assert_ne!(first_id, second_id);
@@ -617,19 +612,26 @@ mod uri_id_tests {
 
     #[test]
     fn resolve_returns_original_uri_for_interned_id() {
-        let interner = UriInterner::new();
         let uri: Uri = "file:///tmp/a.lua".parse().unwrap();
-        let id = interner.intern(uri.clone());
+        let id = intern(uri.clone());
 
-        assert_eq!(interner.resolve(id), uri);
+        assert_eq!(resolve(id), uri);
+        assert_eq!(path(id), uri.as_str());
     }
 
     #[test]
     fn zero_uri_id_resolves_to_empty_uri() {
-        let interner = UriInterner::new();
         let empty_uri: Uri = "file:".parse().unwrap();
 
-        assert_eq!(interner.resolve(UriId::new(0)), empty_uri);
+        assert_eq!(resolve(UriId::new(0)), empty_uri);
+    }
+
+    #[test]
+    fn priority_prefers_annotation_paths() {
+        let annotation_id = intern("file:///tmp/annotation/a.lua".parse().unwrap());
+        let regular_id = intern("file:///tmp/a.lua".parse().unwrap());
+
+        assert!(priority(annotation_id) < priority(regular_id));
     }
 
     #[test]

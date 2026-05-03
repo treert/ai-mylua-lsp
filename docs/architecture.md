@@ -68,7 +68,7 @@ flowchart TB
 4. **build_initial** — 原子一次性构建工作区聚合层
 5. **Ready** — 全能力可用
 
-**内存策略**：全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse。LSP 内部 `documents` 以 session-local `UriId` 为 key，跨文件功能通过 URI-facing lookup 边界解析回原始 `Uri`。5 万文件级别峰值 RSS ~1.5–3GB。
+**内存策略**：全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse。LSP 内部 `documents` 以进程级、只增不删的 `UriId` 为 key，跨文件功能通过全局 URI registry 在边界解析回原始 `Uri`。5 万文件级别峰值 RSS ~1.5–3GB。
 
 **增量更新**：编辑期通过 `upsert_summary` 增量更新聚合索引，不必全库重建。
 
@@ -86,12 +86,12 @@ flowchart TB
 - **Emmy 优先**：命中明确 Emmy 类型后完全切换到 Emmy 语义，不再混用 table shape
 - **Table shape**：每个 table 字面值按节点 identity 建模，单文件内持续更新 shape
 - **全局 table**：跨文件允许对同一全局路径做结构合并，保留逐段节点树与来源候选
-- **定义位置**：resolver 内部的定义位置使用 server session-local `UriId` + `ByteRange`；hover / goto / references / completion / signatureHelp 在构造 LSP 响应时再解析回 `Uri`
+- **定义位置**：resolver 内部的定义位置使用进程级 `UriId` + `ByteRange`；hover / goto / references / completion / signatureHelp 在构造 LSP 响应时再通过 URI registry 解析回 `Uri`
 
 ### 3.4 诊断
 
 - **分层策略**：Emmy 路径严格（`error`），Lua 路径保守（高确定性才报）
-- **调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双优先级队列；队列内部使用 session-local `UriId`，在 LSP 发布边界再解析回 `Uri`
+- **调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双优先级队列；队列内部使用进程级 `UriId`，在 LSP 发布边界再解析回 `Uri`
 - **配置**：`mylua.diagnostics.scope`（`full` / `openOnly`）控制范围
 
 **模块结构**（`src/diagnostics/`）：

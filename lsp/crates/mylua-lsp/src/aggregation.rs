@@ -3,7 +3,7 @@ use tower_lsp_server::ls_types::Uri;
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
-use crate::uri_id::UriId;
+use crate::uri_id::{priority as uri_priority, UriId, UriPriority};
 use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.
@@ -319,21 +319,6 @@ impl TypeCandidate {
     }
 }
 
-/// Priority key for sorting candidates (smaller = higher priority):
-/// 1. More occurrences of "annotation" anywhere in the path = higher priority
-/// 2. Shallower paths (fewer `/` segments) win
-/// 3. Shorter total path length as tiebreaker
-fn uri_priority_key(uri: &Uri) -> (usize, usize, usize) {
-    let path = uri.as_str();
-    let lower = path.to_ascii_lowercase();
-    let annotation_count = lower.matches("annotation").count();
-    
-    // Negate: more occurrences → smaller key → higher priority
-    let annotation_key = usize::MAX - annotation_count;
-    let depth = path.matches('/').count();
-    (annotation_key, depth, path.len())
-}
-
 impl Default for WorkspaceAggregation {
     fn default() -> Self {
         Self::new()
@@ -454,11 +439,11 @@ impl WorkspaceAggregation {
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
         //    Pre-compute URI priority so each URI is evaluated only once
         //    (avoids repeated String allocations inside sort comparisons).
-        let id_priority: HashMap<UriId, (usize, usize, usize)> = self.summaries
+        let id_priority: HashMap<UriId, UriPriority> = self.summaries
             .iter()
-            .map(|(id, summary)| (*id, uri_priority_key(&summary.uri)))
+            .map(|(id, _)| (*id, uri_priority(*id)))
             .collect();
-        let default_priority = (usize::MAX, usize::MAX, usize::MAX);
+        let default_priority = UriPriority::worst();
 
         self.global_shard.sort_all(|c| {
             *id_priority.get(&c.source_uri_id()).unwrap_or(&default_priority)
@@ -478,11 +463,11 @@ impl WorkspaceAggregation {
         let uri = summary.uri.clone();
 
         self.remove_contributions(uri_id);
-        let summary_priorities: HashMap<UriId, (usize, usize, usize)> = self.summaries
+        let summary_priorities: HashMap<UriId, UriPriority> = self.summaries
             .iter()
-            .map(|(id, summary)| (*id, uri_priority_key(&summary.uri)))
+            .map(|(id, _)| (*id, uri_priority(*id)))
             .collect();
-        let current_priority = uri_priority_key(&uri);
+        let current_priority = uri_priority(uri_id);
 
         for gc in &summary.global_contributions {
             self.global_shard.push_candidate(&gc.name, GlobalCandidate {

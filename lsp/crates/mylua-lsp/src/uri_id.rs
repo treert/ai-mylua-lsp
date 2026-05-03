@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use tower_lsp_server::ls_types::Uri;
 
@@ -12,33 +12,79 @@ impl UriId {
         assert!(raw >= 0, "UriId must be non-negative");
         Self(raw)
     }
+
+    fn index(self) -> usize {
+        usize::try_from(self.0).expect("UriId must be non-negative")
+    }
 }
 
 #[derive(Debug)]
-pub struct UriInterner {
+struct UriRegistry {
     inner: Mutex<Inner>,
 }
 
 #[derive(Debug)]
 struct Inner {
     by_uri: HashMap<Uri, UriId>,
-    by_id: Vec<Uri>,
+    by_id: Vec<UriMeta>,
 }
 
-impl UriInterner {
-    pub fn new() -> Self {
+#[derive(Debug)]
+struct UriMeta {
+    uri: Uri,
+    path: &'static str,
+    priority: UriPriority,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub struct UriPriority {
+    annotation_key: usize,
+    depth: usize,
+    len: usize,
+}
+
+static URI_REGISTRY: OnceLock<UriRegistry> = OnceLock::new();
+
+/// Intern a URI into the process-global append-only registry.
+pub fn intern(uri: Uri) -> UriId {
+    registry().intern(uri)
+}
+
+/// Resolve a registered `UriId` back to its LSP `Uri`.
+///
+/// Panics if the id was fabricated rather than returned by `intern`.
+pub fn resolve(id: UriId) -> Uri {
+    registry().resolve(id)
+}
+
+/// Return the registered URI string for an id.
+///
+/// This is `Uri::as_str()` (for example `file:///tmp/a.lua`), not a
+/// decoded filesystem path.
+pub fn path(id: UriId) -> &'static str {
+    registry().path(id)
+}
+
+/// Return the precomputed candidate ordering key for an id.
+pub fn priority(id: UriId) -> UriPriority {
+    registry().priority(id)
+}
+
+impl UriRegistry {
+    fn new() -> Self {
         let empty_uri = empty_uri();
+        let empty_meta = UriMeta::new(empty_uri.clone());
         let mut by_uri = HashMap::new();
         by_uri.insert(empty_uri.clone(), UriId::new(0));
         Self {
             inner: Mutex::new(Inner {
                 by_uri,
-                by_id: vec![empty_uri],
+                by_id: vec![empty_meta],
             }),
         }
     }
 
-    pub fn intern(&self, uri: Uri) -> UriId {
+    fn intern(&self, uri: Uri) -> UriId {
         let mut inner = self.inner.lock().unwrap();
         if let Some(id) = inner.by_uri.get(&uri).copied() {
             return id;
@@ -46,23 +92,83 @@ impl UriInterner {
 
         let raw = i32::try_from(inner.by_id.len()).expect("UriId exhausted");
         let id = UriId::new(raw);
+        let meta = UriMeta::new(uri.clone());
         inner.by_uri.insert(uri.clone(), id);
-        inner.by_id.push(uri);
+        inner.by_id.push(meta);
         id
     }
 
-    pub fn resolve(&self, id: UriId) -> Uri {
-        let raw = usize::try_from(id.0).expect("UriId must be non-negative");
+    fn resolve(&self, id: UriId) -> Uri {
         self.inner
             .lock()
             .unwrap()
             .by_id
-            .get(raw)
-            .cloned()
+            .get(id.index())
+            .map(|meta| meta.uri.clone())
             .expect("UriId must be registered before resolve")
     }
+
+    fn path(&self, id: UriId) -> &'static str {
+        self.inner
+            .lock()
+            .unwrap()
+            .by_id
+            .get(id.index())
+            .map(|meta| meta.path)
+            .expect("UriId must be registered before path lookup")
+    }
+
+    fn priority(&self, id: UriId) -> UriPriority {
+        self.inner
+            .lock()
+            .unwrap()
+            .by_id
+            .get(id.index())
+            .map(|meta| meta.priority)
+            .expect("UriId must be registered before priority lookup")
+    }
+}
+
+impl UriMeta {
+    fn new(uri: Uri) -> Self {
+        let path = leak_path(&uri);
+        Self {
+            uri,
+            path,
+            priority: UriPriority::from_path(path),
+        }
+    }
+}
+
+impl UriPriority {
+    pub(crate) fn worst() -> Self {
+        Self {
+            annotation_key: usize::MAX,
+            depth: usize::MAX,
+            len: usize::MAX,
+        }
+    }
+
+    fn from_path(path: &str) -> Self {
+        let lower = path.to_ascii_lowercase();
+        let annotation_count = lower.matches("annotation").count();
+
+        Self {
+            annotation_key: usize::MAX - annotation_count,
+            depth: path.matches('/').count(),
+            len: path.len(),
+        }
+    }
+}
+
+fn registry() -> &'static UriRegistry {
+    URI_REGISTRY.get_or_init(UriRegistry::new)
 }
 
 fn empty_uri() -> Uri {
     "file:".parse().expect("empty path URI should be valid")
+}
+
+fn leak_path(uri: &Uri) -> &'static str {
+    Box::leak(uri.as_str().to_string().into_boxed_str())
 }
