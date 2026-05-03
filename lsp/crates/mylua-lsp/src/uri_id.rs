@@ -38,9 +38,9 @@ struct UriMeta {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct UriPriority {
-    annotation_key: usize,
-    depth: usize,
-    len: usize,
+    annotation_key: u16,
+    depth: u16,
+    len: u32,
 }
 
 static URI_REGISTRY: OnceLock<UriRegistry> = OnceLock::new();
@@ -143,20 +143,23 @@ impl UriMeta {
 impl UriPriority {
     pub(crate) fn worst() -> Self {
         Self {
-            annotation_key: usize::MAX,
-            depth: usize::MAX,
-            len: usize::MAX,
+            annotation_key: u16::MAX,
+            depth: u16::MAX,
+            len: u32::MAX,
         }
     }
 
     fn from_path(path: &str) -> Self {
         let lower = path.to_ascii_lowercase();
         let annotation_count = lower.matches("annotation").count();
+        let annotation_count = annotation_count.min(u16::MAX as usize) as u16;
+        let depth = path.matches('/').count().min(u16::MAX as usize) as u16;
+        let len = path.len().min(u32::MAX as usize) as u32;
 
         Self {
-            annotation_key: usize::MAX - annotation_count,
-            depth: path.matches('/').count(),
-            len: path.len(),
+            annotation_key: u16::MAX - annotation_count,
+            depth,
+            len,
         }
     }
 }
