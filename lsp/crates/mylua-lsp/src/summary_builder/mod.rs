@@ -36,7 +36,6 @@ pub fn build_file_analysis(
     let mut ctx = BuildContext {
         source,
         line_index,
-        require_bindings: Vec::new(),
         global_contributions: Vec::new(),
         function_summaries: HashMap::new(),
         function_name_to_id: HashMap::new(),
@@ -80,10 +79,9 @@ pub fn build_file_analysis(
 
     let scope_tree = ctx.take_scope_tree();
 
-    let mut summary = DocumentSummary {
+    let summary = DocumentSummary {
         uri: uri.clone(),
         content_hash,
-        require_bindings: ctx.require_bindings,
         global_contributions: ctx.global_contributions,
         function_summaries: ctx.function_summaries,
         function_name_index: ctx.function_name_index,
@@ -95,136 +93,9 @@ pub fn build_file_analysis(
         call_sites,
         is_meta,
         meta_name,
-        global_ref_tree: GlobalRefTree::default(),
     };
 
-    // Pre-compute external global references from all TypeFacts in the summary.
-    summary.global_ref_tree = collect_external_refs(&summary, &scope_tree);
-
     (summary, scope_tree)
-}
-
-/// Collect global reference paths (as a trie) from all TypeFacts in the
-/// summary and scope_tree. Produces a `GlobalRefTree` for cross-file
-/// global name resolution.
-fn collect_external_refs(
-    summary: &DocumentSummary,
-    scope_tree: &ScopeTree,
-) -> GlobalRefTree {
-    let mut tree = GlobalRefTree::default();
-
-    // --- helpers ---
-
-    /// Split a GlobalRef name (which may contain dots, e.g. `"ModuleA.utils.func"`)
-    /// into segments for trie insertion.
-    fn global_ref_segments(name: &str) -> Vec<String> {
-        name.split('.').map(|s| s.to_string()).collect()
-    }
-
-    /// Extract a global reference path from a TypeFact's FieldOf/GlobalRef chain.
-    /// Returns `None` when the root is not a `GlobalRef`.
-    fn extract_global_path(fact: &TypeFact) -> Option<Vec<String>> {
-        match fact {
-            TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(global_ref_segments(name)),
-            TypeFact::Stub(SymbolicStub::FieldOf { base, field }) => {
-                extract_global_path(base).map(|mut segs| { segs.push(field.clone()); segs })
-            }
-            _ => None,
-        }
-    }
-
-    /// Extract a global reference path from a SymbolicStub (for CallReturn.base).
-    fn extract_global_path_from_stub(stub: &SymbolicStub) -> Option<Vec<String>> {
-        match stub {
-            SymbolicStub::GlobalRef { name } => Some(global_ref_segments(name)),
-            SymbolicStub::CallReturn { base, func_name, .. } => {
-                extract_global_path_from_stub(base).map(|mut segs| { segs.push(func_name.clone()); segs })
-            }
-            _ => None,
-        }
-    }
-
-    /// Walk a TypeFact, collecting global ref paths.
-    fn walk(
-        fact: &TypeFact,
-        global_out: &mut GlobalRefTree,
-    ) {
-        match fact {
-            TypeFact::Known(KnownType::EmmyGeneric(_, params)) => {
-                for p in params { walk(p, global_out); }
-            }
-            TypeFact::Known(KnownType::Function(sig)) => {
-                for p in &sig.params { walk(&p.type_fact, global_out); }
-                for r in &sig.returns { walk(r, global_out); }
-            }
-
-            // Global ref paths: GlobalRef name may contain dots (e.g. "A.B.C")
-            TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
-                global_out.insert(&global_ref_segments(name));
-            }
-            TypeFact::Stub(SymbolicStub::FieldOf { base, .. }) => {
-                if let Some(segs) = extract_global_path(fact) {
-                    global_out.insert(&segs);
-                } else {
-                    // Root is not GlobalRef; recurse into base.
-                    walk(base, global_out);
-                }
-            }
-            TypeFact::Stub(SymbolicStub::CallReturn { base, call_arg_types, generic_args, .. }) => {
-                if let Some(segs) = extract_global_path_from_stub(base) {
-                    global_out.insert(&segs);
-                }
-                for arg in call_arg_types { walk(arg, global_out); }
-                for arg in generic_args { walk(arg, global_out); }
-            }
-
-            TypeFact::Union(parts) => {
-                for p in parts { walk(p, global_out); }
-            }
-            _ => {}
-        }
-    }
-
-    // --- walk all sources ---
-
-    // 1. Scope declarations (local variable type facts).
-    for decl in scope_tree.all_declarations() {
-        if let Some(tf) = &decl.type_fact {
-            walk(tf, &mut tree);
-        }
-    }
-
-    // 2. Class fields, alias types.
-    for td in &summary.type_definitions {
-        for f in &td.fields {
-            walk(&f.type_fact, &mut tree);
-        }
-        if let Some(alias_fact) = &td.alias_type {
-            walk(alias_fact, &mut tree);
-        }
-    }
-
-    // 3. Function param & return types (including overloads).
-    for fs in summary.function_summaries.values() {
-        for p in &fs.signature.params { walk(&p.type_fact, &mut tree); }
-        for r in &fs.signature.returns { walk(r, &mut tree); }
-        for overload in &fs.overloads {
-            for p in &overload.params { walk(&p.type_fact, &mut tree); }
-            for r in &overload.returns { walk(r, &mut tree); }
-        }
-    }
-
-    // 4. Module return type.
-    if let Some(mrt) = &summary.module_return_type {
-        walk(mrt, &mut tree);
-    }
-
-    // 5. Global contributions (`---@type Foo G = ...`).
-    for gc in &summary.global_contributions {
-        walk(&gc.type_fact, &mut tree);
-    }
-
-    tree
 }
 
 /// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local
@@ -308,7 +179,6 @@ type PendingClass = (
 pub(crate) struct BuildContext<'a> {
     pub(crate) source: &'a [u8],
     pub(crate) line_index: &'a LineIndex,
-    pub(crate) require_bindings: Vec<RequireBinding>,
     pub(crate) global_contributions: Vec<GlobalContribution>,
     pub(crate) function_summaries: HashMap<FunctionSummaryId, FunctionSummary>,
     /// Reverse mapping: function name → FunctionSummaryId.
@@ -479,55 +349,5 @@ mod tests {
         let uri: tower_lsp_server::ls_types::Uri = "file:///test.lua".parse().unwrap();
         let (summary, _) = build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
         summary
-    }
-
-    // --- GlobalRefTree tests ---
-
-    #[test]
-    fn global_ref_tree_simple_global() {
-        // `local x = print` → print is a global, assigned to a local,
-        // so GlobalRef { name: "print" } ends up in scope_tree.
-        let s = build("local x = print");
-        assert!(s.global_ref_tree.roots.contains_key("print"),
-            "expected 'print' in global_ref_tree, got: {:?}", s.global_ref_tree.roots.keys().collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn global_ref_tree_dotted_path() {
-        // `local x = ModuleA.utils.func` → trie: ModuleA → utils → func
-        let s = build("local x = ModuleA.utils.func");
-        let module_a = s.global_ref_tree.roots.get("ModuleA")
-            .expect("expected 'ModuleA' root");
-        let utils = module_a.children.get("utils")
-            .expect("expected 'utils' child");
-        assert!(utils.children.contains_key("func"),
-            "expected 'func' under 'ModuleA.utils', got: {:?}", utils.children.keys().collect::<Vec<_>>());
-    }
-
-    #[test]
-    fn global_ref_tree_self_contributions_kept() {
-        // File defines `Foo` as a global — self-references are intentionally
-        // kept (consumers handle cycles).
-        let s = build("Foo = 42\nlocal x = Foo");
-        assert!(s.global_ref_tree.roots.contains_key("Foo"),
-            "self-contributed 'Foo' should still appear in global_ref_tree");
-    }
-
-    #[test]
-    fn global_ref_tree_locals_excluded() {
-        // `local x = 1; print(x)` → x is local, should not appear
-        let s = build("local x = 1\nprint(x)");
-        assert!(!s.global_ref_tree.roots.contains_key("x"),
-            "'x' is local, should not appear in global_ref_tree");
-    }
-
-    #[test]
-    fn global_ref_tree_multiple_refs_merge() {
-        // Two paths under same root: ModuleA.foo and ModuleA.bar
-        let s = build("local a = ModuleA.foo\nlocal b = ModuleA.bar");
-        let module_a = s.global_ref_tree.roots.get("ModuleA")
-            .expect("expected 'ModuleA' root");
-        assert!(module_a.children.contains_key("foo"), "expected 'foo'");
-        assert!(module_a.children.contains_key("bar"), "expected 'bar'");
     }
 }

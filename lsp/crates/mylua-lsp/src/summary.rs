@@ -6,51 +6,6 @@ use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::{FunctionSignature, FunctionSummaryId, TypeFact};
 use crate::util::ByteRange;
 
-/// External global names referenced by a file, stored as a trie.
-///
-/// `"ModuleA.utils.func"` + `"ModuleA.utils.abc"` + `"print"` →
-/// ```text
-/// roots: {
-///   "ModuleA": { children: { "utils": { children: { "func": {}, "abc": {} } } } },
-///   "print": {},
-/// }
-/// ```
-///
-/// Leaf nodes (`children.is_empty()`) indicate "referenced at this level";
-/// they also implicitly mean "anything below may affect me" when the deeper
-/// path couldn't be statically resolved.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GlobalRefTree {
-    pub roots: HashMap<String, GlobalRefNode>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct GlobalRefNode {
-    pub children: HashMap<String, GlobalRefNode>,
-}
-
-impl GlobalRefTree {
-    /// Insert a global reference path into the trie.
-    /// `segments` is e.g. `["ModuleA", "utils", "func"]`.
-    pub fn insert(&mut self, segments: &[String]) {
-        if segments.is_empty() {
-            return;
-        }
-        let mut node = self.roots
-            .entry(segments[0].clone())
-            .or_default();
-        for seg in &segments[1..] {
-            node = node.children
-                .entry(seg.clone())
-                .or_default();
-        }
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.roots.is_empty()
-    }
-}
-
 /// Per-file summary: the "recipe" of type facts produced by single-file inference.
 ///
 /// Contains everything needed to participate in the workspace aggregation layer
@@ -60,8 +15,6 @@ pub struct DocumentSummary {
     pub uri: Uri,
     /// Hash of source text; used for cache invalidation.
     pub content_hash: u64,
-    /// `local x = require("mod")` bindings.
-    pub require_bindings: Vec<RequireBinding>,
     /// Globals defined/extended by this file.
     pub global_contributions: Vec<GlobalContribution>,
     /// Top-level and named function summaries, keyed by `FunctionSummaryId`.
@@ -104,11 +57,6 @@ pub struct DocumentSummary {
     /// Optional module name supplied via `---@meta <name>`; purely
     /// informational at present (no require_map mapping yet).
     pub meta_name: Option<String>,
-    /// External global names referenced by this file, stored as a trie.
-    /// Extracted from `FieldOf`/`GlobalRef` chains in all TypeFacts.
-    /// Self-contributions (names in `global_contributions`) are excluded.
-    #[serde(default)]
-    pub global_ref_tree: GlobalRefTree,
 }
 
 /// One `function_call` occurrence recorded during summary build.
@@ -130,14 +78,6 @@ pub struct CallSite {
     /// Range of the callee identifier / final segment — not the
     /// whole `function_call` node. Preferred by clients as the
     /// highlight target.
-    pub range: ByteRange,
-}
-
-/// `local <name> = require("<module_path>")`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RequireBinding {
-    pub local_name: String,
-    pub module_path: String,
     pub range: ByteRange,
 }
 

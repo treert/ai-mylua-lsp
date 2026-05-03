@@ -361,10 +361,9 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         }
 
         if let Some(val) = value_node {
-            if let Some(rb) = try_extract_require(ctx, &name, val) {
-                ctx.require_bindings.push(rb);
+            if let Some(module_path) = try_extract_require(ctx, val) {
                 let require_type_fact = TypeFact::Stub(SymbolicStub::RequireRef {
-                    module_path: ctx.require_bindings.last().unwrap().module_path.clone(),
+                    module_path,
                 });
                 ctx.add_scoped_decl(ScopeDecl {
                     name: name.clone(),
@@ -587,9 +586,8 @@ fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> 
 
 fn try_extract_require<'a>(
     ctx: &BuildContext<'a>,
-    local_name: &str,
     value_node: tree_sitter::Node<'a>,
-) -> Option<RequireBinding> {
+) -> Option<String> {
     if value_node.kind() != "function_call" {
         return None;
     }
@@ -607,11 +605,7 @@ fn try_extract_require<'a>(
     };
     let module_path = extract_string_literal(string_node, ctx.source)?;
 
-    Some(RequireBinding {
-        local_name: local_name.to_string(),
-        module_path,
-        range: ctx.line_index.ts_node_to_byte_range(value_node, ctx.source),
-    })
+    Some(module_path)
 }
 
 // ---------------------------------------------------------------------------
