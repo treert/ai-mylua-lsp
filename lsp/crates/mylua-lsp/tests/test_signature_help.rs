@@ -15,7 +15,7 @@ foo(1, "x")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "sig.lua");
 
     // Cursor between args: `foo(1,| "x")` → active param = 1 (second arg)
-    let help = signature_help::signature_help(&doc, &uri, pos(5, 7), &mut agg)
+    let help = signature_help::signature_help(&doc, intern(uri.clone()), pos(5, 7), &mut agg)
         .expect("signatureHelp should return Some");
 
     assert_eq!(help.signatures.len(), 1, "one signature");
@@ -51,9 +51,9 @@ make(1, "x")"#;
         ("main.lua", main_src),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&uri).expect("main.lua document");
+    let doc = docs.get(&intern(uri.clone())).expect("main.lua document");
 
-    let help = signature_help::signature_help(doc, &uri, pos(1, 8), &mut agg)
+    let help = signature_help::signature_help(doc, intern(uri.clone()), pos(1, 8), &mut agg)
         .expect("signatureHelp should resolve required local function");
 
     assert_eq!(help.signatures.len(), 1);
@@ -73,15 +73,15 @@ foo(1, 2, 3)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "active.lua");
 
     // Position just after `(`: should be 0
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 4), &mut agg).unwrap();
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 4), &mut agg).unwrap();
     assert_eq!(h.active_parameter, Some(0));
 
     // After first comma
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 7), &mut agg).unwrap();
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 7), &mut agg).unwrap();
     assert_eq!(h.active_parameter, Some(1));
 
     // After second comma
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 10), &mut agg).unwrap();
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 10), &mut agg).unwrap();
     assert_eq!(h.active_parameter, Some(2));
 }
 
@@ -92,7 +92,7 @@ foo({1, 2, 3}, 5)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "nested.lua");
 
     // Cursor right before ", 5)" — still on the first arg (the table).
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 12), &mut agg).unwrap();
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 12), &mut agg).unwrap();
     assert_eq!(
         h.active_parameter,
         Some(0),
@@ -110,7 +110,7 @@ function work(n) return n end
 work("hi")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "overload.lua");
 
-    let h = signature_help::signature_help(&doc, &uri, pos(5, 6), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(5, 6), &mut agg)
         .expect("signatureHelp should return Some");
 
     assert_eq!(
@@ -143,7 +143,7 @@ foo{a=1, b=2, c=3}"#;
     let (doc, uri, mut agg) = setup_single_file(src, "tablecall.lua");
 
     // Cursor inside the table, after two commas.
-    let h = signature_help::signature_help(&doc, &uri, pos(3, 15), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(3, 15), &mut agg)
         .expect("table-call still produces a signature");
     assert_eq!(
         h.active_parameter,
@@ -175,7 +175,7 @@ f:init()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "shared_name.lua");
 
     // Cursor inside `f:init(|)` on line 12, col 7.
-    let h = signature_help::signature_help(&doc, &uri, pos(12, 7), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(12, 7), &mut agg)
         .expect("signatureHelp should resolve for f:init()");
     let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
 
@@ -196,7 +196,7 @@ f:init()"#;
 fn signature_help_returns_none_outside_call() {
     let src = "local x = 1";
     let (doc, uri, mut agg) = setup_single_file(src, "none.lua");
-    let h = signature_help::signature_help(&doc, &uri, pos(0, 4), &mut agg);
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(0, 4), &mut agg);
     assert!(h.is_none(), "cursor outside any call → None");
 }
 
@@ -230,10 +230,10 @@ f:init()
     );
     let (docs, mut agg, _parser) = setup_workspace(&[decl, impl_file, caller]);
     let caller_uri = make_uri("caller.lua");
-    let doc = docs.get(&caller_uri).expect("caller doc present");
+    let doc = docs.get(&intern(caller_uri.clone())).expect("caller doc present");
 
     // Cursor inside `f:init(|)` on line 2, col 7.
-    let h = mylua_lsp::signature_help::signature_help(doc, &caller_uri, pos(2, 7), &mut agg)
+    let h = mylua_lsp::signature_help::signature_help(doc, intern(caller_uri.clone()), pos(2, 7), &mut agg)
         .expect("signatureHelp should resolve for f:init()");
     let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
 
@@ -299,7 +299,7 @@ handler:shout("hi")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "handler.lua");
 
     // Cursor inside `handler:shout(|"hi")` — line 10, column 14
-    let h = mylua_lsp::signature_help::signature_help(&doc, &uri, pos(10, 14), &mut agg)
+    let h = mylua_lsp::signature_help::signature_help(&doc, intern(uri.clone()), pos(10, 14), &mut agg)
         .expect("signatureHelp should resolve for handler:shout()");
     let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
 
@@ -335,7 +335,7 @@ fn signature_help_local_anonymous_function_shows_ast_params() {
     let (doc, uri, mut agg) = setup_single_file(src, "anon.lua");
 
     // Cursor inside `f(1,|2)` on line 1, col 2
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 2), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 2), &mut agg)
         .expect("signatureHelp should resolve for f()");
     assert_eq!(h.signatures.len(), 1);
     let label = &h.signatures[0].label;
@@ -360,7 +360,7 @@ f(1, "x")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "anon_emmy.lua");
 
     // Cursor on the second arg: line 4, col 6
-    let h = signature_help::signature_help(&doc, &uri, pos(4, 6), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(4, 6), &mut agg)
         .expect("signatureHelp should resolve");
     assert_eq!(h.signatures.len(), 1);
     let label = &h.signatures[0].label;
@@ -389,7 +389,7 @@ f(1)"#;
     // Click inside `f(|1)` on line 3 col 2 — the real binding. This
     // one SHOULD resolve to the untyped `inner` param (no outer
     // Emmy annotations on `local f = ...`).
-    let h = signature_help::signature_help(&doc, &uri, pos(3, 2), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(3, 2), &mut agg)
         .expect("signatureHelp resolves for direct binding");
     assert_eq!(h.signatures.len(), 1);
     assert!(
@@ -405,7 +405,7 @@ fn signature_help_global_anonymous_assignment() {
     let src = "f = function(x, y) end\nf(1, 2)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "global_anon.lua");
 
-    let h = signature_help::signature_help(&doc, &uri, pos(1, 2), &mut agg)
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(1, 2), &mut agg)
         .expect("signatureHelp should resolve for global f()");
     let label = &h.signatures[0].label;
     assert!(
@@ -427,7 +427,7 @@ local o = Obj
 o:move(10)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "method.lua");
 
-    let h = signature_help::signature_help(&doc, &uri, pos(8, 7), &mut agg);
+    let h = signature_help::signature_help(&doc, intern(uri.clone()), pos(8, 7), &mut agg);
     if let Some(h) = h {
         assert!(!h.signatures.is_empty(), "method call should return a signature");
         let label = &h.signatures[0].label;

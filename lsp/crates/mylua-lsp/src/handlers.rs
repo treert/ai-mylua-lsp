@@ -598,7 +598,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let items = call_hierarchy::prepare_call_hierarchy(doc, &uri, uri_id, position, &idx);
+        let items = call_hierarchy::prepare_call_hierarchy(doc, uri_id, position, &idx);
         if items.is_empty() {
             Ok(None)
         } else {
@@ -659,7 +659,7 @@ impl LanguageServer for Backend {
         let Some((_, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
-        Ok(document_highlight::document_highlight(doc, uri, position))
+        Ok(document_highlight::document_highlight(doc, position))
     }
 
     async fn goto_definition(

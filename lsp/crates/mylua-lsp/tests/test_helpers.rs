@@ -8,7 +8,7 @@ use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::summary::DocumentSummary;
 use mylua_lsp::summary_builder;
-use mylua_lsp::uri_id::{intern, UriId};
+pub use mylua_lsp::uri_id::{intern, UriId};
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
@@ -101,7 +101,7 @@ pub fn pos(line: u32, character: u32) -> Position {
 /// Build an empty documents map for tests.
 /// The `br_to_range` fallback uses row/col directly, which is correct
 /// for ASCII-only test fixtures (byte col == UTF-16 col).
-pub fn empty_docs() -> HashMap<Uri, Document> {
+pub fn empty_docs() -> HashMap<UriId, Document> {
     HashMap::new()
 }
 
@@ -128,7 +128,7 @@ pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, Worksp
 pub fn setup_workspace(
     files: &[(&str, &str)],
 ) -> (
-    HashMap<Uri, Document>,
+    HashMap<UriId, Document>,
     WorkspaceAggregation,
     tree_sitter::Parser,
 ) {
@@ -147,7 +147,7 @@ pub fn setup_workspace(
             agg.set_require_mapping(module_name, uri_id);
         }
         agg.upsert_summary(uri_id, summary);
-        docs.insert(uri, doc);
+        docs.insert(uri_id, doc);
     }
 
     (docs, agg, parser)
@@ -158,7 +158,7 @@ pub fn setup_workspace(
 pub fn setup_workspace_from_dir(
     dir_relative: &str,
 ) -> (
-    HashMap<Uri, Document>,
+    HashMap<UriId, Document>,
     WorkspaceAggregation,
     tree_sitter::Parser,
 ) {
@@ -200,7 +200,7 @@ pub fn setup_workspace_from_dir(
             );
             agg.upsert_summary(uri_id, summary);
             docs.insert(
-                uri,
+                uri_id,
                 Document {
                     lua_source,
                     tree,
@@ -222,7 +222,7 @@ pub fn setup_workspace_with_library(
     workspace_files: &[(&str, &str)],
     library_roots_absolute: &[PathBuf],
 ) -> (
-    HashMap<Uri, Document>,
+    HashMap<UriId, Document>,
     WorkspaceAggregation,
     tree_sitter::Parser,
     std::collections::HashSet<Uri>,
@@ -243,7 +243,7 @@ pub fn setup_workspace_with_library(
             agg.set_require_mapping(module_name, uri_id);
         }
         agg.upsert_summary(uri_id, summary);
-        docs.insert(uri, doc);
+        docs.insert(uri_id, doc);
     }
 
     let ws_config = WorkspaceConfig::default();
@@ -292,7 +292,7 @@ pub fn setup_workspace_with_library(
         summary.is_meta = true;
         agg.upsert_summary(uri_id, summary);
         docs.insert(
-            uri,
+            uri_id,
             Document {
                 lua_source,
                 tree,

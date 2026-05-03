@@ -17,11 +17,11 @@ end"#;
         ("other.lua", other_src),
     ]);
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).expect("main doc");
+    let main_doc = docs.get(&intern(main_uri.clone())).expect("main doc");
 
     let result = goto::goto_definition(
         main_doc,
-        &main_uri,
+        intern(main_uri.clone()),
         pos(0, 15),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -41,7 +41,7 @@ local XX = UE4.Class()"#;
 
     let result = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(1, 15),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -220,7 +220,7 @@ print(a.b.c)
     let (doc, uri, mut agg) = setup_single_file(src, "nested_goto.lua");
 
     // Line 2 `print(a.b.c)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
-    let result = goto::goto_definition(&doc, &uri, pos(2, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(2, 10), &mut agg, &GotoStrategy::Auto);
     assert!(
         result.is_some(),
         "goto on chained .c should jump to the assignment site, got None",
@@ -234,7 +234,7 @@ print(myVar)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `myVar` on line 1, col 6
-    let result = goto::goto_definition(&doc, &uri, pos(1, 6), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(1, 6), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of `myVar`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "myVar defined on line 0");
@@ -250,7 +250,7 @@ local x = foo()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `foo` on line 3, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(3, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of `foo`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "foo defined on line 0");
@@ -265,7 +265,7 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `param1` on line 1, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(1, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find definition of parameter `param1`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "param1 defined on line 0");
@@ -280,7 +280,7 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `i` on line 1, col 10
-    let result = goto::goto_definition(&doc, &uri, pos(1, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(1, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find for-variable `i`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "for-variable i defined on line 0");
@@ -293,7 +293,7 @@ fn goto_no_result_for_undefined() {
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // on `totally_undefined_name_xyz`
-    let result = goto::goto_definition(&doc, &uri, pos(0, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(0, 10), &mut agg, &GotoStrategy::Auto);
     // May or may not find something (globals index etc.), but should not panic
     let _ = result;
 }
@@ -329,7 +329,7 @@ fn goto_require_jumps_to_module_return() {
     // Click on `m` (line 0 col 6) in caller.lua — should jump to mymod.lua's
     // `return M` (line 2, column 0).
     let result = mylua_lsp::goto::goto_definition(
-        &caller_doc, &caller_uri, pos(0, 6), &mut agg, &GotoStrategy::Auto) 
+        &caller_doc, intern(caller_uri.clone()), pos(0, 6), &mut agg, &GotoStrategy::Auto)
     .expect("require goto should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -386,7 +386,7 @@ fn goto_require_with_attribute_before_target() {
 
     // `y` is at column 17 in `local x <const>, y = ...`
     let result =
-        goto::goto_definition(&caller_doc, &caller_uri, pos(0, 17), &mut agg, &GotoStrategy::Auto)
+        goto::goto_definition(&caller_doc, intern(caller_uri.clone()), pos(0, 17), &mut agg, &GotoStrategy::Auto)
             .expect("goto on `y` should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -426,7 +426,7 @@ fn goto_position_with_chinese_comment_on_same_line() {
     let (doc, uri, mut agg) = setup_single_file(src, "utf16.lua");
 
     // `myVar` in print(myVar) at line 2 col 6 (ASCII line, utf-16 == byte)
-    let result = goto::goto_definition(&doc, &uri, pos(2, 6), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(2, 6), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should resolve myVar");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 1, "myVar declared on line 1");
@@ -517,14 +517,14 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `inner` at line 3, col 10 -> should go to line 2
-    let result = goto::goto_definition(&doc, &uri, pos(3, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(&doc, intern(uri.clone()), pos(3, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result.is_some(), "goto should find `inner` in nested scope");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 2, "inner defined on line 2");
     }
 
     // `outer` at line 4, col 10 -> should go to line 0
-    let result2 = goto::goto_definition(&doc, &uri, pos(4, 10), &mut agg, &GotoStrategy::Auto);
+    let result2 = goto::goto_definition(&doc, intern(uri.clone()), pos(4, 10), &mut agg, &GotoStrategy::Auto);
     assert!(result2.is_some(), "goto should find `outer` from parent scope");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result2 {
         assert_eq!(loc.range.start.line, 0, "outer defined on line 0");
@@ -578,7 +578,7 @@ local hero = Player.new("Alice")"#;
 
     // Click on `new` in `Player.new("Alice")` — line 1, col 20
     let result = goto::goto_definition(
-        &caller_doc, &caller_uri, pos(1, 20), &mut agg, &GotoStrategy::Auto) ;
+        &caller_doc, intern(caller_uri.clone()), pos(1, 20), &mut agg, &GotoStrategy::Auto) ;
     assert!(
         result.is_some(),
         "goto on `new` in `Player.new(\"Alice\")` should resolve \
@@ -622,14 +622,14 @@ return test_const"#,
     ]);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).expect("main doc");
+    let main_doc = docs.get(&intern(main_uri.clone())).expect("main doc");
     let target_uri = make_uri("test_const.lua");
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("test_const".to_string(), target_uri_id);
 
     let result = goto::goto_definition(
         main_doc,
-        &main_uri,
+        intern(main_uri.clone()),
         pos(0, 23),
         &mut agg,
         &GotoStrategy::Auto) 
@@ -666,14 +666,14 @@ return settings"#,
     ]);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).expect("main doc");
+    let main_doc = docs.get(&intern(main_uri.clone())).expect("main doc");
     let target_uri = make_uri("settings.lua");
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("settings".to_string(), target_uri_id);
 
     let result = goto::goto_definition(
         main_doc,
-        &main_uri,
+        intern(main_uri.clone()),
         pos(1, 15),
         &mut agg,
         &GotoStrategy::Auto)
@@ -709,7 +709,7 @@ ClassA1 = {}
     // Click `BaseCls` in `---@class ClassA1:BaseCls`.
     let result = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(3, 20),
         &mut agg,
         &GotoStrategy::Auto) 
@@ -735,7 +735,7 @@ ClassA1 = {}
     // The description word `BaseCls` is not part of the type expression.
     let result = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(3, 20),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -764,7 +764,7 @@ Holder = {}
 
     let class_desc = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(6, 25),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -775,7 +775,7 @@ Holder = {}
 
     let field_desc = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(10, 20),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -804,7 +804,7 @@ Holder = {}
 
     let param_name = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(6, 17),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -815,7 +815,7 @@ Holder = {}
 
     let key_type = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(10, 12),
         &mut agg,
         &GotoStrategy::Auto) 
@@ -845,7 +845,7 @@ local escaped = nil
 
     let literal_word = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(3, 12),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -856,7 +856,7 @@ local escaped = nil
 
     let key_word = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(6, 12),
         &mut agg,
         &GotoStrategy::Auto) ;
@@ -867,7 +867,7 @@ local escaped = nil
 
     let escaped_word = goto::goto_definition(
         &doc,
-        &uri,
+        intern(uri.clone()),
         pos(9, 12),
         &mut agg,
         &GotoStrategy::Auto) ;

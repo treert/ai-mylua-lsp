@@ -4,17 +4,17 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::uri_id::{resolve, IntoUriId, UriId};
+use crate::uri_id::{resolve, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
 
 pub fn goto_definition(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    goto_definition_inner(doc, uri_id.into_uri_id(), position, index, strategy)
+    goto_definition_inner(doc, uri_id, position, index, strategy)
 }
 
 fn goto_definition_inner(
@@ -88,7 +88,7 @@ fn goto_definition_inner(
     // Check if ident is a type name → jump to its definition
     if let Some(candidates) = index.type_shard.get(name) {
         if let Some(candidate) = candidates.first() {
-            let candidate_uri = index.type_candidate_uri(candidate)?;
+            let candidate_uri = resolve(candidate.source_uri_id());
             return Some(GotoDefinitionResponse::Scalar(Location {
                 uri: candidate_uri.clone(),
                 range: candidate.range.into(),
@@ -100,7 +100,7 @@ fn goto_definition_inner(
         let locations: Vec<Location> = candidates
             .iter()
             .filter_map(|c| {
-                let uri = index.candidate_uri(c)?;
+                let uri = resolve(c.source_uri_id());
                 Some(Location {
                     uri: uri.clone(),
                     range: c.selection_range.into(),
@@ -139,12 +139,11 @@ fn goto_definition_inner(
 /// nothing when Go-to-Definition would have worked.
 pub fn goto_type_definition(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     // Identifier AST path — click on a Lua identifier. Resolve to a
@@ -234,7 +233,7 @@ fn type_definition_for_name(
     let locations: Vec<Location> = candidates
         .iter()
         .filter_map(|c| {
-            let uri = index.type_candidate_uri(c)?;
+            let uri = resolve(c.source_uri_id());
             Some(Location {
                 uri: uri.clone(),
                 range: c.range.into(),
@@ -262,7 +261,7 @@ fn goto_variable_field(
             crate::type_inference::infer_node_type_in_file_id(base_node, source, uri_id, &doc.scope_tree, index);
         let resolved =
             resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &fields, index);
-        return resolved_to_goto(resolved, index);
+        return resolved_to_goto(resolved);
     }
 
     let base_node = var_node.child_by_field_name("object")?;
@@ -305,15 +304,12 @@ fn goto_field_or_method(
         uri_id, &base_fact, &[field_name], index,
     );
 
-    resolved_to_goto(resolved, index)
+    resolved_to_goto(resolved)
 }
 
-fn resolved_to_goto(
-    resolved: resolver::ResolvedType,
-    index: &WorkspaceAggregation,
-) -> Option<GotoDefinitionResponse> {
+fn resolved_to_goto(resolved: resolver::ResolvedType) -> Option<GotoDefinitionResponse> {
     if let Some(location) = resolved.def_location {
-        let def_uri = index.summary_uri(location.uri_id)?;
+        let def_uri = resolve(location.uri_id);
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri.clone(),
             range: location.range.into(),

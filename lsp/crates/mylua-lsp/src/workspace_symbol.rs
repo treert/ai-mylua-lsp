@@ -19,6 +19,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::summary::{GlobalContributionKind, TypeDefinitionKind};
 use crate::type_system::{KnownType, TypeFact};
+use crate::uri_id::resolve as resolve_uri;
 
 pub fn search_workspace_symbols(
     query: &str,
@@ -42,9 +43,7 @@ pub fn search_workspace_symbols(
             continue;
         }
         for candidate in candidates {
-            let Some(candidate_uri) = index.candidate_uri(candidate) else {
-                continue;
-            };
+            let candidate_uri = resolve_uri(candidate.source_uri_id());
             let effective_kind = if container.is_some() {
                 // Qualified name: determine kind from the function signature.
                 candidate_symbol_kind(candidate, index)
@@ -71,7 +70,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate_uri.clone(),
+                    uri: candidate_uri,
                     range: candidate.selection_range.into(),
                 },
                 container_name: container.clone(),
@@ -85,9 +84,7 @@ pub fn search_workspace_symbols(
             continue;
         }
         for candidate in candidates {
-            let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
-                continue;
-            };
+            let candidate_uri = resolve_uri(candidate.source_uri_id());
             let kind = match candidate.kind {
                 TypeDefinitionKind::Class => SymbolKind::CLASS,
                 TypeDefinitionKind::Alias => SymbolKind::INTERFACE,
@@ -114,7 +111,7 @@ pub fn search_workspace_symbols(
                 tags: None,
                 deprecated: None,
                 location: Location {
-                    uri: candidate_uri.clone(),
+                    uri: candidate_uri,
                     range: location_range.into(),
                 },
                 container_name: None,

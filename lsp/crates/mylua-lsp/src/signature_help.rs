@@ -15,16 +15,15 @@ use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
-use crate::uri_id::{IntoUriId, UriId};
+use crate::uri_id::{resolve as resolve_uri, UriId};
 use crate::util::node_text;
 
 pub fn signature_help(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
-    let uri_id = uri_id.into_uri_id();
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let source = doc.source();
 
@@ -249,7 +248,7 @@ fn lookup_function_signatures_by_field(
             if let Some((impl_uri, impl_sigs)) =
                 lookup_overloads_via_global_shard(cls, field_name, index)
             {
-                if Some(&impl_uri) != def_uri_id.and_then(|id| index.summary_uri(id)) {
+                if Some(impl_uri.clone()) != def_uri_id.map(resolve_uri) {
                     let mut merged = vec![sig.clone()];
                     for s in impl_sigs {
                         // Skip entries that would render as duplicates of
@@ -313,7 +312,7 @@ fn lookup_overloads_via_global_shard(
         .get(&qualified)
         .and_then(|v| v.first().cloned())
     {
-        let source_uri = index.candidate_uri(&candidate)?.clone();
+        let source_uri = resolve_uri(candidate.source_uri_id());
         if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.

@@ -9,11 +9,11 @@ fn hover_local_variable() {
     let src = r#"local abc = 123
 print(abc)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `abc` in the second line (line 1, col 6)
-    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return a result for local variable `abc`");
 }
 
@@ -27,11 +27,11 @@ fn hover_table_literal() {
 }
 print(abcd)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `abcd` in the print line (line 6, col 6)
-    let result = hover::hover(doc, &uri, pos(6, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(6, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on table variable should return result");
 }
 
@@ -39,11 +39,11 @@ print(abcd)"#;
 fn hover_emmy_class_return_type() {
     let src = read_fixture("hover/hover1.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover1.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `btn1` (line 21, col 6) — should show uiButton
-    let result = hover::hover(doc, &uri, pos(21, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(21, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on btn1 should return result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -69,10 +69,10 @@ local function test()
 end
 local a1_test = test()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_function_body_local.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on a1_test should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -88,11 +88,11 @@ local a1_test = test()"#;
 fn hover_chain_call() {
     let src = read_fixture("hover/hover1.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover1.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `btn5` (line 30, col 6) — uiButton:setX(1)
-    let result = hover::hover(doc, &uri, pos(30, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(30, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on btn5 should return result");
 }
 
@@ -100,11 +100,11 @@ fn hover_chain_call() {
 fn hover_fixture_hover5_table_fields() {
     let src = read_fixture("hover/hover5.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover5.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `abcd` (line 6, col 6) — should show table fields
-    let result = hover::hover(doc, &uri, pos(6, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(6, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on abcd should return result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -120,11 +120,11 @@ fn hover_fixture_hover5_table_fields() {
 fn hover_fixture_hover5_alias() {
     let src = read_fixture("hover/hover5.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover5.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `cdef` (line 8, col 6) — aliased from abcd
-    let result = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on cdef (alias of abcd) should return result");
 }
 
@@ -132,11 +132,11 @@ fn hover_fixture_hover5_alias() {
 fn hover_no_result_on_keyword() {
     let src = "local x = 1";
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `local` keyword (line 0, col 0)
-    let result = hover::hover(doc, &uri, pos(0, 0), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(0, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     // Keywords may or may not produce hover — this mainly tests no panic
     let _ = result;
 }
@@ -150,11 +150,11 @@ Misc System Library
 UMiscSystemLibrary = {}
 local x = UMiscSystemLibrary"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_block.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `UMiscSystemLibrary` at the assignment (line 4, col 0)
-    let result = hover::hover(doc, &uri, pos(4, 0), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(4, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -177,11 +177,11 @@ Do something useful
 ---@return number
 function MyObj.doSomething(x) end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_decl.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `doSomething` in the function declaration (line 7, col 15)
-    let result = hover::hover(doc, &uri, pos(7, 15), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(7, 15), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return a result at function declaration site");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -204,11 +204,11 @@ fn hover_at_simple_function_declaration() {
 ---@param name string
 function greet(name) end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_decl2.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `greet` in the function declaration (line 2, col 9)
-    let result = hover::hover(doc, &uri, pos(2, 9), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return result at simple function declaration");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -231,11 +231,11 @@ function doSomething(x) end
 
 local y = doSomething("hello")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_block_fn.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `doSomething` at the call site (line 7, col 10)
-    let result = hover::hover(doc, &uri, pos(7, 10), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(7, 10), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return a result for function");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -254,11 +254,11 @@ fn hover_plain_comment_shown_as_doc() {
 local x = 1
 print(x)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_plain_comment.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `x` at the usage site (line 3, col 6)
-    let result = hover::hover(doc, &uri, pos(3, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return result for x");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -282,11 +282,11 @@ fn hover_dotted_base_shows_local_not_field() {
 local x = {}
 x.bar = 1"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_dotted_base.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `x` in `x.bar = 1` (line 3, col 0) — should show local variable, not field
-    let result = hover::hover(doc, &uri, pos(3, 0), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(3, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return result for base x");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -318,11 +318,11 @@ fn hover_middle_field_in_chain_ast_driven() {
 local a = {}
 local _ = a.b.c"#;
     let (doc, uri, mut agg) = setup_single_file(src, "chain.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on the middle `b` in `a.b.c` (line 7, col 12)
-    let result = hover::hover(doc, &uri, pos(7, 12), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(7, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on middle field `b` should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -341,11 +341,11 @@ fn hover_dotted_field_still_works() {
 local obj = {}
 obj.qux = 1"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_dotted_field.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `qux` in `obj.qux = 1` (line 3, col 4) — should resolve the field
-    let result = hover::hover(doc, &uri, pos(3, 4), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(3, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should return result for field qux");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -383,12 +383,12 @@ return test_const"#,
     ]);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).expect("main doc");
+    let main_doc = docs.get(&intern(main_uri.clone())).expect("main doc");
     let target_uri = make_uri("test_const.lua");
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("test_const".to_string(), target_uri_id);
 
-    let result = hover::hover(main_doc, &main_uri, pos(0, 23), &mut agg, &docs)
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(0, 23), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on utils.test_const.B should resolve");
     let content = hover_content_string(&result);
     assert!(
@@ -438,12 +438,12 @@ return settings"#,
     ]);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).expect("main doc");
+    let main_doc = docs.get(&intern(main_uri.clone())).expect("main doc");
     let target_uri = make_uri("settings.lua");
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("settings".to_string(), target_uri_id);
 
-    let result = hover::hover(main_doc, &main_uri, pos(1, 15), &mut agg, &docs)
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(1, 15), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on settings.host should resolve");
     let content = hover_content_string(&result);
     assert!(
@@ -469,11 +469,11 @@ function ABC:f1()
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "method_base.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `function ABC:f1()` is at line 2; `A` is col 9.
-    let result = hover::hover(doc, &uri, pos(2, 9), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on method base `ABC` should resolve to the local, got None");
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -494,11 +494,11 @@ function ABC:f1()
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "method_tail.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `function ABC:f1()` — `f1` starts at col 13.
-    let result = hover::hover(doc, &uri, pos(2, 13), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on method name `f1` should succeed");
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -520,11 +520,11 @@ fn hover_on_undefined_method_base_returns_none() {
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "undef_base.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `function A1213:f()` — `A1213` starts at col 9.
-    let result = hover::hover(doc, &uri, pos(0, 9), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(0, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     if let Some(h) = result {
         let content = hover_content_string(&h);
         assert!(
@@ -547,12 +547,12 @@ function a.b.c()
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "inter_dot.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `function a.b.c()` at line 2: `a` col 9, `.` col 10, `b` col 11,
     // `.` col 12, `c` col 13. Hover on intermediate `b` (col 11).
-    let result = hover::hover(doc, &uri, pos(2, 11), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 11), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     if let Some(h) = result {
         let content = hover_content_string(&h);
         assert!(
@@ -562,7 +562,7 @@ end
         );
     }
     // Tail `c` (col 13) still shows the function decl.
-    let tail = hover::hover(doc, &uri, pos(2, 13), &mut agg, &docs);
+    let tail = hover::hover(doc, intern(uri.clone()), pos(2, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(tail.is_some(), "tail hover should succeed");
     let tail_content = hover_content_string(tail.as_ref().unwrap());
     assert!(
@@ -581,11 +581,11 @@ fn hover_on_bare_function_decl_name_still_shows_function() {
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "bare_decl.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `function foo()` — `foo` starts at col 9.
-    let result = hover::hover(doc, &uri, pos(0, 9), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(0, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on bare function name should succeed");
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -621,11 +621,11 @@ fn hover_local_anonymous_function_shows_params() {
     // the full `fun(a, b)` signature (previously was empty `fun()`).
     let src = "local f = function(a, b) return a + b end\nprint(f)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "hover_anon.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Hover on `f` in `print(f)` — line 1, col 6
-    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover should return something for local f");
     let text = hover_content_string(&result);
     // Lock on the formatted signature `fun(a, b)` rather than loose
@@ -650,11 +650,11 @@ print(a)
 print(b)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "multi_ret.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `a` (first name → first return = number)
-    let h_a = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs)
+    let h_a = hover::hover(doc, intern(uri.clone()), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on a");
     let text_a = hover_content_string(&h_a);
     assert!(
@@ -663,7 +663,7 @@ print(b)
     );
 
     // hover on `b` (second name → second return = string)
-    let h_b = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs)
+    let h_b = hover::hover(doc, intern(uri.clone()), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on b");
     let text_b = hover_content_string(&h_b);
     assert!(
@@ -685,16 +685,16 @@ print(a)
 print(b)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "multi_ret_short.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `a` gets the sole return type.
-    let h_a = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs).expect("hover on a");
+    let h_a = hover::hover(doc, intern(uri.clone()), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)).expect("hover on a");
     let text_a = hover_content_string(&h_a);
     assert!(text_a.contains("number"), "a should be number, got:\n{}", text_a);
 
     // `b` must not falsely claim `number`.
-    if let Some(h) = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs) {
+    if let Some(h) = hover::hover(doc, intern(uri.clone()), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
         let text_b = hover_content_string(&h);
         assert!(
             !text_b.contains("`number`"),
@@ -722,17 +722,17 @@ print(a)
 print(b)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "method_call.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    if let Some(h) = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs) {
+    if let Some(h) = hover::hover(doc, intern(uri.clone()), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`number`") && !text.contains("Type: number"),
             "method call `obj:m()` must not inherit top-level `obj()`'s number return, got:\n{}", text,
         );
     }
-    if let Some(h) = hover::hover(doc, &uri, pos(5, 6), &mut agg, &docs) {
+    if let Some(h) = hover::hover(doc, intern(uri.clone()), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`string`") && !text.contains("Type: string"),
@@ -757,10 +757,10 @@ local a, b = mod.f()
 print(a)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "dotted_call.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    if let Some(h) = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs) {
+    if let Some(h) = hover::hover(doc, intern(uri.clone()), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`number`") && !text.contains("Type: number"),
@@ -780,10 +780,10 @@ local f = function(a, b) return true end
 print(f)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "hover_anon_emmy.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(4, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on Emmy-annotated anon function should resolve");
     let text = hover_content_string(&result);
     // The full Emmy-merged signature should appear in the "Type:"
@@ -808,12 +808,12 @@ a.b.c = 1
 print(a.b.c)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "nested_write.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Line 2 (0-indexed): `print(a.b.c)` — position on final `c`
     // columns: p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
-    let h = hover::hover(doc, &uri, pos(2, 10), &mut agg, &docs)
+    let h = hover::hover(doc, intern(uri.clone()), pos(2, 10), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on final .c should produce a result");
     let text = hover_content_string(&h);
     // Summary builder infers `1` literal as `number` (not `integer`).
@@ -835,11 +835,11 @@ a.b.c.d = 1
 print(a.b.c.d)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "on_demand.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Line 3 `print(a.b.c.d)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10 .=11 d=12
-    let h = hover::hover(doc, &uri, pos(3, 12), &mut agg, &docs)
+    let h = hover::hover(doc, intern(uri.clone()), pos(3, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on final .d should produce a result");
     let text = hover_content_string(&h);
     assert!(
@@ -864,11 +864,11 @@ local function make() return nil end
 print(make().n)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "call_then_field.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Line 7 `print(make().n)` — p=0 r=1 i=2 n=3 t=4 (=5 m=6 a=7 k=8 e=9 (=10 )=11 .=12 n=13
-    let h = hover::hover(doc, &uri, pos(7, 13), &mut agg, &docs)
+    let h = hover::hover(doc, intern(uri.clone()), pos(7, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on make().n should produce a result");
     let text = hover_content_string(&h);
     assert!(
@@ -913,14 +913,14 @@ a[1] = { name = "x" }
 print(a[1].name)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "subscript_read.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Line 2 `print(a[1].name)` — just assert hover doesn't panic and
     // returns something. Whether the summary_builder's array_element_type
     // path catches the `a[1] = {...}` pattern is orthogonal; the branch
     // addition itself is the contract here.
-    let _ = hover::hover(doc, &uri, pos(2, 12), &mut agg, &docs);
+    let _ = hover::hover(doc, intern(uri.clone()), pos(2, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
 }
 
 #[test]
@@ -947,11 +947,11 @@ print(a.b)
         "local `a.b = 1` must not leak into global_shard either",
     );
 
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // `print(a.b)` line 3 col 8 (b)
-    let h = hover::hover(doc, &uri, pos(3, 8), &mut agg, &docs)
+    let h = hover::hover(doc, intern(uri.clone()), pos(3, 8), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on .b should resolve");
     let text = hover_content_string(&h);
     assert!(
@@ -992,13 +992,13 @@ local p = { x = 1, y = 2 }
 print(p.x)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "alias_shape_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // cursor on `x` in `print(p.x)` — the `x` identifier sits at col 8
     // on line 5 (0-indexed: `print(p.x)` → `(` is col 5, `p` is col 6,
     // `.` is col 7, `x` is col 8).
-    let h = hover::hover(doc, &uri, pos(5, 8), &mut agg, &docs)
+    let h = hover::hover(doc, intern(uri.clone()), pos(5, 8), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on p.x must resolve");
     let text = hover_content_string(&h);
     assert!(
@@ -1028,11 +1028,11 @@ end
 print(identity)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "blank_sep.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `identity` at the usage site (line 11, col 6)
-    let result = hover::hover(doc, &uri, pos(11, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(11, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on identity should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1057,11 +1057,11 @@ fn hover_trailing_comment_on_local_variable() {
 print(top_str)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "trailing_comment.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `top_str` at the usage site (line 1, col 6)
-    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on top_str should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1079,11 +1079,11 @@ fn hover_trailing_comment_not_on_different_line() {
 print(abc)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "trailing_no.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `abc` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on abc should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1100,11 +1100,11 @@ fn hover_trailing_emmy_comment_not_collected() {
 print(xyz)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "trailing_emmy.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `xyz` at the usage site (line 1, col 6)
-    let result = hover::hover(doc, &uri, pos(1, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on xyz should succeed");
     let text = hover_content_string(&result);
     // The `---@type number` should be handled by preceding-comment logic
@@ -1126,11 +1126,11 @@ local s = identity("abc")      -- T = string
 print(s)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "trailing_leak.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `s` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1157,11 +1157,11 @@ local s = identity("abc")
 print(s)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "generic_str.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `s` at the usage site (line 8, col 6)
-    let result = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1189,10 +1189,10 @@ local s = Foo.id("abc")
 print(s)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "generic_dotted_call.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1217,10 +1217,10 @@ local s = Foo.id("abc")
 print(s)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "generic_local_table_dotted_call.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1244,11 +1244,11 @@ local n = identity(123)
 print(n)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "generic_num.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `n` at the usage site (line 8, col 6)
-    let result = hover::hover(doc, &uri, pos(8, 6), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on n should succeed");
     let text = hover_content_string(&result);
     assert!(
@@ -1275,11 +1275,11 @@ local sum = M.add(1, 2)
 print(sum)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "dotted_func_shape.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `add` in `M.add(1, 2)` — line 9, col 14 is `add`
-    let result = hover::hover(doc, &uri, pos(9, 14), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(9, 14), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on `add` in `M.add(1, 2)` should succeed");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1288,7 +1288,7 @@ print(sum)
     );
 
     // hover on `sum` — should show number type
-    let result2 = hover::hover(doc, &uri, pos(10, 6), &mut agg, &docs);
+    let result2 = hover::hover(doc, intern(uri.clone()), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result2.is_some(), "hover on `sum` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
@@ -1311,10 +1311,10 @@ local mm = creat_module()
 mm.hi()
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "local_function_expr_return_shape.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(9, 3), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(9, 3), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on `hi` returned by creat_module() should use the local table shape");
     let text = hover_content_string(&result);
     assert!(
@@ -1336,10 +1336,10 @@ local v = make()
 v.x
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "local_function_expr_scope.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(7, 2), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(7, 2), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on unresolved field should still produce fallback hover");
     let text = hover_content_string(&result);
     assert!(
@@ -1357,11 +1357,11 @@ function obj:inspect()
 end
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "local_table_method_self.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Line 2: `    return self.value`, hover on `value`.
-    let result = hover::hover(doc, &uri, pos(2, 18), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 18), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on self.value should use obj's table shape");
     let text = hover_content_string(&result);
     assert!(
@@ -1401,10 +1401,10 @@ print(sum)
     agg.set_require_mapping("math_utils".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).unwrap();
+    let main_doc = docs.get(&intern(main_uri.clone())).unwrap();
 
     // hover on `add` in `math_utils.add(1, 2)` — line 1, col 23 is `add`
-    let result = hover::hover(main_doc, &main_uri, pos(1, 23), &mut agg, &docs);
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(1, 23), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on `add` in cross-file `math_utils.add(1, 2)` should succeed");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1413,7 +1413,7 @@ print(sum)
     );
 
     // hover on `sum` — should show number type (call return resolved cross-file)
-    let result2 = hover::hover(main_doc, &main_uri, pos(2, 6), &mut agg, &docs);
+    let result2 = hover::hover(main_doc, intern(main_uri.clone()), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result2.is_some(), "hover on `sum` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
@@ -1444,9 +1444,9 @@ mm.hi()
     agg.set_require_mapping("test_create_module".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).unwrap();
+    let main_doc = docs.get(&intern(main_uri.clone())).unwrap();
 
-    let result = hover::hover(main_doc, &main_uri, pos(1, 3), &mut agg, &docs)
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(1, 3), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on global require returned table function should resolve");
     let text = hover_content_string(&result);
     assert!(
@@ -1491,10 +1491,10 @@ local name = hero:getName()
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).unwrap();
+    let main_doc = docs.get(&intern(main_uri.clone())).unwrap();
 
     // hover on `new` in `Player.new("Alice")` — line 1, col 20
-    let result = hover::hover(main_doc, &main_uri, pos(1, 20), &mut agg, &docs);
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(1, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result.is_some(),
         "hover on `new` in cross-file `Player.new(\"Alice\")` should succeed \
@@ -1507,7 +1507,7 @@ local name = hero:getName()
     );
 
     // hover on `hero` — should show Player type (resolved via module_return_type)
-    let result2 = hover::hover(main_doc, &main_uri, pos(1, 6), &mut agg, &docs);
+    let result2 = hover::hover(main_doc, intern(main_uri.clone()), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result2.is_some(), "hover on `hero` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
@@ -1517,7 +1517,7 @@ local name = hero:getName()
 
     // hover on `name` — should preserve the return type through
     // `hero` (a call return) and then `hero:getName()` (a method return).
-    let result3 = hover::hover(main_doc, &main_uri, pos(2, 6), &mut agg, &docs);
+    let result3 = hover::hover(main_doc, intern(main_uri.clone()), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result3.is_some(), "hover on `name` should succeed");
     let text3 = hover_content_string(result3.as_ref().unwrap());
     assert!(
@@ -1585,10 +1585,10 @@ hero:pick_up("sword")
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&main_uri).unwrap();
+    let main_doc = docs.get(&intern(main_uri.clone())).unwrap();
 
     // hover on `take_damage` — line 2, col 7
-    let result = hover::hover(main_doc, &main_uri, pos(2, 7), &mut agg, &docs);
+    let result = hover::hover(main_doc, intern(main_uri.clone()), pos(2, 7), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result.is_some(),
         "hover on `take_damage` (inherited from local Damageable class) should succeed"
@@ -1600,7 +1600,7 @@ hero:pick_up("sword")
     );
 
     // hover on `pick_up` — line 3, col 7 (global Player, should still work)
-    let result2 = hover::hover(main_doc, &main_uri, pos(3, 7), &mut agg, &docs);
+    let result2 = hover::hover(main_doc, intern(main_uri.clone()), pos(3, 7), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result2.is_some(),
         "hover on `pick_up` (defined on global Player) should succeed"
@@ -1624,10 +1624,10 @@ ClassA1 = class("ClassA1")
 
 local a1 = ClassA1:new()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_global_class_inherited_method.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(13, 19), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(13, 19), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result.is_some(),
         "hover on inherited `new` from BaseCls should succeed"
@@ -1657,10 +1657,10 @@ ClassA1 = class("ClassA1")
 
 local a1 = ClassA1:new()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_method_self_generic.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(13, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(13, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on a1 should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1687,10 +1687,10 @@ Phantom = make_value()
 
 local value = Phantom:new()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_global_class_requires_binding.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let result = hover::hover(doc, &uri, pos(13, 22), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(13, 22), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover should still produce fallback method hover");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1710,11 +1710,11 @@ BaseCls = {}
 ClassA1 = {}
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // Hover `BaseCls` in `---@class ClassA1:BaseCls`.
-    let result = hover::hover(doc, &uri, pos(4, 20), &mut agg, &docs)
+    let result = hover::hover(doc, intern(uri.clone()), pos(4, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("hover on Emmy parent type should resolve");
     let text = hover_content_string(&result);
     assert!(
@@ -1732,11 +1732,11 @@ BaseCls = {}
 ClassA1 = {}
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_desc_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // The description word `BaseCls` is not part of the type expression.
-    let result = hover::hover(doc, &uri, pos(3, 20), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(3, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result.is_none(),
         "description words in Emmy comments must not act as type references"
@@ -1758,16 +1758,16 @@ function takes(x) end
 Child = {}
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_unmarked_desc_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let param_desc = hover::hover(doc, &uri, pos(6, 20), &mut agg, &docs);
+    let param_desc = hover::hover(doc, intern(uri.clone()), pos(6, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         param_desc.is_none(),
         "unmarked @param description words must not act as type references"
     );
 
-    let class_desc = hover::hover(doc, &uri, pos(9, 25), &mut agg, &docs);
+    let class_desc = hover::hover(doc, intern(uri.clone()), pos(9, 25), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         class_desc.is_none(),
         "unmarked @class description words must not act as type references"
@@ -1790,16 +1790,16 @@ local shaped = {}
 Holder = {}
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_type_expr_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let table_key = hover::hover(doc, &uri, pos(6, 11), &mut agg, &docs);
+    let table_key = hover::hover(doc, intern(uri.clone()), pos(6, 11), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         table_key.is_none(),
         "table field keys in type expressions must not act as type references"
     );
 
-    let bracket_key = hover::hover(doc, &uri, pos(10, 12), &mut agg, &docs)
+    let bracket_key = hover::hover(doc, intern(uri.clone()), pos(10, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
         .expect("bracket field key type should resolve");
     let text = hover_content_string(&bracket_key);
     assert!(
@@ -1823,22 +1823,22 @@ local keyed = {}
 local escaped = nil
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "emmy_comment_string_literal_hover.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
-    let literal_word = hover::hover(doc, &uri, pos(3, 12), &mut agg, &docs);
+    let literal_word = hover::hover(doc, intern(uri.clone()), pos(3, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         literal_word.is_none(),
         "string literal contents must not act as type references"
     );
 
-    let key_word = hover::hover(doc, &uri, pos(6, 12), &mut agg, &docs);
+    let key_word = hover::hover(doc, intern(uri.clone()), pos(6, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         key_word.is_none(),
         "string table keys must not act as type references"
     );
 
-    let escaped_word = hover::hover(doc, &uri, pos(9, 12), &mut agg, &docs);
+    let escaped_word = hover::hover(doc, intern(uri.clone()), pos(9, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         escaped_word.is_none(),
         "escaped quotes must not expose string literal contents as type references"
@@ -1855,11 +1855,11 @@ my_m = {}
 print(my_m)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "blank_class_gap.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `my_m` at the usage site (line 3, col 6)
-    let result = hover::hover(doc, &uri, pos(3, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on my_m should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1876,11 +1876,11 @@ my_m = {}
 print(my_m)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "no_blank_class.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `my_m` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, &uri, pos(2, 6), &mut agg, &docs);
+    let result = hover::hover(doc, intern(uri.clone()), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on my_m should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -1920,18 +1920,18 @@ c1:test_c1()
 c2:test_c2()
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "test_local_class_call.lua");
-    let docs = HashMap::from([(uri.clone(), doc)]);
-    let doc = docs.get(&uri).unwrap();
+    let docs = HashMap::from([(intern(uri.clone()), doc)]);
+    let doc = docs.get(&intern(uri.clone())).unwrap();
 
     // hover on `test_c1` in `c1:test_c1()` — line 23, col 4
-    let result_global = hover::hover(doc, &uri, pos(23, 4), &mut agg, &docs);
+    let result_global = hover::hover(doc, intern(uri.clone()), pos(23, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result_global.is_some(),
         "hover on global class instance method `c1:test_c1()` should succeed"
     );
 
     // hover on `test_c2` in `c2:test_c2()` — line 24, col 4
-    let result_local = hover::hover(doc, &uri, pos(24, 4), &mut agg, &docs);
+    let result_local = hover::hover(doc, intern(uri.clone()), pos(24, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(
         result_local.is_some(),
         "hover on local class instance method `c2:test_c2()` should succeed (regression: local class)"

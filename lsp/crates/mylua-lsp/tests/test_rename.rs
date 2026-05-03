@@ -76,7 +76,6 @@ fn rename_global_function_across_files() {
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
     let a_uri_id = intern(a_uri.clone());
-    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 
@@ -107,7 +106,6 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
     let a_uri_id = intern(a_uri.clone());
-    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 
@@ -150,7 +148,6 @@ fn rename_emmy_class_field_in_annotation() {
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
     let a_uri_id = intern(a_uri.clone());
-    let docs: HashMap<_, _> = docs.into_iter().map(|(uri, doc)| (intern(uri), doc)).collect();
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 

@@ -6,10 +6,10 @@ use test_helpers::*;
 
 fn run_diagnostics(src: &str, version: &str) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    diagnostics::collect_semantic_diagnostics_with_version(
+    diagnostics::collect_semantic_diagnostics_with_version_id(
         doc.tree.root_node(),
         src.as_bytes(),
-        &uri,
+        summary_id_by_uri(&agg, &uri),
         &mut agg,
         &doc.scope_tree,
         &DiagnosticsConfig::default(),

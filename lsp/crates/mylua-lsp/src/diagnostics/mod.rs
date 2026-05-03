@@ -13,7 +13,7 @@ mod unused_local;
 use crate::aggregation::WorkspaceAggregation;
 use crate::config::DiagnosticsConfig;
 use crate::scope::ScopeTree;
-use crate::uri_id::{intern as intern_uri, UriId};
+use crate::uri_id::UriId;
 use crate::util::LineIndex;
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -35,14 +35,10 @@ pub fn collect_diagnostics(
     diagnostics
 }
 
-/// Version-aware variant — `runtime_version` (e.g. `"5.3"` / `"5.4"`
-/// / `"luajit"`) selects which built-in identifiers are considered
-/// defined so that `undefinedGlobal` and related checks stay
-/// accurate per runtime.
-pub fn collect_semantic_diagnostics(
+pub fn collect_semantic_diagnostics_id(
     root: tree_sitter::Node,
     source: &[u8],
-    protocol_uri: &Uri,
+    uri_id: UriId,
     index: &WorkspaceAggregation,
     scope_tree: &ScopeTree,
     diag_config: &DiagnosticsConfig,
@@ -51,7 +47,7 @@ pub fn collect_semantic_diagnostics(
     collect_semantic_diagnostics_with_version_id(
         root,
         source,
-        intern_uri(protocol_uri.clone()),
+        uri_id,
         index,
         scope_tree,
         diag_config,
@@ -60,29 +56,11 @@ pub fn collect_semantic_diagnostics(
     )
 }
 
-pub fn collect_semantic_diagnostics_with_version(
-    root: tree_sitter::Node,
-    source: &[u8],
-    protocol_uri: &Uri,
-    index: &WorkspaceAggregation,
-    scope_tree: &ScopeTree,
-    diag_config: &DiagnosticsConfig,
-    runtime_version: &str,
-    line_index: &LineIndex,
-) -> Vec<Diagnostic> {
-    collect_semantic_diagnostics_with_version_id(
-        root,
-        source,
-        intern_uri(protocol_uri.clone()),
-        index,
-        scope_tree,
-        diag_config,
-        runtime_version,
-        line_index,
-    )
-}
-
-pub(crate) fn collect_semantic_diagnostics_with_version_id(
+/// Version-aware variant — `runtime_version` (e.g. `"5.3"` / `"5.4"`
+/// / `"luajit"`) selects which built-in identifiers are considered
+/// defined so that `undefinedGlobal` and related checks stay
+/// accurate per runtime.
+pub fn collect_semantic_diagnostics_with_version_id(
     root: tree_sitter::Node,
     source: &[u8],
     uri_id: UriId,

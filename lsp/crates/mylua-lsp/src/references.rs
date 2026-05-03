@@ -5,7 +5,7 @@ use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
-use crate::uri_id::{resolve as resolve_uri, IntoUriId, UriId};
+use crate::uri_id::{resolve as resolve_uri, UriId};
 
 // ---------------------------------------------------------------------------
 // Semantic Identity — what entity the cursor points to
@@ -44,14 +44,13 @@ enum Identity {
 
 pub fn find_references(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
-    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
 
     let identity = identify_at_cursor(doc, uri_id, byte_offset, index, all_docs)?;
@@ -119,9 +118,7 @@ pub fn find_references(
             let identity_def_range = location.range;
             // Declaration: the def_range itself
             if include_declaration {
-                let Some(identity_def_uri) = index.summary_uri(location.uri_id) else {
-                    return None;
-                };
+                let identity_def_uri = resolve_uri(location.uri_id);
                 locations.push(Location {
                     uri: identity_def_uri.clone(),
                     range: range_from_byte_range(location.uri_id, identity_def_range, all_docs),
@@ -155,11 +152,9 @@ pub fn find_references(
             if include_declaration {
                 if let Some(candidates) = index.type_shard.get(name.as_str()) {
                     for candidate in candidates {
-                        let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
-                            continue;
-                        };
+                        let candidate_uri = resolve_uri(candidate.source_uri_id());
                         locations.push(Location {
-                            uri: candidate_uri.clone(),
+                            uri: candidate_uri,
                             range: candidate.range.into(),
                         });
                     }
@@ -171,7 +166,8 @@ pub fn find_references(
                     match strategy {
                         ReferencesStrategy::Best => {
                             if let Some(best) = candidates.first() {
-                                if let Some(best_uri) = index.candidate_uri(best) {
+                                {
+                                    let best_uri = resolve_uri(best.source_uri_id());
                                     locations.push(Location {
                                         uri: best_uri.clone(),
                                         range: best.selection_range.into(),
@@ -181,11 +177,9 @@ pub fn find_references(
                         }
                         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
                             for c in candidates {
-                                let Some(candidate_uri) = index.candidate_uri(c) else {
-                                    continue;
-                                };
+                                let candidate_uri = resolve_uri(c.source_uri_id());
                                 locations.push(Location {
-                                    uri: candidate_uri.clone(),
+                                    uri: candidate_uri,
                                     range: c.selection_range.into(),
                                 });
                             }
@@ -589,22 +583,18 @@ fn collect_global_declarations(
         ReferencesStrategy::Best => {
             if let Some(candidates) = index.global_shard.get(name) {
                 if let Some(best) = candidates.first() {
-                    let Some(best_uri) = index.candidate_uri(best) else {
-                        return;
-                    };
+                    let best_uri = resolve_uri(best.source_uri_id());
                     locations.push(Location {
-                        uri: best_uri.clone(),
+                        uri: best_uri,
                         range: best.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 if let Some(best) = candidates.first() {
-                    let Some(best_uri) = index.type_candidate_uri(best) else {
-                        return;
-                    };
+                    let best_uri = resolve_uri(best.source_uri_id());
                     locations.push(Location {
-                        uri: best_uri.clone(),
+                        uri: best_uri,
                         range: best.range.into(),
                     });
                 }
@@ -613,22 +603,18 @@ fn collect_global_declarations(
         ReferencesStrategy::Merge | ReferencesStrategy::Select => {
             if let Some(candidates) = index.global_shard.get(name) {
                 for candidate in candidates {
-                    let Some(candidate_uri) = index.candidate_uri(candidate) else {
-                        continue;
-                    };
+                    let candidate_uri = resolve_uri(candidate.source_uri_id());
                     locations.push(Location {
-                        uri: candidate_uri.clone(),
+                        uri: candidate_uri,
                         range: candidate.selection_range.into(),
                     });
                 }
             }
             if let Some(candidates) = index.type_shard.get(name) {
                 for candidate in candidates {
-                    let Some(candidate_uri) = index.type_candidate_uri(candidate) else {
-                        continue;
-                    };
+                    let candidate_uri = resolve_uri(candidate.source_uri_id());
                     locations.push(Location {
-                        uri: candidate_uri.clone(),
+                        uri: candidate_uri,
                         range: candidate.range.into(),
                     });
                 }

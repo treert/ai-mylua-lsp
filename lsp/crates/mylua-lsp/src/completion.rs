@@ -4,7 +4,7 @@ use tower_lsp_server::ls_types::*;
 use crate::document::{Document, DocumentLookup};
 use crate::type_inference;
 use crate::resolver;
-use crate::uri_id::{resolve as resolve_uri, IntoUriId, UriId};
+use crate::uri_id::{resolve as resolve_uri, UriId};
 use crate::util::{node_text, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
@@ -31,11 +31,10 @@ const EMMY_TAGS: &[&str] = &[
 
 pub fn complete(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CompletionItem> {
-    let uri_id = uri_id.into_uri_id();
     // `require("<here>")` string-literal completion — highest priority.
     if let Some(items) = try_require_path_completion(doc, position, index) {
         return items;
@@ -420,9 +419,7 @@ fn resolve_global_item(
     let Some(best) = candidates.first() else {
         return item;
     };
-    let Some(best_uri) = index.candidate_uri(best) else {
-        return item;
-    };
+    let best_uri = resolve_uri(best.source_uri_id());
 
     let mut detail_parts: Vec<String> = Vec::new();
     // Type summary from the candidate's type_fact.

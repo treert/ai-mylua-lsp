@@ -3,7 +3,7 @@ use tower_lsp_server::ls_types::Uri;
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
-use crate::uri_id::{priority as uri_priority, UriId, UriPriority};
+use crate::uri_id::{priority as uri_priority, resolve as resolve_uri, UriId, UriPriority};
 use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.
@@ -337,18 +337,6 @@ impl WorkspaceAggregation {
         self.summaries.get(&uri_id)
     }
 
-    pub(crate) fn summary_uri(&self, uri_id: UriId) -> Option<&Uri> {
-        self.summaries.get(&uri_id).map(|summary| &summary.uri)
-    }
-
-    pub(crate) fn candidate_uri(&self, candidate: &GlobalCandidate) -> Option<&Uri> {
-        self.summary_uri(candidate.source_uri_id())
-    }
-
-    pub(crate) fn type_candidate_uri(&self, candidate: &TypeCandidate) -> Option<&Uri> {
-        self.summary_uri(candidate.source_uri_id())
-    }
-
     pub fn summaries_iter(&self) -> impl Iterator<Item = (&Uri, &DocumentSummary)> {
         self.summaries.values().map(|summary| (&summary.uri, summary))
     }
@@ -633,7 +621,7 @@ impl WorkspaceAggregation {
     /// A candidate matches if it equals the query or ends with `.{query}`.
     fn find_best_match(&self, module_path: &str) -> Option<Uri> {
         let uri_id = self.find_best_match_id(module_path)?;
-        self.summary_uri(uri_id).cloned()
+        Some(resolve_uri(uri_id))
     }
 
     fn find_best_match_id(&self, module_path: &str) -> Option<UriId> {

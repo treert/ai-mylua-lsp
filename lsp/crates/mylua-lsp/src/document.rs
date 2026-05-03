@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::scope::ScopeTree;
-use crate::uri_id::{intern, resolve, UriId};
+use crate::uri_id::{intern, UriId};
 use crate::util::{LineIndex, LuaSource};
 use tower_lsp_server::ls_types::Uri;
 
@@ -72,17 +72,6 @@ impl DocumentLookup for DocumentStoreView<'_> {
     }
 }
 
-impl DocumentLookup for HashMap<Uri, Document> {
-    fn get_document_by_id(&self, uri_id: UriId) -> Option<&Document> {
-        self.get(&resolve(uri_id))
-    }
-
-    fn for_each_document_id(&self, mut f: impl FnMut(UriId, &Document)) {
-        for (uri, doc) in self {
-            f(intern(uri.clone()), doc);
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

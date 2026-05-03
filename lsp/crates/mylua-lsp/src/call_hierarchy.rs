@@ -32,7 +32,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
 use crate::type_system::FunctionSummaryId;
-use crate::uri_id::{intern as intern_uri, UriId};
+use crate::uri_id::{intern as intern_uri, resolve as resolve_uri, UriId};
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------
@@ -41,7 +41,6 @@ use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 pub fn prepare_call_hierarchy(
     doc: &Document,
-    uri: &Uri,
     uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
@@ -55,11 +54,12 @@ pub fn prepare_call_hierarchy(
         return Vec::new();
     };
     let name = node_text(ident, source).to_string();
+    let uri = resolve_uri(uri_id);
 
     // Case 1: the cursor is on the declaration name of a function
     // (function_declaration / local_function_declaration). We can
     // build the item without looking it up elsewhere.
-    if let Some(item) = item_from_enclosing_declaration(ident, source, uri, doc.line_index()) {
+    if let Some(item) = item_from_enclosing_declaration(ident, source, &uri, doc.line_index()) {
         return vec![item];
     }
 
@@ -94,9 +94,7 @@ pub fn prepare_call_hierarchy(
     }
     if let Some(candidates) = index.global_shard.get(&name) {
         if let Some(c) = candidates.first() {
-            let Some(candidate_uri) = index.candidate_uri(c) else {
-                return Vec::new();
-            };
+            let candidate_uri = resolve_uri(c.source_uri_id());
             let kind = if matches!(c.kind, GlobalContributionKind::Function) {
                 SymbolKind::FUNCTION
             } else {
@@ -107,7 +105,7 @@ pub fn prepare_call_hierarchy(
             return vec![build_item(
                 name,
                 kind,
-                candidate_uri.clone(),
+                candidate_uri,
                 r,
                 sr,
             )];
@@ -379,15 +377,7 @@ fn resolve_outgoing_target(
     // O(1) lookup via global_shard — preferred path.
     if let Some(candidates) = index.global_shard.get(name) {
         if let Some(c) = candidates.first() {
-            let Some(candidate_uri) = index.candidate_uri(c) else {
-                return build_item(
-                    name.to_string(),
-                    SymbolKind::FUNCTION,
-                    fallback_uri.clone(),
-                    fallback_range,
-                    fallback_range,
-                );
-            };
+            let candidate_uri = resolve_uri(c.source_uri_id());
             // Try to refine with the precise FunctionSummary range from
             // the candidate's source file.
             if let Some(summary) = index.summary_by_id(c.source_uri_id()) {
@@ -396,7 +386,7 @@ fn resolve_outgoing_target(
                     return build_item(
                         name.to_string(),
                         SymbolKind::FUNCTION,
-                        candidate_uri.clone(),
+                        candidate_uri,
                         lsp_range,
                         lsp_range,
                     );
@@ -412,7 +402,7 @@ fn resolve_outgoing_target(
             return build_item(
                 name.to_string(),
                 kind,
-                candidate_uri.clone(),
+                candidate_uri,
                 r,
                 sr,
             );

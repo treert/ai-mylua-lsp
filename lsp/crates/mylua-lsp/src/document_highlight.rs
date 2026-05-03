@@ -23,7 +23,6 @@ use crate::util::{find_node_at_position, is_ancestor_or_equal, node_text, LineIn
 
 pub fn document_highlight(
     doc: &Document,
-    _uri: &Uri,
     position: Position,
 ) -> Option<Vec<DocumentHighlight>> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;

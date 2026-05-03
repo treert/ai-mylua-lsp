@@ -20,10 +20,10 @@ fn collect_all(
     let (doc, uri, mut agg) = setup_single_file(src, name);
     let mut all =
         diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
-    let semantic = diagnostics::collect_semantic_diagnostics(
+    let semantic = diagnostics::collect_semantic_diagnostics_id(
         doc.tree.root_node(),
         src.as_bytes(),
-        &uri,
+        summary_id_by_uri(&agg, &uri),
         &mut agg,
         &doc.scope_tree,
         &cfg,

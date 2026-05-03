@@ -5,18 +5,17 @@ use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_em
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
-use crate::uri_id::{IntoUriId, UriId};
+use crate::uri_id::{resolve as resolve_uri, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
 pub fn hover(
     doc: &Document,
-    uri_id: impl IntoUriId,
+    uri_id: UriId,
     position: Position,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
-    let uri_id = uri_id.into_uri_id();
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
         return hover_type_name(&type_name, index, all_docs);
@@ -131,7 +130,7 @@ pub fn hover(
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
     if let Some(candidates) = index.type_shard.get(ident_text) {
         if let Some(candidate) = candidates.first() {
-            if index.type_candidate_uri(candidate).is_some() {
+            if index.summary_by_id(candidate.source_uri_id()).is_some() {
                 if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
                     for td in &summary.type_definitions {
                         if td.name == ident_text {
@@ -204,7 +203,7 @@ pub fn hover(
     // global kind — purely for the shared formatter.
     let global_info = index.global_shard.get(ident_text).and_then(|candidates| {
         let candidate = candidates.first()?;
-        let source_uri = index.candidate_uri(candidate)?.clone();
+        let source_uri = resolve_uri(candidate.source_uri_id());
         let def_kind = match candidate.kind {
             crate::summary::GlobalContributionKind::Function => crate::types::DefKind::GlobalFunction,
             _ => crate::types::DefKind::GlobalVariable,
@@ -252,7 +251,7 @@ fn hover_type_name(
 ) -> Option<Hover> {
     let candidates = index.type_shard.get(name)?;
     let candidate = candidates.first()?;
-    index.type_candidate_uri(candidate)?;
+    index.summary_by_id(candidate.source_uri_id())?;
     let summary = index.summary_by_id(candidate.source_uri_id())?;
 
     for td in &summary.type_definitions {
