@@ -89,7 +89,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
         }
 
         "function_call" => {
-            infer_call_return_type(ctx, node)
+            infer_call_return_type(ctx, node, depth)
         }
 
         "field_expression" => {
@@ -221,7 +221,29 @@ fn infer_table_array_element_type_lightweight(ctx: &BuildContext, constructor: t
     }
 }
 
-fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
+fn call_base_stub_from_fact(
+    fact: &TypeFact,
+    fallback_node: tree_sitter::Node,
+    source: &[u8],
+) -> (SymbolicStub, Vec<TypeFact>) {
+    match fact {
+        TypeFact::Stub(s) => (s.clone(), vec![]),
+        TypeFact::Known(KnownType::EmmyType(type_name)) => {
+            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
+        }
+        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
+            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
+        }
+        _ => (
+            SymbolicStub::GlobalRef {
+                name: node_text(fallback_node, source).to_string(),
+            },
+            vec![],
+        ),
+    }
+}
+
+fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: usize) -> TypeFact {
     let callee = match node.child_by_field_name("callee") {
         Some(c) => c,
         None => return TypeFact::Unknown,
@@ -244,66 +266,49 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
     // `obj:method()` → CallReturn(base_stub, method_name)
     if let Some(method_node) = node.child_by_field_name("method") {
         let method_name = node_text(method_node, ctx.source).to_string();
-        let callee_text = node_text(callee, ctx.source);
         let explicit_arg_types = collect_call_arg_types(ctx, node);
+        let base_fact = infer_expression_type(ctx, callee, depth + 1);
 
-        let (base_stub, generic_args) = if let Some(decl) =
-            ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte())
-        {
-            match decl.type_fact.as_ref() {
-                Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
-                Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
-                    (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
-                }
-                Some(TypeFact::Known(KnownType::EmmyGeneric(type_name, params))) => {
-                    (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
-                }
-                // When the base is a local Table shape, look up the method
-                // directly in the shape or function_summaries.
-                Some(TypeFact::Known(KnownType::Table(shape_id))) => {
-                    let mut call_arg_types = Vec::with_capacity(explicit_arg_types.len() + 1);
-                    call_arg_types.push(TypeFact::Known(KnownType::Table(*shape_id)));
-                    call_arg_types.extend(explicit_arg_types.clone());
-                    if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                        if let Some(fi) = shape.fields.get(&method_name) {
-                            match &fi.type_fact {
-                                TypeFact::Known(KnownType::Function(ref sig)) => {
-                                    if let Some(ret) = sig.returns.first() {
-                                        return ret.clone();
-                                    }
-                                }
-                                TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
-                                    if let Some(fs) = ctx.function_summaries.get(fid) {
-                                        if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
-                                            return ret.clone();
-                                        }
-                                    }
-                                }
-                                _ => {}
+        if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
+            let mut call_arg_types = Vec::with_capacity(explicit_arg_types.len() + 1);
+            call_arg_types.push(TypeFact::Known(KnownType::Table(*shape_id)));
+            call_arg_types.extend(explicit_arg_types.clone());
+            if let Some(shape) = ctx.table_shapes.get(shape_id) {
+                if let Some(fi) = shape.fields.get(&method_name) {
+                    match &fi.type_fact {
+                        TypeFact::Known(KnownType::Function(ref sig)) => {
+                            if let Some(ret) = sig.returns.first() {
+                                return ret.clone();
                             }
                         }
-                    }
-                    // Fallback: qualified name in function_summaries
-                    for sep in [":", "."] {
-                        let qualified = format!("{}{}{}", callee_text, sep, method_name);
-                        if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
-                            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                        TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
+                            if let Some(fs) = ctx.function_summaries.get(fid) {
                                 if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
                                     return ret.clone();
                                 }
                             }
                         }
+                        _ => {}
                     }
-                    (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![])
                 }
-                _ => (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![]),
             }
-        } else {
-            (SymbolicStub::GlobalRef { name: callee_text.to_string() }, vec![])
-        };
+            // Fallback: qualified name in function_summaries for named local tables.
+            let callee_text = node_text(callee, ctx.source);
+            for sep in [":", "."] {
+                let qualified = format!("{}{}{}", callee_text, sep, method_name);
+                if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
+                    if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                        if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
+                            return ret.clone();
+                        }
+                    }
+                }
+            }
+        }
 
+        let (base_stub, generic_args) = call_base_stub_from_fact(&base_fact, callee, ctx.source);
         let mut call_arg_types = Vec::with_capacity(1);
-        call_arg_types.push(TypeFact::Stub(base_stub.clone()));
+        call_arg_types.push(base_fact);
         call_arg_types.extend(explicit_arg_types);
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_stub),
@@ -324,59 +329,40 @@ fn infer_call_return_type(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFa
                 let base_text = node_text(base, ctx.source);
                 let func_name = node_text(field, ctx.source).to_string();
                 let explicit_arg_types = collect_call_arg_types(ctx, node);
+                let base_fact = infer_expression_type(ctx, base, depth + 1);
 
-                let (base_stub, generic_args) = if let Some(decl) =
-                    ctx.resolve_visible_in_build_scopes(base_text, base.start_byte())
-                {
-                    match decl.type_fact.as_ref() {
-                        Some(TypeFact::Stub(s)) => (s.clone(), vec![]),
-                        Some(TypeFact::Known(KnownType::EmmyType(type_name))) => {
-                            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
-                        }
-                        Some(TypeFact::Known(KnownType::EmmyGeneric(type_name, params))) => {
-                            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
-                        }
-                        // When the base is a local Table shape (e.g. `local M = {}`),
-                        // look up the function field directly in the shape and
-                        // return its first declared return type. This avoids
-                        // generating a GlobalRef stub for a local variable.
-                        Some(TypeFact::Known(KnownType::Table(shape_id))) => {
-                            if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                                if let Some(fi) = shape.fields.get(&func_name) {
-                                    match &fi.type_fact {
-                                        TypeFact::Known(KnownType::Function(ref sig)) => {
-                                            if let Some(ret) = sig.returns.first() {
-                                                return ret.clone();
-                                            }
-                                        }
-                                        TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
-                                            if let Some(fs) = ctx.function_summaries.get(fid) {
-                                                if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
-                                                    return ret.clone();
-                                                }
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                            }
-                            // Fallback: qualified name in function_summaries
-                            let qualified = format!("{}.{}", base_text, func_name);
-                            if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
-                                if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                                    if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
+                if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
+                    if let Some(shape) = ctx.table_shapes.get(shape_id) {
+                        if let Some(fi) = shape.fields.get(&func_name) {
+                            match &fi.type_fact {
+                                TypeFact::Known(KnownType::Function(ref sig)) => {
+                                    if let Some(ret) = sig.returns.first() {
                                         return ret.clone();
                                     }
                                 }
+                                TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
+                                    if let Some(fs) = ctx.function_summaries.get(fid) {
+                                        if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
+                                            return ret.clone();
+                                        }
+                                    }
+                                }
+                                _ => {}
                             }
-                            (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![])
                         }
-                        _ => (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![]),
                     }
-                } else {
-                    (SymbolicStub::GlobalRef { name: base_text.to_string() }, vec![])
-                };
+                    // Fallback: qualified name in function_summaries for named local tables.
+                    let qualified = format!("{}.{}", base_text, func_name);
+                    if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
+                        if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                            if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
+                                return ret.clone();
+                            }
+                        }
+                    }
+                }
 
+                let (base_stub, generic_args) = call_base_stub_from_fact(&base_fact, base, ctx.source);
                 return TypeFact::Stub(SymbolicStub::CallReturn {
                     base: Box::new(base_stub),
                     func_name,

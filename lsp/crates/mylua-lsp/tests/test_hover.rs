@@ -85,6 +85,62 @@ local a1_test = test()"#;
 }
 
 #[test]
+fn hover_local_call_return_from_chained_method_return() {
+    let src = r#"---@class ClassA1
+ClassA1 = {}
+---@return string
+function ClassA1:test() end
+---@return ClassA1
+function utils.get_a1() end
+local function test2()
+    return utils.get_a1():test()
+end
+local a1_test2 = test2()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_chained_method_return.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(doc, intern_uri(&uri), pos(9, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result.is_some(), "hover on a1_test2 should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("Type: `string`"),
+            "a1_test2 hover should show chained method return type string, got: {}",
+            content
+        );
+    }
+}
+
+#[test]
+fn hover_local_call_return_from_chained_dotted_return() {
+    let src = r#"---@class ClassA1
+ClassA1 = {}
+---@return string
+function ClassA1.make_string() end
+---@return ClassA1
+function utils.get_a1() end
+local function test3()
+    return utils.get_a1().make_string()
+end
+local a1_test3 = test3()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_chained_dotted_return.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(doc, intern_uri(&uri), pos(9, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result.is_some(), "hover on a1_test3 should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("Type: `string`"),
+            "a1_test3 hover should show chained dotted return type string, got: {}",
+            content
+        );
+    }
+}
+
+#[test]
 fn hover_local_from_cross_file_dotted_call_shows_return_type() {
     let files = [
         ("class_defs.lua", r#"---@class ClassA1
