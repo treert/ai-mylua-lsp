@@ -601,7 +601,7 @@ fn resolve_call_return(
                     }
                 }
                 TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                    if let Some(uri_id) = resolved.source_uri_id() {
+                    if let Some(uri_id) = resolved.source_uri_id().or(Some(c.source_uri_id())) {
                         if let Some(summary) = agg.summary_by_id(uri_id) {
                             if let Some(fs) = summary.function_summaries.get(fid) {
                                 if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
