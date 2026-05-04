@@ -328,24 +328,3 @@ fn is_decl_visible_at(decl: &ScopeDecl, byte_offset: usize) -> bool {
         && byte_offset < decl.decl_byte + decl.name.len();
     on_decl_name || decl.visible_after_byte <= byte_offset
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn parse_source(src: &str) -> tree_sitter::Tree {
-        let mut parser = tree_sitter::Parser::new();
-        parser
-            .set_language(&tree_sitter_mylua::LANGUAGE.into())
-            .expect("mylua grammar");
-        parser.parse(src, None).expect("parse")
-    }
-
-    fn build(src: &str) -> DocumentSummary {
-        let tree = parse_source(src);
-        let lua_source = crate::util::LuaSource::new(src.to_string());
-        let uri: tower_lsp_server::ls_types::Uri = "file:///test.lua".parse().unwrap();
-        let (summary, _) = build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
-        summary
-    }
-}
