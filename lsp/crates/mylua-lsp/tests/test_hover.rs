@@ -86,13 +86,20 @@ local a1_test = test()"#;
 
 #[test]
 fn hover_local_from_cross_file_dotted_call_shows_return_type() {
-    let (docs, mut agg, _) = setup_workspace_from_dir("lua-root");
-    let uri = mylua_lsp::workspace_scanner::path_to_uri(&fixture_path("lua-root/test_lua_2.lua"))
-        .expect("fixture URI should be valid");
+    let files = [
+        ("class_defs.lua", r#"---@class ClassA1
+ClassA1 = {}"#),
+        ("utils.lua", r#"---@return ClassA1
+function utils.get_a1()
+end"#),
+        ("main.lua", r#"local a123 = utils.get_a1()"#),
+    ];
+    let (docs, mut agg, _) = setup_workspace(&files);
+    let uri = make_uri("main.lua");
     let uri_id = intern_uri(&uri);
     let doc = docs.get(&uri_id).unwrap();
 
-    let result = hover::hover(doc, uri_id, pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(doc, uri_id, pos(0, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
     assert!(result.is_some(), "hover on a123 should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);

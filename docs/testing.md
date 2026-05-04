@@ -23,6 +23,12 @@
 
 采用 **lib + bin 拆分**：集成测试直接调用 `lib.rs` 导出的核心函数，无需 LSP stdio 通信。测试工具模块 `test_helpers.rs` 提供 `parse_doc()`、`setup_single_file()`、`setup_workspace_from_dir()` 等辅助函数。
 
+### Lua 源码用例约定
+
+Rust 集成测试中的 Lua 测试源码应优先内联在 test case 内，例如使用 `setup_single_file(src, ...)` 或 `setup_workspace(&[(filename, src), ...])`。不要为了验证某个具体语义行为而依赖 `tests/lua-root/`、`tests/lua-root2/` 等手工端到端目录中的 Lua 文件，因为这些文件会被人工调试频繁修改，行号和内容都不稳定。
+
+只有测试目标本身是“真实目录扫描 / fixture 兼容 / workspace 布局行为”时，才使用外部 Lua fixture 或 `setup_workspace_from_dir()`；这类测试需要在断言里避免依赖可变手工用例的具体行号。
+
 | 测试文件 | 数量 | 覆盖功能 |
 |----------|------|----------|
 | `test_parse.rs` | 8 | 基础解析、EmmyLua 注解 |

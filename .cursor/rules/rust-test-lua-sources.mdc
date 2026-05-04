@@ -1,0 +1,16 @@
+---
+description: Rust LSP tests should use inline Lua sources by default
+globs: lsp/crates/mylua-lsp/tests/**/*.rs
+alwaysApply: false
+---
+
+# Rust Test Lua Sources
+
+When adding or changing Rust integration tests for Lua semantics:
+
+- Prefer inline Lua source strings inside the test case.
+- Use `setup_single_file(src, ...)` for one-file cases.
+- Use `setup_workspace(&[(filename, src), ...])` for multi-file cases.
+- Do not depend on `tests/lua-root/` or `tests/lua-root2/` for a semantic regression test; those directories are manual end-to-end workspaces and may be edited during debugging.
+- Use external Lua fixtures only when the behavior under test is fixture loading, real directory scanning, workspace layout, or compatibility with an existing stable fixture.
+- If an external fixture is necessary, avoid assertions that depend on mutable manual-test line numbers or incidental file content.
