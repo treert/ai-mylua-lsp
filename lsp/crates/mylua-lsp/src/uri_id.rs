@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{OnceLock, RwLock};
 
 use tower_lsp_server::ls_types::Uri;
 
@@ -20,7 +20,7 @@ impl UriId {
 
 #[derive(Debug)]
 struct UriRegistry {
-    inner: Mutex<Inner>,
+    inner: RwLock<Inner>,
 }
 
 #[derive(Debug)]
@@ -73,24 +73,31 @@ pub fn priority(id: UriId) -> UriPriority {
 
 impl UriRegistry {
     fn new() -> Self {
+        const INITIAL_CAPACITY: usize = 25_000;
         let empty_uri = empty_uri();
         let empty_meta = UriMeta::new(empty_uri);
-        let mut by_uri = HashMap::new();
+        let mut by_uri = HashMap::with_capacity(INITIAL_CAPACITY);
         by_uri.insert(empty_meta.path, UriId::new(0));
+        let mut by_id = Vec::with_capacity(INITIAL_CAPACITY);
+        by_id.push(empty_meta);
         Self {
-            inner: Mutex::new(Inner {
-                by_uri,
-                by_id: vec![empty_meta],
-            }),
+            inner: RwLock::new(Inner { by_uri, by_id }),
         }
     }
 
     fn intern(&self, uri: &Uri) -> UriId {
-        let mut inner = self.inner.lock().unwrap();
+        // Fast path: read lock only
+        {
+            let inner = self.inner.read().unwrap();
+            if let Some(id) = inner.by_uri.get(uri.as_str()).copied() {
+                return id;
+            }
+        }
+        // Slow path: write lock + double-check
+        let mut inner = self.inner.write().unwrap();
         if let Some(id) = inner.by_uri.get(uri.as_str()).copied() {
             return id;
         }
-
         let raw = i32::try_from(inner.by_id.len()).expect("UriId exhausted");
         let id = UriId::new(raw);
         let meta = UriMeta::new(uri.clone());
@@ -101,7 +108,7 @@ impl UriRegistry {
 
     fn resolve(&self, id: UriId) -> Uri {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .by_id
             .get(id.index())
@@ -111,7 +118,7 @@ impl UriRegistry {
 
     fn path(&self, id: UriId) -> &'static str {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .by_id
             .get(id.index())
@@ -121,7 +128,7 @@ impl UriRegistry {
 
     fn priority(&self, id: UriId) -> UriPriority {
         self.inner
-            .lock()
+            .read()
             .unwrap()
             .by_id
             .get(id.index())
