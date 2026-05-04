@@ -77,7 +77,7 @@ use tower_lsp_server::Client;
 use aggregation::WorkspaceAggregation;
 use config::LspConfig;
 use document::Document;
-use uri_id::{intern as intern_uri, UriId};
+use uri_id::{intern_uri, UriId};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IndexState {
@@ -592,7 +592,7 @@ mod tests {
 
 #[cfg(test)]
 mod uri_id_tests {
-    use crate::uri_id::{intern, path, priority, resolve};
+    use crate::uri_id::{intern_uri, path_uri, priority_uri, resolve_uri};
     use tower_lsp_server::ls_types::Uri;
 
     #[test]
@@ -600,9 +600,9 @@ mod uri_id_tests {
         let first: Uri = "file:///tmp/a.lua".parse().unwrap();
         let second: Uri = "file:///tmp/b.lua".parse().unwrap();
 
-        let first_id = intern(&first);
-        let first_again = intern(&first);
-        let second_id = intern(&second);
+        let first_id = intern_uri(&first);
+        let first_again = intern_uri(&first);
+        let second_id = intern_uri(&second);
 
         assert_eq!(first_id, first_again);
         assert_ne!(first_id, second_id);
@@ -611,28 +611,28 @@ mod uri_id_tests {
     #[test]
     fn resolve_returns_original_uri_for_interned_id() {
         let uri: Uri = "file:///tmp/a.lua".parse().unwrap();
-        let id = intern(&uri);
+        let id = intern_uri(&uri);
 
-        assert_eq!(resolve(id), uri);
-        assert_eq!(path(id), uri.as_str());
+        assert_eq!(resolve_uri(id), uri);
+        assert_eq!(path_uri(id), uri.as_str());
     }
 
     #[test]
     fn zero_uri_id_resolves_to_empty_uri() {
         let empty_uri: Uri = "file:".parse().unwrap();
-        let empty_id = intern(&empty_uri);
+        let empty_id = intern_uri(&empty_uri);
 
-        assert_eq!(resolve(empty_id), empty_uri);
+        assert_eq!(resolve_uri(empty_id), empty_uri);
     }
 
     #[test]
     fn priority_prefers_annotation_paths() {
         let annotation_uri: Uri = "file:///tmp/annotation/a.lua".parse().unwrap();
         let regular_uri: Uri = "file:///tmp/a.lua".parse().unwrap();
-        let annotation_id = intern(&annotation_uri);
-        let regular_id = intern(&regular_uri);
+        let annotation_id = intern_uri(&annotation_uri);
+        let regular_id = intern_uri(&regular_uri);
 
-        assert!(priority(annotation_id) < priority(regular_id));
+        assert!(priority_uri(annotation_id) < priority_uri(regular_id));
     }
 }
 

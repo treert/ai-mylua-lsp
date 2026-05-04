@@ -19,7 +19,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::summary::{GlobalContributionKind, TypeDefinitionKind};
 use crate::type_system::{KnownType, TypeFact};
-use crate::uri_id::resolve as resolve_uri;
+use crate::uri_id::resolve_uri;
 
 pub fn search_workspace_symbols(
     query: &str,

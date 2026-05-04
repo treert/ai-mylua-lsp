@@ -1,5 +1,5 @@
 use crate::types::{DefKind, Definition};
-use crate::uri_id::{resolve as resolve_uri, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 use crate::util::ByteRange;
 
 // ---------------------------------------------------------------------------

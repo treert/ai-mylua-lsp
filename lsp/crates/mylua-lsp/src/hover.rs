@@ -5,7 +5,7 @@ use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_em
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
-use crate::uri_id::{resolve as resolve_uri, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 
@@ -537,7 +537,7 @@ fn build_field_chain_hover(
             range: def_range,
             selection_range: def_range,
             uri_id: location.uri_id,
-            uri: crate::uri_id::resolve(location.uri_id),
+            uri: crate::uri_id::resolve_uri(location.uri_id),
         })
     })();
     if let Some(synth_def) = synth_def {

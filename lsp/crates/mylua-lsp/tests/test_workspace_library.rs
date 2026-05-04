@@ -22,7 +22,7 @@
 
 mod test_helpers;
 
-use mylua_lsp::uri_id::resolve;
+use mylua_lsp::uri_id::resolve_uri;
 use test_helpers::*;
 
 /// Library roots contribute known globals (`print`, `assert`,
@@ -96,7 +96,7 @@ fn library_modules_are_requirable() {
 
     let string_uri = agg
         .resolve_module_to_id("string")
-        .map(resolve)
+        .map(resolve_uri)
         .expect("require(\"string\") should resolve to the library file");
     assert!(
         string_uri.to_string().ends_with("string.lua"),
@@ -106,7 +106,7 @@ fn library_modules_are_requirable() {
 
     let table_uri = agg
         .resolve_module_to_id("table")
-        .map(resolve)
+        .map(resolve_uri)
         .expect("require(\"table\") should resolve to the library file");
     assert!(
         table_uri.to_string().ends_with("table.lua"),

@@ -8,7 +8,7 @@ use mylua_lsp::config::{RequireConfig, WorkspaceConfig};
 use mylua_lsp::document::Document;
 use mylua_lsp::summary::DocumentSummary;
 use mylua_lsp::summary_builder;
-pub use mylua_lsp::uri_id::{intern, UriId};
+pub use mylua_lsp::uri_id::{intern_uri, UriId};
 use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
@@ -80,11 +80,11 @@ pub fn summary_by_uri<'a>(
     agg: &'a WorkspaceAggregation,
     uri: &Uri,
 ) -> Option<&'a DocumentSummary> {
-    agg.summary_by_id(intern(&uri))
+    agg.summary_by_id(intern_uri(&uri))
 }
 
 pub fn summary_id_by_uri(agg: &WorkspaceAggregation, uri: &Uri) -> UriId {
-    let uri_id = intern(&uri);
+    let uri_id = intern_uri(&uri);
     assert!(
         agg.summary_by_id(uri_id).is_some(),
         "summary for URI {:?} should be indexed",
@@ -111,7 +111,7 @@ pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, Worksp
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, source);
     let uri = make_uri(filename);
-    let uri_id = intern(&uri);
+    let uri_id = intern_uri(&uri);
     let mut agg = WorkspaceAggregation::new();
     let summary =
         summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
@@ -138,7 +138,7 @@ pub fn setup_workspace(
 
     for (filename, source) in files {
         let uri = make_uri(filename);
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
         let summary =
             summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
@@ -174,7 +174,7 @@ pub fn setup_workspace_from_dir(
         &WorkspaceConfig::default(),
     );
     for (module, uri) in &module_entries {
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         agg.set_require_mapping(module.clone(), uri_id);
     }
 
@@ -188,7 +188,7 @@ pub fn setup_workspace_from_dir(
             Some(u) => u,
             None => continue,
         };
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         let tree = parser.parse(text.as_bytes(), None);
         if let Some(tree) = tree {
             let lua_source = LuaSource::new(text);
@@ -234,7 +234,7 @@ pub fn setup_workspace_with_library(
 
     for (filename, source) in workspace_files {
         let uri = make_uri(filename);
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
         let summary =
             summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
@@ -264,7 +264,7 @@ pub fn setup_workspace_with_library(
         &ws_config,
     );
     for (module, uri) in &module_entries {
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         agg.set_require_mapping(module.clone(), uri_id);
     }
 
@@ -275,7 +275,7 @@ pub fn setup_workspace_with_library(
         let Some(uri) = workspace_scanner::path_to_uri(file) else {
             continue;
         };
-        let uri_id = intern(&uri);
+        let uri_id = intern_uri(&uri);
         let Some(tree) = parser.parse(text.as_bytes(), None) else {
             continue;
         };

@@ -46,14 +46,14 @@ pub struct UriPriority {
 static URI_REGISTRY: OnceLock<UriRegistry> = OnceLock::new();
 
 /// Intern a URI into the process-global append-only registry.
-pub fn intern(uri: &Uri) -> UriId {
+pub fn intern_uri(uri: &Uri) -> UriId {
     registry().intern(uri)
 }
 
 /// Resolve a registered `UriId` back to its LSP `Uri`.
 ///
 /// Panics if the id was fabricated rather than returned by `intern`.
-pub fn resolve(id: UriId) -> Uri {
+pub fn resolve_uri(id: UriId) -> Uri {
     registry().resolve(id)
 }
 
@@ -61,13 +61,13 @@ pub fn resolve(id: UriId) -> Uri {
 ///
 /// This is `Uri::as_str()` (for example `file:///tmp/a.lua`), not a
 /// decoded filesystem path.
-pub fn path(id: UriId) -> &'static str {
+pub fn path_uri(id: UriId) -> &'static str {
     registry().path(id)
 }
 
 
 /// Return the precomputed candidate ordering key for an id.
-pub fn priority(id: UriId) -> UriPriority {
+pub fn priority_uri(id: UriId) -> UriPriority {
     registry().priority(id)
 }
 

@@ -5,7 +5,7 @@ use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
-use crate::uri_id::{resolve as resolve_uri, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceLocation {

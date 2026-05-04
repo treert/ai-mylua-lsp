@@ -32,7 +32,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
 use crate::type_system::FunctionSummaryId;
-use crate::uri_id::{intern as intern_uri, resolve as resolve_uri, UriId};
+use crate::uri_id::{intern_uri, resolve_uri, UriId};
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
 
 // ---------------------------------------------------------------------------

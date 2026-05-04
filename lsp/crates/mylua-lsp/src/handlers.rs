@@ -26,7 +26,7 @@ use crate::selection_range;
 use crate::semantic_tokens;
 use crate::signature_help;
 use crate::symbols;
-use crate::uri_id::intern as intern_uri;
+use crate::uri_id::intern_uri;
 use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{

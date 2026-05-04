@@ -3,7 +3,7 @@ mod test_helpers;
 use std::collections::HashMap;
 use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::rename;
-use mylua_lsp::uri_id::intern;
+use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 
 /// Collect all text edits from a WorkspaceEdit across all URIs,
@@ -39,7 +39,7 @@ fn collect_edits(
 fn rename_local_variable() {
     let src = "local x = 1\nlocal y = x + 1\nprint(x)\n";
     let (doc, uri, agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(&uri);
+    let uri_id = intern_uri(&uri);
     let docs = HashMap::from([(uri_id, doc)]);
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&uri_id).unwrap();
@@ -56,7 +56,7 @@ fn rename_local_variable() {
 fn rename_rejects_invalid_new_name() {
     let src = "local x = 1\n";
     let (doc, uri, agg) = setup_single_file(src, "a.lua");
-    let uri_id = intern(&uri);
+    let uri_id = intern_uri(&uri);
     let docs = HashMap::from([(uri_id, doc)]);
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&uri_id).unwrap();
@@ -75,7 +75,7 @@ fn rename_global_function_across_files() {
     let b = ("b.lua", "print(helper())\n");
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let a_uri_id = intern(&a_uri);
+    let a_uri_id = intern_uri(&a_uri);
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 
@@ -105,7 +105,7 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     );
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let a_uri_id = intern(&a_uri);
+    let a_uri_id = intern_uri(&a_uri);
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 
@@ -147,7 +147,7 @@ fn rename_emmy_class_field_in_annotation() {
     );
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
-    let a_uri_id = intern(&a_uri);
+    let a_uri_id = intern_uri(&a_uri);
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&a_uri_id).unwrap();
 

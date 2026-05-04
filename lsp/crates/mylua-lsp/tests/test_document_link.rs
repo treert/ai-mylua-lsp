@@ -2,7 +2,7 @@ mod test_helpers;
 
 use test_helpers::*;
 use mylua_lsp::document_link;
-use mylua_lsp::uri_id::intern;
+use mylua_lsp::uri_id::intern_uri;
 
 #[test]
 fn document_link_resolves_require_paren_form() {
@@ -11,7 +11,7 @@ fn document_link_resolves_require_paren_form() {
         ("util.lua", "return { x = 1 }\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
@@ -42,7 +42,7 @@ fn document_link_resolves_from_module_map_before_summary_exists() {
     let doc = parse_doc(&mut parser, "local u = require(\"util\")\n");
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     let util_uri = make_uri("util.lua");
-    let util_uri_id = intern(&util_uri);
+    let util_uri_id = intern_uri(&util_uri);
     agg.set_require_mapping("util".to_string(), util_uri_id);
 
     let links = document_link::document_links(
@@ -65,7 +65,7 @@ fn document_link_resolves_require_short_call() {
         ("util.lua", "return 1\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
@@ -86,7 +86,7 @@ fn document_link_ignores_unresolved_module() {
         ("main.lua", "require(\"no_such_module\")\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
@@ -107,7 +107,7 @@ fn document_link_ignores_non_require_calls() {
         ("hello.lua", "return 1\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
@@ -131,7 +131,7 @@ fn document_link_rejects_aliased_require() {
         ("util.lua", "return 1\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),
@@ -155,7 +155,7 @@ fn document_link_multi_require_each_get_link() {
         ("helper.lua", "return 2\n"),
     ]);
     let uri = make_uri("main.lua");
-    let doc = docs.get(&intern(&uri)).expect("main.lua opened");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
         doc.tree.root_node(),
         doc.source(),

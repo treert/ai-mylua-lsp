@@ -4,7 +4,7 @@ use tower_lsp_server::ls_types::*;
 use crate::document::{Document, DocumentLookup};
 use crate::type_inference;
 use crate::resolver;
-use crate::uri_id::{resolve as resolve_uri, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{node_text, walk_ancestors};
 use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;

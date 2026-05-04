@@ -26,7 +26,7 @@
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::uri_id::resolve;
+use crate::uri_id::resolve_uri;
 use crate::util::{node_text, LineIndex};
 
 /// Collect all `require("mod")` document links in `tree`. Strings that
@@ -82,7 +82,7 @@ fn resolve_module_target(
     index: &WorkspaceAggregation,
     module_path: &str,
 ) -> Option<Uri> {
-    index.resolve_module_to_id(module_path).map(resolve)
+    index.resolve_module_to_id(module_path).map(resolve_uri)
 }
 
 /// When `call.callee` is the literal identifier `require` and the

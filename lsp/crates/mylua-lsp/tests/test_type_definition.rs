@@ -3,7 +3,7 @@ mod test_helpers;
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
 use mylua_lsp::type_system::{KnownType, TypeFact};
-use mylua_lsp::uri_id::intern;
+use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 use tower_lsp_server::ls_types::GotoDefinitionResponse;
 
@@ -33,7 +33,7 @@ print(f)
     let (doc, uri, mut agg) = setup_single_file(src, "td1.lua");
 
     // Click `f` on the `print(f)` line — line 6, col 6
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(6, 6), &mut agg, &GotoStrategy::Auto)
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(6, 6), &mut agg, &GotoStrategy::Auto)
         .expect("type definition should resolve");
     let loc = single_loc(&r);
     // The Foo class definition anchor is at line 2 (`Foo = {}`).
@@ -56,7 +56,7 @@ local f = nil
     let (doc, uri, mut agg) = setup_single_file(src, "td2.lua");
 
     // `Foo` in the `---@type Foo` comment on line 3, col 11.
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(3, 11), &mut agg, &GotoStrategy::Auto)
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(3, 11), &mut agg, &GotoStrategy::Auto)
         .expect("type definition should resolve");
     let loc = single_loc(&r);
     // Foo's anchor is line 1 (`Foo = {}` — line 0 is the `@class`).
@@ -70,7 +70,7 @@ fn type_definition_falls_back_to_definition_for_primitive() {
     let src = "local n = 1\nprint(n)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "td3.lua");
 
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(1, 6), &mut agg, &GotoStrategy::Auto)
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(1, 6), &mut agg, &GotoStrategy::Auto)
         .expect("should fall back to goto_definition");
     let loc = single_loc(&r);
     assert_eq!(loc.range.start.line, 0);
@@ -90,7 +90,7 @@ print(b)
 "#;
     let (doc, uri, mut agg) = setup_single_file(src, "td_generic.lua");
 
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(6, 6), &mut agg, &GotoStrategy::Auto)
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(6, 6), &mut agg, &GotoStrategy::Auto)
         .expect("should resolve EmmyGeneric base type");
     let loc = single_loc(&r);
     // Box's anchor statement is `Box = {}` on line 2.
@@ -115,7 +115,7 @@ print(x)
     let (doc, uri, mut agg) = setup_single_file(src, "td_call.lua");
 
     // Click `x` in `print(x)` — line 7, col 6
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(7, 6), &mut agg, &GotoStrategy::Auto)
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(7, 6), &mut agg, &GotoStrategy::Auto)
         .expect("typeDefinition should chase CallReturn → EmmyType");
     let loc = single_loc(&r);
     // Foo's anchor is `Foo = {}` on line 1.
@@ -127,7 +127,7 @@ fn type_definition_unknown_returns_none_after_fallback_also_fails() {
     // Clicking in empty whitespace should return None (no identifier
     // → no plain definition either).
     let (doc, uri, mut agg) = setup_single_file("\n\n", "td_empty.lua");
-    let r = goto::goto_type_definition(&doc, intern(&uri), pos(0, 0), &mut agg, &GotoStrategy::Auto);
+    let r = goto::goto_type_definition(&doc, intern_uri(&uri), pos(0, 0), &mut agg, &GotoStrategy::Auto);
     assert!(r.is_none());
 }
 

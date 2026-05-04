@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
-use crate::uri_id::{priority as uri_priority, UriId, UriPriority};
+use crate::uri_id::{priority_uri as uri_priority, UriId, UriPriority};
 use crate::util::ByteRange;
 
 /// Workspace-level aggregation of all per-file summaries.

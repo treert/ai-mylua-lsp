@@ -3,7 +3,7 @@ mod test_helpers;
 use test_helpers::*;
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::{hover, completion, goto};
-use mylua_lsp::uri_id::{intern, resolve};
+use mylua_lsp::uri_id::{intern_uri, resolve_uri};
 
 /// Tests using the real `tests/hover/` directory as a workspace.
 /// This exercises multi-file require resolution.
@@ -13,7 +13,7 @@ fn workspace_hover_dir() {
 
     // Find the hover1.lua document (match exactly, not hover10/hover11)
     let hover1_entry = docs.iter().find(|(uri, _)| {
-        resolve(**uri).to_string().contains("hover1.lua")
+        resolve_uri(**uri).to_string().contains("hover1.lua")
     });
     assert!(hover1_entry.is_some(), "should find hover1.lua in workspace");
 
@@ -30,7 +30,7 @@ fn workspace_completion_dir() {
 
     // Find test1.lua — "local abc = 1;"
     let test1_entry = docs.iter().find(|(uri, _)| {
-        let s = resolve(**uri).to_string();
+        let s = resolve_uri(**uri).to_string();
         s.contains("test1.lua") && !s.contains("test10")
     });
 
@@ -49,7 +49,7 @@ fn workspace_goto_define_dir() {
 
     // Find test3.lua — `local ppp = require("be_define")`
     let test3_entry = docs.iter().find(|(uri, _)| {
-        resolve(**uri).to_string().contains("test3")
+        resolve_uri(**uri).to_string().contains("test3")
     });
     assert!(test3_entry.is_some(), "should find test3.lua in workspace");
 
@@ -120,7 +120,7 @@ fn require_map_survives_upsert() {
 
     let mut parser = new_parser();
     let mod_uri = make_uri("mymod.lua");
-    let mod_uri_id = intern(&mod_uri);
+    let mod_uri_id = intern_uri(&mod_uri);
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
     let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
@@ -159,7 +159,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
 
     let mut parser = new_parser();
     let main_uri = make_uri("main.lua");
-    let main_uri_id = intern(&main_uri);
+    let main_uri_id = intern_uri(&main_uri);
     let main_doc = parse_doc(&mut parser, "local Player = require(\"player\")\n");
     let main_summary = summary_builder::build_file_analysis(
         &main_uri,
@@ -169,7 +169,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     ).0;
 
     let player_uri = make_uri("player.lua");
-    let player_uri_id = intern(&player_uri);
+    let player_uri_id = intern_uri(&player_uri);
     let player_doc = parse_doc(&mut parser, "Player = {}\nreturn Player\n");
     let player_summary = summary_builder::build_file_analysis(
         &player_uri,
@@ -194,7 +194,7 @@ fn workspace_hover_require_resolution() {
     let (docs, mut agg, _parser) = setup_workspace_from_dir("hover");
 
     let hover2_entry = docs.iter().find(|(uri, _)| {
-        let s = resolve(**uri).to_string();
+        let s = resolve_uri(**uri).to_string();
         s.contains("hover2.lua") && !s.contains("requrie")
     });
 

@@ -4,7 +4,7 @@ use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
-use crate::uri_id::{resolve, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
 
 pub fn goto_definition(
@@ -88,7 +88,7 @@ fn goto_definition_inner(
     // Check if ident is a type name → jump to its definition
     if let Some(candidates) = index.type_shard.get(name) {
         if let Some(candidate) = candidates.first() {
-            let candidate_uri = resolve(candidate.source_uri_id());
+            let candidate_uri = resolve_uri(candidate.source_uri_id());
             return Some(GotoDefinitionResponse::Scalar(Location {
                 uri: candidate_uri.clone(),
                 range: candidate.range.into(),
@@ -100,7 +100,7 @@ fn goto_definition_inner(
         let locations: Vec<Location> = candidates
             .iter()
             .filter_map(|c| {
-                let uri = resolve(c.source_uri_id());
+                let uri = resolve_uri(c.source_uri_id());
                 Some(Location {
                     uri: uri.clone(),
                     range: c.selection_range.into(),
@@ -233,7 +233,7 @@ fn type_definition_for_name(
     let locations: Vec<Location> = candidates
         .iter()
         .filter_map(|c| {
-            let uri = resolve(c.source_uri_id());
+            let uri = resolve_uri(c.source_uri_id());
             Some(Location {
                 uri: uri.clone(),
                 range: c.range.into(),
@@ -309,7 +309,7 @@ fn goto_field_or_method(
 
 fn resolved_to_goto(resolved: resolver::ResolvedType) -> Option<GotoDefinitionResponse> {
     if let Some(location) = resolved.def_location {
-        let def_uri = resolve(location.uri_id);
+        let def_uri = resolve_uri(location.uri_id);
         return Some(GotoDefinitionResponse::Scalar(Location {
             uri: def_uri.clone(),
             range: location.range.into(),
@@ -368,7 +368,7 @@ fn try_require_goto(
     let module_path = extract_string_literal(string_node, doc.source())?;
 
     let target_uri_id = index.resolve_module_to_id(&module_path)?;
-    let target_uri = resolve(target_uri_id);
+    let target_uri = resolve_uri(target_uri_id);
 
     // Prefer the file-level `return` statement's range (what the require
     // expression actually evaluates to). Fall back to the first global

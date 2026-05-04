@@ -2,7 +2,7 @@ mod test_helpers;
 
 use mylua_lsp::config::InlayHintConfig;
 use mylua_lsp::inlay_hint;
-use mylua_lsp::uri_id::intern;
+use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 use tower_lsp_server::ls_types::{InlayHintKind, InlayHintLabel, Range};
 
@@ -34,7 +34,7 @@ fn inlay_hints_disabled_by_default() {
     // return empty regardless of the rest.
     let src = "local function foo(a, b) end\nfoo(1, 2)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), full_range(), &mut agg, &cfg(false, true, true));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), full_range(), &mut agg, &cfg(false, true, true));
     assert!(hints.is_empty(), "disabled config returns nothing, got: {:?}", hints);
 }
 
@@ -42,7 +42,7 @@ fn inlay_hints_disabled_by_default() {
 fn inlay_hints_parameter_names_at_call_site() {
     let src = "local function foo(a, b) end\nfoo(1, 2)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), full_range(), &mut agg, &cfg(true, true, false));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), full_range(), &mut agg, &cfg(true, true, false));
     let labels: Vec<String> = hints.iter().map(label).collect();
     assert!(
         labels.iter().any(|l| l == "a:"),
@@ -62,7 +62,7 @@ fn inlay_hints_skip_argument_same_name_as_param() {
     // — hint would be redundant noise, skip.
     let src = "local function foo(a, b) end\nlocal a = 1\nlocal b = 2\nfoo(a, b)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), full_range(), &mut agg, &cfg(true, true, false));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), full_range(), &mut agg, &cfg(true, true, false));
     let labels: Vec<String> = hints.iter().map(label).collect();
     let param_hints: Vec<&String> = labels.iter().filter(|l| l.ends_with(":")).collect();
     assert!(
@@ -75,7 +75,7 @@ fn inlay_hints_skip_argument_same_name_as_param() {
 fn inlay_hints_variable_type_for_primitive() {
     let src = "local n = 42\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), full_range(), &mut agg, &cfg(true, false, true));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), full_range(), &mut agg, &cfg(true, false, true));
     let labels: Vec<String> = hints.iter().map(label).collect();
     assert!(
         labels.iter().any(|l| l.contains("integer") || l.contains("number")),
@@ -90,7 +90,7 @@ fn inlay_hints_variable_type_skipped_when_emmy_annotated() {
     // don't duplicate as an inlay hint.
     let src = "---@type Foo\nlocal x = nil\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), full_range(), &mut agg, &cfg(true, false, true));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), full_range(), &mut agg, &cfg(true, false, true));
     let types: Vec<_> = hints
         .iter()
         .filter(|h| h.kind == Some(InlayHintKind::TYPE))
@@ -109,7 +109,7 @@ fn inlay_hints_respect_range_filter() {
         start: pos(1, 0),
         end: pos(1, 100),
     };
-    let hints = inlay_hint::inlay_hints(&doc, intern(&uri), range, &mut agg, &cfg(true, true, false));
+    let hints = inlay_hint::inlay_hints(&doc, intern_uri(&uri), range, &mut agg, &cfg(true, true, false));
     // Line 2's call should not contribute hints.
     for h in &hints {
         assert!(h.position.line == 1, "hint out of requested range: {:?}", h);

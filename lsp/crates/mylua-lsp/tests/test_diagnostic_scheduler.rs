@@ -5,7 +5,7 @@
 //! tests` inside `src/diagnostic_scheduler.rs`.
 
 use mylua_lsp::diagnostic_scheduler::{DiagnosticScheduler, Priority};
-use mylua_lsp::uri_id::{intern, UriId};
+use mylua_lsp::uri_id::{intern_uri, UriId};
 use std::time::Duration;
 use tower_lsp_server::ls_types::Uri;
 
@@ -14,7 +14,7 @@ fn uri(s: &str) -> Uri {
 }
 
 fn id(s: &str) -> UriId {
-    intern(&uri(s))
+    intern_uri(&uri(s))
 }
 
 #[test]

@@ -15,7 +15,7 @@ use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
-use crate::uri_id::{resolve as resolve_uri, UriId};
+use crate::uri_id::{resolve_uri, UriId};
 use crate::util::node_text;
 
 pub fn signature_help(

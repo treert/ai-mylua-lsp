@@ -20,7 +20,7 @@ use crate::diagnostics;
 use crate::document::Document;
 use crate::summary;
 use crate::summary_builder;
-use crate::uri_id::{intern, resolve, UriId};
+use crate::uri_id::{intern_uri, resolve_uri, UriId};
 use crate::util;
 use crate::workspace_scanner;
 use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
@@ -164,13 +164,13 @@ pub async fn run_workspace_scan(
         .into_iter()
         .filter_map(|path| {
             let uri = workspace_scanner::path_to_uri(&path)?;
-            let uri_id = intern(&uri);
+            let uri_id = intern_uri(&uri);
             Some((path, uri, uri_id))
         })
         .collect();
     let module_entries: Vec<(String, UriId)> = module_entries
         .into_iter()
-        .map(|(module, uri)| (module, intern(&uri)))
+        .map(|(module, uri)| (module, intern_uri(&uri)))
         .collect();
     let total = file_entries.len();
 
@@ -560,7 +560,7 @@ async fn consumer_loop(
 
         let (uri_id, uri) = loop {
             if let Some(uri_id) = scheduler.pop() {
-                let uri = resolve(uri_id);
+                let uri = resolve_uri(uri_id);
                 break (uri_id, uri);
             }
             scheduler.notified().await;

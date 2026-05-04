@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::scope::ScopeTree;
-use crate::uri_id::{intern, UriId};
+use crate::uri_id::{intern_uri, UriId};
 use crate::util::{LineIndex, LuaSource};
 use tower_lsp_server::ls_types::Uri;
 
@@ -56,7 +56,7 @@ pub(crate) fn find_document<'a>(
     documents: &'a HashMap<UriId, Document>,
     uri: &Uri,
 ) -> Option<(UriId, &'a Document)> {
-    let uri_id = intern(uri);
+    let uri_id = intern_uri(uri);
     documents.get(&uri_id).map(|doc| (uri_id, doc))
 }
 
