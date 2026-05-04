@@ -27,12 +27,14 @@ local ClassB1 = class("ClassB1")
 
 ClassB1.s_bbb = 123
 
-function ClassB1:bbb()
-    self.m_bbb = 1
+--- bbb
+---@param bb number
+function ClassB1:bbb(bb)
+    self.m_bbb = bb
     print(self.__class_name .. " bbb")
 end
 
 function ClassB1:test_bbb()
-    self:bbb()
+    self:bbb(456)
     print(self.__class_name .. self.m_bbb, self.s_bbb)
 end
