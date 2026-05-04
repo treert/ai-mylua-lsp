@@ -9,6 +9,104 @@ use test_helpers::*;
 use mylua_lsp::type_system::{KnownType, TypeFact};
 
 #[test]
+fn local_table_field_return_infers_field_type() {
+    let src = r#"
+local t = { a = 1 }
+local function get_a()
+    return t.a
+end
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "local_table_field_return.lua");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
+    let fs = summary.function_summaries.values()
+        .find(|fs| fs.name == "get_a")
+        .expect("get_a function");
+
+    assert!(
+        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        "local table field return should infer number, got: {:?}",
+        fs.signature.returns
+    );
+}
+
+#[test]
+fn local_table_field_call_arg_unifies_generic_return() {
+    let src = r#"
+---@generic T
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+
+local t = { a = 1 }
+local function get_a()
+    return identity(t.a)
+end
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "local_table_field_arg.lua");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
+    let fs = summary.function_summaries.values()
+        .find(|fs| fs.name == "get_a")
+        .expect("get_a function");
+
+    assert!(
+        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        "local table field call arg should unify generic return to number, got: {:?}",
+        fs.signature.returns
+    );
+}
+
+#[test]
+fn nested_local_table_field_return_infers_leaf_type() {
+    let src = r#"
+local t = { a = { b = 1 } }
+local function get_b()
+    return t.a.b
+end
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "nested_local_table_field_return.lua");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
+    let fs = summary.function_summaries.values()
+        .find(|fs| fs.name == "get_b")
+        .expect("get_b function");
+
+    assert!(
+        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        "nested local table field return should infer number, got: {:?}",
+        fs.signature.returns
+    );
+}
+
+#[test]
+fn nested_local_table_field_call_arg_unifies_generic_return() {
+    let src = r#"
+---@generic T
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+
+local t = { a = { b = 1 } }
+local function get_b()
+    return identity(t.a.b)
+end
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "nested_local_table_field_arg.lua");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
+    let fs = summary.function_summaries.values()
+        .find(|fs| fs.name == "get_b")
+        .expect("get_b function");
+
+    assert!(
+        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        "nested local table field call arg should unify generic return to number, got: {:?}",
+        fs.signature.returns
+    );
+}
+
+#[test]
 fn local_binding_anchors_owner() {
     let src = r#"
 local t = { name = "hello" }

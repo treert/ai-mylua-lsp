@@ -92,7 +92,10 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
             infer_call_return_type(ctx, node, depth)
         }
 
-        "field_expression" => {
+        "variable" | "field_expression"
+            if node.child_by_field_name("object").is_some()
+                && node.child_by_field_name("field").is_some() =>
+        {
             infer_field_expression_type(ctx, node, depth)
         }
 
@@ -169,6 +172,12 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
         "string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
+        "variable" | "field_expression"
+            if node.child_by_field_name("object").is_some()
+                && node.child_by_field_name("field").is_some() =>
+        {
+            infer_field_expression_type(ctx, node, 0)
+        }
         "variable" | "identifier" => {
             let text = node_text(node, ctx.source);
             if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
@@ -428,7 +437,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
 fn infer_field_expression_type(
     ctx: &BuildContext,
     node: tree_sitter::Node,
-    _depth: usize,
+    depth: usize,
 ) -> TypeFact {
     let base = match node.child_by_field_name("object") {
         Some(b) => b,
@@ -439,31 +448,50 @@ fn infer_field_expression_type(
         None => return TypeFact::Unknown,
     };
 
-    let base_text = node_text(base, ctx.source);
     let field_name = node_text(field, ctx.source).to_string();
+    let base_fact = infer_field_base_type(ctx, base, depth + 1);
 
-    // If base is a known local with a table shape, look up the field directly
-    if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
-        if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
-            if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                if let Some(fi) = shape.fields.get(&field_name) {
-                    return fi.type_fact.clone();
-                }
+    if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
+        if let Some(shape) = ctx.table_shapes.get(shape_id) {
+            if let Some(fi) = shape.fields.get(&field_name) {
+                return fi.type_fact.clone();
             }
-        }
-        if let Some(ref tf) = decl.type_fact {
-            return TypeFact::Stub(SymbolicStub::FieldOf {
-                base: Box::new(tf.clone()),
-                field: field_name,
-            });
         }
     }
 
     TypeFact::Stub(SymbolicStub::FieldOf {
-        base: Box::new(TypeFact::Stub(SymbolicStub::GlobalRef {
-            name: base_text.to_string(),
-        })),
+        base: Box::new(base_fact),
         field: field_name,
+    })
+}
+
+fn infer_field_base_type(
+    ctx: &BuildContext,
+    base: tree_sitter::Node,
+    depth: usize,
+) -> TypeFact {
+    if depth > MAX_TABLE_SHAPE_DEPTH {
+        return TypeFact::Unknown;
+    }
+
+    if matches!(base.kind(), "variable" | "field_expression")
+        && base.child_by_field_name("object").is_some()
+        && base.child_by_field_name("field").is_some()
+    {
+        return infer_field_expression_type(ctx, base, depth);
+    }
+
+    let base_text = node_text(base, ctx.source);
+    if matches!(base.kind(), "variable" | "identifier") {
+        if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
+            if let Some(ref tf) = decl.type_fact {
+                return tf.clone();
+            }
+        }
+    }
+
+    TypeFact::Stub(SymbolicStub::GlobalRef {
+        name: base_text.to_string(),
     })
 }
 
