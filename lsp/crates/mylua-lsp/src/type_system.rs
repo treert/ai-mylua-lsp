@@ -72,6 +72,14 @@ pub enum SymbolicStub {
         generic_args: Vec<TypeFact>,
     },
 
+    /// `local x = func_name(...)` where `func_name` is a global function.
+    /// Resolve to the function's declared/inferred return type.
+    FunctionCallReturn {
+        func_name: std::string::String,
+        #[serde(default)]
+        call_arg_types: Vec<TypeFact>,
+    },
+
     /// Reference to a global name, resolved via GlobalShard.
     GlobalRef { name: std::string::String },
 
@@ -293,6 +301,7 @@ impl fmt::Display for SymbolicStub {
         match self {
             Self::RequireRef { module_path } => write!(f, "require(\"{}\")", module_path),
             Self::CallReturn { base, func_name, .. } => write!(f, "{}.{}()", base, func_name),
+            Self::FunctionCallReturn { func_name, .. } => write!(f, "{}()", func_name),
             Self::GlobalRef { name } => write!(f, "global:{}", name),
             Self::TypeRef { name } => write!(f, "type:{}", name),
             Self::FieldOf { base, field } => write!(f, "{}.{}", base, field),

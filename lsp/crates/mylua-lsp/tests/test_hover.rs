@@ -1413,6 +1413,46 @@ mm.hi()
 }
 
 #[test]
+fn hover_cross_file_global_function_returned_local_table_field() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "provider.lua",
+            r#"local tt = {
+    a = 1,
+}
+
+function test_g()
+    return tt
+end
+"#,
+        ),
+        (
+            "main.lua",
+            r#"local tt = test_g()
+print(tt.a)
+"#,
+        ),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
+
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on field returned by cross-file global function should resolve");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("Type: `number`"),
+        "hover on `tt.a` should show number from provider table, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_local_function_expression_does_not_escape_block_scope() {
     let src = r#"do
     local make = function()

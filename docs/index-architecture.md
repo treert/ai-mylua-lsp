@@ -91,6 +91,7 @@
 |---------|---------------------|
 | 字面量：string, number, … | require 返回值：`RequireRef("mod")` |
 | 本文件内函数调用返回 | 跨文件函数调用：`CallReturn(ref, "func")` |
+| 本文件内裸函数调用返回 | 跨文件全局裸函数调用：`FunctionCallReturn("func")` |
 | table 字面值构造 | 全局变量引用：`GlobalRef("Mgr")` |
 | Emmy 注解声明的类型 | Emmy 类型名引用：`TypeRef("PlayerData")` |
 
@@ -150,6 +151,13 @@ hover 在 p.name 上
   → 解析 RequireRef("protocol") → protocol.lua 的 Summary
   → 查 FunctionSummary["new_player"] → 返回类型
   → 在返回类型中查字段 "name" → string
+  → 返回结果
+
+hover 在 tt.a 上（`local tt = test_g()`，`test_g` 定义在其他文件）
+  → 查本文件 ScopeTree → tt 的类型 = FunctionCallReturn("test_g")
+  → 解析 GlobalShard["test_g"] → 定义文件的 FunctionSummary
+  → 解析返回类型，并把 per-file TableShapeId 的 owner 设为定义文件 UriId
+  → 在返回 table shape 中查字段 "a" → number
   → 返回结果
 ```
 

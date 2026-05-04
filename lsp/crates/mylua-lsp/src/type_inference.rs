@@ -351,7 +351,10 @@ fn infer_call_return_fact(
             };
         }
     }
-    TypeFact::Unknown
+    TypeFact::Stub(SymbolicStub::FunctionCallReturn {
+        func_name: callee_text.to_string(),
+        call_arg_types: collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index),
+    })
 }
 
 /// Best-effort conversion of a base expression's inferred `TypeFact`

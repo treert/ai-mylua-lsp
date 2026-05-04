@@ -431,7 +431,10 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
         }
     }
 
-    TypeFact::Unknown
+    TypeFact::Stub(SymbolicStub::FunctionCallReturn {
+        func_name: callee_text.to_string(),
+        call_arg_types: collect_call_arg_types(ctx, node),
+    })
 }
 
 fn infer_field_expression_type(

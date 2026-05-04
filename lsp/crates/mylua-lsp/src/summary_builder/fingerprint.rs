@@ -135,6 +135,14 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
                 hash_type_fact(arg, hasher);
             }
         }
+        SymbolicStub::FunctionCallReturn { func_name, call_arg_types } => {
+            "function_call_return".hash(hasher);
+            func_name.hash(hasher);
+            call_arg_types.len().hash(hasher);
+            for arg in call_arg_types {
+                hash_type_fact(arg, hasher);
+            }
+        }
         SymbolicStub::GlobalRef { name } => {
             "global_ref".hash(hasher);
             name.hash(hasher);

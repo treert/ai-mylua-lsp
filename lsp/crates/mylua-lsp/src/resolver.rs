@@ -331,6 +331,10 @@ fn resolve_stub(
             resolve_call_return(base, func_name, generic_args, call_arg_types, agg, depth, visited)
         }
 
+        SymbolicStub::FunctionCallReturn { func_name, call_arg_types } => {
+            resolve_function_call_return(func_name, call_arg_types, agg, depth, visited)
+        }
+
         SymbolicStub::FieldOf { base, field } => {
             resolve_field_access(base, field, agg, depth, visited)
         }
@@ -403,6 +407,40 @@ fn resolve_global(
         resolved.owner_uri_id = Some(candidate.source_uri_id());
     }
     resolved
+}
+
+fn resolve_function_call_return(
+    func_name: &str,
+    call_arg_types: &[TypeFact],
+    agg: &WorkspaceAggregation,
+    depth: usize,
+    visited: &mut HashSet<String>,
+) -> ResolvedType {
+    let candidate = match agg.global_shard.get(func_name) {
+        Some(candidates) if !candidates.is_empty() => candidates[0].clone(),
+        _ => return ResolvedType::unknown(),
+    };
+
+    let resolved = resolve_recursive(&candidate.type_fact, agg, depth + 1, visited);
+    let owner_uri_id = resolved.source_uri_id().unwrap_or(candidate.source_uri_id());
+    let ret = match &resolved.type_fact {
+        TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
+        TypeFact::Known(KnownType::FunctionRef(fid)) => {
+            agg.summary_by_id(owner_uri_id)
+                .and_then(|summary| summary.function_summaries.get(fid))
+                .and_then(|fs| function_return_with_call_args(fs, call_arg_types))
+        }
+        _ => None,
+    };
+
+    let Some(ret) = ret else {
+        return ResolvedType::unknown();
+    };
+    let mut ret_resolved = resolve_recursive(&ret, agg, depth + 1, visited);
+    if ret_resolved.source_uri_id().is_none() {
+        ret_resolved.owner_uri_id = Some(owner_uri_id);
+    }
+    ret_resolved
 }
 
 /// Fallback for `resolve_field_chain`: try a qualified name (e.g. `UE4.Foo`)
