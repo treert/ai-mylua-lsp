@@ -1,6 +1,7 @@
 use crate::scope::{ScopeDecl, ScopeTree};
 use crate::types::DefKind;
 use crate::util::node_text;
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use tower_lsp_server::ls_types::*;
 
 /// Warn on locals that are declared but never referenced. Uses the
@@ -17,7 +18,7 @@ pub(super) fn check_unused_locals(
 ) {
     // Count references per (name, decl_byte) by walking the tree
     // and resolving each identifier through the scope tree.
-    let mut ref_count: std::collections::HashMap<(String, usize), usize> =
+    let mut ref_count: std::collections::HashMap<(LuaSymbol, usize), usize> =
         std::collections::HashMap::new();
     let mut cursor = root.walk();
     count_identifier_references(&mut cursor, source, scope_tree, &mut ref_count);
@@ -40,7 +41,7 @@ pub(super) fn check_unused_locals(
         {
             continue;
         }
-        let key = (decl.name.clone(), decl.decl_byte);
+        let key = (decl.name, decl.decl_byte);
         if ref_count.get(&key).copied().unwrap_or(0) == 0 {
             diagnostics.push(Diagnostic {
                 range: decl.selection_range.into(),
@@ -69,7 +70,7 @@ fn count_identifier_references(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     scope_tree: &ScopeTree,
-    ref_count: &mut std::collections::HashMap<(String, usize), usize>,
+    ref_count: &mut std::collections::HashMap<(LuaSymbol, usize), usize>,
 ) {
     let node = cursor.node();
     if matches!(node.kind(), "identifier" | "varargs" | "vararg_expression") {
@@ -84,7 +85,7 @@ fn count_identifier_references(
             // decl.decl_byte's occurrence is the binding, not a use.
             if byte != decl.decl_byte {
                 *ref_count
-                    .entry((name.to_string(), decl.decl_byte))
+                    .entry((intern_lua_symbol(name), decl.decl_byte))
                     .or_insert(0) += 1;
             }
         }

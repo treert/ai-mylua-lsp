@@ -326,16 +326,16 @@ fn collect_scope_completions(
         return;
     };
     for decl in doc.scope_tree.visible_locals(offset) {
-        if decl.name.starts_with(prefix) && !seen.contains(&decl.name) {
-            seen.insert(decl.name.clone());
+        if decl.name.as_str().starts_with(prefix) && !seen.contains(decl.name.as_str()) {
+            seen.insert(decl.name.to_string());
             let kind = match decl.kind {
                 crate::types::DefKind::LocalFunction => CompletionItemKind::FUNCTION,
                 _ => CompletionItemKind::VARIABLE,
             };
             items.push(CompletionItem {
-                label: decl.name.clone(),
+                label: decl.name.to_string(),
                 kind: Some(kind),
-                data: Some(resolve_data("local", Some(uri_id), &decl.name)),
+                data: Some(resolve_data("local", Some(uri_id), decl.name.as_str())),
                 ..Default::default()
             });
         }

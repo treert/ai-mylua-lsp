@@ -80,7 +80,7 @@ pub fn search_workspace_symbols(
 
     // --- type_shard: classes / enums / aliases ---
     for (name, candidates) in &index.type_shard {
-        if !matches_query(name, &query_lower, query.is_empty()) {
+        if !matches_query(name.as_str(), &query_lower, query.is_empty()) {
             continue;
         }
         for candidate in candidates {
@@ -100,13 +100,13 @@ pub fn search_workspace_symbols(
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
-                        .find(|td| td.name.as_str() == name)
+                        .find(|td| td.name == *name)
                         .and_then(|td| td.name_range)
                 })
                 .unwrap_or(candidate.range);
             #[allow(deprecated)]
             results.push(SymbolInformation {
-                name: name.clone(),
+                name: name.to_string(),
                 kind,
                 tags: None,
                 deprecated: None,

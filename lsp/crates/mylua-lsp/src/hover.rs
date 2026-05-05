@@ -128,7 +128,7 @@ pub fn hover(
     }
 
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
-    if let Some(candidates) = index.type_shard.get(ident_text) {
+    if let Some(candidates) = index.type_candidates(ident_text) {
         if let Some(candidate) = candidates.first() {
             if index.summary_by_id(candidate.source_uri_id()).is_some() {
                 if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
@@ -213,7 +213,7 @@ pub fn hover(
             _ => crate::types::DefKind::GlobalVariable,
         };
         Some((crate::types::Definition {
-            name: candidate.name.clone(),
+            name: candidate.name.to_string(),
             kind: def_kind,
             range: candidate.range,
             selection_range: candidate.selection_range,
@@ -254,7 +254,7 @@ fn hover_type_name(
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
-    let candidates = index.type_shard.get(name)?;
+    let candidates = index.type_candidates(name)?;
     let candidate = candidates.first()?;
     index.summary_by_id(candidate.source_uri_id())?;
     let summary = index.summary_by_id(candidate.source_uri_id())?;

@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol, LuaSymbol};
 use crate::summary::{DocumentSummary, GlobalContributionKind};
 use crate::type_system::TypeFact;
 use crate::uri_id::{priority_uri as uri_priority, UriId, UriPriority};
@@ -17,21 +18,21 @@ pub struct WorkspaceAggregation {
     /// Global name tree — candidate definitions from all files.
     pub global_shard: GlobalShard,
     /// Emmy type name → candidate definitions.
-    pub type_shard: HashMap<String, Vec<TypeCandidate>>,
+    pub type_shard: HashMap<LuaSymbol, Vec<TypeCandidate>>,
 
     /// Module index: last_segment → Vec<(full_module_name, UriId)>.
     /// Used by `resolve_module_to_id` for O(1) last-segment lookup
     /// followed by longest-suffix matching among candidates.
-    module_index: HashMap<String, Vec<(String, UriId)>>,
+    module_index: HashMap<LuaSymbol, Vec<(LuaSymbol, UriId)>>,
     /// Require path aliases (e.g. `{"@": "src/"}`), applied during module resolution.
     /// The longest matching prefix alias is chosen.
-    pub require_aliases: HashMap<String, String>,
+    pub require_aliases: HashMap<LuaSymbol, LuaSymbol>,
 }
 
 /// A single candidate definition for a global name.
 #[derive(Debug, Clone)]
 pub struct GlobalCandidate {
-    pub name: String,
+    pub name: LuaSymbol,
     pub kind: GlobalContributionKind,
     pub type_fact: TypeFact,
     pub range: ByteRange,
@@ -67,7 +68,7 @@ pub struct GlobalNode {
     /// Empty when this node is a structural-only ancestor of deeper entries.
     pub candidates: Vec<GlobalCandidate>,
     /// Child nodes keyed by the next segment name.
-    pub children: HashMap<String, GlobalNode>,
+    pub children: HashMap<LuaSymbol, GlobalNode>,
 }
 
 /// Tree-structured global shard, replacing the flat
@@ -78,10 +79,10 @@ pub struct GlobalNode {
 #[derive(Debug)]
 pub struct GlobalShard {
     /// Top-level entries: `"print"`, `"UE4"`, `"Foo"`, etc.
-    roots: HashMap<String, GlobalNode>,
+    roots: HashMap<LuaSymbol, GlobalNode>,
     /// Reverse index: UriId → full-path strings contributed by that URI.
     /// Maintained by `push_candidate` / `remove_by_uri` / `clear`.
-    uri_to_paths: HashMap<UriId, Vec<String>>,
+    uri_to_paths: HashMap<UriId, Vec<LuaSymbol>>,
 }
 
 /// Split a path string on `.` and `:` separators.
@@ -138,11 +139,11 @@ impl GlobalNode {
             // original separator (`:` vs `.`). The trie merges both
             // separator types into a single `children` map, so
             // reconstructing from the tree would always produce `.`.
-            let key = self.candidates[0].name.clone();
+            let key = self.candidates[0].name.to_string();
             out.push((key, &self.candidates));
         }
         for (seg, child) in &self.children {
-            let child_path = format!("{}.{}", prefix, seg);
+            let child_path = format!("{}.{}", prefix, seg.as_str());
             child.collect_entries(&child_path, out);
         }
     }
@@ -182,9 +183,11 @@ impl GlobalShard {
     /// Navigate to a node at the given path.
     pub fn get_node(&self, path: &str) -> Option<&GlobalNode> {
         let (root, segments) = split_global_path(path);
-        let mut node = self.roots.get(root)?;
+        let root = get_lua_symbol(root)?;
+        let mut node = self.roots.get(&root)?;
         for seg in segments {
-            node = node.children.get(seg)?;
+            let seg = get_lua_symbol(seg)?;
+            node = node.children.get(&seg)?;
         }
         Some(node)
     }
@@ -192,9 +195,11 @@ impl GlobalShard {
     /// Navigate to a node at the given path (mutable).
     fn get_node_mut(&mut self, path: &str) -> Option<&mut GlobalNode> {
         let (root, segments) = split_global_path(path);
-        let mut node = self.roots.get_mut(root)?;
+        let root = get_lua_symbol(root)?;
+        let mut node = self.roots.get_mut(&root)?;
         for seg in segments {
-            node = node.children.get_mut(seg)?;
+            let seg = get_lua_symbol(seg)?;
+            node = node.children.get_mut(&seg)?;
         }
         Some(node)
     }
@@ -206,16 +211,16 @@ impl GlobalShard {
         self.uri_to_paths
             .entry(candidate.source_uri_id())
             .or_default()
-            .push(path.to_string());
+            .push(intern_lua_symbol(path));
 
         // Walk/create nodes.
         let (root, segments) = split_global_path(path);
         let mut node = self.roots
-            .entry(root.to_string())
+            .entry(intern_lua_symbol(root))
             .or_insert_with(GlobalNode::new);
         for seg in segments {
             node = node.children
-                .entry(seg.to_string())
+                .entry(intern_lua_symbol(seg))
                 .or_insert_with(GlobalNode::new);
         }
         node.candidates.push(candidate);
@@ -268,7 +273,7 @@ impl GlobalShard {
     pub fn iter_all_entries(&self) -> Vec<(String, &Vec<GlobalCandidate>)> {
         let mut out = Vec::new();
         for (root_name, root_node) in &self.roots {
-            root_node.collect_entries(root_name, &mut out);
+            root_node.collect_entries(root_name.as_str(), &mut out);
         }
         out
     }
@@ -282,8 +287,8 @@ impl GlobalShard {
     pub fn iter_roots_with_prefix(&self, prefix: &str) -> Vec<(String, &Vec<GlobalCandidate>)> {
         let mut out = Vec::new();
         for (root_name, root_node) in &self.roots {
-            if root_name.starts_with(prefix) {
-                root_node.collect_entries(root_name, &mut out);
+            if root_name.as_str().starts_with(prefix) {
+                root_node.collect_entries(root_name.as_str(), &mut out);
             }
         }
         out
@@ -303,7 +308,7 @@ impl Default for GlobalShard {
 /// A single candidate definition for an Emmy type name.
 #[derive(Debug, Clone)]
 pub struct TypeCandidate {
-    pub name: String,
+    pub name: LuaSymbol,
     pub kind: crate::summary::TypeDefinitionKind,
     source_uri_id: UriId,
     pub range: ByteRange,
@@ -348,6 +353,15 @@ impl WorkspaceAggregation {
         self.summaries.len()
     }
 
+    pub fn type_candidates(&self, name: &str) -> Option<&Vec<TypeCandidate>> {
+        let name = get_lua_symbol(name)?;
+        self.type_shard.get(&name)
+    }
+
+    pub fn contains_type(&self, name: &str) -> bool {
+        self.type_candidates(name).is_some()
+    }
+
     /// Build the initial global index atomically from a complete set of
     /// file summaries. This is the cold-start path: all summaries are
     /// available at once, so we skip `remove_contributions` (nothing to
@@ -383,7 +397,7 @@ impl WorkspaceAggregation {
             for (uri_id, summary) in summaries {
                 for gc in &summary.global_contributions {
                     global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
-                        name: gc.name.to_string(),
+                        name: gc.name,
                         kind: gc.kind.clone(),
                         type_fact: gc.type_fact.clone(),
                         range: gc.range,
@@ -394,10 +408,10 @@ impl WorkspaceAggregation {
 
                 for td in &summary.type_definitions {
                     let candidates = type_shard
-                        .entry(td.name.to_string())
+                        .entry(td.name)
                         .or_default();
                     candidates.push(TypeCandidate {
-                        name: td.name.to_string(),
+                        name: td.name,
                         kind: td.kind.clone(),
                         source_uri_id: *uri_id,
                         range: td.range,
@@ -439,7 +453,7 @@ impl WorkspaceAggregation {
 
         for gc in &summary.global_contributions {
             self.global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
-                name: gc.name.to_string(),
+                name: gc.name,
                 kind: gc.kind.clone(),
                 type_fact: gc.type_fact.clone(),
                 range: gc.range,
@@ -456,10 +470,10 @@ impl WorkspaceAggregation {
 
         for td in &summary.type_definitions {
             let candidates = self.type_shard
-                .entry(td.name.to_string())
+                .entry(td.name)
                 .or_default();
             candidates.push(TypeCandidate {
-                name: td.name.to_string(),
+                name: td.name,
                 kind: td.kind.clone(),
                 source_uri_id: uri_id,
                 range: td.range,
@@ -491,23 +505,24 @@ impl WorkspaceAggregation {
     /// init.lua handled).
     pub fn set_require_mapping(&mut self, module_name: String, uri_id: UriId) {
         use crate::workspace_scanner::module_last_segment;
-        let last_seg = module_last_segment(&module_name).to_string();
+        let last_seg = intern_lua_symbol(module_last_segment(&module_name));
+        let module_name = intern_lua_symbol(&module_name);
         let entries = self.module_index.entry(last_seg).or_default();
         // Avoid duplicates: if this exact (module_name, uri_id) pair exists, skip.
-        if !entries.iter().any(|(m, id)| m == &module_name && *id == uri_id) {
+        if !entries.iter().any(|(m, id)| *m == module_name && *id == uri_id) {
             entries.push((module_name, uri_id));
         }
     }
 
     /// Get all registered module names (for completion).
     pub fn all_module_names(&self) -> Vec<String> {
-        let mut names: HashSet<String> = HashSet::new();
+        let mut names: HashSet<LuaSymbol> = HashSet::new();
         for entries in self.module_index.values() {
             for (module_name, _) in entries {
-                names.insert(module_name.clone());
+                names.insert(*module_name);
             }
         }
-        names.into_iter().collect()
+        names.into_iter().map(|name| name.to_string()).collect()
     }
 
     fn remove_contributions(&mut self, uri_id: UriId) {
@@ -574,17 +589,17 @@ impl WorkspaceAggregation {
         let mut best_len = 0;
 
         for (alias, replacement) in &self.require_aliases {
-            if alias.is_empty() {
+            if alias.as_str().is_empty() {
                 continue;
             }
-            if module_path.starts_with(alias.as_str()) && alias.len() > best_len {
+            if module_path.starts_with(alias.as_str()) && alias.as_str().len() > best_len {
                 // Ensure the alias matches at a segment boundary:
                 // either the alias covers the entire path, or the
                 // next char after the alias is `.`
-                let rest = &module_path[alias.len()..];
+                let rest = &module_path[alias.as_str().len()..];
                 if rest.is_empty() || rest.starts_with('.') {
                     best_alias = Some((alias.as_str(), replacement.as_str()));
-                    best_len = alias.len();
+                    best_len = alias.as_str().len();
                 }
             }
         }
@@ -610,17 +625,80 @@ impl WorkspaceAggregation {
         use crate::workspace_scanner::module_last_segment;
 
         let query_last = module_last_segment(module_path);
-        let candidates = self.module_index.get(query_last)?;
+        let query_last = get_lua_symbol(query_last)?;
+        let candidates = self.module_index.get(&query_last)?;
         let dot_query = format!(".{}", module_path);
 
         for (candidate_name, candidate_uri_id) in candidates {
-            if candidate_name == module_path
-                || candidate_name.ends_with(dot_query.as_str())
+            if candidate_name.as_str() == module_path
+                || candidate_name.as_str().ends_with(dot_query.as_str())
             {
                 return Some(*candidate_uri_id);
             }
         }
 
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+    use crate::summary::TypeDefinitionKind;
+    use crate::uri_id::intern_uri;
+
+    fn byte_range() -> ByteRange {
+        ByteRange {
+            start_byte: 0,
+            end_byte: 1,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 1,
+        }
+    }
+
+    fn assert_symbol(_: LuaSymbol) {}
+
+    #[test]
+    fn long_lived_aggregation_names_use_symbols_but_queries_stay_string_facing() {
+        let uri = "file:///aggregation_symbols.lua".parse().unwrap();
+        let uri_id = intern_uri(&uri);
+        let candidate = GlobalCandidate {
+            name: intern_lua_symbol("Game.Player.new"),
+            kind: GlobalContributionKind::Function,
+            type_fact: TypeFact::Unknown,
+            range: byte_range(),
+            selection_range: byte_range(),
+            source_uri_id: uri_id,
+        };
+        assert_symbol(candidate.name);
+
+        let mut shard = GlobalShard::new();
+        shard.push_candidate("Game.Player.new", candidate);
+
+        assert!(shard.contains_key("Game.Player.new"));
+        assert_eq!(shard.iter_all_entries()[0].0, "Game.Player.new");
+        assert_symbol(*shard.uri_to_paths.get(&uri_id).unwrap().first().unwrap());
+
+        let type_candidate = TypeCandidate {
+            name: intern_lua_symbol("Player"),
+            kind: TypeDefinitionKind::Class,
+            source_uri_id: uri_id,
+            range: byte_range(),
+        };
+        assert_symbol(type_candidate.name);
+
+        let mut agg = WorkspaceAggregation::new();
+        agg.type_shard
+            .insert(intern_lua_symbol("Player"), vec![type_candidate]);
+        agg.require_aliases
+            .insert(intern_lua_symbol("@game"), intern_lua_symbol("src.game"));
+        agg.set_require_mapping("src.game.player".to_string(), uri_id);
+
+        assert!(agg.type_shard.contains_key(&intern_lua_symbol("Player")));
+        assert_eq!(agg.all_module_names(), vec!["src.game.player".to_string()]);
+        assert_eq!(agg.resolve_module_to_id("@game.player"), Some(uri_id));
     }
 }

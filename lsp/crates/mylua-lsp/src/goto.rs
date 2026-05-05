@@ -86,7 +86,7 @@ fn goto_definition_inner(
     }
 
     // Check if ident is a type name → jump to its definition
-    if let Some(candidates) = index.type_shard.get(name) {
+    if let Some(candidates) = index.type_candidates(name) {
         if let Some(candidate) = candidates.first() {
             let candidate_uri = resolve_uri(candidate.source_uri_id());
             return Some(GotoDefinitionResponse::Scalar(Location {
@@ -227,7 +227,7 @@ fn type_definition_for_name(
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let candidates = index.type_shard.get(name)?;
+    let candidates = index.type_candidates(name)?;
     if candidates.is_empty() {
         return None;
     }

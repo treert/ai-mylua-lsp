@@ -104,14 +104,14 @@ pub fn build_file_analysis(
 fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
     // Collect class name → shape_id from local declarations that were
     // explicitly bound by the immediately preceding `---@class`.
-    let shape_map: HashMap<String, TableShapeId> = ctx.scopes.iter()
+    let shape_map: HashMap<LuaSymbol, TableShapeId> = ctx.scopes.iter()
         .flat_map(|s| s.declarations.iter())
         .filter_map(|decl| {
             let class_name = decl.bound_class.as_ref()?;
             let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact else {
                 return None;
             };
-            Some((class_name.clone(), *sid))
+            Some((*class_name, *sid))
         })
         .collect();
 
@@ -119,7 +119,7 @@ fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
         if td.kind != TypeDefinitionKind::Class || td.anchor_shape_id.is_some() {
             continue;
         }
-        if let Some(&sid) = shape_map.get(td.name.as_str()) {
+        if let Some(&sid) = shape_map.get(&td.name) {
             td.anchor_shape_id = Some(sid);
         }
     }

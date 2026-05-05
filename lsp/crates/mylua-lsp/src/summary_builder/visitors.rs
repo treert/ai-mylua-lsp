@@ -171,7 +171,7 @@ fn visit_nested_block_inner(
             if let Some(name_node) = node.child_by_field_name("name") {
                 let db = name_node.start_byte();
                 ctx.add_scoped_decl(ScopeDecl {
-                    name: node_text(name_node, ctx.source).to_string(),
+                    name: node_text(name_node, ctx.source).into(),
                     kind: DefKind::ForVariable,
                     decl_byte: db,
                     visible_after_byte: db,
@@ -190,7 +190,7 @@ fn visit_nested_block_inner(
                         if id_node.kind() == "identifier" {
                             let db = id_node.start_byte();
                             ctx.add_scoped_decl(ScopeDecl {
-                                name: node_text(id_node, ctx.source).to_string(),
+                                name: node_text(id_node, ctx.source).into(),
                                 kind: DefKind::ForVariable,
                                 decl_byte: db,
                                 visible_after_byte: db,
@@ -322,20 +322,21 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         // Phase 2: only the first local immediately following the class
         // comment gets the binding, even when it has no initializer.
         let var_bound_class = if i == 0 { pending_class.take() } else { None };
+        let var_bound_class_symbol = var_bound_class.as_deref().map(intern_lua_symbol);
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
             if let Some(ref type_expr) = pending_type {
                 let type_fact = emmy_type_to_fact(type_expr);
                 ctx.add_scoped_decl(ScopeDecl {
-                    name: name.clone(),
+                    name: name.as_str().into(),
                     kind: DefKind::LocalVariable,
                     decl_byte: name_node.start_byte(),
                     visible_after_byte: node.end_byte(),
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: range,
                     type_fact: Some(type_fact),
-                    bound_class: var_bound_class,
+                    bound_class: var_bound_class_symbol,
                     is_emmy_annotated: true,
                 });
                 continue;
@@ -348,14 +349,14 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         if let Some(ref returns) = multi_return_types {
             let type_fact = returns.get(i).cloned().unwrap_or(TypeFact::Unknown);
             ctx.add_scoped_decl(ScopeDecl {
-                name: name.clone(),
+                name: name.as_str().into(),
                 kind: DefKind::LocalVariable,
                 decl_byte: name_node.start_byte(),
                 visible_after_byte: node.end_byte(),
                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                 selection_range: range,
                 type_fact: Some(type_fact),
-                bound_class: var_bound_class,
+                bound_class: var_bound_class_symbol,
                 is_emmy_annotated: false,
             });
             continue;
@@ -367,14 +368,14 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     module_path: module_path.into(),
                 });
                 ctx.add_scoped_decl(ScopeDecl {
-                    name: name.clone(),
+                    name: name.as_str().into(),
                     kind: DefKind::LocalVariable,
                     decl_byte: name_node.start_byte(),
                     visible_after_byte: node.end_byte(),
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                     selection_range: range,
                     type_fact: Some(require_type_fact),
-                    bound_class: var_bound_class,
+                    bound_class: var_bound_class_symbol,
                     is_emmy_annotated: false,
                 });
                 continue;
@@ -428,14 +429,14 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
             }
             ctx.add_scoped_decl(ScopeDecl {
-                name: name.clone(),
+                name: name.as_str().into(),
                 kind: DefKind::LocalVariable,
                 decl_byte: name_node.start_byte(),
                 visible_after_byte: node.end_byte(),
                 range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
                 selection_range: range,
                 type_fact: Some(final_type_fact.clone()),
-                bound_class: var_bound_class,
+                bound_class: var_bound_class_symbol,
                 is_emmy_annotated: false,
             });
 
@@ -460,14 +461,14 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         }
 
         ctx.add_scoped_decl(ScopeDecl {
-            name: name.clone(),
+            name: name.as_str().into(),
             kind: DefKind::LocalVariable,
             decl_byte: name_node.start_byte(),
             visible_after_byte: node.end_byte(),
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             selection_range: range,
             type_fact: None,
-            bound_class: var_bound_class,
+            bound_class: var_bound_class_symbol,
             is_emmy_annotated: false,
         });
     }
@@ -631,7 +632,7 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.function_summaries.insert(func_id, fs);
 
     ctx.add_scoped_decl(ScopeDecl {
-        name: name.clone(),
+        name: name.as_str().into(),
         kind: DefKind::LocalFunction,
         decl_byte: name_node.start_byte(),
         visible_after_byte: name_node.start_byte(),
@@ -1579,14 +1580,14 @@ fn visit_function_body(
         };
 
         ctx.add_scoped_decl(ScopeDecl {
-            name: "self".to_string(),
+            name: "self".into(),
             kind: DefKind::Parameter,
             decl_byte: db,
             visible_after_byte: db,
             range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             type_fact: self_type,
-            bound_class: self_bound_class,
+            bound_class: self_bound_class.as_deref().map(intern_lua_symbol),
             is_emmy_annotated: false,
         });
     }
@@ -1631,7 +1632,7 @@ fn register_params_into_scope(
                 // `...` parameter — register as a vararg decl
                 let db = child.start_byte();
                 ctx.add_scoped_decl(ScopeDecl {
-                    name: "...".to_string(),
+                    name: "...".into(),
                     kind: DefKind::Parameter,
                     decl_byte: db,
                     visible_after_byte: db,
@@ -1651,7 +1652,7 @@ fn register_params_into_scope(
                 if !child.is_named() && node_text(child, ctx.source) == "..." {
                     let db = child.start_byte();
                     ctx.add_scoped_decl(ScopeDecl {
-                        name: "...".to_string(),
+                        name: "...".into(),
                         kind: DefKind::Parameter,
                         decl_byte: db,
                         visible_after_byte: db,
@@ -1685,7 +1686,7 @@ fn register_single_param(
         .filter(|tf| *tf != TypeFact::Unknown);
     let db = id_node.start_byte();
     ctx.add_scoped_decl(ScopeDecl {
-        name,
+        name: name.as_str().into(),
         kind: DefKind::Parameter,
         decl_byte: db,
         visible_after_byte: db,

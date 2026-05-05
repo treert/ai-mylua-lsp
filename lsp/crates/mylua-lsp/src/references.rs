@@ -134,7 +134,7 @@ pub fn find_references_by_uri_id(
             });
             // Also scan Emmy annotations for references to this name
             // (e.g. if it's also a type name)
-            if index.type_shard.contains_key(name.as_str()) {
+            if index.contains_type(name.as_str()) {
                 collect_emmy_type_references(name, all_docs, &mut locations);
             }
         }
@@ -172,7 +172,7 @@ pub fn find_references_by_uri_id(
         Identity::TypeName { name } => {
             // Declarations from type_shard
             if include_declaration {
-                if let Some(candidates) = index.type_shard.get(name.as_str()) {
+                if let Some(candidates) = index.type_candidates(name.as_str()) {
                     for candidate in candidates {
                         locations.push(ReferenceLocation {
                             uri_id: candidate.source_uri_id(),
@@ -268,7 +268,7 @@ fn identify_at_cursor(
         name_owned = extract_word_at(doc.text(), byte_offset)?;
         name = name_owned.as_str();
         // If it's a word in an emmy annotation and a known type, treat as TypeName
-        if index.type_shard.contains_key(name) {
+        if index.contains_type(name) {
             return Some(Identity::TypeName { name: name.to_string() });
         }
         // Otherwise try as global
@@ -294,7 +294,7 @@ fn identify_at_cursor(
     }
 
     // 5. Type name in type_shard?
-    if index.type_shard.contains_key(name) {
+    if index.contains_type(name) {
         return Some(Identity::TypeName { name: name.to_string() });
     }
 
@@ -609,7 +609,7 @@ fn collect_global_declarations(
                     });
                 }
             }
-            if let Some(candidates) = index.type_shard.get(name) {
+            if let Some(candidates) = index.type_candidates(name) {
                 if let Some(best) = candidates.first() {
                     locations.push(ReferenceLocation {
                         uri_id: best.source_uri_id(),
@@ -627,7 +627,7 @@ fn collect_global_declarations(
                     });
                 }
             }
-            if let Some(candidates) = index.type_shard.get(name) {
+            if let Some(candidates) = index.type_candidates(name) {
                 for candidate in candidates {
                     locations.push(ReferenceLocation {
                         uri_id: candidate.source_uri_id(),

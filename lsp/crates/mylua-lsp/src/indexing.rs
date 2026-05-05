@@ -254,7 +254,11 @@ pub async fn run_workspace_scan(
     // the parse phase, before the full global index is built.
     {
         let mut idx = index.lock().unwrap();
-        idx.require_aliases = require_config.aliases.clone();
+        idx.require_aliases = require_config
+            .aliases
+            .iter()
+            .map(|(alias, replacement)| (alias.as_str().into(), replacement.as_str().into()))
+            .collect();
         for (module, uri_id) in &module_entries {
             idx.set_require_mapping(module.clone(), *uri_id);
         }

@@ -1,7 +1,7 @@
 # Global LuaSymbol Interning — 进度记录
 
 **日期**: 2026-05-05
-**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前三段完成待提交
+**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前四段完成待提交
 
 ## 当前目标
 
@@ -152,6 +152,39 @@ cargo build
 - spec review: no spec issues found
 - `code-reviewer`: no issues found
 
+### Task 2.4: Migrate ScopeTree and WorkspaceAggregation Names
+
+改动：
+
+- `ScopeDecl.name`、`ScopeDecl.bound_class` 改为 `LuaSymbol`
+- `GlobalCandidate.name`、`TypeCandidate.name` 改为 `LuaSymbol`
+- `GlobalNode.children`、`GlobalShard.roots`、`GlobalShard.uri_to_paths` 改为 `LuaSymbol` key / value
+- `WorkspaceAggregation.type_shard`、`module_index`、`require_aliases` 改为 `LuaSymbol` key / value
+- 新增 `WorkspaceAggregation::type_candidates` / `contains_type`，保持 type 查询 API 字符串边界且 lookup miss 不写入 interner
+- 更新 scope completion、unused local diagnostics、goto / hover / references / resolver / workspace_symbol 等消费者，在 LSP 输出边界转回 `String`
+- 新增 `scope` / `aggregation` 回归测试，覆盖长期字段已使用 `LuaSymbol` 且字符串查询行为不变
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test long_lived_ -- --nocapture
+cargo test --test test_goto && cargo test --test test_references && cargo test --test test_diagnostics
+cargo test --tests
+cargo build
+cargo run --bin lua-perf -- --summary-stdout /Users/zhuguosen/MyGit/ai-mylua-lsp/tests/lua-root/main.lua
+```
+
+结果：
+
+- targeted migration tests: passed
+- planned integration tests: `test_goto` 29 passed, `test_references` 14 passed, `test_diagnostics` 84 passed
+- `cargo test --tests`: 585 passed
+- `cargo build`: passed
+- `lua-perf --summary-stdout`: passed; JSON name fields still output strings
+- `ReadLints`: no linter errors
+- `code-reviewer`: no blocking issues found
+
 ## 当前仓库状态
 
 换会话前检查：
@@ -164,10 +197,10 @@ git log -1 --oneline
 最新提交：
 
 ```text
-57f0d7f docs: add LuaSymbol progress doc
+9e1d1af refactor: intern summary names
 ```
 
-当前有未提交代码改动覆盖 Task 2.1、Task 2.2 和 Task 2.3。
+当前有未提交代码改动覆盖 Task 2.4。
 
 ## 下一步建议
 
@@ -176,9 +209,9 @@ git log -1 --oneline
 1. ~~`TypeFact` / `FunctionSignature` / `ParamInfo` 里的长期字符串改为 `LuaSymbol`~~
 2. ~~`TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`~~
 3. ~~`DocumentSummary` 名称字段和 `function_name_index` 改为 `LuaSymbol`~~
-4. `ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`
+4. ~~`ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`~~
 5. `summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储
-6. `lua_perf --summary` 验证 JSON 仍输出字符串
+6. ~~`lua_perf --summary` 验证 JSON 仍输出字符串~~
 
 每个小任务都应保持：
 
@@ -197,5 +230,5 @@ git log -1 --oneline
 3. `docs/superpowers/plans/2026-05-05-global-lua-symbol-interning.md`
 4. 本文件
 
-然后从“ScopeTree / WorkspaceAggregation 名称字段、索引 key、reverse indexes”继续，不要直接派发完整剩余任务。
+然后从“summary_builder 构造边界继续收口，避免先 resolve 回 `String` 再存储”继续，不要直接派发完整剩余任务。
 

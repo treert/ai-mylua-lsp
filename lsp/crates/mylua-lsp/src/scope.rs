@@ -1,3 +1,4 @@
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use crate::types::{DefKind, Definition};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::ByteRange;
@@ -22,7 +23,7 @@ pub enum ScopeKind {
 
 #[derive(Debug, Clone)]
 pub struct ScopeDecl {
-    pub name: String,
+    pub name: LuaSymbol,
     pub kind: DefKind,
     pub decl_byte: usize,
     /// Byte offset after which this declaration becomes visible.
@@ -35,7 +36,7 @@ pub struct ScopeDecl {
     /// Inferred type for this declaration; None when unknown.
     pub type_fact: Option<crate::type_system::TypeFact>,
     /// Class anchor binding for Phase 2; None when not yet resolved.
-    pub bound_class: Option<String>,
+    pub bound_class: Option<LuaSymbol>,
     /// `true` when the type was specified via an Emmy annotation
     /// (e.g. `---@type X`). Used by diagnostics that only fire
     /// for explicitly annotated locals.
@@ -73,7 +74,7 @@ impl ScopeTree {
     pub fn resolve_id(&self, byte_offset: usize, name: &str, uri_id: UriId) -> Option<Definition> {
         let decl = self.resolve_decl(byte_offset, name)?;
         Some(Definition {
-            name: decl.name.clone(),
+            name: decl.name.to_string(),
             kind: decl.kind.clone(),
             range: decl.range,
             selection_range: decl.selection_range,
@@ -83,6 +84,11 @@ impl ScopeTree {
     }
 
     pub fn resolve_decl(&self, byte_offset: usize, name: &str) -> Option<&ScopeDecl> {
+        let name = intern_lua_symbol(name);
+        self.resolve_decl_symbol(byte_offset, name)
+    }
+
+    fn resolve_decl_symbol(&self, byte_offset: usize, name: LuaSymbol) -> Option<&ScopeDecl> {
         let scope_id = self.innermost_scope(byte_offset)?;
         let mut current = scope_id;
         loop {
@@ -126,6 +132,7 @@ impl ScopeTree {
     }
 
     pub fn scope_byte_range_for_def(&self, byte_offset: usize, name: &str) -> Option<(usize, usize)> {
+        let name = intern_lua_symbol(name);
         let scope_id = self.innermost_scope(byte_offset)?;
         let mut current = scope_id;
         loop {
@@ -166,7 +173,7 @@ impl ScopeTree {
         }
     }
 
-    fn find_decl_in_scope(&self, scope_id: usize, byte_offset: usize, name: &str) -> Option<&ScopeDecl> {
+    fn find_decl_in_scope(&self, scope_id: usize, byte_offset: usize, name: LuaSymbol) -> Option<&ScopeDecl> {
         let scope = &self.scopes[scope_id];
         let mut best: Option<&ScopeDecl> = None;
         for decl in &scope.declarations {
@@ -190,5 +197,54 @@ impl ScopeTree {
         self.scopes[scope_id].kind == ScopeKind::File
     }
 
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+
+    fn byte_range(start: usize, end: usize) -> ByteRange {
+        ByteRange {
+            start_byte: start,
+            end_byte: end,
+            start_row: 0,
+            start_col: start as u32,
+            end_row: 0,
+            end_col: end as u32,
+        }
+    }
+
+    fn assert_symbol(_: LuaSymbol) {}
+
+    #[test]
+    fn long_lived_scope_names_use_symbols_but_queries_stay_string_facing() {
+        let decl = ScopeDecl {
+            name: intern_lua_symbol("player"),
+            kind: DefKind::LocalVariable,
+            decl_byte: 6,
+            visible_after_byte: 14,
+            range: byte_range(0, 14),
+            selection_range: byte_range(6, 12),
+            type_fact: None,
+            bound_class: Some(intern_lua_symbol("Player")),
+            is_emmy_annotated: false,
+        };
+        assert_symbol(decl.name);
+        assert_symbol(decl.bound_class.unwrap());
+
+        let tree = ScopeTree::from_scopes(vec![Scope {
+            kind: ScopeKind::File,
+            byte_start: 0,
+            byte_end: 32,
+            parent: None,
+            children: Vec::new(),
+            declarations: vec![decl],
+        }]);
+
+        let resolved = tree.resolve_decl(20, "player").unwrap();
+        assert_eq!(resolved.name.as_str(), "player");
+        assert_eq!(tree.resolve_bound_class(20, "player"), Some("Player"));
+    }
 }
 

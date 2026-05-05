@@ -240,7 +240,7 @@ pub fn get_fields_for_type_id(
                     let is_func = is_function_type(&c.type_fact)
                         || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
                     global_prefix_fields.push(FieldCompletion {
-                        name: child_name.clone(),
+                        name: child_name.to_string(),
                         type_display: format!("{}", c.type_fact),
                         is_function: is_func,
                         def_range: Some(c.selection_range),
@@ -479,7 +479,7 @@ fn resolve_emmy_type(
     name: &str,
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    let candidate = match agg.type_shard.get(name) {
+    let candidate = match agg.type_candidates(name) {
         Some(candidates) if !candidates.is_empty() => &candidates[0],
         _ => return ResolvedType::from_fact(ctx, TypeFact::Known(KnownType::EmmyType(name.into()))),
     };
@@ -921,7 +921,7 @@ fn resolve_emmy_field_with_visited(
         return ResolvedType::unknown(ctx);
     }
 
-    if let Some(candidates) = agg.type_shard.get(type_name) {
+    if let Some(candidates) = agg.type_candidates(type_name) {
         for candidate in candidates {
             if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 let candidate_ctx = ResolveCtx::new(candidate.source_uri_id());
@@ -1070,7 +1070,7 @@ fn collect_emmy_fields_recursive(
     if !visited.insert(type_name.to_string()) {
         return;
     }
-    if let Some(candidates) = agg.type_shard.get(type_name) {
+    if let Some(candidates) = agg.type_candidates(type_name) {
         for candidate in candidates {
             if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 for td in &summary.type_definitions {
@@ -1130,7 +1130,7 @@ fn is_function_type(fact: &TypeFact) -> bool {
 
 /// Look up the generic parameter names for a class definition.
 fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<LuaSymbol> {
-    if let Some(candidates) = agg.type_shard.get(type_name) {
+    if let Some(candidates) = agg.type_candidates(type_name) {
         for candidate in candidates {
             if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
                 for td in &summary.type_definitions {
@@ -1157,7 +1157,7 @@ pub fn resolve_method_return_with_generics(
     agg: &WorkspaceAggregation,
 ) -> TypeFact {
     // Find the source UriId for this type so we can look up function_summaries.
-    let source_uri_id = agg.type_shard.get(type_name)
+    let source_uri_id = agg.type_candidates(type_name)
         .and_then(|candidates| candidates.first())
         .map(|c| c.source_uri_id());
 
