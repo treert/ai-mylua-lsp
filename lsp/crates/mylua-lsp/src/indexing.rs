@@ -406,24 +406,9 @@ pub async fn run_workspace_scan(
         phase3_ms
     );
 
-    // Seed the diagnostics scheduler now that `IndexState::Ready` is
-    // set. `documents` is fully populated at this point.
-    let open: HashSet<UriId> = open_uris.lock().unwrap().clone();
-    let all_uri_ids: Vec<UriId> = documents
-        .lock()
-        .unwrap()
-        .keys()
-        .copied()
-        .collect();
-    let diag_scope = config.lock().unwrap().diagnostics.scope.clone();
-    let (hot, cold): (Vec<_>, Vec<_>) = all_uri_ids.into_iter()
-        .partition(|uri_id| open.contains(uri_id));
-    let hot_ids = hot;
-    scheduler.seed_bulk(hot_ids, diagnostic_scheduler::Priority::Hot);
-    if matches!(diag_scope, config::DiagnosticScope::Full) {
-        let cold_ids = cold;
-        scheduler.seed_bulk(cold_ids, diagnostic_scheduler::Priority::Cold);
-    }
+    // Seed the diagnostics scheduler now that `IndexState::Ready` is set.
+    // The scheduler collects the current scope and priority order itself.
+    scheduler.seed_workspace();
 
     client
         .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
@@ -449,7 +434,7 @@ pub(crate) fn start_diagnostic_consumer(
     // Diagnostic progress reporter: 100ms snapshot of remaining queue size.
     // Exits once the queue is first drained after having seen work.
     // Uses `seen_nonzero` to avoid a race where Ready is set but
-    // seed_bulk hasn't run yet (pending_count would be 0 briefly).
+    // seed_workspace hasn't run yet (pending_count would be 0 briefly).
     {
         let sched = scheduler.clone();
         let state = index_state.clone();
@@ -490,7 +475,7 @@ pub(crate) fn start_diagnostic_consumer(
                     .await;
                     break;
                 } else {
-                    // Ready but seed_bulk hasn't fired yet — wait up to 2s.
+                    // Ready but seed_workspace hasn't fired yet — wait up to 2s.
                     ready_ticks += 1;
                     if ready_ticks >= 20 {
                         break; // Nothing was seeded (e.g. OpenOnly scope with no files).

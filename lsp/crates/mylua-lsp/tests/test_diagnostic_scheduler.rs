@@ -1,12 +1,9 @@
-//! Integration tests for DiagnosticScheduler — cross-module behavior
-//! (scope config + open_uris interaction + consumer-visible 行为).
-//!
-//! Pure scheduler data-structure tests live in-file as `#[cfg(test)] mod
-//! tests` inside `src/diagnostic_scheduler.rs`.
+//! Integration tests for DiagnosticScheduler — scope config, open_uris
+//! interaction, global debounce, and consumer-visible ordering.
 
-use mylua_lsp::diagnostic_scheduler::{DiagnosticScheduler, Priority};
+use mylua_lsp::config::DiagnosticScope;
+use mylua_lsp::diagnostic_scheduler::{DiagnosticScheduler, DIAGNOSTIC_DEBOUNCE_MS};
 use mylua_lsp::uri_id::{intern_uri, UriId};
-use std::time::Duration;
 use tower_lsp_server::ls_types::Uri;
 
 fn uri(s: &str) -> Uri {
@@ -18,83 +15,126 @@ fn id(s: &str) -> UriId {
 }
 
 #[test]
-fn seed_bulk_hot_cold_split_preserves_priority_order() {
-    // 模拟 initialized handler 的 seed_bulk 行为：先 seed open (Hot)，再 seed
-    // cold (Cold)。消费顺序：所有 hot → 所有 cold FIFO。
-    let s = DiagnosticScheduler::new();
-    s.seed_bulk(vec![id("open1"), id("open2")], Priority::Hot);
-    s.seed_bulk(
-        vec![id("closed1"), id("closed2"), id("closed3")],
-        Priority::Cold,
+fn seed_workspace_full_prioritizes_open_before_unopened() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("closed2"), id("open1"), id("closed1"), id("open2")],
+        vec![id("open1"), id("open2")],
+        DiagnosticScope::Full,
     );
+
+    s.seed_workspace();
 
     assert_eq!(s.pop(), Some(id("open1")));
     assert_eq!(s.pop(), Some(id("open2")));
     assert_eq!(s.pop(), Some(id("closed1")));
     assert_eq!(s.pop(), Some(id("closed2")));
-    assert_eq!(s.pop(), Some(id("closed3")));
     assert_eq!(s.pop(), None);
 }
 
 #[test]
-fn seed_bulk_only_open_simulates_openonly_scope() {
-    // 模拟 scope=OpenOnly：仅 seed open 的 URIs，不 seed 其他。
-    let s = DiagnosticScheduler::new();
-    s.seed_bulk(vec![id("open1")], Priority::Hot);
+fn seed_workspace_openonly_collects_only_open_files() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("closed1"), id("open1"), id("closed2")],
+        vec![id("open1")],
+        DiagnosticScope::OpenOnly,
+    );
+
+    s.seed_workspace();
 
     assert_eq!(s.pop(), Some(id("open1")));
     assert_eq!(s.pop(), None);
 }
 
 #[tokio::test]
-async fn schedule_then_upgrade_from_cold_via_open_flow() {
-    // 模拟：冷启动 seed 5 个 cold；用户后续 schedule Hot 一个，相当于升级。
-    let s = DiagnosticScheduler::new();
-    s.seed_bulk(
-        vec![id("a"), id("b"), id("c"), id("d"), id("e")],
-        Priority::Cold,
+async fn alternating_changes_share_one_global_debounce_window() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("a"), id("b"), id("c")],
+        vec![id("a"), id("b")],
+        DiagnosticScope::Full,
     );
 
-    s.schedule(id("c"), Priority::Hot);
+    s.schedule_changed(id("a"), false);
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    s.schedule_changed(id("b"), false);
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    s.schedule_changed(id("a"), false);
 
-    tokio::time::sleep(Duration::from_millis(400)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS - 100)).await;
+    assert_eq!(s.pop(), None);
 
-    assert_eq!(s.pop(), Some(id("c"))); // Hot 优先
+    tokio::time::sleep(std::time::Duration::from_millis(150)).await;
     assert_eq!(s.pop(), Some(id("a")));
     assert_eq!(s.pop(), Some(id("b")));
-    // uri "c" 的 cold tombstone 被跳过
-    assert_eq!(s.pop(), Some(id("d")));
-    assert_eq!(s.pop(), Some(id("e")));
     assert_eq!(s.pop(), None);
 }
 
 #[tokio::test]
-async fn rapid_schedule_collapses_to_single_push() {
-    let s = DiagnosticScheduler::new();
+async fn cascade_full_collects_all_files_after_debounce() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("closed2"), id("open1"), id("changed"), id("closed1")],
+        vec![id("open1")],
+        DiagnosticScope::Full,
+    );
 
-    // 200ms 内连续 schedule 10 次
-    for _ in 0..10 {
-        s.schedule(id("a"), Priority::Hot);
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
+    s.schedule_changed(id("changed"), true);
+    tokio::time::sleep(std::time::Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS + 100)).await;
 
-    // 等所有 debounce 任务完成
-    tokio::time::sleep(Duration::from_millis(400)).await;
-
-    // 只有一份入队（gen 过滤使早期 9 次 return）
-    assert_eq!(s.pop(), Some(id("a")));
+    assert_eq!(s.pop(), Some(id("changed")));
+    assert_eq!(s.pop(), Some(id("open1")));
+    assert_eq!(s.pop(), Some(id("closed1")));
+    assert_eq!(s.pop(), Some(id("closed2")));
     assert_eq!(s.pop(), None);
 }
 
 #[test]
-fn invalidate_enables_re_enqueue_same_uri() {
-    // invalidate 清空状态后，同 URI 重新 push 应成功（模拟文件先 DELETED
-    // 再 CREATED 的场景）。
-    let s = DiagnosticScheduler::new();
-    s.seed_bulk(vec![id("a")], Priority::Hot);
-    s.pop(); // 取出，enqueued 已清
+fn modified_priority_is_retained_until_uri_is_popped() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("a"), id("b"), id("c")],
+        vec![id("a"), id("b"), id("c")],
+        DiagnosticScope::Full,
+    );
 
-    s.invalidate(&id("a"));
-    s.seed_bulk(vec![id("a")], Priority::Cold);
+    s.schedule_changed_now_for_test(id("b"), false);
+    s.schedule_changed_now_for_test(id("c"), false);
+    assert_eq!(s.pop(), Some(id("c")));
+
+    s.seed_workspace();
+
+    assert_eq!(s.pop(), Some(id("b")));
     assert_eq!(s.pop(), Some(id("a")));
+    assert_eq!(s.pop(), Some(id("c")));
+    assert_eq!(s.pop(), None);
+}
+
+#[test]
+fn pending_files_are_preserved_when_new_batch_is_built() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("a"), id("b"), id("c")],
+        vec![id("a")],
+        DiagnosticScope::OpenOnly,
+    );
+
+    s.schedule_uri_now_for_test(id("c"));
+    s.schedule_changed_now_for_test(id("b"), false);
+
+    assert_eq!(s.pop(), Some(id("b")));
+    assert_eq!(s.pop(), Some(id("c")));
+    assert_eq!(s.pop(), None);
+}
+
+#[test]
+fn invalidate_removes_ready_and_modified_state() {
+    let s = DiagnosticScheduler::new_for_test(
+        vec![id("a"), id("b")],
+        vec![id("a")],
+        DiagnosticScope::Full,
+    );
+
+    s.schedule_changed_now_for_test(id("a"), false);
+    s.invalidate(&id("a"));
+
+    assert_eq!(s.pop(), None);
+    s.seed_workspace();
+    assert_eq!(s.pop(), Some(id("a")));
+    assert_eq!(s.pop(), Some(id("b")));
 }

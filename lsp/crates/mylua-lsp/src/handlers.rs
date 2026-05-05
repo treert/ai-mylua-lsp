@@ -11,7 +11,6 @@ use tower_lsp_server::LanguageServer;
 use crate::call_hierarchy;
 use crate::completion;
 use crate::config::LspConfig;
-use crate::diagnostic_scheduler;
 use crate::document::{find_document, DocumentStoreView};
 use crate::document_highlight;
 use crate::document_link;
@@ -318,16 +317,12 @@ impl LanguageServer for Backend {
         if text_matches {
             let uri_id = intern_uri(&uri);
             self.open_uris.lock().unwrap().insert(uri_id);
-            self.scheduler
-                .schedule(uri_id, diagnostic_scheduler::Priority::Hot);
+            self.scheduler.schedule_uri(uri_id);
             return;
         }
 
-        // Mark open BEFORE `parse_and_store` so the `scheduler.schedule`
-        // call inside sees this URI as "open" and routes to the Hot
-        // queue. Otherwise the very first did_open of a fresh URI
-        // would route to Cold (steady state after workspace Ready,
-        // no seed_bulk tombstone upgrade to save us).
+        // Mark open BEFORE `parse_and_store` so the scheduler's later
+        // collection can prioritize this URI as open.
         let uri_id = intern_uri(&uri);
         self.open_uris.lock().unwrap().insert(uri_id);
         self.parse_and_store(uri.clone(), params.text_document.text);

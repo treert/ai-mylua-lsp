@@ -149,12 +149,8 @@ pub struct Backend {
     /// Monotonic counter used to mint unique `result_id`s.
     pub(crate) semantic_tokens_counter: Arc<Mutex<u64>>,
     /// URIs currently in LSP `did_open` state (not yet `did_close`d).
-    /// Used by:
-    ///   - T1-1 fast path guard in `did_open` (skip parse only if already
-    ///     open AND text matches)
-    ///   - Diagnostic scheduler priority decision (Hot vs Cold)
-    ///   - Cold-start seed routing (`initialized` splits documents into
-    ///     Hot/Cold based on this set)
+    /// Used by `did_open` fast path and diagnostic scheduler priority
+    /// collection.
     pub(crate) open_uris: Arc<Mutex<HashSet<UriId>>>,
     /// URIs indexed via `config.workspace.library` (stdlib stubs and
     /// other external annotation packages). Populated by
@@ -165,9 +161,9 @@ pub struct Backend {
     /// a stub file happens to contain tree-sitter ERROR nodes or
     /// shape-level warnings.
     pub(crate) library_uris: Arc<Mutex<HashSet<UriId>>>,
-    /// Unified semantic diagnostics scheduler (priority queue + single
-    /// consumer). Replaces the per-URI `schedule_semantic_diagnostics`
-    /// spawns and the cold-start `publish_diagnostics_for_open_files`.
+    /// Unified semantic diagnostics scheduler (target collection +
+    /// priority queue + single consumer). Replaces caller-side
+    /// diagnostics fan-out.
     pub(crate) scheduler: Arc<diagnostic_scheduler::DiagnosticScheduler>,
 }
 
@@ -193,20 +189,29 @@ pub(crate) fn new_parser() -> tree_sitter::Parser {
 
 impl Backend {
     pub fn new(client: Client) -> Self {
+        let documents = Arc::new(Mutex::new(HashMap::new()));
+        let config = Arc::new(Mutex::new(LspConfig::default()));
+        let open_uris = Arc::new(Mutex::new(HashSet::new()));
+        let scheduler = diagnostic_scheduler::DiagnosticScheduler::new(
+            Arc::clone(&documents),
+            Arc::clone(&open_uris),
+            Arc::clone(&config),
+        );
+
         Backend {
             client,
             parser: Mutex::new(new_parser()),
-            documents: Arc::new(Mutex::new(HashMap::new())),
+            documents,
             index: Arc::new(Mutex::new(WorkspaceAggregation::new())),
             workspace_roots: Mutex::new(Vec::new()),
-            config: Arc::new(Mutex::new(LspConfig::default())),
+            config,
             index_state: Arc::new(Mutex::new(IndexState::Initializing)),
             edit_locks: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_cache: Arc::new(Mutex::new(HashMap::new())),
             semantic_tokens_counter: Arc::new(Mutex::new(0)),
-            open_uris: Arc::new(Mutex::new(HashSet::new())),
+            open_uris,
             library_uris: Arc::new(Mutex::new(HashSet::new())),
-            scheduler: diagnostic_scheduler::DiagnosticScheduler::new(),
+            scheduler,
         }
     }
 
@@ -368,52 +373,11 @@ impl Backend {
             // `did_change` now appear after the 300ms debounce
             // instead of immediately.
             //
-            // Hot/Cold priority is decided by whether the client has
-            // `did_open`'d this URI.
-            let is_open = self.open_uris.lock().unwrap().contains(&uri_id);
-            let pri = if is_open {
-                diagnostic_scheduler::Priority::Hot
-            } else {
-                diagnostic_scheduler::Priority::Cold
-            };
-            self.scheduler.schedule(uri_id, pri);
-
-            // Cascade: signature-fingerprint change → re-diagnose other
-            // files. Scope config (Full | OpenOnly) decides the set.
-            if should_cascade {
-                let diag_cfg = self.config.lock().unwrap().diagnostics.clone();
-                if diag_cfg.enable {
-                    let open: HashSet<UriId> = self.open_uris.lock().unwrap().clone();
-                    match diag_cfg.scope {
-                        config::DiagnosticScope::OpenOnly => {
-                            for dep_uri_id in &open {
-                                if *dep_uri_id != uri_id {
-                                    self.scheduler.schedule(*dep_uri_id, diagnostic_scheduler::Priority::Hot);
-                                }
-                            }
-                        }
-                        config::DiagnosticScope::Full => {
-                            let all_uri_ids: Vec<UriId> = self.documents
-                                .lock()
-                                .unwrap()
-                                .keys()
-                                .copied()
-                                .collect();
-                            for dep_uri_id in all_uri_ids {
-                                if dep_uri_id == uri_id {
-                                    continue;
-                                }
-                                let pri = if open.contains(&dep_uri_id) {
-                                    diagnostic_scheduler::Priority::Hot
-                                } else {
-                                    diagnostic_scheduler::Priority::Cold
-                                };
-                                self.scheduler.schedule(dep_uri_id, pri);
-                            }
-                        }
-                    }
-                }
-            }
+            // DiagnosticScheduler owns debounce, scope fan-out, pending
+            // preservation and priority sorting. Full mode still diagnoses
+            // all documents after cascade, but collection happens inside
+            // the scheduler instead of here.
+            self.scheduler.schedule_changed(uri_id, should_cascade);
         }
     }
 

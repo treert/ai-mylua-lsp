@@ -90,7 +90,7 @@ ai-mylua-lsp/
 - **模块解析**：固定规则（全路径小写 + `.` 分隔 + `init.lua` 特殊处理），last-segment 索引 + 最长后缀匹配，O(1) 查找无 fallback；`require.aliases` 支持最长前缀别名替换
 - **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
 - **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
-- **诊断调度**：`DiagnosticScheduler` 统一管理，300ms debounce，hot/cold 双队列
+- **诊断调度**：`DiagnosticScheduler` 统一管理，公共 300ms debounce 后按 scope 主动收集候选，排序规则为已修改（最近优先）→ 已打开 → 未打开
 - **文件过滤**：`workspace.include` / `workspace.exclude` glob
 
 命令：
