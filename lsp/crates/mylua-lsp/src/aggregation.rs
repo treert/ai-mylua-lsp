@@ -29,6 +29,36 @@ pub struct WorkspaceAggregation {
     pub require_aliases: HashMap<LuaSymbol, LuaSymbol>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkspaceAggregationStats {
+    pub summary_count: usize,
+    pub global_contribution_count: usize,
+    pub function_summary_count: usize,
+    pub function_name_index_count: usize,
+    pub type_definition_count: usize,
+    pub type_field_count: usize,
+    pub table_shape_count: usize,
+    pub table_field_count: usize,
+    pub call_site_count: usize,
+    pub global_root_count: usize,
+    pub global_node_count: usize,
+    pub global_candidate_count: usize,
+    pub global_reverse_path_count: usize,
+    pub type_name_count: usize,
+    pub type_candidate_count: usize,
+    pub module_last_segment_count: usize,
+    pub module_entry_count: usize,
+    pub require_alias_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+struct GlobalShardStats {
+    root_count: usize,
+    node_count: usize,
+    candidate_count: usize,
+    reverse_path_count: usize,
+}
+
 /// A single candidate definition for a global name.
 #[derive(Debug, Clone)]
 pub struct GlobalCandidate {
@@ -146,6 +176,17 @@ impl GlobalNode {
             let child_path = format!("{}.{}", prefix, seg.as_str());
             child.collect_entries(&child_path, out);
         }
+    }
+
+    fn stats(&self) -> (usize, usize) {
+        let mut node_count = 1;
+        let mut candidate_count = self.candidates.len();
+        for child in self.children.values() {
+            let (child_nodes, child_candidates) = child.stats();
+            node_count += child_nodes;
+            candidate_count += child_candidates;
+        }
+        (node_count, candidate_count)
     }
 }
 
@@ -294,6 +335,20 @@ impl GlobalShard {
         out
     }
 
+    fn stats(&self) -> GlobalShardStats {
+        let mut stats = GlobalShardStats {
+            root_count: self.roots.len(),
+            reverse_path_count: self.uri_to_paths.values().map(Vec::len).sum(),
+            ..Default::default()
+        };
+        for root in self.roots.values() {
+            let (nodes, candidates) = root.stats();
+            stats.node_count += nodes;
+            stats.candidate_count += candidates;
+        }
+        stats
+    }
+
 }
 
 impl Default for GlobalShard {
@@ -351,6 +406,44 @@ impl WorkspaceAggregation {
 
     pub fn summary_count(&self) -> usize {
         self.summaries.len()
+    }
+
+    pub fn stats(&self) -> WorkspaceAggregationStats {
+        let global_stats = self.global_shard.stats();
+        let mut stats = WorkspaceAggregationStats {
+            summary_count: self.summaries.len(),
+            global_root_count: global_stats.root_count,
+            global_node_count: global_stats.node_count,
+            global_candidate_count: global_stats.candidate_count,
+            global_reverse_path_count: global_stats.reverse_path_count,
+            type_name_count: self.type_shard.len(),
+            type_candidate_count: self.type_shard.values().map(Vec::len).sum(),
+            module_last_segment_count: self.module_index.len(),
+            module_entry_count: self.module_index.values().map(Vec::len).sum(),
+            require_alias_count: self.require_aliases.len(),
+            ..Default::default()
+        };
+
+        for summary in self.summaries.values() {
+            stats.global_contribution_count += summary.global_contributions.len();
+            stats.function_summary_count += summary.function_summaries.len();
+            stats.function_name_index_count += summary.function_name_index.len();
+            stats.type_definition_count += summary.type_definitions.len();
+            stats.type_field_count += summary
+                .type_definitions
+                .iter()
+                .map(|definition| definition.fields.len())
+                .sum::<usize>();
+            stats.table_shape_count += summary.table_shapes.len();
+            stats.table_field_count += summary
+                .table_shapes
+                .values()
+                .map(|shape| shape.fields.len())
+                .sum::<usize>();
+            stats.call_site_count += summary.call_sites.len();
+        }
+
+        stats
     }
 
     pub fn type_candidates(&self, name: &str) -> Option<&Vec<TypeCandidate>> {
@@ -700,5 +793,38 @@ mod tests {
         assert!(agg.type_shard.contains_key(&intern_lua_symbol("Player")));
         assert_eq!(agg.all_module_names(), vec!["src.game.player".to_string()]);
         assert_eq!(agg.resolve_module_to_id("@game.player"), Some(uri_id));
+    }
+
+    #[test]
+    fn reports_aggregation_stats() {
+        let uri = "file:///aggregation_stats.lua".parse().unwrap();
+        let uri_id = intern_uri(&uri);
+        let mut agg = WorkspaceAggregation::new();
+        agg.set_require_mapping("src.game.player".to_string(), uri_id);
+        agg.type_shard.insert(
+            intern_lua_symbol("Player"),
+            vec![TypeCandidate {
+                name: intern_lua_symbol("Player"),
+                kind: TypeDefinitionKind::Class,
+                source_uri_id: uri_id,
+                range: byte_range(),
+            }],
+        );
+        agg.global_shard.push_candidate(
+            "Game.Player",
+            GlobalCandidate {
+                name: intern_lua_symbol("Game.Player"),
+                kind: GlobalContributionKind::Variable,
+                type_fact: TypeFact::Unknown,
+                range: byte_range(),
+                selection_range: byte_range(),
+                source_uri_id: uri_id,
+            },
+        );
+
+        let stats = agg.stats();
+        assert_eq!(stats.global_candidate_count, 1);
+        assert_eq!(stats.type_candidate_count, 1);
+        assert_eq!(stats.module_entry_count, 1);
     }
 }

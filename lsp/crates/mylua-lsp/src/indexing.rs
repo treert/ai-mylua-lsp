@@ -18,6 +18,7 @@ use crate::config::LspConfig;
 use crate::diagnostic_scheduler;
 use crate::diagnostics;
 use crate::document::Document;
+use crate::memory_profile;
 use crate::summary;
 use crate::summary_builder;
 use crate::uri_id::{intern_uri, resolve_uri, UriId};
@@ -475,6 +476,17 @@ pub async fn run_workspace_scan(
         phase2_ms,
         phase3_ms
     );
+    if memory_profile::enabled() {
+        {
+            let docs = documents.lock().unwrap();
+            memory_profile::log_document_profile(&docs);
+        }
+        {
+            let idx = index.lock().unwrap();
+            memory_profile::log_index_profile(&idx);
+        }
+        memory_profile::log_symbol_profile();
+    }
 
     // Seed the diagnostics scheduler now that `IndexState::Ready` is set.
     // The scheduler collects the current scope and priority order itself.

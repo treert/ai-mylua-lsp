@@ -32,6 +32,8 @@ Thumbs.db
 
 .codebuddy/plan/
 
+*.pyc
+
 # Logs & temp
 *.log
 *.orig

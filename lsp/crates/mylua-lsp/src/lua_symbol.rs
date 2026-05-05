@@ -11,6 +11,13 @@ pub struct LuaSymbol(Spur);
 
 static LUA_SYMBOLS: OnceLock<ThreadedRodeo> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LuaSymbolStats {
+    pub symbol_count: usize,
+    pub string_bytes: usize,
+    pub arena_bytes: usize,
+}
+
 pub fn intern_lua_symbol(text: &str) -> LuaSymbol {
     LuaSymbol(symbols().get_or_intern(text))
 }
@@ -21,6 +28,15 @@ pub fn get_lua_symbol(text: &str) -> Option<LuaSymbol> {
 
 pub fn resolve_lua_symbol(symbol: LuaSymbol) -> &'static str {
     symbols().resolve(&symbol.0)
+}
+
+pub fn lua_symbol_stats() -> LuaSymbolStats {
+    let symbols = symbols();
+    LuaSymbolStats {
+        symbol_count: symbols.len(),
+        string_bytes: symbols.strings().map(str::len).sum(),
+        arena_bytes: symbols.current_memory_usage(),
+    }
 }
 
 impl LuaSymbol {
@@ -161,5 +177,17 @@ mod tests {
         let json = serde_json::to_string(&symbol).unwrap();
 
         assert_eq!(json, "\"Player.name\"");
+    }
+
+    #[test]
+    fn reports_symbol_pool_stats() {
+        let before = lua_symbol_stats();
+        intern_lua_symbol("__lua_symbol_stats_test_a__");
+        intern_lua_symbol("__lua_symbol_stats_test_b__");
+        let after = lua_symbol_stats();
+
+        assert!(after.symbol_count >= before.symbol_count + 2);
+        assert!(after.string_bytes >= before.string_bytes + "__lua_symbol_stats_test_a__".len());
+        assert!(after.arena_bytes >= after.string_bytes);
     }
 }

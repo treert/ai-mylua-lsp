@@ -32,6 +32,10 @@ fn now_local_str() -> String {
 }
 
 pub fn init(workspace_root: &Path, enable_file_log: bool) {
+    let enable_file_log = enable_file_log
+        || std::env::var("MYLUA_MEM_PROFILE")
+            .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
     ENABLED.store(enable_file_log, Ordering::Relaxed);
     if !enable_file_log {
         if let Ok(mut w) = WRITER.lock() {

@@ -81,6 +81,10 @@ impl LineIndex {
         &self.line_starts
     }
 
+    pub fn line_start_count(&self) -> usize {
+        self.line_starts.len()
+    }
+
     /// Convert a byte offset to an LSP `Position` using O(log N)
     /// binary search on the line-start table.
     pub fn byte_offset_to_position(&self, source: &[u8], byte_offset: usize) -> Option<Position> {
@@ -232,6 +236,10 @@ impl LuaSource {
     #[inline]
     pub fn line_index(&self) -> &LineIndex {
         &self.line_index
+    }
+
+    pub fn line_start_count(&self) -> usize {
+        self.line_index.line_start_count()
     }
 
     /// Consume and return the inner `String` (e.g. for snapshot copies).

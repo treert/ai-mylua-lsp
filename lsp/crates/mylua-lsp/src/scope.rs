@@ -58,6 +58,13 @@ pub struct ScopeTree {
     scopes: Vec<Scope>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ScopeTreeStats {
+    pub scope_count: usize,
+    pub declaration_count: usize,
+    pub child_link_count: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Querying
 // ---------------------------------------------------------------------------
@@ -67,6 +74,14 @@ impl ScopeTree {
     /// Used by `build_file_analysis` which builds scopes during summary construction.
     pub fn from_scopes(scopes: Vec<Scope>) -> Self {
         ScopeTree { scopes }
+    }
+
+    pub fn stats(&self) -> ScopeTreeStats {
+        ScopeTreeStats {
+            scope_count: self.scopes.len(),
+            declaration_count: self.scopes.iter().map(|scope| scope.declarations.len()).sum(),
+            child_link_count: self.scopes.iter().map(|scope| scope.children.len()).sum(),
+        }
     }
 }
 
@@ -275,6 +290,43 @@ mod tests {
         assert!(tree.scope_byte_range_for_def(32, missing).is_none());
 
         assert_eq!(get_lua_symbol(missing), None);
+    }
+
+    #[test]
+    fn reports_scope_tree_stats() {
+        let tree = ScopeTree::from_scopes(vec![
+            Scope {
+                kind: ScopeKind::File,
+                byte_start: 0,
+                byte_end: 10,
+                parent: None,
+                children: vec![1],
+                declarations: Vec::new(),
+            },
+            Scope {
+                kind: ScopeKind::FunctionBody,
+                byte_start: 1,
+                byte_end: 9,
+                parent: Some(0),
+                children: Vec::new(),
+                declarations: vec![ScopeDecl {
+                    name: intern_lua_symbol("x"),
+                    kind: DefKind::LocalVariable,
+                    decl_byte: 2,
+                    visible_after_byte: 2,
+                    range: byte_range(2, 3),
+                    selection_range: byte_range(2, 3),
+                    type_fact: None,
+                    bound_class: None,
+                    is_emmy_annotated: false,
+                }],
+            },
+        ]);
+
+        let stats = tree.stats();
+        assert_eq!(stats.scope_count, 2);
+        assert_eq!(stats.declaration_count, 1);
+        assert_eq!(stats.child_link_count, 1);
     }
 }
 
