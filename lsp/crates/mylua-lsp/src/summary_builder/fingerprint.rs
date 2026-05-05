@@ -123,7 +123,7 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
             generic_args,
         } => {
             "call_return".hash(hasher);
-            hash_symbolic_stub(base, hasher);
+            hash_type_fact(base, hasher);
             func_name.hash(hasher);
             is_method_call.hash(hasher);
             call_arg_types.len().hash(hasher);

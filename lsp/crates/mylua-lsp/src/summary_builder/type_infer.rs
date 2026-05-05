@@ -230,25 +230,12 @@ fn infer_table_array_element_type_lightweight(ctx: &BuildContext, constructor: t
     }
 }
 
-fn call_base_stub_from_fact(
+fn call_base_generic_args(
     fact: &TypeFact,
-    fallback_node: tree_sitter::Node,
-    source: &[u8],
-) -> (SymbolicStub, Vec<TypeFact>) {
+) -> Vec<TypeFact> {
     match fact {
-        TypeFact::Stub(s) => (s.clone(), vec![]),
-        TypeFact::Known(KnownType::EmmyType(type_name)) => {
-            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
-        }
-        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
-            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
-        }
-        _ => (
-            SymbolicStub::GlobalRef {
-                name: node_text(fallback_node, source).to_string(),
-            },
-            vec![],
-        ),
+        TypeFact::Known(KnownType::EmmyGeneric(_, params)) => params.clone(),
+        _ => vec![],
     }
 }
 
@@ -315,12 +302,12 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
             }
         }
 
-        let (base_stub, generic_args) = call_base_stub_from_fact(&base_fact, callee, ctx.source);
+        let generic_args = call_base_generic_args(&base_fact);
         let mut call_arg_types = Vec::with_capacity(1);
-        call_arg_types.push(base_fact);
+        call_arg_types.push(base_fact.clone());
         call_arg_types.extend(explicit_arg_types);
         return TypeFact::Stub(SymbolicStub::CallReturn {
-            base: Box::new(base_stub),
+            base: Box::new(base_fact),
             func_name: method_name,
             is_method_call: true,
             call_arg_types,
@@ -371,9 +358,9 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
                     }
                 }
 
-                let (base_stub, generic_args) = call_base_stub_from_fact(&base_fact, base, ctx.source);
+                let generic_args = call_base_generic_args(&base_fact);
                 return TypeFact::Stub(SymbolicStub::CallReturn {
-                    base: Box::new(base_stub),
+                    base: Box::new(base_fact),
                     func_name,
                     is_method_call: false,
                     call_arg_types: explicit_arg_types,

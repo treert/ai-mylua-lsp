@@ -53,7 +53,7 @@ pub enum SymbolicStub {
 
     /// `local x = base.func_name()` — resolve to function return type.
     CallReturn {
-        base: Box<SymbolicStub>,
+        base: Box<TypeFact>,
         func_name: std::string::String,
         /// Whether the call used Lua's colon method syntax (`obj:m(...)`).
         /// Colon calls receive an implicit `self` argument, while dotted calls

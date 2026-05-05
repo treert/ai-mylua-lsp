@@ -491,7 +491,7 @@ fn resolve_emmy_type(
 }
 
 fn resolve_call_return(
-    base: &SymbolicStub,
+    base: &TypeFact,
     func_name: &str,
     generic_args: &[TypeFact],
     call_arg_types: &[TypeFact],
@@ -499,7 +499,7 @@ fn resolve_call_return(
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
-    let base_resolved = resolve_stub(base, agg, depth + 1, visited);
+    let base_resolved = resolve_recursive(base, agg, depth + 1, visited);
 
     // When the base resolves to a generic class instance (e.g. `Stack<string>`),
     // look up the method's return type and substitute generic parameters.
@@ -575,7 +575,7 @@ fn resolve_call_return(
     if let Some(name) = base_type_name(base) {
         candidate_names.push(name.to_string());
     }
-    if let SymbolicStub::RequireRef { module_path } = base {
+    if let Some(module_path) = base_require_module_path(base) {
         if let Some(global_name) = resolve_require_global_name(module_path, agg) {
             if !candidate_names.contains(&global_name) {
                 candidate_names.push(global_name);
@@ -707,19 +707,28 @@ fn function_return_with_call_args(
     fs.signature.returns.first().cloned()
 }
 
-/// Extract the base name from a `SymbolicStub` for qualified name lookups.
-/// Works for `GlobalRef`, `RequireRef`, and `TypeRef` — the three stub
-/// variants that carry a meaningful name for `{name}.{field}` / `{name}:{field}`
-/// lookups in `function_summaries` and `global_shard`.
+/// Extract the base name from a `TypeFact` for qualified name lookups.
+/// Works for the named stub variants and known Emmy class facts — the values
+/// that carry a meaningful name for `{name}.{field}` / `{name}:{field}` lookups
+/// in `function_summaries` and `global_shard`.
 ///
 /// Note: for `RequireRef`, this returns the module_path (e.g. `"player"`),
 /// which may differ from the actual global name (e.g. `"Player"`). Callers
 /// that need the real global name should also check `module_return_type`.
-fn base_type_name(stub: &SymbolicStub) -> Option<&str> {
-    match stub {
-        SymbolicStub::GlobalRef { name } => Some(name.as_str()),
-        SymbolicStub::RequireRef { module_path } => Some(module_path.as_str()),
-        SymbolicStub::TypeRef { name } => Some(name.as_str()),
+fn base_type_name(fact: &TypeFact) -> Option<&str> {
+    match fact {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.as_str()),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => Some(module_path.as_str()),
+        TypeFact::Stub(SymbolicStub::TypeRef { name }) => Some(name.as_str()),
+        TypeFact::Known(KnownType::EmmyType(name)) => Some(name.as_str()),
+        TypeFact::Known(KnownType::EmmyGeneric(name, _)) => Some(name.as_str()),
+        _ => None,
+    }
+}
+
+fn base_require_module_path(fact: &TypeFact) -> Option<&str> {
+    match fact {
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => Some(module_path.as_str()),
         _ => None,
     }
 }

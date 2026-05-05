@@ -259,12 +259,12 @@ fn infer_call_return_fact(
             }
         }
 
-        let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, callee, source);
+        let generic_args = generic_args_from_call_base(&base_fact);
         let mut call_arg_types = Vec::with_capacity(1);
         call_arg_types.push(base_fact.clone());
         call_arg_types.extend(collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index));
         return TypeFact::Stub(SymbolicStub::CallReturn {
-            base: Box::new(base_stub),
+            base: Box::new(base_fact),
             func_name: method_name,
             is_method_call: true,
             call_arg_types,
@@ -280,10 +280,10 @@ fn infer_call_return_fact(
         ) {
             let func_name = node_text(field_node, source).to_string();
             let base_fact = infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
-            let (base_stub, generic_args) = type_fact_to_stub_for_call_base(&base_fact, base_node, source);
+            let generic_args = generic_args_from_call_base(&base_fact);
             let call_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             return TypeFact::Stub(SymbolicStub::CallReturn {
-                base: Box::new(base_stub),
+                base: Box::new(base_fact),
                 func_name,
                 is_method_call: false,
                 call_arg_types,
@@ -357,25 +357,12 @@ fn infer_call_return_fact(
     })
 }
 
-/// Best-effort conversion of a base expression's inferred `TypeFact`
-/// into a `SymbolicStub` suitable for `CallReturn.base`. Mirrors the
-/// build-time logic in `summary_builder::infer_call_return_type`.
-fn type_fact_to_stub_for_call_base(
+fn generic_args_from_call_base(
     base_fact: &TypeFact,
-    base_node: tree_sitter::Node,
-    source: &[u8],
-) -> (crate::type_system::SymbolicStub, Vec<TypeFact>) {
-    use crate::type_system::{SymbolicStub, KnownType};
+) -> Vec<TypeFact> {
+    use crate::type_system::KnownType;
     match base_fact {
-        TypeFact::Stub(s) => (s.clone(), vec![]),
-        TypeFact::Known(KnownType::EmmyType(type_name)) => {
-            (SymbolicStub::TypeRef { name: type_name.clone() }, vec![])
-        }
-        TypeFact::Known(KnownType::EmmyGeneric(type_name, params)) => {
-            (SymbolicStub::TypeRef { name: type_name.clone() }, params.clone())
-        }
-        _ => (SymbolicStub::GlobalRef {
-            name: node_text(base_node, source).to_string(),
-        }, vec![]),
+        TypeFact::Known(KnownType::EmmyGeneric(_, params)) => params.clone(),
+        _ => vec![],
     }
 }
