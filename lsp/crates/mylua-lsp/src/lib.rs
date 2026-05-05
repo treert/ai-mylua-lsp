@@ -13,6 +13,7 @@ pub mod emmy;
 pub mod folding_range;
 pub mod inlay_hint;
 pub mod lua_builtins;
+pub mod lua_symbol;
 pub mod goto;
 pub mod hover;
 pub mod references;
