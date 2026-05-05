@@ -75,6 +75,19 @@ pub(crate) async fn send_index_ready(client: &Client, indexed: u64, total: u64, 
         .await;
 }
 
+fn diagnostic_completion_ready_status(index: &WorkspaceAggregation) -> IndexStatusParams {
+    let total = index.summary_count() as u64;
+    IndexStatusParams {
+        state: "ready".to_string(),
+        indexed: total,
+        total,
+        elapsed_ms: None,
+        phase: None,
+        message: None,
+        remaining: Some(0),
+    }
+}
+
 // ── Workspace scan ─────────────────────────────────────────────────
 
 /// Run the workspace scan as a background task (spawned from `initialized`).
@@ -438,6 +451,7 @@ pub(crate) fn start_diagnostic_consumer(
     {
         let sched = scheduler.clone();
         let state = index_state.clone();
+        let progress_index = index.clone();
         let cl = client.clone();
         tokio::spawn(async move {
             let mut seen_nonzero = false;
@@ -463,16 +477,11 @@ pub(crate) fn start_diagnostic_consumer(
                     .await;
                 } else if seen_nonzero {
                     // All caught up — send final "ready" with remaining=0 and exit.
-                    cl.send_notification::<IndexStatusNotification>(IndexStatusParams {
-                        state: "ready".to_string(),
-                        indexed: 0,
-                        total: 0,
-                        elapsed_ms: None,
-                        phase: None,
-                        message: None,
-                        remaining: Some(0),
-                    })
-                    .await;
+                    let status = {
+                        let idx = progress_index.lock().unwrap();
+                        diagnostic_completion_ready_status(&idx)
+                    };
+                    cl.send_notification::<IndexStatusNotification>(status).await;
                     break;
                 } else {
                     // Ready but seed_workspace hasn't fired yet — wait up to 2s.
@@ -613,6 +622,50 @@ async fn consumer_loop(
         }
 
         client.publish_diagnostics(uri, diags, None).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use tower_lsp_server::ls_types::Uri;
+
+    use crate::summary::DocumentSummary;
+
+    fn empty_summary(uri: Uri) -> DocumentSummary {
+        DocumentSummary {
+            uri,
+            global_contributions: vec![],
+            function_summaries: HashMap::new(),
+            function_name_index: HashMap::new(),
+            type_definitions: vec![],
+            table_shapes: HashMap::new(),
+            module_return_type: None,
+            module_return_range: None,
+            signature_fingerprint: 0,
+            call_sites: vec![],
+            is_meta: false,
+            meta_name: None,
+        }
+    }
+
+    #[test]
+    fn diagnostic_completion_ready_status_preserves_index_count() {
+        let uri_a: Uri = "file:///a.lua".parse().unwrap();
+        let uri_b: Uri = "file:///b.lua".parse().unwrap();
+        let mut index = WorkspaceAggregation::new();
+        index.build_initial(vec![
+            (intern_uri(&uri_a), empty_summary(uri_a)),
+            (intern_uri(&uri_b), empty_summary(uri_b)),
+        ]);
+
+        let status = diagnostic_completion_ready_status(&index);
+
+        assert_eq!(status.state, "ready");
+        assert_eq!(status.indexed, 2);
+        assert_eq!(status.total, 2);
+        assert_eq!(status.remaining, Some(0));
     }
 }
 
