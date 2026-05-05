@@ -160,8 +160,9 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 ### `mylua/indexStatus`（server → client）
 
 ```typescript
-{ state: "indexing" | "ready", indexed: number, total: number,
-  elapsedMs?: number, phase?: string, message?: string }
+{ state: "indexing" | "diagnosing" | "ready", indexed: number, total: number,
+  elapsedMs?: number, phase?: string, message?: string, remaining?: number }
 ```
 
-`phase` 值：`scanning` / `module_map_ready` / `parsing` / `merging`。`elapsedMs` 仅在 `ready` 时出现。
+`phase` 值：`scanning` / `module_map_ready` / `parsing` / `merging` / `diagnosing`。
+`elapsedMs` 仅在冷启动索引完成的 `ready` 时出现；`remaining` 用于后台诊断进度，采样到从非零变为 0 时 server 会发送一次 `ready`。

@@ -200,7 +200,7 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 | `ModuleMapReady` | + document_link、require 补全 |
 | `Ready` | 完整工作区语义 |
 
-进度通过 `mylua/indexStatus` 通知上报（phase: scanning / module_map_ready / parsing / merging）。
+进度通过 `mylua/indexStatus` 通知上报（phase: scanning / module_map_ready / parsing / merging / diagnosing）。
 
 ### 6.2 编辑期增量更新
 

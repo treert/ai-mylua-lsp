@@ -75,8 +75,13 @@ pub(crate) async fn send_index_ready(client: &Client, indexed: u64, total: u64, 
         .await;
 }
 
+#[cfg(test)]
 fn diagnostic_completion_ready_status(index: &WorkspaceAggregation) -> IndexStatusParams {
     let total = index.summary_count() as u64;
+    diagnostic_completion_ready_status_for_total(total)
+}
+
+fn diagnostic_completion_ready_status_for_total(total: u64) -> IndexStatusParams {
     IndexStatusParams {
         state: "ready".to_string(),
         indexed: total,
@@ -85,6 +90,53 @@ fn diagnostic_completion_ready_status(index: &WorkspaceAggregation) -> IndexStat
         phase: None,
         message: None,
         remaining: Some(0),
+    }
+}
+
+fn diagnostic_progress_status(remaining: usize) -> IndexStatusParams {
+    IndexStatusParams {
+        state: "diagnosing".to_string(),
+        indexed: 0,
+        total: 0,
+        elapsed_ms: None,
+        phase: Some("diagnosing".to_string()),
+        message: Some(format!("{} files remaining", remaining)),
+        remaining: Some(remaining as u64),
+    }
+}
+
+struct DiagnosticProgressTracker {
+    last_remaining: Option<usize>,
+}
+
+impl DiagnosticProgressTracker {
+    fn new() -> Self {
+        Self { last_remaining: None }
+    }
+
+    fn next_status(
+        &mut self,
+        index_state: IndexState,
+        remaining: usize,
+        total: u64,
+    ) -> Option<IndexStatusParams> {
+        if index_state != IndexState::Ready {
+            return None;
+        }
+
+        if remaining > 0 {
+            if self.last_remaining == Some(remaining) {
+                return None;
+            }
+            self.last_remaining = Some(remaining);
+            return Some(diagnostic_progress_status(remaining));
+        }
+
+        if self.last_remaining.take().is_some() {
+            return Some(diagnostic_completion_ready_status_for_total(total));
+        }
+
+        None
     }
 }
 
@@ -445,50 +497,26 @@ pub(crate) fn start_diagnostic_consumer(
     client: Client,
 ) {
     // Diagnostic progress reporter: 100ms snapshot of remaining queue size.
-    // Exits once the queue is first drained after having seen work.
-    // Uses `seen_nonzero` to avoid a race where Ready is set but
-    // seed_workspace hasn't run yet (pending_count would be 0 briefly).
+    // It is intentionally observational only: fast batches may complete
+    // between samples, and only sampled state/count changes are sent.
     {
         let sched = scheduler.clone();
         let state = index_state.clone();
         let progress_index = index.clone();
         let cl = client.clone();
         tokio::spawn(async move {
-            let mut seen_nonzero = false;
-            let mut ready_ticks: u32 = 0;
+            let mut tracker = DiagnosticProgressTracker::new();
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                if *state.lock().unwrap() != IndexState::Ready {
-                    continue;
-                }
+                let index_state = *state.lock().unwrap();
                 let remaining = sched.pending_count();
-                if remaining > 0 {
-                    seen_nonzero = true;
-                    ready_ticks = 0;
-                    cl.send_notification::<IndexStatusNotification>(IndexStatusParams {
-                        state: "diagnosing".to_string(),
-                        indexed: 0,
-                        total: 0,
-                        elapsed_ms: None,
-                        phase: Some("diagnosing".to_string()),
-                        message: Some(format!("{} files remaining", remaining)),
-                        remaining: Some(remaining as u64),
-                    })
-                    .await;
-                } else if seen_nonzero {
-                    // All caught up — send final "ready" with remaining=0 and exit.
-                    let status = {
-                        let idx = progress_index.lock().unwrap();
-                        diagnostic_completion_ready_status(&idx)
-                    };
-                    cl.send_notification::<IndexStatusNotification>(status).await;
-                    break;
+                let total = if remaining == 0 {
+                    progress_index.lock().unwrap().summary_count() as u64
                 } else {
-                    // Ready but seed_workspace hasn't fired yet — wait up to 2s.
-                    ready_ticks += 1;
-                    if ready_ticks >= 20 {
-                        break; // Nothing was seeded (e.g. OpenOnly scope with no files).
-                    }
+                    0
+                };
+                if let Some(status) = tracker.next_status(index_state, remaining, total) {
+                    cl.send_notification::<IndexStatusNotification>(status).await;
                 }
             }
         });
@@ -666,6 +694,41 @@ mod tests {
         assert_eq!(status.indexed, 2);
         assert_eq!(status.total, 2);
         assert_eq!(status.remaining, Some(0));
+    }
+
+    #[test]
+    fn diagnostic_progress_tracker_reports_only_sampled_changes() {
+        let mut tracker = DiagnosticProgressTracker::new();
+
+        assert!(tracker.next_status(IndexState::Initializing, 3, 2).is_none());
+
+        let first = tracker
+            .next_status(IndexState::Ready, 3, 2)
+            .expect("first sampled nonzero pending count should be reported");
+        assert_eq!(first.state, "diagnosing");
+        assert_eq!(first.remaining, Some(3));
+
+        assert!(tracker.next_status(IndexState::Ready, 3, 2).is_none());
+
+        let changed = tracker
+            .next_status(IndexState::Ready, 1, 2)
+            .expect("changed sampled pending count should be reported");
+        assert_eq!(changed.state, "diagnosing");
+        assert_eq!(changed.remaining, Some(1));
+
+        let drained = tracker
+            .next_status(IndexState::Ready, 0, 2)
+            .expect("sampled transition from nonzero to zero should report ready");
+        assert_eq!(drained.state, "ready");
+        assert_eq!(drained.remaining, Some(0));
+
+        assert!(tracker.next_status(IndexState::Ready, 0, 2).is_none());
+
+        let second_batch = tracker
+            .next_status(IndexState::Ready, 2, 2)
+            .expect("later sampled batches should report after a drain");
+        assert_eq!(second_batch.state, "diagnosing");
+        assert_eq!(second_batch.remaining, Some(2));
     }
 }
 

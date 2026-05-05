@@ -90,14 +90,15 @@ pub enum IndexState {
 }
 
 /// Custom notification `mylua/indexStatus` pushed to the client
-/// whenever indexing progress changes (scan start, per-batch, and
-/// Ready). The VS Code extension uses it to drive a status-bar item
-/// (`💛mylua 123/5000` → `💚mylua`). `state` is either `"indexing"`
-/// or `"ready"`; `indexed`/`total` are file counts. `elapsed_ms` is
-/// only populated on the terminal `"ready"` notification and carries
-/// the wall-clock duration from the `initialized` handler entry to
-/// the moment `IndexState::Ready` is committed — the extension uses
-/// it to show a one-shot "索引完成，耗时 X.X 秒" toast.
+/// whenever indexing or background diagnostic progress changes. The
+/// VS Code extension uses it to drive a status-bar item
+/// (`💛mylua 123/5000`, `💚42`, `💚mylua`). `state` is `"indexing"`,
+/// `"diagnosing"`, or `"ready"`; `indexed`/`total` are file counts.
+/// `elapsed_ms` is only populated on the terminal indexing `"ready"`
+/// notification and carries the wall-clock duration from the
+/// `initialized` handler entry to the moment `IndexState::Ready` is
+/// committed — the extension uses it to show a one-shot "索引完成，耗时
+/// X.X 秒" toast.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct IndexStatusParams {
@@ -106,15 +107,15 @@ pub struct IndexStatusParams {
     pub total: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
-    /// Current indexing phase: "scanning", "parsing", "merging".
-    /// Only present when `state == "indexing"`.
+    /// Current phase, e.g. "scanning", "parsing", "merging", or
+    /// "diagnosing". Present for indexing and diagnostic progress.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub phase: Option<String>,
     /// Human-readable message for the current phase.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
-    /// Remaining files awaiting background diagnostics.
-    /// Only present when `state == "diagnosing"`.
+    /// Remaining background diagnostics. Also sent as `Some(0)` when
+    /// the sampler observes a transition from nonzero to zero.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub remaining: Option<u64>,
 }

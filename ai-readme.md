@@ -63,7 +63,7 @@ ai-mylua-lsp/
 
 **EmmyLua 注解**：完整类型表达式 / @class / @field / @param / @return / @type / @alias / @enum / @generic / @overload / self 泛型绑定 / 多返回值
 
-**自定义通知**：`mylua/indexStatus`（索引进度）
+**自定义通知**：`mylua/indexStatus`（索引 / 诊断进度）
 
 ## Grammar — Tree-sitter 解析器
 
