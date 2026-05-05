@@ -1,7 +1,7 @@
 use tower_lsp_server::ls_types::*;
 use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
-use crate::util::{node_text, find_node_at_position, ByteRange, LineIndex};
+use crate::util::{node_text, find_node_at_position, LineIndex};
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
@@ -144,7 +144,7 @@ pub fn find_references_by_uri_id(
             if include_declaration {
                 locations.push(ReferenceLocation {
                     uri_id: location.uri_id,
-                    range: range_from_byte_range(location.uri_id, identity_def_range, all_docs),
+                    range: identity_def_range.into(),
                 });
             }
             // Scan all files for the field name
@@ -637,23 +637,6 @@ fn collect_global_declarations(
             }
         }
     }
-}
-
-/// Convert a ByteRange to an LSP Range by looking up the document.
-fn range_from_byte_range(
-    uri_id: UriId,
-    byte_range: ByteRange,
-    all_docs: &impl DocumentLookup,
-) -> Range {
-    if let Some(doc) = all_docs.get_document_by_id(uri_id) {
-        let start = doc.line_index().byte_offset_to_position(doc.source(), byte_range.start_byte);
-        let end = doc.line_index().byte_offset_to_position(doc.source(), byte_range.end_byte);
-        if let (Some(s), Some(e)) = (start, end) {
-            return Range { start: s, end: e };
-        }
-    }
-    // Fallback: use the Into<Range> impl from ByteRange
-    byte_range.into()
 }
 
 // ---------------------------------------------------------------------------
