@@ -204,11 +204,11 @@ pub(crate) struct BuildContext<'a> {
     /// Class name from the most recently flushed `@class`, consumed by
     /// the immediately following `local` or assignment to bind the variable
     /// to its class definition (Phase 2: class anchor binding).
-    pub(crate) pending_class_name: Option<String>,
+    pub(crate) pending_class_name: Option<LuaSymbol>,
     /// Global variable → class name binding. When `---@class Foo` is followed
     /// by `Foo = class()` (global assignment), record the binding here so
     /// `function Foo:method()` can resolve Foo's class and write fields back.
-    pub(crate) global_class_bindings: HashMap<String, String>,
+    pub(crate) global_class_bindings: HashMap<String, LuaSymbol>,
     /// Type of the file-level `return` statement (module export).
     pub(crate) module_return_type: Option<TypeFact>,
     /// Source range of the file-level `return` statement.
@@ -311,11 +311,11 @@ impl<'a> BuildContext<'a> {
     /// Resolve the `bound_class` for a variable name. Checks locals first
     /// (via scope stack), then falls back to `global_class_bindings`.
     /// Implements the strictly-layered lookup from Phase 2 §4.2.
-    pub(crate) fn resolve_bound_class_for_at(&self, name: &str, byte_offset: usize) -> Option<&str> {
+    pub(crate) fn resolve_bound_class_for_at(&self, name: &str, byte_offset: usize) -> Option<LuaSymbol> {
         if let Some(decl) = self.resolve_visible_in_build_scopes(name, byte_offset) {
-            return decl.bound_class.as_deref();
+            return decl.bound_class;
         }
-        self.global_class_bindings.get(name).map(|s| s.as_str())
+        self.global_class_bindings.get(name).copied()
     }
 
     /// Extract the built scopes into a ScopeTree, consuming the scope data.

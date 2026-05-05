@@ -322,7 +322,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         // Phase 2: only the first local immediately following the class
         // comment gets the binding, even when it has no initializer.
         let var_bound_class = if i == 0 { pending_class.take() } else { None };
-        let var_bound_class_symbol = var_bound_class.as_deref().map(intern_lua_symbol);
+        let var_bound_class_symbol = var_bound_class;
 
         // If we have an explicit @type annotation, it takes priority
         if i == 0 {
@@ -412,8 +412,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     }
                     _ => {
                         // For non-table initializers, use the class type directly
-                        let class_name = var_bound_class.clone().unwrap();
-                        TypeFact::Known(KnownType::EmmyType(class_name.into()))
+                        let class_name = var_bound_class.unwrap();
+                        TypeFact::Known(KnownType::EmmyType(class_name))
                     }
                 }
             } else {
@@ -746,13 +746,10 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // bases, and the shape write still happens for local table shapes.
     if let Some((base_name, field_name)) = name.rsplit_once(':').or_else(|| name.rsplit_once('.')) {
         if !base_name.contains('.') && !base_name.contains(':') {
-            if let Some(class_name) = ctx
-                .resolve_bound_class_for_at(base_name, name_node.start_byte())
-                .map(|s| s.to_string())
-            {
+            if let Some(class_name) = ctx.resolve_bound_class_for_at(base_name, name_node.start_byte()) {
                 let def_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
                 let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
-                add_field_to_class(ctx, &class_name, field_name, type_fact, def_range);
+                add_field_to_class(ctx, class_name, field_name, type_fact, def_range);
             }
         }
     }
@@ -810,7 +807,7 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 /// - A runtime field with the same name was already appended
 fn add_field_to_class(
     ctx: &mut BuildContext,
-    class_name: &str,
+    class_name: crate::lua_symbol::LuaSymbol,
     field_name: &str,
     type_fact: TypeFact,
     def_range: crate::util::ByteRange,
@@ -1173,17 +1170,17 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
                 // Phase 2: bind the first simple-identifier LHS to the class
                 if i == 0 {
-                    if let Some(ref class_name) = pending_class {
+                    if let Some(class_name) = pending_class {
                         ctx.global_class_bindings
-                            .insert(name.clone(), class_name.clone());
+                            .insert(name.clone(), class_name);
                     }
                 }
 
                 let type_fact = if i == 0 {
                     if let Some(ref type_expr) = pending_type {
                         emmy_type_to_fact(type_expr)
-                    } else if let Some(ref class_name) = pending_class {
-                        TypeFact::Known(KnownType::EmmyType(class_name.clone().into()))
+                    } else if let Some(class_name) = pending_class {
+                        TypeFact::Known(KnownType::EmmyType(class_name))
                     } else {
                         value_node
                             .map(|v| infer_expression_type(ctx, v, 0))
@@ -1266,14 +1263,13 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // Foo is a global). The existing local/global check below
                 // decides whether to emit a global contribution.
                 if chain.fields.len() == 1 {
-                    if let Some(class_name) = ctx
-                        .resolve_bound_class_for_at(&chain.base_name, var_node.start_byte())
-                        .map(|s| s.to_string())
+                    if let Some(class_name) =
+                        ctx.resolve_bound_class_for_at(&chain.base_name, var_node.start_byte())
                     {
                         let field_name = &chain.fields[0];
                         add_field_to_class(
                             ctx,
-                            &class_name,
+                            class_name,
                             field_name,
                             type_fact.clone(),
                             assign_range,
@@ -1556,12 +1552,11 @@ fn visit_function_body(
         // local table methods use the table shape so `self.field` can resolve.
         let (self_type, self_bound_class) = if !class_prefix.is_empty() {
             let bound = ctx
-                .resolve_bound_class_for_at(class_prefix, func_body.start_byte())
-                .map(|s| s.to_string());
-            if let Some(ref class_name) = bound {
+                .resolve_bound_class_for_at(class_prefix, func_body.start_byte());
+            if let Some(class_name) = bound {
                 (
-                    Some(TypeFact::Known(KnownType::EmmyType(class_name.clone().into()))),
-                    Some(class_name.clone()),
+                    Some(TypeFact::Known(KnownType::EmmyType(class_name))),
+                    Some(class_name),
                 )
             } else if let Some(decl) =
                 ctx.resolve_visible_in_build_scopes(class_prefix, func_body.start_byte())
@@ -1587,7 +1582,7 @@ fn visit_function_body(
             range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
             type_fact: self_type,
-            bound_class: self_bound_class.as_deref().map(intern_lua_symbol),
+            bound_class: self_bound_class,
             is_emmy_annotated: false,
         });
     }

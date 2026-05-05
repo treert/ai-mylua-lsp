@@ -15,7 +15,7 @@ use super::BuildContext;
 /// following statement can bind the variable to this class.
 pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if let Some((cname, parents, fields, generic_params, name_range)) = ctx.pending_class.take() {
-        ctx.pending_class_name = Some(cname.clone());
+        ctx.pending_class_name = Some(intern_lua_symbol(&cname));
         ctx.type_definitions.push(TypeDefinition {
             name: intern_lua_symbol(&cname),
             kind: TypeDefinitionKind::Class,

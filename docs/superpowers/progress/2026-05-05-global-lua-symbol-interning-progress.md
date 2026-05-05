@@ -1,7 +1,7 @@
 # Global LuaSymbol Interning — 进度记录
 
 **日期**: 2026-05-05
-**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前四段完成待提交
+**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前五段完成待提交
 
 ## 当前目标
 
@@ -185,6 +185,34 @@ cargo run --bin lua-perf -- --summary-stdout /Users/zhuguosen/MyGit/ai-mylua-lsp
 - `ReadLints`: no linter errors
 - `code-reviewer`: no blocking issues found
 
+### Task 2.5: Tighten summary_builder Symbol Boundaries
+
+改动：
+
+- `BuildContext.pending_class_name` 从 `Option<String>` 改为 `Option<LuaSymbol>`
+- `BuildContext.global_class_bindings` value 从 `String` 改为 `LuaSymbol`
+- `resolve_bound_class_for_at` 改为返回 `Option<LuaSymbol>`，避免从 `ScopeDecl.bound_class` resolve 成 `String` 后再 intern
+- 更新 local/global class binding、class field injection、method `self` scope declaration 的构造路径，直接传递 `LuaSymbol`
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test lua_symbol
+cargo test summary_lua_symbols_serialize_as_strings_and_lookup_normalizes_colon
+cargo test long_lived_scope_names_use_symbols_but_queries_stay_string_facing
+cargo test --tests
+cargo build
+```
+
+结果：
+
+- targeted tests: passed
+- `cargo test --tests`: 585 passed
+- `cargo build`: passed
+- `ReadLints`: no linter errors
+- `code-reviewer`: no blocking issues found
+
 ## 当前仓库状态
 
 换会话前检查：
@@ -200,7 +228,7 @@ git log -1 --oneline
 9e1d1af refactor: intern summary names
 ```
 
-当前有未提交代码改动覆盖 Task 2.4。
+当前有未提交代码改动覆盖 Task 2.4 和 Task 2.5。
 
 ## 下一步建议
 
@@ -210,7 +238,7 @@ git log -1 --oneline
 2. ~~`TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`~~
 3. ~~`DocumentSummary` 名称字段和 `function_name_index` 改为 `LuaSymbol`~~
 4. ~~`ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`~~
-5. `summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储
+5. ~~`summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储~~
 6. ~~`lua_perf --summary` 验证 JSON 仍输出字符串~~
 
 每个小任务都应保持：
