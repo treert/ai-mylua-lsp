@@ -1362,11 +1362,11 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
                         returns: Vec::new(),
                     }))
                 } else {
-                    TypeFact::Known(KnownType::EmmyType(base))
+                    TypeFact::Known(KnownType::EmmyType(base.into()))
                 }
             } else {
                 let generic_facts: Vec<TypeFact> = generics.iter().map(emmy_type_to_fact).collect();
-                TypeFact::Known(KnownType::EmmyGeneric(base, generic_facts))
+                TypeFact::Known(KnownType::EmmyGeneric(base.into(), generic_facts))
             }
         }
         EmmyType::Union(types) => {
@@ -1388,11 +1388,11 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
             // can match `T[]` against an actual array argument and infer `T`.
             // We represent `T[]` as `EmmyGeneric("__array", [T_fact])`.
             let elem_fact = emmy_type_to_fact(inner);
-            TypeFact::Known(KnownType::EmmyGeneric("__array".to_string(), vec![elem_fact]))
+            TypeFact::Known(KnownType::EmmyGeneric("__array".into(), vec![elem_fact]))
         }
         EmmyType::Function { params, returns } => {
             let param_infos: Vec<ParamInfo> = params.iter().map(|p| ParamInfo {
-                name: p.name.clone().unwrap_or_default(),
+                name: p.name.clone().unwrap_or_default().into(),
                 type_fact: emmy_type_to_fact(&p.type_expr),
                 optional: false,
             }).collect();

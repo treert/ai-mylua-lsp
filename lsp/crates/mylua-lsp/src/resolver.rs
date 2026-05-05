@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use crate::aggregation::WorkspaceAggregation;
+use crate::lua_symbol::intern_lua_symbol;
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
 use crate::uri_id::UriId;
@@ -145,7 +146,7 @@ fn resolve_field_chain_inner(
     let mut current = ResolvedType::from_fact(ctx, base_fact.clone());
 
     let mut global_prefix = match base_fact {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.to_string()),
         TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
             resolve_require_global_name(module_path, agg)
         }
@@ -367,7 +368,7 @@ fn resolve_require(
             ret.clone()
         } else {
             TypeFact::Stub(SymbolicStub::GlobalRef {
-                name: module_path.to_string(),
+                name: module_path.into(),
             })
         }
     };
@@ -480,10 +481,10 @@ fn resolve_emmy_type(
 ) -> ResolvedType {
     let candidate = match agg.type_shard.get(name) {
         Some(candidates) if !candidates.is_empty() => &candidates[0],
-        _ => return ResolvedType::from_fact(ctx, TypeFact::Known(KnownType::EmmyType(name.to_string()))),
+        _ => return ResolvedType::from_fact(ctx, TypeFact::Known(KnownType::EmmyType(name.into()))),
     };
     ResolvedType::with_location(
-        TypeFact::Known(KnownType::EmmyType(name.to_string())),
+        TypeFact::Known(KnownType::EmmyType(name.into())),
         candidate.source_uri_id(),
         candidate.range,
     )
@@ -547,7 +548,7 @@ fn resolve_call_return(
                 None => return ResolvedType::unknown(base_ctx),
             };
             summary.table_shapes.get(shape_id)
-                .and_then(|shape| shape.fields.get(func_name))
+                .and_then(|shape| shape.fields.get(&intern_lua_symbol(func_name)))
                 .and_then(|fi| {
                     match &fi.type_fact {
                         TypeFact::Known(KnownType::Function(ref sig)) => {
@@ -747,7 +748,7 @@ pub fn resolve_require_global_name(
             agg.summary_by_id(target_uri_id)
                 .and_then(|s| s.module_return_type.as_ref())
                 .and_then(|ret| match ret {
-                    TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.clone()),
+                    TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.to_string()),
                     _ => None,
                 })
         })
@@ -888,7 +889,7 @@ fn resolve_table_field(
         None => return ResolvedType::unknown(ctx),
     };
     if let Some(shape) = summary.table_shapes.get(&shape_id) {
-        if let Some(fi) = shape.fields.get(field) {
+        if let Some(fi) = shape.fields.get(&intern_lua_symbol(field)) {
             return ResolvedType {
                 type_fact: fi.type_fact.clone(),
                 def_location: fi.def_range
@@ -956,7 +957,7 @@ fn resolve_emmy_field_with_visited(
                         // pre-computed anchor_shape_id to find them directly.
                         if let Some(shape_id) = td.anchor_shape_id {
                             if let Some(shape) = summary.table_shapes.get(&shape_id) {
-                                if let Some(fi) = shape.fields.get(field) {
+                                if let Some(fi) = shape.fields.get(&intern_lua_symbol(field)) {
                                     return ResolvedType {
                                         type_fact: fi.type_fact.clone(),
                                         def_location: fi.def_range.map(|range| ResolvedLocation {
@@ -1014,7 +1015,7 @@ fn collect_fields(
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     for (name, fi) in &shape.fields {
                         fields.push(FieldCompletion {
-                            name: name.clone(),
+                            name: name.to_string(),
                             type_display: format!("{}", fi.type_fact),
                             is_function: is_function_type(&fi.type_fact),
                             def_range: fi.def_range,
@@ -1095,9 +1096,9 @@ fn collect_emmy_fields_recursive(
                         if let Some(shape_id) = td.anchor_shape_id {
                             if let Some(shape) = summary.table_shapes.get(&shape_id) {
                                 for (fname, fi) in &shape.fields {
-                                    if !fields.iter().any(|f| f.name == *fname) {
+                                    if !fields.iter().any(|f| f.name == fname.as_str()) {
                                         fields.push(FieldCompletion {
-                                            name: fname.clone(),
+                                            name: fname.to_string(),
                                             type_display: format!("{}", fi.type_fact),
                                             is_function: is_function_type(&fi.type_fact),
                                             def_range: fi.def_range,
@@ -1229,7 +1230,7 @@ fn substitute_in_fact(
 ) -> TypeFact {
     match fact {
         TypeFact::Known(KnownType::EmmyType(name)) => {
-            if let Some(i) = param_names.iter().position(|p| p == name) {
+            if let Some(i) = param_names.iter().position(|p| p == name.as_str()) {
                 if let Some(actual) = actual_params.get(i) {
                     return actual.clone();
                 }
@@ -1241,10 +1242,10 @@ fn substitute_in_fact(
                 .iter()
                 .map(|p| substitute_in_fact(p, param_names, actual_params))
                 .collect();
-            TypeFact::Known(KnownType::EmmyGeneric(name.clone(), substituted))
+            TypeFact::Known(KnownType::EmmyGeneric(*name, substituted))
         }
         TypeFact::Stub(SymbolicStub::TypeRef { name }) => {
-            if let Some(i) = param_names.iter().position(|p| p == name) {
+            if let Some(i) = param_names.iter().position(|p| p == name.as_str()) {
                 if let Some(actual) = actual_params.get(i) {
                     return actual.clone();
                 }
@@ -1261,7 +1262,7 @@ fn substitute_in_fact(
         TypeFact::Known(KnownType::Function(sig)) => {
             let params: Vec<crate::type_system::ParamInfo> = sig.params.iter().map(|p| {
                 crate::type_system::ParamInfo {
-                    name: p.name.clone(),
+                    name: p.name,
                     type_fact: substitute_in_fact(&p.type_fact, param_names, actual_params),
                     optional: p.optional,
                 }
@@ -1327,7 +1328,7 @@ pub fn unify_function_generics(
         .into_iter()
         .enumerate()
         .map(|(i, b)| {
-            b.unwrap_or_else(|| TypeFact::Known(KnownType::EmmyType(generic_params[i].clone())))
+            b.unwrap_or_else(|| TypeFact::Known(KnownType::EmmyType(generic_params[i].clone().into())))
         })
         .collect();
 
@@ -1355,7 +1356,7 @@ fn unify_one(
     match formal {
         // Direct generic param: `@param x T` → T = actual
         TypeFact::Known(KnownType::EmmyType(name)) => {
-            if let Some(i) = generic_params.iter().position(|p| p == name) {
+            if let Some(i) = generic_params.iter().position(|p| p == name.as_str()) {
                 if bindings[i].is_none() {
                     bindings[i] = Some(actual.clone());
                 }

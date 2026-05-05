@@ -2,6 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, parse_type_from_str,
     EmmyAnnotation, EmmyType,
 };
+use crate::lua_symbol::intern_lua_symbol;
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape};
@@ -363,7 +364,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         if let Some(val) = value_node {
             if let Some(module_path) = try_extract_require(ctx, val) {
                 let require_type_fact = TypeFact::Stub(SymbolicStub::RequireRef {
-                    module_path,
+                    module_path: module_path.into(),
                 });
                 ctx.add_scoped_decl(ScopeDecl {
                     name: name.clone(),
@@ -411,7 +412,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     _ => {
                         // For non-table initializers, use the class type directly
                         let class_name = var_bound_class.clone().unwrap();
-                        TypeFact::Known(KnownType::EmmyType(class_name))
+                        TypeFact::Known(KnownType::EmmyType(class_name.into()))
                     }
                 }
             } else {
@@ -423,7 +424,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // methods across two shape tables in the same file.
             if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
                 if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
-                    shape.set_owner(name.clone());
+                    shape.set_owner(&name);
                 }
             }
             ctx.add_scoped_decl(ScopeDecl {
@@ -709,9 +710,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let sid = *shape_id;
                 if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
                     shape.set_field(
-                        field_name.to_string(),
+                        field_name,
                         FieldInfo {
-                            name: field_name.to_string(),
+                            name: field_name.into(),
                             type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
                             def_range: Some(
                                 ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
@@ -867,7 +868,7 @@ fn build_function_summary(
             } => {
                 emmy_annotated = true;
                 annotated_params.push(ParamInfo {
-                    name: pname.clone(),
+                    name: pname.clone().into(),
                     type_fact: emmy_type_to_fact(type_expr),
                     optional: *optional,
                 });
@@ -881,7 +882,7 @@ fn build_function_summary(
             EmmyAnnotation::Vararg { type_expr } => {
                 emmy_annotated = true;
                 vararg_param = Some(ParamInfo {
-                    name: "...".to_string(),
+                    name: "...".into(),
                     type_fact: emmy_type_to_fact(type_expr),
                     optional: false,
                 });
@@ -1034,7 +1035,7 @@ pub(super) fn extract_ast_params(
         match child.kind() {
             "identifier" => {
                 params.push(ParamInfo {
-                    name: node_text(child, source).to_string(),
+                    name: node_text(child, source).into(),
                     type_fact: TypeFact::Unknown,
                     optional: false,
                 });
@@ -1044,7 +1045,7 @@ pub(super) fn extract_ast_params(
                     if let Some(id) = child.named_child(j as u32) {
                         if id.kind() == "identifier" {
                             params.push(ParamInfo {
-                                name: node_text(id, source).to_string(),
+                                name: node_text(id, source).into(),
                                 type_fact: TypeFact::Unknown,
                                 optional: false,
                             });
@@ -1056,7 +1057,7 @@ pub(super) fn extract_ast_params(
             // vararg as a named node again) or anonymous `...` token.
             "varargs" => {
                 params.push(ParamInfo {
-                    name: "...".to_string(),
+                    name: "...".into(),
                     type_fact: TypeFact::Unknown,
                     optional: false,
                 });
@@ -1067,7 +1068,7 @@ pub(super) fn extract_ast_params(
                 // literal text is `...`.
                 if !child.is_named() && node_text(child, source) == "..." {
                     params.push(ParamInfo {
-                        name: "...".to_string(),
+                        name: "...".into(),
                         type_fact: TypeFact::Unknown,
                         optional: false,
                     });
@@ -1180,7 +1181,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     if let Some(ref type_expr) = pending_type {
                         emmy_type_to_fact(type_expr)
                     } else if let Some(ref class_name) = pending_class {
-                        TypeFact::Known(KnownType::EmmyType(class_name.clone()))
+                        TypeFact::Known(KnownType::EmmyType(class_name.clone().into()))
                     } else {
                         value_node
                             .map(|v| infer_expression_type(ctx, v, 0))
@@ -1197,7 +1198,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // shape when the RHS is `{ ... }`.
                 if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
                     if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
-                        shape.set_owner(name.clone());
+                        shape.set_owner(&name);
                     }
                 }
 
@@ -1444,7 +1445,7 @@ fn register_nested_field_write(
         let existing_field = ctx
             .table_shapes
             .get(&current_shape)
-            .and_then(|s| s.fields.get(field_name))
+            .and_then(|s| s.fields.get(&intern_lua_symbol(field_name)))
             .map(|fi| fi.type_fact.clone());
         let next_shape = match existing_field {
             Some(TypeFact::Known(KnownType::Table(sid))) => sid,
@@ -1454,9 +1455,9 @@ fn register_nested_field_write(
                 ctx.table_shapes.insert(new_id, TableShape::new(new_id));
                 if let Some(parent) = ctx.table_shapes.get_mut(&current_shape) {
                     parent.set_field(
-                        field_name.clone(),
+                        field_name,
                         FieldInfo {
-                            name: field_name.clone(),
+                            name: field_name.as_str().into(),
                             type_fact: TypeFact::Known(KnownType::Table(new_id)),
                             def_range: Some(assign_range),
                             assignment_count: 1,
@@ -1475,9 +1476,9 @@ fn register_nested_field_write(
     };
     if let Some(shape) = ctx.table_shapes.get_mut(&current_shape) {
         shape.set_field(
-            final_field.clone(),
+            &final_field,
             FieldInfo {
-                name: final_field,
+                name: final_field.as_str().into(),
                 type_fact,
                 def_range: Some(assign_range),
                 assignment_count: 1,
@@ -1557,7 +1558,7 @@ fn visit_function_body(
                 .map(|s| s.to_string());
             if let Some(ref class_name) = bound {
                 (
-                    Some(TypeFact::Known(KnownType::EmmyType(class_name.clone()))),
+                    Some(TypeFact::Known(KnownType::EmmyType(class_name.clone().into()))),
                     Some(class_name.clone()),
                 )
             } else if let Some(decl) =
@@ -1567,7 +1568,7 @@ fn visit_function_body(
             } else {
                 (
                     Some(TypeFact::Known(KnownType::EmmyType(
-                        class_prefix.to_string(),
+                        class_prefix.to_string().into(),
                     ))),
                     None,
                 )
@@ -1678,7 +1679,7 @@ fn register_single_param(
     let name = node_text(id_node, ctx.source).to_string();
     let type_fact = emmy_params
         .iter()
-        .find(|p| p.name == name)
+        .find(|p| p.name.as_str() == name)
         .map(|p| p.type_fact.clone())
         .filter(|tf| *tf != TypeFact::Unknown);
     let db = id_node.start_byte();

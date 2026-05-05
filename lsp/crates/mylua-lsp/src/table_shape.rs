@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use crate::util::ByteRange;
 
 /// Stable identity for a table literal or constructed table within a file.
@@ -8,10 +9,10 @@ use crate::util::ByteRange;
 pub struct TableShapeId(pub u32);
 
 /// Describes the statically known shape of a Lua table value.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TableShape {
     pub id: TableShapeId,
-    pub fields: HashMap<String, FieldInfo>,
+    pub fields: HashMap<LuaSymbol, FieldInfo>,
     /// Element type for array-style `t[i] = v` writes with non-static keys.
     pub array_element_type: Option<crate::type_system::TypeFact>,
     /// `true` if the field set is considered exhaustive (no dynamic key writes observed).
@@ -25,21 +26,17 @@ pub struct TableShape {
     /// popups can say `(method of t)` when two shape tables in the
     /// same file share a field name. Dotted / subscripted LHS
     /// (`M.field = { ... }`) preserves the full text form.
-    /// `#[serde(default)]` keeps caches written by earlier builds
-    /// loadable.
-    #[serde(default)]
-    pub owner_name: Option<String>,
+    pub owner_name: Option<LuaSymbol>,
     /// Key type for bracket-key-only tables (e.g. `{ [string] = value, ... }`).
     /// When set, `fields` is empty and the shape represents a map-like table
     /// whose individual entries are not tracked. Consumers should use
     /// `key_type` + `array_element_type` for type information.
-    #[serde(default)]
     pub key_type: Option<crate::type_system::TypeFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FieldInfo {
-    pub name: String,
+    pub name: LuaSymbol,
     pub type_fact: crate::type_system::TypeFact,
     /// Where this field was first defined.
     pub def_range: Option<ByteRange>,
@@ -67,17 +64,46 @@ impl TableShape {
     /// the first non-empty name wins, later writes are ignored so a
     /// subsequent field-level extraction can't overwrite the
     /// original binding with a nested-scope alias.
-    pub fn set_owner(&mut self, name: String) {
+    pub fn set_owner(&mut self, name: &str) {
         if self.owner_name.is_none() && !name.is_empty() {
-            self.owner_name = Some(name);
+            self.owner_name = Some(intern_lua_symbol(name));
         }
     }
 
-    pub fn set_field(&mut self, name: String, info: FieldInfo) {
-        self.fields.insert(name, info);
+    pub fn set_field(&mut self, name: &str, info: FieldInfo) {
+        self.fields.insert(intern_lua_symbol(name), info);
     }
 
     pub fn mark_open(&mut self) {
         self.is_closed = false;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua_symbol::intern_lua_symbol;
+    use crate::type_system::TypeFact;
+
+    #[test]
+    fn long_lived_table_names_use_symbols_but_serialize_as_strings() {
+        let mut shape = TableShape::new(TableShapeId(7));
+        shape.set_owner("Player");
+        shape.set_field(
+            "name",
+            FieldInfo {
+                name: intern_lua_symbol("name"),
+                type_fact: TypeFact::Unknown,
+                def_range: None,
+                assignment_count: 1,
+            },
+        );
+
+        assert_eq!(shape.owner_name.unwrap().as_str(), "Player");
+        assert!(shape.fields.contains_key(&intern_lua_symbol("name")));
+
+        let json = serde_json::to_value(&shape).unwrap();
+        assert_eq!(json["owner_name"], "Player");
+        assert_eq!(json["fields"]["name"]["name"], "name");
     }
 }

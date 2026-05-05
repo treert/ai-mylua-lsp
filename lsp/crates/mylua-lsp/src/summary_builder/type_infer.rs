@@ -1,4 +1,5 @@
 use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation};
+use crate::lua_symbol::intern_lua_symbol;
 use crate::table_shape::{TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::node_text;
@@ -58,7 +59,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
                             // function declaring `a` must NOT append a
                             // phantom `xyz` parameter (keeps behavior in
                             // line with `build_function_summary`).
-                            if let Some(p) = params.iter_mut().find(|p| p.name == pname) {
+                            if let Some(p) = params.iter_mut().find(|p| p.name.as_str() == pname) {
                                 p.type_fact = fact;
                                 p.optional = optional;
                             }
@@ -109,7 +110,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
             }
             // Otherwise it's a global reference stub
             TypeFact::Stub(SymbolicStub::GlobalRef {
-                name: text.to_string(),
+                name: text.into(),
             })
         }
 
@@ -225,7 +226,7 @@ fn infer_table_array_element_type_lightweight(ctx: &BuildContext, constructor: t
         }
     }
     match elem_type {
-        Some(t) => TypeFact::Known(KnownType::EmmyGeneric("__array".to_string(), vec![t])),
+        Some(t) => TypeFact::Known(KnownType::EmmyGeneric("__array".into(), vec![t])),
         None => TypeFact::Unknown,
     }
 }
@@ -252,7 +253,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_from_node(ctx, first_arg) {
-                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path });
+                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path: module_path.into() });
                 }
             }
         }
@@ -270,7 +271,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
             call_arg_types.push(TypeFact::Known(KnownType::Table(*shape_id)));
             call_arg_types.extend(explicit_arg_types.clone());
             if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                if let Some(fi) = shape.fields.get(&method_name) {
+                if let Some(fi) = shape.fields.get(&intern_lua_symbol(&method_name)) {
                     match &fi.type_fact {
                         TypeFact::Known(KnownType::Function(ref sig)) => {
                             if let Some(ret) = sig.returns.first() {
@@ -308,7 +309,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
         call_arg_types.extend(explicit_arg_types);
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_fact),
-            func_name: method_name,
+            func_name: method_name.into(),
             is_method_call: true,
             call_arg_types,
             generic_args,
@@ -329,7 +330,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
 
                 if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                        if let Some(fi) = shape.fields.get(&func_name) {
+                        if let Some(fi) = shape.fields.get(&intern_lua_symbol(&func_name)) {
                             match &fi.type_fact {
                                 TypeFact::Known(KnownType::Function(ref sig)) => {
                                     if let Some(ret) = sig.returns.first() {
@@ -361,7 +362,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
                 let generic_args = call_base_generic_args(&base_fact);
                 return TypeFact::Stub(SymbolicStub::CallReturn {
                     base: Box::new(base_fact),
-                    func_name,
+                    func_name: func_name.into(),
                     is_method_call: false,
                     call_arg_types: explicit_arg_types,
                     generic_args,
@@ -419,7 +420,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
     }
 
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
-        func_name: callee_text.to_string(),
+        func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
     })
 }
@@ -443,7 +444,7 @@ fn infer_field_expression_type(
 
     if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
         if let Some(shape) = ctx.table_shapes.get(shape_id) {
-            if let Some(fi) = shape.fields.get(&field_name) {
+            if let Some(fi) = shape.fields.get(&intern_lua_symbol(&field_name)) {
                 return fi.type_fact.clone();
             }
         }
@@ -451,7 +452,7 @@ fn infer_field_expression_type(
 
     TypeFact::Stub(SymbolicStub::FieldOf {
         base: Box::new(base_fact),
-        field: field_name,
+        field: field_name.into(),
     })
 }
 
@@ -481,7 +482,7 @@ fn infer_field_base_type(
     }
 
     TypeFact::Stub(SymbolicStub::GlobalRef {
-        name: base_text.to_string(),
+        name: base_text.into(),
     })
 }
 

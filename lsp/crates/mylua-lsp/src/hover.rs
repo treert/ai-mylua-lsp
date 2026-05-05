@@ -221,7 +221,7 @@ pub fn hover(
         let resolved = resolver::resolve_type(
             source_uri_id,
             &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                name: ident_text.to_string(),
+                name: ident_text.into(),
             }),
             index,
         );

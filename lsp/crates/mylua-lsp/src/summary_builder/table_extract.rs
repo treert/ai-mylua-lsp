@@ -130,8 +130,8 @@ fn extract_single_field(
             let key = node_text(k, ctx.source).to_string();
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.set_field(key.clone(), FieldInfo {
-                    name: key,
+                shape.set_field(&key, FieldInfo {
+                    name: key.as_str().into(),
                     type_fact,
                     def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
                     assignment_count: 1,
@@ -158,8 +158,8 @@ fn extract_single_field(
             };
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.set_field(key_text.clone(), FieldInfo {
-                    name: key_text,
+                shape.set_field(&key_text, FieldInfo {
+                    name: key_text.as_str().into(),
                     type_fact,
                     def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
                     assignment_count: 1,

@@ -1,7 +1,7 @@
 # Global LuaSymbol Interning — 进度记录
 
 **日期**: 2026-05-05
-**状态**: Task 1 完成并已提交；Task 2+ 待拆分执行
+**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前两段完成待提交
 
 ## 当前目标
 
@@ -67,6 +67,60 @@ cargo build
 - `ReadLints`: no linter errors
 - `code-reviewer`: no issues found
 
+### Task 2.1: Migrate Core TypeFact Value Names
+
+改动：
+
+- `TypeFact` / `KnownType` / `SymbolicStub` 中长期保存的类型名、模块名、全局名、字段名改为 `LuaSymbol`
+- `FunctionSignature` / `ParamInfo` 参数名改为 `LuaSymbol`
+- 更新 `emmy.rs`、`type_inference.rs`、`summary_builder/**`、`resolver.rs`、goto / hover / completion / signature help / references / diagnostics 相关调用点
+- `summary.rs` / `table_shape.rs` 中依赖 `TypeFact`、`FunctionSignature` 的长期结构移除 `Deserialize` 派生，保留 `Serialize`
+- 新增 `type_system` 回归测试，覆盖 `LuaSymbol` 存储下 JSON 仍输出字符串
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test long_lived_type_names_use_symbols_but_serialize_as_strings
+cargo test --tests
+cargo build
+```
+
+结果：
+
+- targeted test: passed
+- `cargo test --tests`: 580 passed
+- `cargo build`: passed
+- `ReadLints`: no linter errors
+- `code-reviewer`: no blocking issues found
+
+### Task 2.2: Migrate TableShape Field Names
+
+改动：
+
+- `TableShape.fields` key 从 `String` 改为 `LuaSymbol`
+- `TableShape.owner_name` 从 `Option<String>` 改为 `Option<LuaSymbol>`
+- `FieldInfo.name` 从 `String` 改为 `LuaSymbol`
+- 更新 table extraction、nested field writes、resolver、field diagnostics、summary builder inference 的 field lookup 边界，查找前 intern key
+- 新增 `table_shape` 回归测试，覆盖 owner、field key、FieldInfo JSON 仍输出字符串
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test long_lived_table_names_use_symbols_but_serialize_as_strings
+cargo test --tests
+cargo build
+```
+
+结果：
+
+- targeted test: passed
+- `cargo test --tests`: 581 passed
+- `cargo build`: passed
+- `ReadLints`: no linter errors
+- `code-reviewer`: no blocking issues found
+
 ## 当前仓库状态
 
 换会话前检查：
@@ -79,18 +133,21 @@ git log -1 --oneline
 最新提交：
 
 ```text
-cf7fefb refactor: add LuaSymbol infrastructure
+57f0d7f docs: add LuaSymbol progress doc
 ```
+
+当前有未提交代码改动覆盖 Task 2.1 和 Task 2.2。
 
 ## 下一步建议
 
 不要直接一次性执行原计划里的 Task 2，因为它同时覆盖 `TypeFact`、`TableShape`、`DocumentSummary`、`summary_builder`，替换量大。建议把 Task 2 拆成更小的可验证提交：
 
-1. `TypeFact` / `FunctionSignature` / `ParamInfo` 里的长期字符串改为 `LuaSymbol`
-2. `TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`
+1. ~~`TypeFact` / `FunctionSignature` / `ParamInfo` 里的长期字符串改为 `LuaSymbol`~~
+2. ~~`TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`~~
 3. `DocumentSummary` 名称字段和 `function_name_index` 改为 `LuaSymbol`
-4. `summary_builder` 构造边界统一 intern
-5. `lua_perf --summary` 验证 JSON 仍输出字符串
+4. `ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`
+5. `summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储
+6. `lua_perf --summary` 验证 JSON 仍输出字符串
 
 每个小任务都应保持：
 
@@ -109,5 +166,5 @@ cf7fefb refactor: add LuaSymbol infrastructure
 3. `docs/superpowers/plans/2026-05-05-global-lua-symbol-interning.md`
 4. 本文件
 
-然后从“拆分 Task 2”开始讨论，不要直接派发完整 Task 2。
+然后从“DocumentSummary 名称字段和 `function_name_index`”继续，不要直接派发完整剩余任务。
 

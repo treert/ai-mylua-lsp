@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tower_lsp_server::ls_types::Uri;
 
 use crate::table_shape::{TableShape, TableShapeId};
@@ -10,7 +10,7 @@ use crate::util::ByteRange;
 ///
 /// Contains everything needed to participate in the workspace aggregation layer
 /// without re-parsing the AST. See `index-architecture.md` §2.1.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct DocumentSummary {
     pub uri: Uri,
     /// Globals defined/extended by this file.
@@ -61,7 +61,7 @@ pub struct DocumentSummary {
 /// `callee_name` preserves the full dotted / colon-qualified form
 /// (`m.sub.foo`, `obj:bar`) so consumers can do exact or
 /// last-segment matching.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CallSite {
     /// Full callee text (e.g. `foo`, `m.sub.foo`, `obj:bar`).
     pub callee_name: String,
@@ -80,7 +80,7 @@ pub struct CallSite {
 }
 
 /// A global name contributed by this file (assignment, function declaration, table extension).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GlobalContribution {
     pub name: String,
     pub kind: GlobalContributionKind,
@@ -89,7 +89,7 @@ pub struct GlobalContribution {
     pub selection_range: ByteRange,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum GlobalContributionKind {
     Variable,
     Function,
@@ -97,7 +97,7 @@ pub enum GlobalContributionKind {
 }
 
 /// Summary of a function's type-level contract.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct FunctionSummary {
     pub name: String,
     pub signature: FunctionSignature,
@@ -116,7 +116,7 @@ pub struct FunctionSummary {
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TypeDefinition {
     pub name: String,
     pub kind: TypeDefinitionKind,
@@ -142,7 +142,7 @@ pub struct TypeDefinition {
     pub anchor_shape_id: Option<crate::table_shape::TableShapeId>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum TypeDefinitionKind {
     Class,
     Alias,
@@ -150,7 +150,7 @@ pub enum TypeDefinitionKind {
 }
 
 /// A field declared within `---@class` or `---@field`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TypeFieldDef {
     pub name: String,
     pub type_fact: TypeFact,

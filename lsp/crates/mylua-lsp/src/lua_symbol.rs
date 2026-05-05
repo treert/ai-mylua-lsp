@@ -1,4 +1,5 @@
 use std::fmt;
+use std::ops::Deref;
 use std::sync::OnceLock;
 
 use lasso::{Spur, ThreadedRodeo};
@@ -39,6 +40,44 @@ impl fmt::Display for LuaSymbol {
 impl From<&str> for LuaSymbol {
     fn from(value: &str) -> Self {
         intern_lua_symbol(value)
+    }
+}
+
+impl From<String> for LuaSymbol {
+    fn from(value: String) -> Self {
+        intern_lua_symbol(&value)
+    }
+}
+
+impl PartialEq<&str> for LuaSymbol {
+    fn eq(&self, other: &&str) -> bool {
+        self.as_str() == *other
+    }
+}
+
+impl PartialEq<LuaSymbol> for &str {
+    fn eq(&self, other: &LuaSymbol) -> bool {
+        *self == other.as_str()
+    }
+}
+
+impl PartialEq<str> for LuaSymbol {
+    fn eq(&self, other: &str) -> bool {
+        self.as_str() == other
+    }
+}
+
+impl PartialEq<LuaSymbol> for str {
+    fn eq(&self, other: &LuaSymbol) -> bool {
+        self == other.as_str()
+    }
+}
+
+impl Deref for LuaSymbol {
+    type Target = str;
+
+    fn deref(&self) -> &Self::Target {
+        self.as_str()
     }
 }
 

@@ -447,7 +447,7 @@ fn resolve_global_item(
                 .signature
                 .params
                 .iter()
-                .map(|p| p.name.clone())
+                .map(|p| p.name.to_string())
                 .collect();
             md.push_str(&params.join(", "));
             md.push_str(")\n```");

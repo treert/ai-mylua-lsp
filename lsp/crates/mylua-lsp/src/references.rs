@@ -412,12 +412,12 @@ fn resolve_segments_to_field(
     // call whose return is unknown), bound_class is authoritative.
     let root_name = &segments[0];
     let root_fact = if let Some(class_name) = scope_tree.resolve_bound_class(lookup_byte, root_name) {
-        crate::type_system::TypeFact::Known(crate::type_system::KnownType::EmmyType(class_name.to_string()))
+        crate::type_system::TypeFact::Known(crate::type_system::KnownType::EmmyType(class_name.to_string().into()))
     } else if let Some(tf) = scope_tree.resolve_type(lookup_byte, root_name) {
         tf.clone()
     } else {
         crate::type_system::TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-            name: root_name.clone(),
+            name: root_name.clone().into(),
         })
     };
 

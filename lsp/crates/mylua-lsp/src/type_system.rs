@@ -2,6 +2,7 @@ use std::fmt::{self, Write as _};
 
 use serde::{Deserialize, Serialize};
 
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use crate::table_shape::TableShapeId;
 
 /// Stable identity for a function summary within a file.
@@ -20,7 +21,7 @@ impl fmt::Display for FunctionSummaryId {
 ///
 /// `Known` variants are fully resolved within the file.
 /// `Stub` variants require cross-file resolution via the aggregation layer.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum TypeFact {
     Known(KnownType),
     Stub(SymbolicStub),
@@ -28,7 +29,7 @@ pub enum TypeFact {
     Unknown,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum KnownType {
     Nil,
     Boolean,
@@ -41,20 +42,20 @@ pub enum KnownType {
     /// Use this when the function is defined in the same file; it allows looking up the complete
     /// metadata (overloads, Emmy annotations, etc.) from the summary.
     FunctionRef(FunctionSummaryId),
-    EmmyType(std::string::String),
-    EmmyGeneric(std::string::String, Vec<TypeFact>),
+    EmmyType(LuaSymbol),
+    EmmyGeneric(LuaSymbol, Vec<TypeFact>),
 }
 
 /// Placeholder that defers resolution to cross-file analysis.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum SymbolicStub {
     /// `local x = require("mod")` — resolve to target file's return type.
-    RequireRef { module_path: std::string::String },
+    RequireRef { module_path: LuaSymbol },
 
     /// `local x = base.func_name()` — resolve to function return type.
     CallReturn {
         base: Box<TypeFact>,
-        func_name: std::string::String,
+        func_name: LuaSymbol,
         /// Whether the call used Lua's colon method syntax (`obj:m(...)`).
         /// Colon calls receive an implicit `self` argument, while dotted calls
         /// (`obj.m(...)`) do not.
@@ -75,33 +76,33 @@ pub enum SymbolicStub {
     /// `local x = func_name(...)` where `func_name` is a global function.
     /// Resolve to the function's declared/inferred return type.
     FunctionCallReturn {
-        func_name: std::string::String,
+        func_name: LuaSymbol,
         #[serde(default)]
         call_arg_types: Vec<TypeFact>,
     },
 
     /// Reference to a global name, resolved via GlobalShard.
-    GlobalRef { name: std::string::String },
+    GlobalRef { name: LuaSymbol },
 
     /// Reference to an Emmy type name, resolved via TypeShard.
-    TypeRef { name: std::string::String },
+    TypeRef { name: LuaSymbol },
 
     /// `base.field` — resolve base, then look up field.
     FieldOf {
         base: Box<TypeFact>,
-        field: std::string::String,
+        field: LuaSymbol,
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct FunctionSignature {
     pub params: Vec<ParamInfo>,
     pub returns: Vec<TypeFact>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ParamInfo {
-    pub name: std::string::String,
+    pub name: LuaSymbol,
     pub type_fact: TypeFact,
     #[serde(default)]
     pub optional: bool,
@@ -121,7 +122,7 @@ impl FunctionSignature {
         label.push('(');
         let mut first = true;
         for p in &self.params {
-            if skip_self && p.name == "self" {
+            if skip_self && p.name.as_str() == "self" {
                 continue;
             }
             if !first {
@@ -157,7 +158,7 @@ impl FunctionSignature {
         let mut offsets = Vec::new();
         let mut first = true;
         for p in &self.params {
-            if skip_self && p.name == "self" {
+            if skip_self && p.name.as_str() == "self" {
                 continue;
             }
             if !first {
@@ -199,23 +200,23 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
         return fact.clone();
     }
     match fact {
-        TypeFact::Known(KnownType::EmmyType(name)) if name == "self" => {
-            TypeFact::Known(KnownType::EmmyType(class_name.to_string()))
+        TypeFact::Known(KnownType::EmmyType(name)) if name.as_str() == "self" => {
+            TypeFact::Known(KnownType::EmmyType(intern_lua_symbol(class_name)))
         }
-        TypeFact::Known(KnownType::EmmyGeneric(name, args)) if name == "self" => {
+        TypeFact::Known(KnownType::EmmyGeneric(name, args)) if name.as_str() == "self" => {
             let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
-            TypeFact::Known(KnownType::EmmyGeneric(class_name.to_string(), new_args))
+            TypeFact::Known(KnownType::EmmyGeneric(intern_lua_symbol(class_name), new_args))
         }
         TypeFact::Known(KnownType::EmmyGeneric(name, args)) => {
             let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
-            TypeFact::Known(KnownType::EmmyGeneric(name.clone(), new_args))
+            TypeFact::Known(KnownType::EmmyGeneric(*name, new_args))
         }
         TypeFact::Known(KnownType::Function(sig)) => {
             let params = sig
                 .params
                 .iter()
                 .map(|p| ParamInfo {
-                    name: p.name.clone(),
+                    name: p.name,
                     type_fact: substitute_self(&p.type_fact, class_name),
                     optional: p.optional,
                 })
@@ -232,10 +233,10 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
 }
 
 fn display_param_name(param: &ParamInfo) -> String {
-    if param.optional && param.name != "..." {
+    if param.optional && param.name.as_str() != "..." {
         format!("{}?", param.name)
     } else {
-        param.name.clone()
+        param.name.as_str().to_string()
     }
 }
 
@@ -286,7 +287,7 @@ impl fmt::Display for KnownType {
             Self::FunctionRef(id) => write!(f, "function<{}>", id),
             Self::EmmyType(name) => write!(f, "{}", name),
             Self::EmmyGeneric(name, params) => {
-                if name == "__array" && params.len() == 1 {
+                if name.as_str() == "__array" && params.len() == 1 {
                     write!(f, "{}[]", params[0])
                 } else {
                     write!(f, "{}<{}>", name, params.iter().map(|p| format!("{}", p)).collect::<Vec<_>>().join(", "))
@@ -306,5 +307,46 @@ impl fmt::Display for SymbolicStub {
             Self::TypeRef { name } => write!(f, "type:{}", name),
             Self::FieldOf { base, field } => write!(f, "{}.{}", base, field),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua_symbol::intern_lua_symbol;
+
+    #[test]
+    fn long_lived_type_names_use_symbols_but_serialize_as_strings() {
+        let player = intern_lua_symbol("Player");
+        let field = intern_lua_symbol("name");
+        let module_path = intern_lua_symbol("game.player");
+        let param = intern_lua_symbol("self");
+
+        let fact = TypeFact::Union(vec![
+            TypeFact::Known(KnownType::EmmyGeneric(
+                player,
+                vec![TypeFact::Known(KnownType::EmmyType(field))],
+            )),
+            TypeFact::Stub(SymbolicStub::RequireRef { module_path }),
+        ]);
+        let signature = FunctionSignature {
+            params: vec![ParamInfo {
+                name: param,
+                type_fact: TypeFact::Known(KnownType::EmmyType(player)),
+                optional: false,
+            }],
+            returns: vec![TypeFact::Stub(SymbolicStub::FieldOf {
+                base: Box::new(TypeFact::Stub(SymbolicStub::GlobalRef { name: player })),
+                field,
+            })],
+        };
+
+        let fact_json = serde_json::to_value(&fact).unwrap();
+        let signature_json = serde_json::to_value(&signature).unwrap();
+
+        assert_eq!(fact_json["Union"][0]["Known"]["EmmyGeneric"][0], "Player");
+        assert_eq!(fact_json["Union"][1]["Stub"]["RequireRef"]["module_path"], "game.player");
+        assert_eq!(signature_json["params"][0]["name"], "self");
+        assert_eq!(signature_json["returns"][0]["Stub"]["FieldOf"]["field"], "name");
     }
 }

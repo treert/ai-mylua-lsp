@@ -22,7 +22,7 @@ fn class_prefix_extraction() {
 
 #[test]
 fn substitute_self_replaces_emmy_type() {
-    let fact = TypeFact::Known(KnownType::EmmyType("self".to_string()));
+    let fact = TypeFact::Known(KnownType::EmmyType("self".into()));
     let out = substitute_self(&fact, "Foo");
     assert!(
         matches!(&out, TypeFact::Known(KnownType::EmmyType(n)) if n == "Foo"),

@@ -197,7 +197,7 @@ fn lookup_function_signatures_by_field(
 ) -> Vec<FunctionSignature> {
     let resolved_base = resolver::resolve_type(caller_uri_id, base_fact, index);
     let owner_class = match &resolved_base.type_fact {
-        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
+        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.to_string()),
         _ => None,
     };
     // URI-aware chain resolve so `a.b.c` style callers whose base is a

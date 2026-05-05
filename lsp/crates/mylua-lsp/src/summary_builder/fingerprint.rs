@@ -231,7 +231,7 @@ mod tests {
     fn function_signature_hash_includes_param_optionality() {
         let required = FunctionSignature {
             params: vec![ParamInfo {
-                name: "value".to_string(),
+                name: "value".into(),
                 type_fact: TypeFact::Known(KnownType::String),
                 optional: false,
             }],
@@ -239,7 +239,7 @@ mod tests {
         };
         let optional = FunctionSignature {
             params: vec![ParamInfo {
-                name: "value".to_string(),
+                name: "value".into(),
                 type_fact: TypeFact::Known(KnownType::String),
                 optional: true,
             }],

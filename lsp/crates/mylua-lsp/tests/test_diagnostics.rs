@@ -768,7 +768,7 @@ print(Audit.enabled)
     // Warm the resolution cache first (diagnostics does this in real
     // LSP sessions before any hover arrives).
     let base = TypeFact::Stub(SymbolicStub::GlobalRef {
-        name: "Audit".to_string(),
+        name: "Audit".into(),
     });
     let _ = resolver::resolve_type(uri_id, &base, &mut agg);
 
@@ -910,8 +910,8 @@ fn resolver_preserves_branch_owner_for_cross_file_union_tables() {
     assert!(docs.contains_key(&main_uri_id), "main doc should be indexed");
 
     let union = TypeFact::Union(vec![
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".to_string() }),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".to_string() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".into() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".into() }),
     ]);
     let resolved =
         resolver::resolve_field_chain(main_uri_id, &union, &["value".to_string()], &agg);
@@ -935,8 +935,8 @@ fn resolver_preserves_branch_owner_for_cross_file_union_field_chain() {
     ]);
     let main_uri_id = summary_id_by_uri(&agg, &make_uri("main.lua"));
     let union = TypeFact::Union(vec![
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".to_string() }),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".to_string() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".into() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".into() }),
     ]);
     let resolved = resolver::resolve_field_chain(
         main_uri_id,

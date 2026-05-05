@@ -77,7 +77,7 @@ pub(crate) fn infer_node_type_in_file_id(
                             return tf.clone();
                         }
                         return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                            name: text.to_string(),
+                            name: text.into(),
                         });
                     }
                 }
@@ -104,7 +104,7 @@ pub(crate) fn infer_node_type_in_file_id(
                 return tf.clone();
             }
             TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                name: text.to_string(),
+                name: text.into(),
             })
         }
         // Literal types — needed for function-level generic inference
@@ -157,7 +157,7 @@ fn infer_table_array_element_type(
     }
     match elem_type {
         Some(t) => TypeFact::Known(crate::type_system::KnownType::EmmyGeneric(
-            "__array".to_string(), vec![t],
+            "__array".into(), vec![t],
         )),
         None => TypeFact::Unknown,
     }
@@ -208,7 +208,7 @@ fn infer_call_return_fact(
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_literal(first_arg, source) {
-                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path });
+                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path: module_path.into() });
                 }
             }
         }
@@ -265,7 +265,7 @@ fn infer_call_return_fact(
         call_arg_types.extend(collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index));
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_fact),
-            func_name: method_name,
+            func_name: method_name.into(),
             is_method_call: true,
             call_arg_types,
             generic_args,
@@ -284,7 +284,7 @@ fn infer_call_return_fact(
             let call_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             return TypeFact::Stub(SymbolicStub::CallReturn {
                 base: Box::new(base_fact),
-                func_name,
+                func_name: func_name.into(),
                 is_method_call: false,
                 call_arg_types,
                 generic_args,
@@ -345,14 +345,14 @@ fn infer_call_return_fact(
             // so the resolver can look up `T`'s fields.
             return match ret {
                 TypeFact::Known(KnownType::EmmyType(name)) => {
-                    TypeFact::Stub(SymbolicStub::TypeRef { name: name.clone() })
+                    TypeFact::Stub(SymbolicStub::TypeRef { name: *name })
                 }
                 other => other.clone(),
             };
         }
     }
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
-        func_name: callee_text.to_string(),
+        func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index),
     })
 }
