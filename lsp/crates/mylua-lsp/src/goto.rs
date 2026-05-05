@@ -154,7 +154,7 @@ pub fn goto_type_definition(
     if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
-            if let Some(target) = type_definition_for_local(&def.name, byte_offset, &doc.scope_tree, index, strategy) {
+            if let Some(target) = type_definition_for_local(uri_id, &def.name, byte_offset, &doc.scope_tree, index, strategy) {
                 return Some(target);
             }
         }
@@ -179,6 +179,7 @@ pub fn goto_type_definition(
 /// stored `TypeFact` via scope_tree and map it to a `type_shard` candidate range
 /// when the fact identifies an Emmy type.
 fn type_definition_for_local(
+    uri_id: UriId,
     local_name: &str,
     byte_offset: usize,
     scope_tree: &crate::scope::ScopeTree,
@@ -202,7 +203,7 @@ fn type_definition_for_local(
     // with Emmy module return type — let the resolver chase stubs
     // (GlobalRef / RequireRef / CallReturn) and try again on the
     // resolved fact.
-    let resolved_fact = resolver::resolve_type(&fact, index).type_fact;
+    let resolved_fact = resolver::resolve_type(uri_id, &fact, index).type_fact;
     if let Some(type_name) = type_name_of(&resolved_fact) {
         return type_definition_for_name(&type_name, index, strategy);
     }

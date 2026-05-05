@@ -94,18 +94,17 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
                 ctx.index,
             );
             let field_name = node_text(method, ctx.source).to_string();
-            let resolved_base = resolver::resolve_type(&base_fact, ctx.index);
+            let resolved_base = resolver::resolve_type(ctx.uri_id, &base_fact, ctx.index);
 
             if let TypeFact::Known(KnownType::EmmyType(type_name)) = &resolved_base.type_fact {
                 if let Some(severity) = ctx.emmy_severity {
                     let field_resolved = resolver::resolve_field_chain(
+                        resolved_base.owner_uri_id,
                         &resolved_base.type_fact,
                         std::slice::from_ref(&field_name),
                         ctx.index,
                     );
-                    if field_resolved.type_fact == TypeFact::Unknown
-                        && field_resolved.source_uri_id().is_none()
-                    {
+                    if field_resolved.type_fact == TypeFact::Unknown {
                         let qualified = format!("{}.{}", type_name, field_name);
                         if !ctx.index.global_shard.contains_key(&qualified) {
                             ctx.diagnostics.push(Diagnostic {
@@ -157,7 +156,7 @@ fn check_dotted_field(
         ctx.index,
     );
     let resolved_base = if fields.len() == 1 {
-        resolver::resolve_type(&base_fact, ctx.index)
+        resolver::resolve_type(ctx.uri_id, &base_fact, ctx.index)
     } else {
         resolver::resolve_field_chain_prefix_in_file_id(
             ctx.uri_id,
@@ -171,13 +170,12 @@ fn check_dotted_field(
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
             if let Some(severity) = ctx.emmy_severity {
                 let field_resolved = resolver::resolve_field_chain(
+                    resolved_base.owner_uri_id,
                     &resolved_base.type_fact,
                     std::slice::from_ref(field_name),
                     ctx.index,
                 );
-                if field_resolved.type_fact == TypeFact::Unknown
-                    && field_resolved.source_uri_id().is_none()
-                {
+                if field_resolved.type_fact == TypeFact::Unknown {
                     let qualified = format!("{}.{}", type_name, field_name);
                     if !ctx.index.global_shard.contains_key(&qualified) {
                         ctx.diagnostics.push(Diagnostic {
@@ -195,10 +193,8 @@ fn check_dotted_field(
             }
         }
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            let table_uri_id = resolved_base
-                .source_uri_id()
-                .or(Some(ctx.uri_id));
-            if let Some(summary) = table_uri_id.and_then(|uri_id| ctx.index.summary_by_id(uri_id)) {
+            let table_uri_id = resolved_base.source_uri_id();
+            if let Some(summary) = ctx.index.summary_by_id(table_uri_id) {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
                     if !shape.fields.contains_key(field_name) {
                         let field_is_global = field_global_prefixes(

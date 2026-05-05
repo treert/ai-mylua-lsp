@@ -165,6 +165,8 @@ hover 在 tt.a 上（`local tt = test_g()`，`test_g` 定义在其他文件）
 
 解析过程维护访问栈（visited set），检测到环路时返回 `unknown`，最大深度 32。
 
+解析入口必须携带当前请求文件的 `UriId`，并在跨文件命中 `require`、全局候选或类型候选时切换为目标文件的 `UriId` 后继续递归。`ResolvedType.owner_uri_id` 始终表示当前 `TypeFact` 中 per-file id（如 `TableShapeId`、`FunctionSummaryId`）所属的文件；`def_location` 只表示可跳转定义位置。这样 `CallReturn`、`FieldOf`、`Union` 等中间结果即使没有定义区间，也不会产生 owner-less 的 `Known(TableShapeId)` / `Known(FunctionRef)`。
+
 ---
 
 ## 6. 索引生命周期

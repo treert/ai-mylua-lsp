@@ -770,7 +770,7 @@ print(Audit.enabled)
     let base = TypeFact::Stub(SymbolicStub::GlobalRef {
         name: "Audit".to_string(),
     });
-    let _ = resolver::resolve_type(&base, &mut agg);
+    let _ = resolver::resolve_type(uri_id, &base, &mut agg);
 
     // Now resolve the field chain — must succeed, not return Unknown.
     let resolved =
@@ -844,13 +844,110 @@ local c = getContainer()
     // "c" is declared at line 7 (`local c = ...`), use byte offset past the declaration
     let byte_offset = src.len() - 1;
     let resolved =
-        resolver::resolve_local_in_file("c", byte_offset, &doc.scope_tree, &mut agg);
+        resolver::resolve_local_in_file(uri_id, "c", byte_offset, &doc.scope_tree, &mut agg);
     let field_result =
-        resolver::resolve_field_chain(&resolved.type_fact, &["value".to_string()], &mut agg);
+        resolver::resolve_field_chain(resolved.owner_uri_id, &resolved.type_fact, &["value".to_string()], &mut agg);
     assert!(
         matches!(&field_result.type_fact, TypeFact::Known(KnownType::String)),
         "Container<string>.value should resolve to string, got: {}",
         field_result.type_fact
+    );
+}
+
+#[test]
+fn resolver_preserves_owner_for_union_of_file_local_tables() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{KnownType, TypeFact};
+
+    let src = r#"
+local left = { value = 1 }
+local right = { value = 2 }
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "union_owner.lua");
+    let uri_id = summary_id_by_uri(&agg, &uri);
+    let end_offset = src.len();
+
+    let left = doc
+        .scope_tree
+        .resolve_type(end_offset, "left")
+        .expect("left type")
+        .clone();
+    let right = doc
+        .scope_tree
+        .resolve_type(end_offset, "right")
+        .expect("right type")
+        .clone();
+    let union = TypeFact::Union(vec![left, right]);
+
+    let resolved =
+        resolver::resolve_field_chain_in_file_id(uri_id, &union, &["value".to_string()], &agg);
+
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Known(KnownType::Number)),
+        "union table field should resolve through the current file owner, got: {}",
+        resolved.type_fact,
+    );
+    assert_eq!(
+        resolved.def_location.map(|location| location.uri_id),
+        Some(uri_id),
+        "resolved union field should keep the defining file owner",
+    );
+}
+
+#[test]
+fn resolver_preserves_branch_owner_for_cross_file_union_tables() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{KnownType, SymbolicStub, TypeFact};
+
+    let (docs, agg, _) = setup_workspace(&[
+        ("main.lua", "local _ = nil\n"),
+        ("left_mod.lua", "return { value = 1 }\n"),
+        ("right_mod.lua", "return { value = 2 }\n"),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_uri_id = summary_id_by_uri(&agg, &main_uri);
+    assert!(docs.contains_key(&main_uri_id), "main doc should be indexed");
+
+    let union = TypeFact::Union(vec![
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".to_string() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".to_string() }),
+    ]);
+    let resolved =
+        resolver::resolve_field_chain(main_uri_id, &union, &["value".to_string()], &agg);
+
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Known(KnownType::Number)),
+        "cross-file union table field should resolve through each branch owner, got: {}",
+        resolved.type_fact,
+    );
+}
+
+#[test]
+fn resolver_preserves_branch_owner_for_cross_file_union_field_chain() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{KnownType, SymbolicStub, TypeFact};
+
+    let (_docs, agg, _) = setup_workspace(&[
+        ("main.lua", "local _ = nil\n"),
+        ("left_mod.lua", "return { child = { left_only = 1 } }\n"),
+        ("right_mod.lua", "return { child = { right_only = 2 } }\n"),
+    ]);
+    let main_uri_id = summary_id_by_uri(&agg, &make_uri("main.lua"));
+    let union = TypeFact::Union(vec![
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".to_string() }),
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".to_string() }),
+    ]);
+    let resolved = resolver::resolve_field_chain(
+        main_uri_id,
+        &union,
+        &["child".to_string(), "right_only".to_string()],
+        &agg,
+    );
+
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Known(KnownType::Number)),
+        "cross-file union field chain should keep each branch owner, got: {}",
+        resolved.type_fact,
     );
 }
 

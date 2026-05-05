@@ -219,6 +219,7 @@ pub fn hover(
     });
     if let Some((synth_def, entry_count, _source_uri, source_uri_id)) = global_info {
         let resolved = resolver::resolve_type(
+            source_uri_id,
             &TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
                 name: ident_text.to_string(),
             }),
@@ -588,7 +589,7 @@ fn resolve_local_type_info(
         }
     }
 
-    let resolved = resolver::resolve_local_in_file(name, byte_offset, scope_tree, index);
+    let resolved = resolver::resolve_local_in_file(uri_id, name, byte_offset, scope_tree, index);
     let display = format_resolved_type(&resolved.type_fact);
     if display == "unknown" {
         None

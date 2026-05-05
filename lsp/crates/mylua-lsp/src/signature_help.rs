@@ -131,15 +131,13 @@ pub(crate) fn resolve_call_signatures(
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
     let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
-    let resolved = resolver::resolve_type(&base_fact, index);
+    let resolved = resolver::resolve_type(uri_id, &base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {
             return Some((vec![sig.clone()], false, name));
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
-            let summary = resolved
-                .source_uri_id()
-                .and_then(|uri_id| index.summary_by_id(uri_id));
+            let summary = index.summary_by_id(resolved.source_uri_id());
             if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
@@ -197,7 +195,7 @@ fn lookup_function_signatures_by_field(
     field_name: &str,
     index: &WorkspaceAggregation,
 ) -> Vec<FunctionSignature> {
-    let resolved_base = resolver::resolve_type(base_fact, index);
+    let resolved_base = resolver::resolve_type(caller_uri_id, base_fact, index);
     let owner_class = match &resolved_base.type_fact {
         TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.clone()),
         _ => None,
@@ -272,9 +270,7 @@ fn lookup_function_signatures_by_field(
         return vec![sig.clone()];
     }
     if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
-        let summary = resolved
-            .source_uri_id()
-            .and_then(|uri_id| index.summary_by_id(uri_id));
+        let summary = index.summary_by_id(resolved.source_uri_id());
         if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
             return primary_plus_overloads(fs);
         }

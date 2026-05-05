@@ -99,7 +99,9 @@ fn workspace_global_priority_by_path_depth() {
     assert_eq!(candidates.len(), 2, "should have two candidates");
 
     // Verify resolver picks the shallow file's type (SubClass)
+    let owner_uri_id = summary_id_by_uri(&agg, &make_uri("test_utils.lua"));
     let resolved = resolver::resolve_type(
+        owner_uri_id,
         &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
         &mut agg,
     );
@@ -239,7 +241,9 @@ fn workspace_global_priority_annotation_path_segment() {
     
     assert_eq!(candidates.len(), 3, "should have three candidates");
 
+    let owner_uri_id = summary_id_by_uri(&agg, &make_uri("annotation/module.lua"));
     let resolved = resolver::resolve_type(
+        owner_uri_id,
         &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
         &agg,
     );
