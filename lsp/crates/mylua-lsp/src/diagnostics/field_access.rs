@@ -1,5 +1,4 @@
 use crate::aggregation::WorkspaceAggregation;
-use crate::lua_symbol::intern_lua_symbol;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::UriId;
@@ -197,7 +196,7 @@ fn check_dotted_field(
             let table_uri_id = resolved_base.source_uri_id();
             if let Some(summary) = ctx.index.summary_by_id(table_uri_id) {
                 if let Some(shape) = summary.table_shapes.get(shape_id) {
-                    if !shape.fields.contains_key(&intern_lua_symbol(field_name)) {
+                    if shape.get_field(field_name).is_none() {
                         let field_is_global = field_global_prefixes(
                             &base_fact, base_node, fields, ctx.source, ctx.index,
                         )

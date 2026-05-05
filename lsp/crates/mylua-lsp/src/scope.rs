@@ -1,4 +1,4 @@
-use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+use crate::lua_symbol::{get_lua_symbol, LuaSymbol};
 use crate::types::{DefKind, Definition};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::ByteRange;
@@ -84,7 +84,7 @@ impl ScopeTree {
     }
 
     pub fn resolve_decl(&self, byte_offset: usize, name: &str) -> Option<&ScopeDecl> {
-        let name = intern_lua_symbol(name);
+        let name = get_lua_symbol(name)?;
         self.resolve_decl_symbol(byte_offset, name)
     }
 
@@ -132,7 +132,7 @@ impl ScopeTree {
     }
 
     pub fn scope_byte_range_for_def(&self, byte_offset: usize, name: &str) -> Option<(usize, usize)> {
-        let name = intern_lua_symbol(name);
+        let name = get_lua_symbol(name)?;
         let scope_id = self.innermost_scope(byte_offset)?;
         let mut current = scope_id;
         loop {
@@ -202,7 +202,7 @@ impl ScopeTree {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+    use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol, LuaSymbol};
 
     fn byte_range(start: usize, end: usize) -> ByteRange {
         ByteRange {
@@ -245,6 +245,36 @@ mod tests {
         let resolved = tree.resolve_decl(20, "player").unwrap();
         assert_eq!(resolved.name.as_str(), "player");
         assert_eq!(tree.resolve_bound_class(20, "player"), Some("Player"));
+    }
+
+    #[test]
+    fn scope_lookup_misses_do_not_intern_request_names() {
+        let decl = ScopeDecl {
+            name: intern_lua_symbol("known_local"),
+            kind: DefKind::LocalVariable,
+            decl_byte: 6,
+            visible_after_byte: 14,
+            range: byte_range(0, 14),
+            selection_range: byte_range(6, 17),
+            type_fact: None,
+            bound_class: None,
+            is_emmy_annotated: false,
+        };
+        let tree = ScopeTree::from_scopes(vec![Scope {
+            kind: ScopeKind::File,
+            byte_start: 0,
+            byte_end: 64,
+            parent: None,
+            children: Vec::new(),
+            declarations: vec![decl],
+        }]);
+        let missing = "__missing_scope_lookup_should_not_intern__";
+        assert_eq!(get_lua_symbol(missing), None);
+
+        assert!(tree.resolve_decl(32, missing).is_none());
+        assert!(tree.scope_byte_range_for_def(32, missing).is_none());
+
+        assert_eq!(get_lua_symbol(missing), None);
     }
 }
 

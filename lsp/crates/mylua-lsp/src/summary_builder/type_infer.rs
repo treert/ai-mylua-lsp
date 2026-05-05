@@ -1,5 +1,5 @@
 use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation};
-use crate::lua_symbol::intern_lua_symbol;
+use crate::lua_symbol::get_lua_symbol;
 use crate::table_shape::{TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::node_text;
@@ -271,7 +271,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
             call_arg_types.push(TypeFact::Known(KnownType::Table(*shape_id)));
             call_arg_types.extend(explicit_arg_types.clone());
             if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                if let Some(fi) = shape.fields.get(&intern_lua_symbol(&method_name)) {
+                if let Some(fi) = shape.get_field(&method_name) {
                     match &fi.type_fact {
                         TypeFact::Known(KnownType::Function(ref sig)) => {
                             if let Some(ret) = sig.returns.first() {
@@ -330,7 +330,7 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
 
                 if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
-                        if let Some(fi) = shape.fields.get(&intern_lua_symbol(&func_name)) {
+                        if let Some(fi) = shape.get_field(&func_name) {
                             match &fi.type_fact {
                                 TypeFact::Known(KnownType::Function(ref sig)) => {
                                     if let Some(ret) = sig.returns.first() {
@@ -396,26 +396,27 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
 
     // Global function fallback. Local functions are intentionally excluded here
     // because their visibility is already handled by the scoped lookup above.
-    let callee_symbol = intern_lua_symbol(callee_text);
-    if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
-        if let Some(fs) = ctx.function_summaries.get(&func_id) {
-            // Function-level generic inference: if the callee has @generic params,
-            // try to unify them from the actual argument types at the call site.
-            if !fs.generic_params.is_empty() {
-                let actual_arg_types = collect_call_arg_types(ctx, node);
-                if let Some(substituted_returns) = crate::resolver::unify_function_generics(
-                    &fs.generic_params,
-                    &fs.signature.params,
-                    &actual_arg_types,
-                    &fs.signature.returns,
-                ) {
-                    if let Some(ret) = substituted_returns.first() {
-                        return ret.clone();
+    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
+        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
+            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                // Function-level generic inference: if the callee has @generic params,
+                // try to unify them from the actual argument types at the call site.
+                if !fs.generic_params.is_empty() {
+                    let actual_arg_types = collect_call_arg_types(ctx, node);
+                    if let Some(substituted_returns) = crate::resolver::unify_function_generics(
+                        &fs.generic_params,
+                        &fs.signature.params,
+                        &actual_arg_types,
+                        &fs.signature.returns,
+                    ) {
+                        if let Some(ret) = substituted_returns.first() {
+                            return ret.clone();
+                        }
                     }
                 }
-            }
-            if let Some(ret) = fs.signature.returns.first() {
-                return ret.clone();
+                if let Some(ret) = fs.signature.returns.first() {
+                    return ret.clone();
+                }
             }
         }
     }
@@ -445,7 +446,7 @@ fn infer_field_expression_type(
 
     if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
         if let Some(shape) = ctx.table_shapes.get(shape_id) {
-            if let Some(fi) = shape.fields.get(&intern_lua_symbol(&field_name)) {
+            if let Some(fi) = shape.get_field(&field_name) {
                 return fi.type_fact.clone();
             }
         }

@@ -2,7 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, parse_type_from_str,
     EmmyAnnotation, EmmyType,
 };
-use crate::lua_symbol::intern_lua_symbol;
+use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol};
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
 use crate::table_shape::{FieldInfo, TableShape};
@@ -541,10 +541,11 @@ fn extract_call_return_types(
     }
 
     // Global function summary fallback.
-    let callee_symbol = intern_lua_symbol(callee_text);
-    if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
-        if let Some(fs) = ctx.function_summaries.get(&func_id) {
-            return Some(fs.signature.returns.clone());
+    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
+        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
+            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                return Some(fs.signature.returns.clone());
+            }
         }
     }
     None
@@ -1443,7 +1444,7 @@ fn register_nested_field_write(
         let existing_field = ctx
             .table_shapes
             .get(&current_shape)
-            .and_then(|s| s.fields.get(&intern_lua_symbol(field_name)))
+            .and_then(|s| s.get_field(field_name))
             .map(|fi| fi.type_fact.clone());
         let next_shape = match existing_field {
             Some(TypeFact::Known(KnownType::Table(sid))) => sid,

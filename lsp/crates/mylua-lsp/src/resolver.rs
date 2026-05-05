@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+use crate::lua_symbol::LuaSymbol;
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
 use crate::uri_id::UriId;
@@ -548,7 +548,7 @@ fn resolve_call_return(
                 None => return ResolvedType::unknown(base_ctx),
             };
             summary.table_shapes.get(shape_id)
-                .and_then(|shape| shape.fields.get(&intern_lua_symbol(func_name)))
+                .and_then(|shape| shape.get_field(func_name))
                 .and_then(|fi| {
                     match &fi.type_fact {
                         TypeFact::Known(KnownType::Function(ref sig)) => {
@@ -889,7 +889,7 @@ fn resolve_table_field(
         None => return ResolvedType::unknown(ctx),
     };
     if let Some(shape) = summary.table_shapes.get(&shape_id) {
-        if let Some(fi) = shape.fields.get(&intern_lua_symbol(field)) {
+        if let Some(fi) = shape.get_field(field) {
             return ResolvedType {
                 type_fact: fi.type_fact.clone(),
                 def_location: fi.def_range
@@ -957,7 +957,7 @@ fn resolve_emmy_field_with_visited(
                         // pre-computed anchor_shape_id to find them directly.
                         if let Some(shape_id) = td.anchor_shape_id {
                             if let Some(shape) = summary.table_shapes.get(&shape_id) {
-                                if let Some(fi) = shape.fields.get(&intern_lua_symbol(field)) {
+                                if let Some(fi) = shape.get_field(field) {
                                     return ResolvedType {
                                         type_fact: fi.type_fact.clone(),
                                         def_location: fi.def_range.map(|range| ResolvedLocation {

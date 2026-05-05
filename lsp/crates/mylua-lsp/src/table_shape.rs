@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use serde::{Deserialize, Serialize};
-use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol, LuaSymbol};
 use crate::util::ByteRange;
 
 /// Stable identity for a table literal or constructed table within a file.
@@ -74,6 +74,11 @@ impl TableShape {
         self.fields.insert(intern_lua_symbol(name), info);
     }
 
+    pub fn get_field(&self, name: &str) -> Option<&FieldInfo> {
+        let name = get_lua_symbol(name)?;
+        self.fields.get(&name)
+    }
+
     pub fn mark_open(&mut self) {
         self.is_closed = false;
     }
@@ -82,7 +87,7 @@ impl TableShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::lua_symbol::intern_lua_symbol;
+    use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol};
     use crate::type_system::TypeFact;
 
     #[test]
@@ -105,5 +110,26 @@ mod tests {
         let json = serde_json::to_value(&shape).unwrap();
         assert_eq!(json["owner_name"], "Player");
         assert_eq!(json["fields"]["name"]["name"], "name");
+    }
+
+    #[test]
+    fn field_lookup_misses_do_not_intern_request_names() {
+        let mut shape = TableShape::new(TableShapeId(8));
+        shape.set_field(
+            "existing",
+            FieldInfo {
+                name: intern_lua_symbol("existing"),
+                type_fact: TypeFact::Unknown,
+                def_range: None,
+                assignment_count: 1,
+            },
+        );
+        let missing = "__missing_table_field_should_not_intern__";
+        assert_eq!(get_lua_symbol(missing), None);
+
+        assert!(shape.get_field("existing").is_some());
+        assert!(shape.get_field(missing).is_none());
+
+        assert_eq!(get_lua_symbol(missing), None);
     }
 }

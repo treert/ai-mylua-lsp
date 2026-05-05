@@ -1,7 +1,7 @@
 # Global LuaSymbol Interning — 进度记录
 
 **日期**: 2026-05-05
-**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前五段完成待提交
+**状态**: Task 1 完成并已提交；Task 2 拆分迁移已完成；Task 2.6 query lookup 边界修复完成并验证
 
 ## 当前目标
 
@@ -154,6 +154,12 @@ cargo build
 
 ### Task 2.4: Migrate ScopeTree and WorkspaceAggregation Names
 
+提交：
+
+```text
+3793623 refactor: intern scope and aggregation names
+```
+
 改动：
 
 - `ScopeDecl.name`、`ScopeDecl.bound_class` 改为 `LuaSymbol`
@@ -187,6 +193,12 @@ cargo run --bin lua-perf -- --summary-stdout /Users/zhuguosen/MyGit/ai-mylua-lsp
 
 ### Task 2.5: Tighten summary_builder Symbol Boundaries
 
+提交：
+
+```text
+1832ba6 refactor: tighten summary builder symbol boundaries
+```
+
 改动：
 
 - `BuildContext.pending_class_name` 从 `Option<String>` 改为 `Option<LuaSymbol>`
@@ -213,26 +225,60 @@ cargo build
 - `ReadLints`: no linter errors
 - `code-reviewer`: no blocking issues found
 
+### Task 2.6: Tighten Query Lookup Interning Boundaries
+
+改动：
+
+- `ScopeTree::resolve_decl` / `scope_byte_range_for_def` 从插入式 `intern_lua_symbol` 改为非插入式 `get_lua_symbol`
+- `unused_local` 引用计数使用已解析出的 `decl.name`，避免对请求级 identifier 文本重复 interning
+- `TableShape::get_field` 新增非插入式字段查询 helper
+- resolver、field diagnostics、summary builder 的字段查询改用 `TableShape::get_field`
+- summary builder 的 `function_name_index` fallback 查询改用 `get_lua_symbol`
+- 新增 `scope_lookup_misses_do_not_intern_request_names` 回归测试，覆盖 lookup miss 不应写入全局 symbol pool
+- 新增 `field_lookup_misses_do_not_intern_request_names` 回归测试，覆盖字段 lookup miss 不应写入全局 symbol pool
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test scope_lookup_misses_do_not_intern_request_names
+cargo test field_lookup_misses_do_not_intern_request_names
+cargo run --bin lua-perf -- --summary-stdout /Users/zhuguosen/MyGit/ai-mylua-lsp/tests/lua-root/main.lua
+cargo test --tests
+cargo build
+```
+
+结果：
+
+- RED: 新测试先失败，证明 `resolve_decl` / `scope_byte_range_for_def` 的 lookup miss 会写入 interner
+- RED: 字段查询测试先因缺少非插入式查询 API 失败
+- GREEN: 修复后 targeted test passed
+- `lua-perf --summary-stdout`: passed; JSON name fields still output strings
+- `cargo test --tests`: full suite passed
+- `cargo build`: passed
+- `ReadLints`: no linter errors
+
 ## 当前仓库状态
 
-换会话前检查：
+本轮开始时检查：
 
 ```text
-git status --short
-git log -1 --oneline
+git status --short --branch
+git log --oneline -5
 ```
 
-最新提交：
+已确认最近提交：
 
 ```text
-9e1d1af refactor: intern summary names
+1832ba6 refactor: tighten summary builder symbol boundaries
+3793623 refactor: intern scope and aggregation names
 ```
 
-当前有未提交代码改动覆盖 Task 2.4 和 Task 2.5。
+本轮改动覆盖 Task 2.6。
 
 ## 下一步建议
 
-不要直接一次性执行原计划里的 Task 2，因为它同时覆盖 `TypeFact`、`TableShape`、`DocumentSummary`、`summary_builder`，替换量大。建议把 Task 2 拆成更小的可验证提交：
+原计划 Task 2 已按更小粒度拆分并完成：
 
 1. ~~`TypeFact` / `FunctionSignature` / `ParamInfo` 里的长期字符串改为 `LuaSymbol`~~
 2. ~~`TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`~~
@@ -240,6 +286,7 @@ git log -1 --oneline
 4. ~~`ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`~~
 5. ~~`summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储~~
 6. ~~`lua_perf --summary` 验证 JSON 仍输出字符串~~
+7. ~~修复 query lookup miss 不应写入全局 interner~~
 
 每个小任务都应保持：
 
@@ -248,6 +295,11 @@ git log -1 --oneline
 - LSP 输出边界仍输出 `String`
 - 验证至少包含 `cargo test --tests` 和 `cargo build`
 - 完成后调用 code-reviewer
+
+后续可继续原计划 Task 5/6：
+
+- 若有 2w 文件级 workspace，采集 before/after RSS 与索引耗时，真实数据再写入 `docs/performance-analysis.md`
+- 无大工作区数据时，不写推测数字；只保留行为验证、JSON 验证和最终 review
 
 ## 新会话起步提示
 
@@ -258,5 +310,5 @@ git log -1 --oneline
 3. `docs/superpowers/plans/2026-05-05-global-lua-symbol-interning.md`
 4. 本文件
 
-然后从“summary_builder 构造边界继续收口，避免先 resolve 回 `String` 再存储”继续，不要直接派发完整剩余任务。
+然后从“是否具备大工作区 RSS 测量环境”继续；如果没有，就进入最终验证和收尾。
 
