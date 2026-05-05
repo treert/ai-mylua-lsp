@@ -120,15 +120,4 @@ ai-mylua-lsp/
 
 ## 文档索引
 
-| 文档 | 内容 |
-|------|------|
-| [`docs/README.md`](docs/README.md) | 文档中心索引 |
-| [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md) | **LSP 能力详细实现**：每个能力的内部机制、边界处理、配置项 |
-| [`docs/testing.md`](docs/testing.md) | **测试体系**：测试框架、测试资源、完整测试清单 |
-| [`docs/vscode-extension.md`](docs/vscode-extension.md) | **VS Code 扩展**：文件结构、构建打包、运行时行为 |
-| [`docs/requirements.md`](docs/requirements.md) | 功能/非功能需求 |
-| [`docs/architecture.md`](docs/architecture.md) | Extension / LSP / Grammar 三分解、数据流 |
-| [`docs/index-architecture.md`](docs/index-architecture.md) | 索引内部架构：数据模型、推断、类型、构建与维护 |
-| [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md) | LSP 语义能力：语义约定、消费规则 |
-| [`docs/performance-analysis.md`](docs/performance-analysis.md) | 性能现状、瓶颈分析、优化路线图 |
-| [`docs/future-work.md`](docs/future-work.md) | 后续待办与优化方向（索引坑点 + 泛型缺口 + 维护清单） |
+完整文档目录见 [`docs/README.md`](docs/README.md)。
