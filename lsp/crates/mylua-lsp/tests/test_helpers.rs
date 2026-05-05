@@ -66,6 +66,7 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
         lua_source,
         tree,
         scope_tree,
+        last_diagnostic_signature: None,
     }
 }
 
@@ -205,6 +206,7 @@ pub fn setup_workspace_from_dir(
                     lua_source,
                     tree,
                     scope_tree,
+                    last_diagnostic_signature: None,
                 },
             );
         }
@@ -297,6 +299,7 @@ pub fn setup_workspace_with_library(
                 lua_source,
                 tree,
                 scope_tree,
+                last_diagnostic_signature: None,
             },
         );
     }

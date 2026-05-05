@@ -288,7 +288,13 @@ impl Backend {
     }
 
     pub(crate) fn parse_and_store(&self, uri: Uri, text: String) {
-        self.parse_and_store_with_old_tree(uri, text, None);
+        let uri_id = intern_uri(&uri);
+        let last_diagnostic_signature = self.documents
+            .lock()
+            .unwrap()
+            .get(&uri_id)
+            .and_then(|doc| doc.last_diagnostic_signature);
+        self.parse_and_store_with_old_tree(uri, text, None, last_diagnostic_signature);
     }
 
     /// Parse `text` optionally reusing an `old_tree` (already `.edit()`-ed
@@ -300,6 +306,7 @@ impl Backend {
         uri: Uri,
         text: String,
         old_tree: Option<tree_sitter::Tree>,
+        last_diagnostic_signature: Option<u64>,
     ) {
         let tree = {
             let mut parser = self.parser.lock().unwrap();
@@ -329,7 +336,7 @@ impl Backend {
                     let uri_id = intern_uri(&uri);
                     self.documents.lock().unwrap().insert(
                         uri_id,
-                        Document { lua_source, tree: old, scope_tree },
+                        Document { lua_source, tree: old, scope_tree, last_diagnostic_signature },
                     );
                 }
                 return;
@@ -362,7 +369,7 @@ impl Backend {
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri_id, Document { lua_source, tree, scope_tree });
+                .insert(uri_id, Document { lua_source, tree, scope_tree, last_diagnostic_signature });
 
             // All diagnostics (both syntax and semantic) flow through
             // the unified scheduler → consumer_loop, which recomputes
@@ -411,11 +418,16 @@ impl Backend {
             if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
+            let last_diagnostic_signature = self.documents
+                .lock()
+                .unwrap()
+                .get(&uri_id)
+                .and_then(|doc| doc.last_diagnostic_signature);
             self.index.lock().unwrap().upsert_summary(uri_id, summary);
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri_id, Document { lua_source, tree, scope_tree });
+                .insert(uri_id, Document { lua_source, tree, scope_tree, last_diagnostic_signature });
             Some(uri_id)
         } else {
             None
@@ -469,9 +481,9 @@ impl Backend {
         if self.library_uris.lock().unwrap().contains(&uri_id) {
             return;
         }
-        let diags = {
-            let docs = self.documents.lock().unwrap();
-            let Some(doc) = docs.get(&uri_id) else {
+        let (diags, should_publish) = {
+            let mut docs = self.documents.lock().unwrap();
+            let Some(doc) = docs.get_mut(&uri_id) else {
                 return;
             };
             let syntax = diagnostics::collect_diagnostics(
@@ -479,12 +491,17 @@ impl Backend {
                 doc.source(),
                 doc.line_index(),
             );
-            diagnostics::apply_diagnostic_suppressions(
+            let diags = diagnostics::apply_diagnostic_suppressions(
                 doc.tree.root_node(),
                 doc.source(),
                 syntax,
-            )
+            );
+            let should_publish = doc.remember_diagnostic_signature(&diags);
+            (diags, should_publish)
         };
+        if !should_publish {
+            return;
+        }
         lsp_log!(
             "[cold-start] syntax-only publish for {:?}: {} diags",
             uri,

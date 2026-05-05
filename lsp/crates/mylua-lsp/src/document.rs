@@ -1,14 +1,17 @@
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
 use crate::scope::ScopeTree;
 use crate::uri_id::{intern_uri, UriId};
 use crate::util::{LineIndex, LuaSource};
-use tower_lsp_server::ls_types::Uri;
+use tower_lsp_server::ls_types::{Diagnostic, Uri};
 
 pub struct Document {
     pub lua_source: LuaSource,
     pub tree: tree_sitter::Tree,
     pub scope_tree: ScopeTree,
+    pub last_diagnostic_signature: Option<u64>,
 }
 
 impl Document {
@@ -28,6 +31,24 @@ impl Document {
     #[inline]
     pub fn line_index(&self) -> &LineIndex {
         self.lua_source.line_index()
+    }
+
+    pub(crate) fn diagnostic_signature(diagnostics: &[Diagnostic]) -> u64 {
+        let bytes = serde_json::to_vec(diagnostics)
+            .expect("LSP diagnostics should always serialize");
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Records the latest diagnostics and returns whether clients need an update.
+    pub(crate) fn remember_diagnostic_signature(&mut self, diagnostics: &[Diagnostic]) -> bool {
+        let signature = Self::diagnostic_signature(diagnostics);
+        if self.last_diagnostic_signature == Some(signature) {
+            return false;
+        }
+        self.last_diagnostic_signature = Some(signature);
+        true
     }
 }
 
@@ -76,9 +97,11 @@ impl DocumentLookup for DocumentStoreView<'_> {
 #[cfg(test)]
 mod tests {
     use super::{find_document, Document};
+    use crate::{new_parser, summary_builder};
     use crate::uri_id::UriId;
+    use crate::util::LuaSource;
     use std::collections::HashMap;
-    use tower_lsp_server::ls_types::Uri;
+    use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Position, Range, Uri};
 
     #[test]
     fn find_document_returns_none_for_unknown_uri() {
@@ -86,5 +109,67 @@ mod tests {
         let uri: Uri = "file:///tmp/missing.lua".parse().unwrap();
 
         assert!(find_document(&documents, &uri).is_none());
+    }
+
+    fn diagnostic(message: &str) -> Diagnostic {
+        Diagnostic {
+            range: Range {
+                start: Position { line: 0, character: 0 },
+                end: Position { line: 0, character: 1 },
+            },
+            severity: Some(DiagnosticSeverity::ERROR),
+            code: None,
+            code_description: None,
+            source: Some("mylua".to_string()),
+            message: message.to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        }
+    }
+
+    #[test]
+    fn diagnostic_signature_changes_when_diagnostics_change() {
+        let first = vec![diagnostic("first")];
+        let same = vec![diagnostic("first")];
+        let changed = vec![diagnostic("changed")];
+
+        assert_eq!(
+            Document::diagnostic_signature(&first),
+            Document::diagnostic_signature(&same)
+        );
+        assert_ne!(
+            Document::diagnostic_signature(&first),
+            Document::diagnostic_signature(&changed)
+        );
+    }
+
+    #[test]
+    fn remember_diagnostic_signature_suppresses_repeated_results() {
+        let src = "local x = 1";
+        let mut parser = new_parser();
+        let tree = parser.parse(src.as_bytes(), None).unwrap();
+        let lua_source = LuaSource::new(src.to_string());
+        let uri: Uri = "file:///tmp/signature.lua".parse().unwrap();
+        let (_, scope_tree) = summary_builder::build_file_analysis(
+            &uri,
+            &tree,
+            lua_source.source(),
+            lua_source.line_index(),
+        );
+        let mut doc = Document {
+            lua_source,
+            tree,
+            scope_tree,
+            last_diagnostic_signature: None,
+        };
+
+        let first = vec![diagnostic("first")];
+        let same = vec![diagnostic("first")];
+        let changed = vec![diagnostic("changed")];
+
+        assert!(doc.remember_diagnostic_signature(&first));
+        assert!(!doc.remember_diagnostic_signature(&same));
+        assert!(doc.remember_diagnostic_signature(&changed));
     }
 }

@@ -427,6 +427,7 @@ pub async fn run_workspace_scan(
                     lua_source: pf.lua_source,
                     tree: pf.tree,
                     scope_tree: pf.scope_tree,
+                    last_diagnostic_signature: None,
                 },
             );
         }
@@ -596,7 +597,15 @@ async fn consumer_loop(
         // previously (e.g. config change enabling the library path).
         let is_library = library_uris.lock().unwrap().contains(&uri_id);
         if is_library {
-            client.publish_diagnostics(uri, Vec::new(), None).await;
+            let diags = Vec::new();
+            let should_publish = {
+                let mut docs = documents.lock().unwrap();
+                docs.get_mut(&uri_id)
+                    .is_some_and(|doc| doc.remember_diagnostic_signature(&diags))
+            };
+            if should_publish {
+                client.publish_diagnostics(uri, diags, None).await;
+            }
             continue;
         }
 
@@ -638,14 +647,15 @@ async fn consumer_loop(
         // Consistency check: if the document's text changed while we
         // were computing (another did_change in flight), skip publish.
         // The newer edit already re-scheduled its own compute.
-        let stale = {
-            let docs = documents.lock().unwrap();
-            match docs.get(&uri_id) {
-                Some(doc) => doc.text() != snapshot,
-                None => true,
+        let should_publish = {
+            let mut docs = documents.lock().unwrap();
+            match docs.get_mut(&uri_id) {
+                Some(doc) if doc.text() == snapshot => doc.remember_diagnostic_signature(&diags),
+                Some(_) => false,
+                None => false,
             }
         };
-        if stale {
+        if !should_publish {
             continue;
         }
 

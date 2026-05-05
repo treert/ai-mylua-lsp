@@ -837,6 +837,7 @@ local c = getContainer()
         lua_source,
         tree,
         scope_tree,
+        last_diagnostic_signature: None,
     };
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     let uri_id = intern_uri(&uri);

@@ -310,14 +310,14 @@ fn goto_require_jumps_to_module_return() {
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
     let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope };
+    let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope, last_diagnostic_signature: None };
 
     let caller_src = "local m = require(\"mymod\")\nprint(m)";
     let caller_uri = make_uri("caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
     let (caller_summary, caller_scope) = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
-    let caller_doc = Document { lua_source: caller_lua_source, tree: caller_tree, scope_tree: caller_scope };
+    let caller_doc = Document { lua_source: caller_lua_source, tree: caller_tree, scope_tree: caller_scope, last_diagnostic_signature: None };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     let mod_uri_id = intern_uri(&mod_uri);
@@ -375,6 +375,7 @@ fn goto_require_with_attribute_before_target() {
         lua_source: caller_lua_source,
         tree: caller_tree,
         scope_tree: caller_scope,
+        last_diagnostic_signature: None,
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
@@ -553,7 +554,7 @@ return Player"#;
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
     let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope };
+    let _mod_doc = Document { lua_source: mod_lua_source, tree: mod_tree, scope_tree: mod_scope, last_diagnostic_signature: None };
 
     // main.lua: require("player") and call Player.new("Alice")
     let caller_src = r#"local Player = require("player")
@@ -567,6 +568,7 @@ local hero = Player.new("Alice")"#;
         lua_source: caller_lua_source,
         tree: caller_tree,
         scope_tree: caller_scope,
+        last_diagnostic_signature: None,
     };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();

@@ -346,13 +346,15 @@ impl LanguageServer for Backend {
         // can reuse unchanged subtrees, and finally reparse using the
         // edited tree as a base. A full-document change (range = None)
         // restarts from scratch.
-        let (final_text, old_tree) = {
+        let (final_text, old_tree, last_diagnostic_signature) = {
             let mut docs = self.documents.lock().unwrap();
             let mut text;
             let mut tree: Option<tree_sitter::Tree>;
+            let mut last_diagnostic_signature = None;
             let uri_id = intern_uri(&uri);
             let old_doc = docs.remove(&uri_id);
             if let Some(doc) = old_doc {
+                last_diagnostic_signature = doc.last_diagnostic_signature;
                 text = doc.lua_source.into_text();
                 tree = Some(doc.tree);
             } else {
@@ -375,10 +377,15 @@ impl LanguageServer for Backend {
                 }
             }
 
-            (text, tree)
+            (text, tree, last_diagnostic_signature)
         };
 
-        self.parse_and_store_with_old_tree(uri.clone(), final_text, old_tree);
+        self.parse_and_store_with_old_tree(
+            uri.clone(),
+            final_text,
+            old_tree,
+            last_diagnostic_signature,
+        );
 
         // Cold-start syntax-only fast path (no-op once IndexState::Ready).
         // `did_close` and `did_change_watched_files` intentionally do NOT
@@ -468,7 +475,16 @@ impl LanguageServer for Backend {
         // disk between open and close: fall back to clearing. For the
         // deleted case `did_change_watched_files` will also fire a
         // DELETED event that removes the file from the index.
-        self.client.publish_diagnostics(uri, vec![], None).await;
+        let diags = Vec::new();
+        let should_publish = {
+            let mut docs = self.documents.lock().unwrap();
+            docs.get_mut(&uri_id)
+                .map(|doc| doc.remember_diagnostic_signature(&diags))
+                .unwrap_or(true)
+        };
+        if should_publish {
+            self.client.publish_diagnostics(uri, diags, None).await;
+        }
     }
 
     async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
