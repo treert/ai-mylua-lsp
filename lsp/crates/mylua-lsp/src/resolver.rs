@@ -18,8 +18,6 @@ pub struct ResolvedLocation {
 #[derive(Debug, Clone)]
 pub struct ResolvedType {
     pub type_fact: TypeFact,
-    /// Byte range of the defining symbol when known.
-    pub def_range: Option<ByteRange>,
     /// Definition location for protocol-facing consumers that need a range.
     pub def_location: Option<ResolvedLocation>,
     /// Owning file identity for per-file values such as `TableShapeId` and
@@ -30,17 +28,16 @@ pub struct ResolvedType {
 
 impl ResolvedType {
     fn unknown(ctx: ResolveCtx) -> Self {
-        Self { type_fact: TypeFact::Unknown, def_range: None, def_location: None, owner_uri_id: ctx.owner_uri_id }
+        Self { type_fact: TypeFact::Unknown, def_location: None, owner_uri_id: ctx.owner_uri_id }
     }
 
     fn from_fact(ctx: ResolveCtx, fact: TypeFact) -> Self {
-        Self { type_fact: fact, def_range: None, def_location: None, owner_uri_id: ctx.owner_uri_id }
+        Self { type_fact: fact, def_location: None, owner_uri_id: ctx.owner_uri_id }
     }
 
     fn with_location(fact: TypeFact, uri_id: UriId, range: ByteRange) -> Self {
         Self {
             type_fact: fact,
-            def_range: Some(range),
             def_location: Some(ResolvedLocation { uri_id, range }),
             owner_uri_id: uri_id,
         }
@@ -132,8 +129,8 @@ fn resolve_field_chain_inner(
             if result.type_fact != TypeFact::Unknown {
                 first_owner.get_or_insert(result.owner_uri_id);
                 if best_location.is_none() {
-                    if let Some(r) = result.def_range {
-                        best_location = Some((r, result.owner_uri_id));
+                    if let Some(location) = result.def_location {
+                        best_location = Some((location.range, location.uri_id));
                     }
                 }
                 if !resolved_types.contains(&result.type_fact) {
@@ -402,8 +399,7 @@ fn resolve_global(
         depth + 1,
         visited,
     );
-    if resolved.def_range.is_none() {
-        resolved.def_range = Some(candidate.selection_range);
+    if resolved.def_location.is_none() {
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
             range: candidate.selection_range,
@@ -469,7 +465,6 @@ fn try_global_shard_qualified(
         visited,
     );
     if !preserve_resolved_location || resolved.def_location.is_none() {
-        resolved.def_range = Some(candidate.selection_range);
         resolved.def_location = Some(ResolvedLocation {
             uri_id: candidate.source_uri_id(),
             range: candidate.selection_range,
@@ -635,7 +630,6 @@ fn resolve_call_return(
                     if let Some(ret) = sig.returns.first() {
                         let mut ret_resolved = resolve_recursive(candidate_ctx, ret, agg, depth + 1, visited);
                         if ret_resolved.def_location.is_none() {
-                            ret_resolved.def_range = Some(c.selection_range);
                             ret_resolved.def_location = Some(ResolvedLocation {
                                 uri_id: c.source_uri_id(),
                                 range: c.selection_range,
@@ -651,7 +645,6 @@ fn resolve_call_return(
                             if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
                                 let mut ret_resolved = resolve_recursive(candidate_ctx, &ret, agg, depth + 1, visited);
                                 if ret_resolved.def_location.is_none() {
-                                    ret_resolved.def_range = Some(c.selection_range);
                                     ret_resolved.def_location = Some(ResolvedLocation {
                                         uri_id: c.source_uri_id(),
                                         range: c.selection_range,
@@ -781,8 +774,8 @@ fn resolve_field_access(
             if result.type_fact != TypeFact::Unknown {
                 first_owner.get_or_insert(result.owner_uri_id);
                 if best_location.is_none() {
-                    if let Some(r) = result.def_range {
-                        best_location = Some((r, result.owner_uri_id));
+                    if let Some(location) = result.def_location {
+                        best_location = Some((location.range, location.uri_id));
                     }
                 }
                 if !resolved_types.contains(&result.type_fact) {
@@ -840,9 +833,8 @@ fn resolve_field_access(
                 if result.type_fact != TypeFact::Unknown {
                     first_owner.get_or_insert(result.owner_uri_id);
                     if best_location.is_none() {
-                        if let Some(r) = result.def_range {
-                            let uri_id = result.source_uri_id();
-                            best_location = Some((r, uri_id));
+                        if let Some(location) = result.def_location {
+                            best_location = Some((location.range, location.uri_id));
                         }
                     }
                     if !resolved_types.contains(&result.type_fact) {
@@ -899,7 +891,6 @@ fn resolve_table_field(
         if let Some(fi) = shape.fields.get(field) {
             return ResolvedType {
                 type_fact: fi.type_fact.clone(),
-                def_range: fi.def_range,
                 def_location: fi.def_range
                     .map(|range| ResolvedLocation { uri_id, range }),
                 owner_uri_id: uri_id,
@@ -949,7 +940,6 @@ fn resolve_emmy_field_with_visited(
                             if tf.name == field {
                                 return ResolvedType {
                                     type_fact: tf.type_fact.clone(),
-                                    def_range: Some(tf.range),
                                     def_location: Some(ResolvedLocation {
                                         uri_id: candidate.source_uri_id(),
                                         range: tf.range,
@@ -969,7 +959,6 @@ fn resolve_emmy_field_with_visited(
                                 if let Some(fi) = shape.fields.get(field) {
                                     return ResolvedType {
                                         type_fact: fi.type_fact.clone(),
-                                        def_range: fi.def_range,
                                         def_location: fi.def_range.map(|range| ResolvedLocation {
                                             uri_id: candidate.source_uri_id(),
                                             range,
