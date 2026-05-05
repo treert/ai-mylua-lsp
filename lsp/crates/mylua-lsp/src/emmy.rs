@@ -184,7 +184,7 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
     let tag_start = at + 1;
     let tag_end = scan_ident_end(line, tag_start)?;
     let tag = std::str::from_utf8(&line[tag_start..tag_end]).ok()?;
-    let (word_start, word_end) = word_span_at(line, rel)?;
+    let (word_start, word_end) = qualified_word_span_at(line, rel)?;
     let word = std::str::from_utf8(&line[word_start..word_end]).ok()?;
 
     let content_start = skip_ws(line, tag_end);
@@ -193,7 +193,7 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
 
     match tag {
         "class" => {
-            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            let (name_start, name_end) = read_qualified_ident_span(line, content_start)?;
             if in_range(name_start, name_end) {
                 return Some(word.to_string());
             }
@@ -209,7 +209,7 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
             }
         }
         "alias" => {
-            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            let (name_start, name_end) = read_qualified_ident_span(line, content_start)?;
             if in_range(name_start, name_end) {
                 return Some(word.to_string());
             }
@@ -218,7 +218,7 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
             type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
         }
         "enum" => {
-            let (name_start, name_end) = read_ident_span(line, content_start)?;
+            let (name_start, name_end) = read_qualified_ident_span(line, content_start)?;
             in_range(name_start, name_end).then(|| word.to_string())
         }
         "type" | "return" | "vararg" | "overload" => {
@@ -286,6 +286,22 @@ fn description_start(line: &[u8], from: usize) -> Option<usize> {
 fn read_ident_span(line: &[u8], start: usize) -> Option<(usize, usize)> {
     let start = skip_ws(line, start);
     let end = scan_ident_end(line, start)?;
+    Some((start, end))
+}
+
+fn read_qualified_ident_span(line: &[u8], start: usize) -> Option<(usize, usize)> {
+    let start = skip_ws(line, start);
+    let mut end = scan_ident_end(line, start)?;
+    loop {
+        if end >= line.len() || line[end] != b'.' {
+            break;
+        }
+        let next_start = end + 1;
+        let Some(next_end) = scan_ident_end(line, next_start) else {
+            break;
+        };
+        end = next_end;
+    }
     Some((start, end))
 }
 
@@ -422,6 +438,31 @@ fn word_span_at(line: &[u8], rel: usize) -> Option<(usize, usize)> {
     } else {
         Some((start, end))
     }
+}
+
+fn qualified_word_span_at(line: &[u8], rel: usize) -> Option<(usize, usize)> {
+    let (mut start, mut end) = word_span_at(line, rel)?;
+    while start >= 2 && line[start - 1] == b'.' {
+        let Some((prev_start, prev_end)) = word_span_at(line, start - 2) else {
+            break;
+        };
+        if prev_end == start - 1 {
+            start = prev_start;
+        } else {
+            break;
+        }
+    }
+    while end + 1 < line.len() && line[end] == b'.' {
+        let Some((next_start, next_end)) = word_span_at(line, end + 1) else {
+            break;
+        };
+        if next_start == end + 1 {
+            end = next_end;
+        } else {
+            break;
+        }
+    }
+    Some((start, end))
 }
 
 fn skip_ws(line: &[u8], mut pos: usize) -> usize {
@@ -627,6 +668,23 @@ impl Tokenizer {
         }
     }
 
+    fn eat_qualified_name(&mut self) -> Option<String> {
+        let mut name = self.eat_name()?;
+        loop {
+            if !matches!(self.peek(), Token::Dot) || !matches!(self.peek_at(1), Token::Name(_)) {
+                break;
+            }
+            self.advance(); // dot
+            if let Some(segment) = self.eat_name() {
+                name.push('.');
+                name.push_str(&segment);
+            } else {
+                break;
+            }
+        }
+        Some(name)
+    }
+
     fn at_eof(&self) -> bool {
         matches!(self.peek(), Token::Eof)
     }
@@ -738,9 +796,9 @@ fn parse_atom_type(tz: &mut Tokenizer) -> EmmyType {
     }
 }
 
-/// `emmy_name_type ::= Name [ '<' emmy_type_list '>' ]`
+/// `emmy_name_type ::= qualified_name [ '<' emmy_type_list '>' ]`
 fn parse_name_type(tz: &mut Tokenizer) -> EmmyType {
-    let name = match tz.eat_name() {
+    let name = match tz.eat_qualified_name() {
         Some(n) => n,
         None => return EmmyType::Unknown,
     };
@@ -913,7 +971,7 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
         "async" => Some(EmmyAnnotation::Async),
         "nodiscard" => Some(EmmyAnnotation::Nodiscard),
         "enum" => {
-            let name = tz.eat_name()?;
+            let name = tz.eat_qualified_name()?;
             Some(EmmyAnnotation::Enum { name })
         }
         "see" => Some(EmmyAnnotation::See { path: tz.rest_as_string() }),
@@ -921,21 +979,21 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
         "meta" => {
             // `---@meta` or `---@meta <module_name>`. Anything after
             // the first name token is ignored (no semantic role).
-            let name = tz.eat_name();
+            let name = tz.eat_qualified_name();
             Some(EmmyAnnotation::Meta { name })
         }
         _ => Some(EmmyAnnotation::Other { tag, text: tz.rest_as_string() }),
     }
 }
 
-/// `@class Name [ ':' Parent { ',' Parent } ] [ desc ]`
+/// `@class qualified_name [ ':' qualified_name { ',' qualified_name } ] [ desc ]`
 fn parse_ann_class(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
-    let name = tz.eat_name()?;
+    let name = tz.eat_qualified_name()?;
     let parents = if tz.eat(&Token::Colon) {
         let mut ps = Vec::new();
-        if let Some(p) = tz.eat_name() { ps.push(p); }
+        if let Some(p) = tz.eat_qualified_name() { ps.push(p); }
         while tz.eat(&Token::Comma) {
-            if let Some(p) = tz.eat_name() { ps.push(p); }
+            if let Some(p) = tz.eat_qualified_name() { ps.push(p); }
         }
         ps
     } else {
@@ -1018,7 +1076,7 @@ fn parse_ann_type(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
 
 /// `@alias Name type_expr`
 fn parse_ann_alias(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
-    let name = tz.eat_name()?;
+    let name = tz.eat_qualified_name()?;
     let type_expr = parse_type_expr(tz);
     Some(EmmyAnnotation::Alias { name, type_expr })
 }
@@ -1384,6 +1442,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_qualified_named() {
+        assert_eq!(
+            parse_type_from_str("XMod.ClassX1"),
+            EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] }
+        );
+    }
+
+    #[test]
     fn parse_union() {
         let ty = parse_type_from_str("string|number");
         assert_eq!(ty, EmmyType::Union(vec![
@@ -1433,6 +1499,17 @@ mod tests {
             generics: vec![
                 EmmyType::Named { name: "string".into(), generics: vec![] },
                 EmmyType::Named { name: "number".into(), generics: vec![] },
+            ],
+        });
+    }
+
+    #[test]
+    fn parse_qualified_generic() {
+        let ty = parse_type_from_str("Pkg.Box<XMod.ClassX1>");
+        assert_eq!(ty, EmmyType::Named {
+            name: "Pkg.Box".into(),
+            generics: vec![
+                EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] },
             ],
         });
     }
@@ -1617,6 +1694,19 @@ mod tests {
     }
 
     #[test]
+    fn annotation_class_qualified_name_and_parent() {
+        let anns = parse_emmy_comments("---@class XMod.ClassX1 : Base.Mod");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Class { name, parents, .. } => {
+                assert_eq!(name, "XMod.ClassX1");
+                assert_eq!(parents, &["Base.Mod"]);
+            }
+            _ => panic!("expected Class"),
+        }
+    }
+
+    #[test]
     fn annotation_field_with_type() {
         let anns = parse_emmy_comments("---@field name string some desc");
         assert_eq!(anns.len(), 1);
@@ -1639,6 +1729,30 @@ mod tests {
                 assert!(matches!(type_expr, EmmyType::Named { name, generics } if name == "table" && generics.len() == 2));
             }
             _ => panic!("expected Type"),
+        }
+    }
+
+    #[test]
+    fn annotation_type_qualified_name() {
+        let anns = parse_emmy_comments("---@type XMod.ClassX1");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Type { type_expr, .. } => {
+                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+            }
+            _ => panic!("expected Type"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_qualified_type() {
+        let anns = parse_emmy_comments("---@field parent XMod.ClassX1");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field { type_expr, .. } => {
+                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+            }
+            _ => panic!("expected Field"),
         }
     }
 
@@ -1790,6 +1904,56 @@ mod tests {
         }
     }
 
+    #[test]
+    fn annotation_alias_qualified_name() {
+        let anns = parse_emmy_comments("---@alias Pkg.MyType XMod.ClassX1");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Alias { name, type_expr } => {
+                assert_eq!(name, "Pkg.MyType");
+                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+            }
+            _ => panic!("expected Alias"),
+        }
+    }
+
+    #[test]
+    fn annotation_enum_qualified_name() {
+        let anns = parse_emmy_comments("---@enum Pkg.Kind");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Enum { name } => {
+                assert_eq!(name, "Pkg.Kind");
+            }
+            _ => panic!("expected Enum"),
+        }
+    }
+
+    #[test]
+    fn annotation_meta_qualified_name() {
+        let anns = parse_emmy_comments("---@meta Pkg.Module");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Meta { name } => {
+                assert_eq!(name.as_deref(), Some("Pkg.Module"));
+            }
+            _ => panic!("expected Meta"),
+        }
+    }
+
+    #[test]
+    fn emmy_type_name_at_byte_returns_qualified_name() {
+        let source = b"---@type XMod.ClassX1\nlocal x = {}\n";
+        let byte_offset = source
+            .windows(b"ClassX1".len())
+            .position(|w| w == b"ClassX1")
+            .unwrap();
+        assert_eq!(
+            emmy_type_name_at_byte(source, byte_offset),
+            Some("XMod.ClassX1".into())
+        );
+    }
+
     // -- Annotation: deprecated / async / nodiscard --
 
     #[test]
@@ -1935,6 +2099,13 @@ mod tests {
         let ty = parse_type_from_str("MyClass");
         let fact = emmy_type_to_fact(&ty);
         assert_eq!(fact, TypeFact::Known(KnownType::EmmyType("MyClass".into())));
+    }
+
+    #[test]
+    fn type_to_fact_qualified_emmy_named() {
+        let ty = parse_type_from_str("XMod.ClassX1");
+        let fact = emmy_type_to_fact(&ty);
+        assert_eq!(fact, TypeFact::Known(KnownType::EmmyType("XMod.ClassX1".into())));
     }
 
     #[test]
