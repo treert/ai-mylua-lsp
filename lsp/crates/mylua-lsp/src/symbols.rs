@@ -114,7 +114,7 @@ impl<'a> OutlineBuilder<'a> {
                 if td.name.is_empty() {
                     continue;
                 }
-                if class_index.contains_key(&td.name) {
+                if class_index.contains_key(td.name.as_str()) {
                     continue;
                 }
                 let kind = match td.kind {
@@ -141,7 +141,7 @@ impl<'a> OutlineBuilder<'a> {
                     let selection_range = fd.name_range.unwrap_or(fd.range).into();
                     #[allow(deprecated)]
                     children.push(DocumentSymbol {
-                        name: fd.name.clone(),
+                        name: fd.name.to_string(),
                         detail: None,
                         kind: SymbolKind::FIELD,
                         tags: None,
@@ -156,7 +156,7 @@ impl<'a> OutlineBuilder<'a> {
                 let selection_range = td.name_range.unwrap_or(td.range).into();
                 #[allow(deprecated)]
                 class_nodes.push(DocumentSymbol {
-                    name: td.name.clone(),
+                    name: td.name.to_string(),
                     detail: None,
                     kind,
                     tags: None,
@@ -165,8 +165,8 @@ impl<'a> OutlineBuilder<'a> {
                     selection_range,
                     children: Some(children),
                 });
-                class_index.insert(td.name.clone(), class_nodes.len() - 1);
-                class_child_keys.insert(td.name.clone(), seen_keys);
+                class_index.insert(td.name.to_string(), class_nodes.len() - 1);
+                class_child_keys.insert(td.name.to_string(), seen_keys);
             }
         }
 

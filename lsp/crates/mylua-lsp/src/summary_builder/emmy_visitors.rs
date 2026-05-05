@@ -1,4 +1,5 @@
 use crate::emmy::{parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation, EmmyTableFieldKey, EmmyType};
+use crate::lua_symbol::intern_lua_symbol;
 use crate::summary::*;
 use crate::util::{encode_col, node_text, LineIndex};
 
@@ -16,12 +17,12 @@ pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Nod
     if let Some((cname, parents, fields, generic_params, name_range)) = ctx.pending_class.take() {
         ctx.pending_class_name = Some(cname.clone());
         ctx.type_definitions.push(TypeDefinition {
-            name: cname,
+            name: intern_lua_symbol(&cname),
             kind: TypeDefinitionKind::Class,
-            parents,
+            parents: parents.iter().map(|parent| intern_lua_symbol(parent)).collect(),
             fields,
             alias_type: None,
-            generic_params,
+            generic_params: generic_params.iter().map(|param| intern_lua_symbol(param)).collect(),
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
             anchor_shape_id: None,
@@ -35,12 +36,12 @@ pub(super) fn emit_pending_class_as_typedef(
 ) {
     if let Some((cname, prev_parents, fields, gparams, name_range)) = ctx.pending_class.take() {
         ctx.type_definitions.push(TypeDefinition {
-            name: cname,
+            name: intern_lua_symbol(&cname),
             kind: TypeDefinitionKind::Class,
-            parents: prev_parents,
+            parents: prev_parents.iter().map(|parent| intern_lua_symbol(parent)).collect(),
             fields,
             alias_type: None,
-            generic_params: gparams,
+            generic_params: gparams.iter().map(|param| intern_lua_symbol(param)).collect(),
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
             anchor_shape_id: None,
@@ -112,7 +113,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                         "field",
                     );
                     fields.push(TypeFieldDef {
-                        name: fname.clone(),
+                        name: intern_lua_symbol(fname),
                         type_fact: emmy_type_to_fact(type_expr),
                         range: full_range,
                         name_range: Some(name_range),
@@ -150,7 +151,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     tfs.iter()
                         .filter_map(|tf| match &tf.key {
                             EmmyTableFieldKey::Name(n) => Some(TypeFieldDef {
-                                name: n.clone(),
+                                name: intern_lua_symbol(n),
                                 type_fact: emmy_type_to_fact(&tf.value),
                                 range: line_range,
                                 name_range: None,
@@ -162,7 +163,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     Vec::new()
                 };
                 ctx.type_definitions.push(TypeDefinition {
-                    name: name.clone(),
+                    name: intern_lua_symbol(name),
                     kind: TypeDefinitionKind::Alias,
                     parents: Vec::new(),
                     fields: aliased_fields,
@@ -185,7 +186,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     "enum",
                 );
                 ctx.type_definitions.push(TypeDefinition {
-                    name: name.clone(),
+                    name: intern_lua_symbol(name),
                     kind: TypeDefinitionKind::Enum,
                     parents: Vec::new(),
                     fields: Vec::new(),

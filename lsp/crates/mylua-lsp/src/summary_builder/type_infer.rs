@@ -396,7 +396,8 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
 
     // Global function fallback. Local functions are intentionally excluded here
     // because their visibility is already handled by the scoped lookup above.
-    if let Some(&func_id) = ctx.function_name_index.get(callee_text) {
+    let callee_symbol = intern_lua_symbol(callee_text);
+    if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
         if let Some(fs) = ctx.function_summaries.get(&func_id) {
             // Function-level generic inference: if the callee has @generic params,
             // try to unify them from the actual argument types at the call site.

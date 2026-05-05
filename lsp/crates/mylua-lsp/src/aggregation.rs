@@ -382,8 +382,8 @@ impl WorkspaceAggregation {
             // 2. Build all shards in a single pass.
             for (uri_id, summary) in summaries {
                 for gc in &summary.global_contributions {
-                    global_shard.push_candidate(&gc.name, GlobalCandidate {
-                        name: gc.name.clone(),
+                    global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
+                        name: gc.name.to_string(),
                         kind: gc.kind.clone(),
                         type_fact: gc.type_fact.clone(),
                         range: gc.range,
@@ -394,10 +394,10 @@ impl WorkspaceAggregation {
 
                 for td in &summary.type_definitions {
                     let candidates = type_shard
-                        .entry(td.name.clone())
+                        .entry(td.name.to_string())
                         .or_default();
                     candidates.push(TypeCandidate {
-                        name: td.name.clone(),
+                        name: td.name.to_string(),
                         kind: td.kind.clone(),
                         source_uri_id: *uri_id,
                         range: td.range,
@@ -438,15 +438,15 @@ impl WorkspaceAggregation {
         let current_priority = uri_priority(uri_id);
 
         for gc in &summary.global_contributions {
-            self.global_shard.push_candidate(&gc.name, GlobalCandidate {
-                name: gc.name.clone(),
+            self.global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
+                name: gc.name.to_string(),
                 kind: gc.kind.clone(),
                 type_fact: gc.type_fact.clone(),
                 range: gc.range,
                 selection_range: gc.selection_range,
                 source_uri_id: uri_id,
             });
-            self.global_shard.sort_at(&gc.name, |c| {
+            self.global_shard.sort_at(gc.name.as_str(), |c| {
                 summary_priorities
                     .get(&c.source_uri_id())
                     .copied()
@@ -456,10 +456,10 @@ impl WorkspaceAggregation {
 
         for td in &summary.type_definitions {
             let candidates = self.type_shard
-                .entry(td.name.clone())
+                .entry(td.name.to_string())
                 .or_default();
             candidates.push(TypeCandidate {
-                name: td.name.clone(),
+                name: td.name.to_string(),
                 kind: td.kind.clone(),
                 source_uri_id: uri_id,
                 range: td.range,

@@ -73,7 +73,7 @@ pub fn prepare_call_hierarchy(
         )) = doc.scope_tree.resolve_type(byte_offset, &name) {
             if let Some(fs) = summary.function_summaries.get(fid) {
                 return vec![build_item(
-                    fs.name.clone(),
+                    fs.name.to_string(),
                     SymbolKind::FUNCTION,
                     uri.clone(),
                     fs.range.into(),
@@ -84,7 +84,7 @@ pub fn prepare_call_hierarchy(
         // Global function via function_name_index
         if let Some(fs) = summary.get_function_by_name(&name) {
             return vec![build_item(
-                fs.name.clone(),
+                fs.name.to_string(),
                 SymbolKind::FUNCTION,
                 uri.clone(),
                 fs.range.into(),
@@ -222,7 +222,7 @@ pub fn incoming_calls(
             }
             let caller_item = resolve_caller_item(&uri, cs, summary);
             let lsp_range: Range = cs.range.into();
-            let key = (uri.clone(), cs.caller_name.clone(), cs.caller_id);
+            let key = (uri.clone(), cs.caller_name.to_string(), cs.caller_id);
             groups
                 .entry(key)
                 .or_insert_with(|| (caller_item, Vec::new()))
@@ -272,7 +272,7 @@ fn resolve_caller_item(
             };
             let lsp_range: Range = fs.range.into();
             return build_item(
-                cs.caller_name.clone(),
+                cs.caller_name.to_string(),
                 kind,
                 uri.clone(),
                 lsp_range,
@@ -281,7 +281,7 @@ fn resolve_caller_item(
         }
     }
     // Fallback for global functions whose caller_id wasn't set.
-    if let Some(fs) = summary.get_function_by_name(&cs.caller_name) {
+    if let Some(fs) = summary.get_function_by_name(cs.caller_name.as_str()) {
         let kind = if cs.caller_name.contains(':') {
             SymbolKind::METHOD
         } else {
@@ -289,7 +289,7 @@ fn resolve_caller_item(
         };
         let lsp_range: Range = fs.range.into();
         return build_item(
-            cs.caller_name.clone(),
+            cs.caller_name.to_string(),
             kind,
             uri.clone(),
             lsp_range,
@@ -302,7 +302,7 @@ fn resolve_caller_item(
         start: Position { line: 0, character: 0 },
         end: Position { line: 0, character: 0 },
     };
-    build_item(cs.caller_name.clone(), SymbolKind::FUNCTION, uri.clone(), range, range)
+    build_item(cs.caller_name.to_string(), SymbolKind::FUNCTION, uri.clone(), range, range)
 }
 
 fn file_name_hint(uri: &Uri) -> String {
@@ -331,7 +331,7 @@ pub fn outgoing_calls(
             if cs.caller_id != Some(id) {
                 continue;
             }
-        } else if cs.caller_name != item.name {
+        } else if cs.caller_name.as_str() != item.name {
             continue;
         }
         let target_name = last_segment(&cs.callee_name).to_string();
@@ -361,7 +361,7 @@ fn function_id_for_item(
         .iter()
         .find_map(|(id, fs)| {
             let range: Range = fs.range.into();
-            (fs.name == item.name && range == item.range).then_some(*id)
+            (fs.name.as_str() == item.name && range == item.range).then_some(*id)
         })
 }
 
@@ -469,8 +469,8 @@ pub fn extract_call_site(
     };
 
     Some(CallSite {
-        callee_name,
-        caller_name: caller_name.to_string(),
+        callee_name: crate::lua_symbol::intern_lua_symbol(&callee_name),
+        caller_name: crate::lua_symbol::intern_lua_symbol(caller_name),
         caller_id,
         range,
     })

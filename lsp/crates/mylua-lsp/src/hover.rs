@@ -149,7 +149,11 @@ pub fn hover(
                                     if td.parents.is_empty() {
                                         format!("---@class {}", td.name)
                                     } else {
-                                        format!("---@class {} : {}", td.name, td.parents.join(", "))
+                                        let parents = td.parents.iter()
+                                            .map(|parent| parent.as_str())
+                                            .collect::<Vec<_>>()
+                                            .join(", ");
+                                        format!("---@class {} : {}", td.name, parents)
                                     }
                                 }
                             };
@@ -275,7 +279,11 @@ fn hover_type_name(
                 if td.parents.is_empty() {
                     format!("---@class {}", td.name)
                 } else {
-                    format!("---@class {} : {}", td.name, td.parents.join(", "))
+                    let parents = td.parents.iter()
+                        .map(|parent| parent.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    format!("---@class {} : {}", td.name, parents)
                 }
             }
         };

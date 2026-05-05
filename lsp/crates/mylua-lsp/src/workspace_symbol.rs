@@ -100,7 +100,7 @@ pub fn search_workspace_symbols(
                 .and_then(|s| {
                     s.type_definitions
                         .iter()
-                        .find(|td| td.name == *name)
+                        .find(|td| td.name.as_str() == name)
                         .and_then(|td| td.name_range)
                 })
                 .unwrap_or(candidate.range);
@@ -128,8 +128,8 @@ pub fn search_workspace_symbols(
                     continue;
                 }
                 let key = (
-                    fd.name.clone(),
-                    Some(td.name.clone()),
+                    fd.name.to_string(),
+                    Some(td.name.to_string()),
                     uri.to_string(),
                 );
                 if !member_keys.insert(key) {
@@ -138,7 +138,7 @@ pub fn search_workspace_symbols(
                 let location_range = fd.name_range.unwrap_or(fd.range);
                 #[allow(deprecated)]
                 results.push(SymbolInformation {
-                    name: fd.name.clone(),
+                    name: fd.name.to_string(),
                     kind: SymbolKind::FIELD,
                     tags: None,
                     deprecated: None,
@@ -146,7 +146,7 @@ pub fn search_workspace_symbols(
                         uri: uri.clone(),
                         range: location_range.into(),
                     },
-                    container_name: Some(td.name.clone()),
+                    container_name: Some(td.name.to_string()),
                 });
             }
         }

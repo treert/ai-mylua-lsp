@@ -540,7 +540,8 @@ fn extract_call_return_types(
     }
 
     // Global function summary fallback.
-    if let Some(&func_id) = ctx.function_name_index.get(callee_text) {
+    let callee_symbol = intern_lua_symbol(callee_text);
+    if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
         if let Some(fs) = ctx.function_summaries.get(&func_id) {
             return Some(fs.signature.returns.clone());
         }
@@ -790,12 +791,12 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     // Global function: colon→dot normalization for both index and contribution.
     let normalized = name.replace(':', ".");
-    ctx.function_name_index.insert(normalized.clone(), func_id);
+    ctx.function_name_index.insert(intern_lua_symbol(&normalized), func_id);
 
     // Base is not a local (or bare name) → register as global contribution
     // (e.g. `function Player.new()` where Player is a global).
     ctx.global_contributions.push(GlobalContribution {
-        name: normalized,
+        name: intern_lua_symbol(&normalized),
         kind: GlobalContributionKind::Function,
         type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
         range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
@@ -822,7 +823,7 @@ fn add_field_to_class(
             return;
         }
         td.fields.push(TypeFieldDef {
-            name: field_name.to_string(),
+            name: intern_lua_symbol(field_name),
             type_fact,
             range: def_range,
             name_range: None,
@@ -962,13 +963,13 @@ fn build_function_summary(
     let fingerprint = hash_function_signature(&sig);
 
     FunctionSummary {
-        name: name.to_string(),
+        name: intern_lua_symbol(name),
         signature: sig,
         range: ctx.line_index.ts_node_to_byte_range(decl_node, ctx.source),
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
-        generic_params: func_generic_params,
+        generic_params: func_generic_params.iter().map(|param| intern_lua_symbol(param)).collect(),
     }
 }
 
@@ -1203,7 +1204,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
 
                 ctx.global_contributions.push(GlobalContribution {
-                    name,
+                    name: intern_lua_symbol(&name),
                     kind: GlobalContributionKind::Variable,
                     type_fact,
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
@@ -1300,7 +1301,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
                 let name = chain.joined();
                 ctx.global_contributions.push(GlobalContribution {
-                    name,
+                    name: intern_lua_symbol(&name),
                     kind: GlobalContributionKind::TableExtension,
                     type_fact,
                     range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),

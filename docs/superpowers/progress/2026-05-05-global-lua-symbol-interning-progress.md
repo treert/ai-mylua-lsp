@@ -1,7 +1,7 @@
 # Global LuaSymbol Interning — 进度记录
 
 **日期**: 2026-05-05
-**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前两段完成待提交
+**状态**: Task 1 完成并已提交；Task 2 已开始拆分执行，前三段完成待提交
 
 ## 当前目标
 
@@ -121,6 +121,37 @@ cargo build
 - `ReadLints`: no linter errors
 - `code-reviewer`: no blocking issues found
 
+### Task 2.3: Migrate DocumentSummary Names
+
+改动：
+
+- `DocumentSummary.function_name_index` 从 `HashMap<String, FunctionSummaryId>` 改为 `HashMap<LuaSymbol, FunctionSummaryId>`
+- `DocumentSummary.meta_name`、`CallSite` 的 callee/caller、`GlobalContribution.name`、`FunctionSummary.name/generic_params` 改为 `LuaSymbol`
+- `TypeDefinition.name/parents/generic_params` 和 `TypeFieldDef.name` 改为 `LuaSymbol`
+- `summary_builder` 在构造 `DocumentSummary` 长期字段时 intern 名称；消费者在 LSP/UI 输出边界用 `as_str()` / `to_string()` 转回字符串
+- 新增 `get_lua_symbol` 非插入式查询 helper，`DocumentSummary::get_function_by_name` 查找 miss 时不会把请求级临时字符串写入全局 interner
+- 新增 `summary` 回归测试，覆盖 summary JSON 字段和 `function_name_index` key 仍序列化为字符串，并验证 colon-normalized lookup
+
+验证：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test lua_symbol
+cargo test summary_lua_symbols_serialize_as_strings_and_lookup_normalizes_colon
+cargo test --tests
+cargo build
+```
+
+结果：
+
+- `cargo test lua_symbol`: 9 passed
+- targeted summary test: passed
+- `cargo test --tests`: 583 passed
+- `cargo build`: passed, 0 warnings
+- `ReadLints`: no linter errors
+- spec review: no spec issues found
+- `code-reviewer`: no issues found
+
 ## 当前仓库状态
 
 换会话前检查：
@@ -136,7 +167,7 @@ git log -1 --oneline
 57f0d7f docs: add LuaSymbol progress doc
 ```
 
-当前有未提交代码改动覆盖 Task 2.1 和 Task 2.2。
+当前有未提交代码改动覆盖 Task 2.1、Task 2.2 和 Task 2.3。
 
 ## 下一步建议
 
@@ -144,7 +175,7 @@ git log -1 --oneline
 
 1. ~~`TypeFact` / `FunctionSignature` / `ParamInfo` 里的长期字符串改为 `LuaSymbol`~~
 2. ~~`TableShape` / `FieldInfo` 字段名和 owner 改为 `LuaSymbol`~~
-3. `DocumentSummary` 名称字段和 `function_name_index` 改为 `LuaSymbol`
+3. ~~`DocumentSummary` 名称字段和 `function_name_index` 改为 `LuaSymbol`~~
 4. `ScopeTree` / `WorkspaceAggregation` 名称字段、索引 key、reverse indexes 改为 `LuaSymbol`
 5. `summary_builder` 构造边界继续收口，避免先 resolve 回 `String` 再存储
 6. `lua_perf --summary` 验证 JSON 仍输出字符串
@@ -166,5 +197,5 @@ git log -1 --oneline
 3. `docs/superpowers/plans/2026-05-05-global-lua-symbol-interning.md`
 4. 本文件
 
-然后从“DocumentSummary 名称字段和 `function_name_index`”继续，不要直接派发完整剩余任务。
+然后从“ScopeTree / WorkspaceAggregation 名称字段、索引 key、reverse indexes”继续，不要直接派发完整剩余任务。
 

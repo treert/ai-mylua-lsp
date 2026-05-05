@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use tower_lsp_server::ls_types::Uri;
 
 use crate::emmy::{parse_emmy_comments, EmmyAnnotation, EmmyType};
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use crate::summary::*;
 use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::*;
@@ -90,7 +91,7 @@ pub fn build_file_analysis(
         signature_fingerprint,
         call_sites,
         is_meta,
-        meta_name,
+        meta_name: meta_name.map(|name| intern_lua_symbol(&name)),
     };
 
     (summary, scope_tree)
@@ -118,7 +119,7 @@ fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
         if td.kind != TypeDefinitionKind::Class || td.anchor_shape_id.is_some() {
             continue;
         }
-        if let Some(&sid) = shape_map.get(&td.name) {
+        if let Some(&sid) = shape_map.get(td.name.as_str()) {
             td.anchor_shape_id = Some(sid);
         }
     }
@@ -185,7 +186,7 @@ pub(crate) struct BuildContext<'a> {
     /// Exported reverse index: global function name (colon→dot normalized) → FunctionSummaryId.
     /// Populated by `visit_function_declaration` for global functions only.
     /// Transferred to `DocumentSummary::function_name_index` at build completion.
-    pub(crate) function_name_index: HashMap<String, FunctionSummaryId>,
+    pub(crate) function_name_index: HashMap<LuaSymbol, FunctionSummaryId>,
     /// Direct function syntax node byte range → FunctionSummaryId.
     /// Used by call-site collection to distinguish shadowed same-name locals.
     pub(crate) function_node_to_id: HashMap<(usize, usize), FunctionSummaryId>,

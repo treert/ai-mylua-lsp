@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::lua_symbol::intern_lua_symbol;
+use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
 use crate::table_shape::TableShapeId;
 use crate::type_system::*;
 use crate::uri_id::UriId;
@@ -1083,7 +1083,7 @@ fn collect_emmy_fields_recursive(
 
                         for tf in &td.fields {
                             fields.push(FieldCompletion {
-                                name: tf.name.clone(),
+                                name: tf.name.to_string(),
                                 type_display: format!("{}", tf.type_fact),
                                 is_function: is_function_type(&tf.type_fact),
                                 def_range: Some(tf.range),
@@ -1129,7 +1129,7 @@ fn is_function_type(fact: &TypeFact) -> bool {
 }
 
 /// Look up the generic parameter names for a class definition.
-fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<String> {
+fn get_generic_param_names(type_name: &str, agg: &WorkspaceAggregation) -> Vec<LuaSymbol> {
     if let Some(candidates) = agg.type_shard.get(type_name) {
         for candidate in candidates {
             if let Some(summary) = agg.summary_by_id(candidate.source_uri_id()) {
@@ -1225,7 +1225,7 @@ fn substitute_generics(
 
 fn substitute_in_fact(
     fact: &TypeFact,
-    param_names: &[String],
+    param_names: &[LuaSymbol],
     actual_params: &[TypeFact],
 ) -> TypeFact {
     match fact {
@@ -1299,7 +1299,7 @@ fn substitute_in_fact(
 /// - `@param xs T[]` + actual `string[]` → `T = string` (array element)
 /// - Nested generics (`List<T>` vs `List<string>`) are P3.
 pub fn unify_function_generics(
-    generic_params: &[String],
+    generic_params: &[LuaSymbol],
     formal_params: &[crate::type_system::ParamInfo],
     actual_arg_types: &[TypeFact],
     return_types: &[TypeFact],
@@ -1328,7 +1328,7 @@ pub fn unify_function_generics(
         .into_iter()
         .enumerate()
         .map(|(i, b)| {
-            b.unwrap_or_else(|| TypeFact::Known(KnownType::EmmyType(generic_params[i].clone().into())))
+            b.unwrap_or_else(|| TypeFact::Known(KnownType::EmmyType(generic_params[i])))
         })
         .collect();
 
@@ -1345,7 +1345,7 @@ pub fn unify_function_generics(
 fn unify_one(
     formal: &TypeFact,
     actual: &TypeFact,
-    generic_params: &[String],
+    generic_params: &[LuaSymbol],
     bindings: &mut [Option<TypeFact>],
 ) {
     // Skip unknown actuals — they don't contribute useful bindings.

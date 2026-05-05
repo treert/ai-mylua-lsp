@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use serde::Serialize;
 use tower_lsp_server::ls_types::Uri;
 
+use crate::lua_symbol::{get_lua_symbol, LuaSymbol};
 use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::{FunctionSignature, FunctionSummaryId, TypeFact};
 use crate::util::ByteRange;
@@ -23,7 +24,7 @@ pub struct DocumentSummary {
     /// Only contains **global** functions. Colon-separated names are normalized
     /// to dot (e.g. `"Player:new"` → `"Player.new"`).
     /// Local functions are accessed via scope_tree → `FunctionRef(id)` instead.
-    pub function_name_index: HashMap<String, FunctionSummaryId>,
+    pub function_name_index: HashMap<LuaSymbol, FunctionSummaryId>,
     /// `---@class`, `---@alias`, `---@enum` definitions.
     pub type_definitions: Vec<TypeDefinition>,
     /// Table shape instances defined in this file.
@@ -54,7 +55,7 @@ pub struct DocumentSummary {
     pub is_meta: bool,
     /// Optional module name supplied via `---@meta <name>`; purely
     /// informational at present (no require_map mapping yet).
-    pub meta_name: Option<String>,
+    pub meta_name: Option<LuaSymbol>,
 }
 
 /// One `function_call` occurrence recorded during summary build.
@@ -64,10 +65,10 @@ pub struct DocumentSummary {
 #[derive(Debug, Clone, Serialize)]
 pub struct CallSite {
     /// Full callee text (e.g. `foo`, `m.sub.foo`, `obj:bar`).
-    pub callee_name: String,
+    pub callee_name: LuaSymbol,
     /// Enclosing function's (possibly qualified) name. Empty string
     /// when the call is at file top level.
-    pub caller_name: String,
+    pub caller_name: LuaSymbol,
     /// `FunctionSummaryId` of the enclosing function. `None` when the
     /// call is at file top level. Prefer this over `caller_name` for
     /// looking up the caller's `FunctionSummary` — it avoids name-based
@@ -82,7 +83,7 @@ pub struct CallSite {
 /// A global name contributed by this file (assignment, function declaration, table extension).
 #[derive(Debug, Clone, Serialize)]
 pub struct GlobalContribution {
-    pub name: String,
+    pub name: LuaSymbol,
     pub kind: GlobalContributionKind,
     pub type_fact: TypeFact,
     pub range: ByteRange,
@@ -99,7 +100,7 @@ pub enum GlobalContributionKind {
 /// Summary of a function's type-level contract.
 #[derive(Debug, Clone, Serialize)]
 pub struct FunctionSummary {
-    pub name: String,
+    pub name: LuaSymbol,
     pub signature: FunctionSignature,
     /// Range of the full function declaration.
     pub range: ByteRange,
@@ -112,19 +113,19 @@ pub struct FunctionSummary {
     /// Function-level generic type parameter names from `---@generic T, K`.
     /// Empty for non-generic functions. Used by the resolver to perform
     /// call-site generic argument inference (unification).
-    pub generic_params: Vec<String>,
+    pub generic_params: Vec<LuaSymbol>,
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeDefinition {
-    pub name: String,
+    pub name: LuaSymbol,
     pub kind: TypeDefinitionKind,
-    pub parents: Vec<String>,
+    pub parents: Vec<LuaSymbol>,
     pub fields: Vec<TypeFieldDef>,
     pub alias_type: Option<TypeFact>,
     /// Names of generic type parameters (from `---@generic T, K`).
-    pub generic_params: Vec<String>,
+    pub generic_params: Vec<LuaSymbol>,
     /// Full range of the declaration anchor — for a class this is the
     /// following statement that anchors the class value (`Foo = {}`);
     /// for alias/enum it is the range of the emmy_comment node itself.
@@ -152,7 +153,7 @@ pub enum TypeDefinitionKind {
 /// A field declared within `---@class` or `---@field`.
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeFieldDef {
-    pub name: String,
+    pub name: LuaSymbol,
     pub type_fact: TypeFact,
     /// Full `---@field ...` line range.
     pub range: ByteRange,
@@ -172,7 +173,8 @@ impl DocumentSummary {
     /// `function_summaries[id]` instead.
     pub fn get_function_by_name(&self, name: &str) -> Option<&FunctionSummary> {
         let normalized = name.replace(':', ".");
-        self.function_name_index.get(&normalized)
+        let symbol = get_lua_symbol(&normalized)?;
+        self.function_name_index.get(&symbol)
             .and_then(|id| self.function_summaries.get(id))
     }
 
@@ -182,5 +184,103 @@ impl DocumentSummary {
         self.function_summaries
             .iter()
             .map(|(id, fs)| (*id, fs))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+
+    fn empty_range() -> ByteRange {
+        ByteRange {
+            start_byte: 0,
+            end_byte: 0,
+            start_row: 0,
+            start_col: 0,
+            end_row: 0,
+            end_col: 0,
+        }
+    }
+
+    fn assert_symbol(_: LuaSymbol) {}
+
+    #[test]
+    fn summary_lua_symbols_serialize_as_strings_and_lookup_normalizes_colon() {
+        let function_id = FunctionSummaryId(0);
+        let function_summary = FunctionSummary {
+            name: intern_lua_symbol("Player.new"),
+            signature: FunctionSignature {
+                params: Vec::new(),
+                returns: Vec::new(),
+            },
+            range: empty_range(),
+            signature_fingerprint: 0,
+            emmy_annotated: false,
+            overloads: Vec::new(),
+            generic_params: vec![intern_lua_symbol("T")],
+        };
+        assert_symbol(function_summary.name);
+        assert_symbol(function_summary.generic_params[0]);
+
+        let mut function_summaries = HashMap::new();
+        function_summaries.insert(function_id, function_summary);
+        let mut function_name_index = HashMap::new();
+        function_name_index.insert(intern_lua_symbol("Player.new"), function_id);
+
+        let summary = DocumentSummary {
+            uri: "file:///summary.lua".parse().unwrap(),
+            global_contributions: vec![GlobalContribution {
+                name: intern_lua_symbol("Player.new"),
+                kind: GlobalContributionKind::Function,
+                type_fact: TypeFact::Known(crate::type_system::KnownType::FunctionRef(function_id)),
+                range: empty_range(),
+                selection_range: empty_range(),
+            }],
+            function_summaries,
+            function_name_index,
+            type_definitions: vec![TypeDefinition {
+                name: intern_lua_symbol("Player"),
+                kind: TypeDefinitionKind::Class,
+                parents: vec![intern_lua_symbol("Entity")],
+                fields: vec![TypeFieldDef {
+                    name: intern_lua_symbol("hp"),
+                    type_fact: TypeFact::Unknown,
+                    range: empty_range(),
+                    name_range: None,
+                }],
+                alias_type: None,
+                generic_params: vec![intern_lua_symbol("T")],
+                range: empty_range(),
+                name_range: None,
+                anchor_shape_id: None,
+            }],
+            table_shapes: HashMap::new(),
+            module_return_type: None,
+            module_return_range: None,
+            signature_fingerprint: 0,
+            call_sites: vec![CallSite {
+                callee_name: intern_lua_symbol("Player.new"),
+                caller_name: intern_lua_symbol(""),
+                caller_id: None,
+                range: empty_range(),
+            }],
+            is_meta: true,
+            meta_name: Some(intern_lua_symbol("mymeta")),
+        };
+
+        assert!(summary.get_function_by_name("Player:new").is_some());
+
+        let json = serde_json::to_value(&summary).unwrap();
+        assert_eq!(json["global_contributions"][0]["name"], "Player.new");
+        assert_eq!(json["type_definitions"][0]["name"], "Player");
+        assert_eq!(json["type_definitions"][0]["parents"][0], "Entity");
+        assert_eq!(json["type_definitions"][0]["fields"][0]["name"], "hp");
+        assert_eq!(json["function_summaries"]["0"]["name"], "Player.new");
+        assert_eq!(json["function_summaries"]["0"]["generic_params"][0], "T");
+        assert_eq!(json["function_name_index"]["Player.new"], 0);
+        assert_eq!(json["call_sites"][0]["callee_name"], "Player.new");
+        assert_eq!(json["call_sites"][0]["caller_name"], "");
+        assert_eq!(json["meta_name"], "mymeta");
     }
 }

@@ -15,6 +15,10 @@ pub fn intern_lua_symbol(text: &str) -> LuaSymbol {
     LuaSymbol(symbols().get_or_intern(text))
 }
 
+pub fn get_lua_symbol(text: &str) -> Option<LuaSymbol> {
+    symbols().get(text).map(LuaSymbol)
+}
+
 pub fn resolve_lua_symbol(symbol: LuaSymbol) -> &'static str {
     symbols().resolve(&symbol.0)
 }
@@ -112,6 +116,14 @@ mod tests {
         let b = intern_lua_symbol("Player.level");
 
         assert_ne!(a, b);
+    }
+
+    #[test]
+    fn gets_existing_symbol_without_interning_missing_text() {
+        let symbol = intern_lua_symbol("Player.name");
+
+        assert_eq!(get_lua_symbol("Player.name"), Some(symbol));
+        assert_eq!(get_lua_symbol("Player.missing"), None);
     }
 
     #[test]
