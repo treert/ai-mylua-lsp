@@ -38,3 +38,6 @@ end
 mm = require("test_create_module")
 -- local mm = require("test_create_module")
 mm.hi()
+
+local tt = test_g()
+print(tt.a)

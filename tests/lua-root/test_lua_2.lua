@@ -18,6 +18,30 @@ end
 local a1_test2_1 = test2_1()
 
 
+local tt = {
+    a = 1,
+}
+function tt:get_tt_a()
+    return self.a
+end
+
+local function test_tt_1()
+    return tt:get_tt_a()
+end
+
+local a1_test_tt_1 = test_tt_1()
+
+local function test2_2()
+    return tt.a
+end
+
+function test_g()
+    return tt
+end
+
+local a1_test2_2 = test2_2()
+
+
 
 
 local function test3()
