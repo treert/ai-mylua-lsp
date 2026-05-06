@@ -57,12 +57,13 @@
 
 ## 3. 内存优化
 
-### 3.1 [P1] 全局字符串驻留池
+### 3.1 [P2] 语法树 / 文件文本 LRU 缓存
 
-- **问题**：2 万文件工作区源文件总大小约 200M，但 LSP RSS 可达 ~6G。主要瓶颈不是 AST LRU，而是索引 / summary / scope 等常驻结构中大量重复 `String` 复制（全局名、类型名、字段名、函数名、模块名、局部变量名等）。
-- **方案**：引入类似 `UriId` 的 `LuaSymbol` newtype，内部封装全局 `lasso::ThreadedRodeo`，外部只能通过 `LuaSymbol` 间接 intern / resolve，不直接访问 rodeo。将长期驻留内存的数据结构从 `String` 改为 `LuaSymbol`，重点覆盖 `WorkspaceAggregation` / `GlobalShard`、`DocumentSummary`、`ScopeTree`、`TypeFact` / `TableShape` 等索引热数据；hover、诊断 message、completion label 等请求级临时拼装字符串不纳入本优化。
-- **JSON 输出**：summary 的 JSON 仅用于 `lua_perf` 调试查看，无反序列化兼容要求。`LuaSymbol` 自定义 `Serialize`，序列化时通过全局 interner 输出原始字符串，而不是输出底层整数。
-- **验收**：2 万文件工作区 RSS 显著下降；索引构建和 HashMap 查找因整数 key 受益；`lua_perf` summary JSON 仍输出可读字符串；LSP 功能测试无回归。
+- **设计文档**：[`superpowers/specs/2026-05-01-ast-lru-cache-design.md`](superpowers/specs/2026-05-01-ast-lru-cache-design.md)
+- **问题**：`documents` 为每个文件常驻 `LuaSource + tree + scope_tree`，大型项目内存线性增长（2 万文件工作区 ~6.5GB），但大部分语法树不被频繁访问。
+- **核心思路**：拆分 `DocumentStore`——`LuaSource` 常驻，`tree + scope_tree` 走 LRU 缓存（`astCacheCapacity` 可配置）。慢文件（`slow_pinned`）和打开文件（`open_pinned`）双 pin 集合互不干扰。
+- **阻塞因素**：`references.rs` 和 `rename.rs` 全量遍历所有文件 AST，summary 层无引用反向索引，无法缩小扫描范围。LRU 淘汰的文件会被频繁 `parse_temp` 重建，收益受限。**建议先实现引用反向索引，再实施 LRU。**
+- **验收**：2 万文件工作区，AST 缓存容量 200，全流程无功能回归；内存 RSS 显著下降（预估释放 1.2~1.8GB）。
 
 ---
 
@@ -71,7 +72,7 @@
 1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
 2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
 3. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-4. **3.1** 全局字符串驻留池 — 优先处理常驻结构里的重复 `String`，预计对 2 万文件工作区 RSS 收益最大
+4. **3.1** 语法树 LRU 缓存 — 依赖引用反向索引，否则淘汰收益受限
 5. 其余 P3 项按需补做
 
 ---
