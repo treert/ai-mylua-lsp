@@ -247,12 +247,9 @@ fn write_summary_if_requested(
 }
 
 fn summary_output_path(output_dir: &Path, input_path: &Path) -> PathBuf {
-    let path_text = input_path.to_string_lossy();
-    let path_hash = mylua_lsp::util::hash_bytes(path_text.as_bytes());
     output_dir.join(format!(
-        "{}.{:016x}.summary.json",
-        sanitize_summary_filename(input_path),
-        path_hash
+        "{}.summary.json",
+        sanitize_summary_filename(input_path)
     ))
 }
 

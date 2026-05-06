@@ -86,7 +86,7 @@ cargo run --release --bin lua-perf -- --summary-out target/lua-summary /path/to/
 cargo run --release --bin lua-perf -- --summary-stdout /path/to/file.lua
 ```
 
-`--summary` 默认写入 `target/lua-summary/`，输出文件名由输入路径转义并追加稳定 hash 得到，例如 `tests/lua-root/diagnostics.lua` 会写为 `target/lua-summary/tests_lua-root_diagnostics.lua.<hash>.summary.json`，避免多文件模式下同名覆盖。`--summary-out <dir>` 可指定目录；`--summary-stdout` 仅支持单个输入文件。
+`--summary` 默认写入 `target/lua-summary/`，输出文件名由输入路径转义得到，例如 `tests/lua-root/diagnostics.lua` 会写为 `target/lua-summary/tests_lua-root_diagnostics.lua.summary.json`，避免多文件模式下同名覆盖。`--summary-out <dir>` 可指定目录；`--summary-stdout` 仅支持单个输入文件。
 
 ## 与 `grammar/` 的边界
 
