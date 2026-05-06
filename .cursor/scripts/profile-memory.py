@@ -207,7 +207,12 @@ def format_summary(profile: dict[str, object], rss: RssStats, top_count: int = 1
 
 def run_checked(cmd: list[str], cwd: Path, env: dict[str, str] | None = None) -> None:
     print(f"==> {' '.join(cmd)}")
-    subprocess.run(cmd, cwd=str(cwd), env=env, check=True)
+    # 在 Windows 上，npm 实际是 npm.cmd，需要用 shutil.which 解析完整路径
+    resolved = shutil.which(cmd[0], path=env.get("PATH", None) if env else None)
+    if resolved is None:
+        raise SystemExit(f"ERROR: 找不到命令 '{cmd[0]}'，请确认已安装并在 PATH 中")
+    cmd_resolved = [resolved] + cmd[1:]
+    subprocess.run(cmd_resolved, cwd=str(cwd), env=env, check=True)
 
 
 def build_env(profile: str) -> dict[str, str]:
@@ -285,11 +290,15 @@ def kill_existing_edh() -> None:
 
 def launch_extension(target: Path, profile: str, env: dict[str, str], editor: str) -> None:
     kill_existing_edh()
+    editor_resolved = shutil.which(editor, path=env.get("PATH", None) if env else None)
+    if editor_resolved is None:
+        raise SystemExit(f"ERROR: 找不到编辑器 '{editor}'，请确认已在 PATH 中")
     print(f"==> Launching Extension Development Host [{profile}]")
     print(f"    Extension: {EXT_DIR}")
     print(f"    Target: {target}")
+    print(f"    Editor: {editor_resolved}")
     subprocess.Popen(
-        [editor, f"--extensionDevelopmentPath={EXT_DIR}", str(target)],
+        [editor_resolved, f"--extensionDevelopmentPath={EXT_DIR}", str(target)],
         env=env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
