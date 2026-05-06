@@ -9,7 +9,6 @@ tsconfig.*.json
 .eslintrc*
 
 # Test artifacts
-node_modules/**
 .nyc_output/**
 coverage/**
 
