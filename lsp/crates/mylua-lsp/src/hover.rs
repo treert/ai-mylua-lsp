@@ -1,7 +1,7 @@
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
 use crate::document::{Document, DocumentLookup};
-use crate::emmy::{collect_preceding_comments, collect_trailing_comment, parse_emmy_comments, format_annotations_markdown};
+use crate::emmy::{collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text, parse_emmy_comments, format_annotations_markdown};
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
@@ -363,7 +363,10 @@ fn hover_at_declaration(
     let comment_lines = collect_preceding_comments(decl_node, source);
     let trailing = collect_trailing_comment(decl_node, source);
     let comment_text = comment_lines.join("\n");
-    let annotations = parse_emmy_comments(&comment_text);
+    let mut annotations = parse_emmy_comments(&comment_text);
+    if let Some(trailing_emmy) = collect_trailing_emmy_text(decl_node, source) {
+        annotations.extend(parse_emmy_comments(&trailing_emmy));
+    }
     let emmy_md = format_annotations_markdown(&annotations);
 
     let def_line = node_text(decl_node, source)
@@ -642,7 +645,10 @@ fn build_hover_for_definition(
     let comment_lines = collect_preceding_comments(stmt_node, source);
     let trailing = collect_trailing_comment(stmt_node, source);
     let comment_text = comment_lines.join("\n");
-    let annotations = parse_emmy_comments(&comment_text);
+    let mut annotations = parse_emmy_comments(&comment_text);
+    if let Some(trailing_emmy) = collect_trailing_emmy_text(stmt_node, source) {
+        annotations.extend(parse_emmy_comments(&trailing_emmy));
+    }
     let emmy_md = format_annotations_markdown(&annotations);
 
     let def_line = node_text(stmt_node, source)

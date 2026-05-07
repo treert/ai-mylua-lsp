@@ -158,6 +158,15 @@ pub enum EmmyAnnotation {
 ///
 /// Words in the free-form description section (for example after `@` / `#`)
 /// are ignored so hover/goto do not treat prose as type refs.
+///
+/// **Limitation — no AST context.** This function operates on raw bytes
+/// sliced by `\n`; it cannot tell whether the line happens to live inside
+/// a multi-line string or long comment. A pathological source like
+/// `local s = [[\n  local x = ---@type Foo\n]]` will be treated as if
+/// `Foo` were a real type reference. Callers happy to trade that edge
+/// case for simplicity should keep using this; AST-aware filtering can
+/// be layered on at the entry sites if/when it matters. See
+/// `docs/future-work.md`.
 pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<String> {
     if byte_offset > source.len() {
         return None;
@@ -173,8 +182,23 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
         .position(|&b| b == b'\n')
         .map(|i| byte_offset + i)
         .unwrap_or(source.len());
-    let line = &source[line_start..line_end];
-    let rel = byte_offset.saturating_sub(line_start).min(line.len());
+    let full_line = &source[line_start..line_end];
+    let full_rel = byte_offset.saturating_sub(line_start).min(full_line.len());
+
+    // Find where the emmy line content begins. For a leading-only line
+    // (`---@type X`) this is column 0; for a trailing emmy line on the
+    // same line as Lua code (`local x = {} ---@type X`) it is the column
+    // of the `---`. The `---` must sit at the start of the line or be
+    // preceded by whitespace so it is not confused with `--` inside
+    // identifiers/operators.
+    let emmy_start = find_triple_dash_start(full_line)?;
+    // If the cursor is in the Lua-code portion before `---`, this is not
+    // an emmy-line query — bail out early.
+    if full_rel < emmy_start {
+        return None;
+    }
+    let line = &full_line[emmy_start..];
+    let rel = full_rel - emmy_start;
 
     let at = line.iter().position(|&b| b == b'@')?;
     if !line[..at].iter().all(|&b| b == b'-' || b == b' ' || b == b'\t') {
@@ -401,6 +425,31 @@ fn next_non_ws(line: &[u8], mut pos: usize, limit: usize) -> Option<u8> {
             return Some(line[pos]);
         }
         pos += 1;
+    }
+    None
+}
+
+/// Locate the first `---` (3+ dashes) in `line` that either sits at column 0
+/// or is preceded by whitespace. Returns the byte offset of the first dash.
+///
+/// This anchors emmy-line analysis for both leading (`---@type Foo`) and
+/// trailing (`local x = {} ---@type Foo`) cases so consumers don't need
+/// to know which form they are dealing with.
+///
+/// Returns the *first* candidate only; if downstream validation (e.g. the
+/// `@` lookup in [`emmy_type_name_at_byte`]) rejects it, the function does
+/// not retry with later occurrences. In practice the first `---` after
+/// whitespace is always the start of the emmy comment for well-formed
+/// Lua sources.
+fn find_triple_dash_start(line: &[u8]) -> Option<usize> {
+    let mut i = 0;
+    while i + 2 < line.len() {
+        if line[i] == b'-' && line[i + 1] == b'-' && line[i + 2] == b'-' {
+            if i == 0 || line[i - 1].is_ascii_whitespace() {
+                return Some(i);
+            }
+        }
+        i += 1;
     }
     None
 }
@@ -1255,6 +1304,61 @@ pub fn collect_trailing_comment<'a>(
                 }
             }
             None
+        }
+        _ => None,
+    }
+}
+
+/// Return the raw text of a same-line trailing `emmy_comment` (or `---`-style
+/// comment) sitting after `node`. The returned text is suitable for direct
+/// consumption by [`parse_emmy_comments`].
+///
+/// Recognises both AST shapes the scanner can produce after an in-line
+/// statement (`local x = {} ---@type Foo`):
+///
+/// 1. `emmy_comment` statement (one or more `emmy_line` children) — the
+///    normal case when the parser is at a statement boundary.
+/// 2. `comment` extra starting with `---` — defensive handling for
+///    positions where the scanner emitted `COMMENT` instead of
+///    `EMMY_LINE`.
+///
+/// Returns `None` when the next sibling is not on the same row, or is a
+/// plain `--` comment (handled separately by [`collect_trailing_comment`]).
+pub fn collect_trailing_emmy_text<'a>(
+    node: tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<String> {
+    let stmt_end_row = node.end_position().row;
+    let next = node.next_sibling()?;
+    if next.start_position().row != stmt_end_row {
+        return None;
+    }
+    match next.kind() {
+        "emmy_comment" => {
+            let mut lines = Vec::new();
+            for i in 0..next.named_child_count() {
+                if let Some(child) = next.named_child(i as u32) {
+                    if child.kind() == "emmy_line" {
+                        let text = child.utf8_text(source).unwrap_or("").trim_end();
+                        if !text.is_empty() {
+                            lines.push(text.to_string());
+                        }
+                    }
+                }
+            }
+            if lines.is_empty() {
+                None
+            } else {
+                Some(lines.join("\n"))
+            }
+        }
+        "comment" => {
+            let text = next.utf8_text(source).unwrap_or("");
+            if text.starts_with("---") {
+                Some(text.trim_end().to_string())
+            } else {
+                None
+            }
         }
         _ => None,
     }

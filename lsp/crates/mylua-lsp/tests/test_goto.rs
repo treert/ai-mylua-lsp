@@ -878,3 +878,45 @@ local escaped = nil
         "escaped quotes must not expose string literal contents as type references"
     );
 }
+
+#[test]
+fn goto_type_in_trailing_type_annotation() {
+    // Regression: clicking on the type name inside a same-line trailing
+    // `---@type Foo` should jump to the class definition, just like a
+    // leading `---@type Foo` does.
+    let src = r#"---@class MyClass
+MyClass = {}
+
+local tt = {} ---@type MyClass @ desc
+print(tt)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "trailing_goto_type.lua");
+
+    // Cursor on `MyClass` inside the trailing `---@type MyClass`.
+    // Line 3 = `local tt = {} ---@type MyClass @ desc`
+    // Column 25 lands on `M` of `MyClass`.
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(3, 25),
+        &mut agg,
+        &GotoStrategy::Auto);
+
+    let response = result.expect("goto on `MyClass` in trailing `---@type` should resolve");
+    let loc = match response {
+        tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(l) => l,
+        tower_lsp_server::ls_types::GotoDefinitionResponse::Array(mut v) => v.pop().expect("non-empty"),
+        tower_lsp_server::ls_types::GotoDefinitionResponse::Link(mut v) => {
+            let l = v.pop().expect("non-empty");
+            tower_lsp_server::ls_types::Location { uri: l.target_uri, range: l.target_range }
+        }
+    };
+    // For `---@class X\nX = {}`, the type anchor is the value-side
+    // assignment range (line 1), matching how leading `---@type X` goto
+    // already resolves.
+    assert_eq!(
+        loc.range.start.line, 1,
+        "should jump to the `MyClass = {{}}` anchor on line 1, got line {}",
+        loc.range.start.line,
+    );
+}

@@ -2137,3 +2137,32 @@ tt:Say()
         );
     }
 }
+
+#[test]
+fn hover_trailing_type_annotation_includes_at_desc() {
+    // Regression: a trailing `---@type X @ desc` on the same line as a
+    // local declaration should surface BOTH the type AND the @-desc in
+    // hover, just like a leading `---@type X @ desc` does.
+    let src = r#"---@class MyClass
+MyClass = {}
+
+local tt = {} ---@type MyClass @ tail desc
+print(tt)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_trailing_type_desc.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // hover on `tt` at the declaration site (line 3, col 6)
+    let result = hover::hover(doc, intern_uri(&uri), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
+        .expect("hover on tt should succeed");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("MyClass"),
+        "hover should resolve trailing @type to MyClass, got:\n{}", content,
+    );
+    assert!(
+        content.contains("tail desc"),
+        "hover should include the @-desc from trailing `---@type X @ desc`, got:\n{}", content,
+    );
+}
