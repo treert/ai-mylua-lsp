@@ -25,6 +25,7 @@
 - `useBundledStdlib=true` 时将内置 stdlib 路径预置到 `workspace.library`
 - 用户自定义 library 路径追加其后
 - stdlib 按 `runtime.version` 查找，找不到时沿 fallback 链回落到 5.4
+- `performance.slowParseKeepTreeThresholdMs` 透传给 LSP，控制冷启动解析后哪些文件保留 parse tree；小于 15 时改为全部缓存
 
 ### StatusBar
 

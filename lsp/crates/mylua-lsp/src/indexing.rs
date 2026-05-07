@@ -26,7 +26,15 @@ use crate::util;
 use crate::workspace_scanner;
 use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
 
-const SLOW_PARSE_KEEP_TREE_THRESHOLD_MS: u128 = 500;
+const MIN_SLOW_PARSE_KEEP_TREE_THRESHOLD_MS: u128 = 15;
+
+fn should_keep_parse_tree(elapsed_ms: u128, threshold_ms: u128) -> bool {
+    threshold_ms < MIN_SLOW_PARSE_KEEP_TREE_THRESHOLD_MS || elapsed_ms > threshold_ms
+}
+
+fn should_log_slow_parse(elapsed_ms: u128, threshold_ms: u128) -> bool {
+    threshold_ms >= MIN_SLOW_PARSE_KEEP_TREE_THRESHOLD_MS && elapsed_ms > threshold_ms
+}
 
 // ── Index status notification helpers ──────────────────────────────
 
@@ -177,12 +185,13 @@ pub async fn run_workspace_scan(
     index_state: Arc<Mutex<IndexState>>,
     started_at: std::time::Instant,
 ) {
-    let (require_config, workspace_config, index_mode) = {
+    let (require_config, workspace_config, index_mode, slow_parse_keep_tree_threshold_ms) = {
         let cfg = config.lock().unwrap();
         (
             cfg.require.clone(),
             cfg.workspace.clone(),
             cfg.workspace.index_mode.clone(),
+            cfg.performance.slow_parse_keep_tree_threshold_ms,
         )
     };
 
@@ -357,7 +366,7 @@ pub async fn run_workspace_scan(
                     }
 
                     let elapsed_ms = file_started.elapsed().as_millis();
-                    if elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
+                    if should_log_slow_parse(elapsed_ms, slow_parse_keep_tree_threshold_ms) {
                         lsp_log!(
                             "[scan] SLOW {} ms ({} bytes): {}",
                             elapsed_ms,
@@ -365,7 +374,7 @@ pub async fn run_workspace_scan(
                             path.display()
                         );
                     }
-                    let tree = if elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
+                    let tree = if should_keep_parse_tree(elapsed_ms, slow_parse_keep_tree_threshold_ms) {
                         Some(tree)
                     } else {
                         None
@@ -737,6 +746,25 @@ mod tests {
         assert_eq!(status.indexed, 2);
         assert_eq!(status.total, 2);
         assert_eq!(status.remaining, Some(0));
+    }
+
+    #[test]
+    fn parse_tree_retention_keeps_only_slow_files_at_default_threshold() {
+        assert!(!should_keep_parse_tree(499, 500));
+        assert!(!should_keep_parse_tree(500, 500));
+        assert!(should_keep_parse_tree(501, 500));
+    }
+
+    #[test]
+    fn parse_tree_retention_disabled_below_minimum_threshold_keeps_everything() {
+        assert!(should_keep_parse_tree(0, 14));
+        assert!(should_keep_parse_tree(1, 14));
+        assert!(should_keep_parse_tree(10_000, 14));
+    }
+
+    #[test]
+    fn slow_parse_logging_is_disabled_below_minimum_threshold() {
+        assert!(!should_log_slow_parse(10_000, 14));
     }
 
     #[test]

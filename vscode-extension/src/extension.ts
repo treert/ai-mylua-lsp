@@ -86,6 +86,9 @@ function collectLspConfig(
       indexMode: cfg.get('workspace.indexMode'),
       library,
     },
+    performance: {
+      slowParseKeepTreeThresholdMs: cfg.get('performance.slowParseKeepTreeThresholdMs'),
+    },
     diagnostics: {
       enable: cfg.get('diagnostics.enable'),
       undefinedGlobal: cfg.get('diagnostics.undefinedGlobal'),

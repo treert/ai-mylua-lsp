@@ -124,6 +124,12 @@
           "default": true,
           "markdownDescription": "When enabled, the extension auto-injects the bundled Lua stdlib stubs (`<extension>/assets/lua<version>/`) into `#mylua.workspace.library#`, so `print`, `string.format`, `table.concat`, etc. have hover / goto / signature help without any user configuration. Disable only if you want to supply your own complete stdlib annotations via `#mylua.workspace.library#`. The version selected follows `#mylua.runtime.version#`."
         },
+        "mylua.performance.slowParseKeepTreeThresholdMs": {
+          "type": "integer",
+          "minimum": 0,
+          "default": 500,
+          "markdownDescription": "Cold-start parse tree retention threshold in milliseconds. Files that parse slower than this keep their parse tree cached for faster follow-up incremental edits. Values below 15 disable this selective-retention optimization and cache every parsed file."
+        },
         "mylua.diagnostics.enable": {
           "type": "boolean",
           "default": true,

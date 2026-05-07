@@ -7,6 +7,7 @@ pub struct LspConfig {
     pub runtime: RuntimeConfig,
     pub require: RequireConfig,
     pub workspace: WorkspaceConfig,
+    pub performance: PerformanceConfig,
     pub diagnostics: DiagnosticsConfig,
     #[serde(rename = "gotoDefinition")]
     pub goto_definition: GotoDefinitionConfig,
@@ -26,6 +27,21 @@ pub struct DebugConfig {
 impl Default for DebugConfig {
     fn default() -> Self {
         Self { file_log: true }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct PerformanceConfig {
+    #[serde(rename = "slowParseKeepTreeThresholdMs")]
+    pub slow_parse_keep_tree_threshold_ms: u128,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            slow_parse_keep_tree_threshold_ms: 500,
+        }
     }
 }
 
@@ -295,5 +311,28 @@ pub enum ReferencesStrategy {
 impl LspConfig {
     pub fn from_value(value: serde_json::Value) -> Self {
         serde_json::from_value(value).unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn performance_config_defaults_slow_parse_keep_tree_threshold_to_500_ms() {
+        let cfg = LspConfig::default();
+
+        assert_eq!(cfg.performance.slow_parse_keep_tree_threshold_ms, 500);
+    }
+
+    #[test]
+    fn performance_config_reads_slow_parse_keep_tree_threshold_from_json() {
+        let cfg = LspConfig::from_value(serde_json::json!({
+            "performance": {
+                "slowParseKeepTreeThresholdMs": 42
+            }
+        }));
+
+        assert_eq!(cfg.performance.slow_parse_keep_tree_threshold_ms, 42);
     }
 }
