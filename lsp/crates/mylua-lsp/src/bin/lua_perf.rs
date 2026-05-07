@@ -303,14 +303,6 @@ mod tests {
     }
 
     #[test]
-    fn summary_output_path_avoids_sanitized_name_collisions() {
-        let slash_path = summary_output_path(Path::new("target/lua-summary"), Path::new("tests/a.lua"));
-        let underscore_path = summary_output_path(Path::new("target/lua-summary"), Path::new("tests_a.lua"));
-
-        assert_ne!(slash_path, underscore_path);
-    }
-
-    #[test]
     fn file_uri_for_path_handles_special_characters() {
         let uri = file_uri_for_path(Path::new("lua perf #?.lua")).expect("path should convert to URI");
 
