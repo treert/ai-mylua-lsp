@@ -36,6 +36,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_local_declaration(ctx, node);
+                skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
             "local_function_declaration" => {
                 clear_pending_on_blank_line_gap(ctx, node);
@@ -55,6 +56,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_assignment(ctx, node);
+                skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
             "return_statement" => {
                 clear_pending_on_blank_line_gap(ctx, node);
@@ -95,6 +97,43 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
     }
 
     ctx.pop_scope();
+}
+
+/// If the next sibling is an `emmy_comment` on the same line that only
+/// contains a `---@type` annotation, advance the cursor past it.
+/// This prevents the trailing type annotation from being re-processed
+/// and leaking as `pending_type_annotation` to the next statement.
+fn skip_same_line_trailing_type_emmy(
+    cursor: &mut tree_sitter::TreeCursor,
+    node: tree_sitter::Node,
+    source: &[u8],
+) {
+    let end_row = node.end_position().row;
+    // Peek at the next sibling without consuming
+    let next = match node.next_sibling() {
+        Some(n) => n,
+        None => return,
+    };
+    if next.start_position().row != end_row {
+        return;
+    }
+    if next.kind() != "emmy_comment" {
+        return;
+    }
+    // Verify this emmy_comment only contains @type (not @class, @param, etc.)
+    let text = node_text(next, source);
+    let has_only_type = text.lines().all(|line| {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("---") {
+            let rest = rest.trim();
+            rest.starts_with("@type") || rest.is_empty()
+        } else {
+            true
+        }
+    });
+    if has_only_type {
+        cursor.goto_next_sibling();
+    }
 }
 
 /// If there is a blank-line gap between the last `emmy_comment` and `node`,
@@ -281,10 +320,11 @@ fn visit_nested_block_inner(
 // ---------------------------------------------------------------------------
 
 fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    // Check for preceding `---@type` annotation (either from pending or inline comment)
+    // Check for `---@type` annotation: pending (from emmy_comment visitor) > preceding > trailing
     let pending_type = ctx
         .take_pending_type()
-        .or_else(|| extract_preceding_type_annotation(node, ctx.source));
+        .or_else(|| extract_preceding_type_annotation(node, ctx.source))
+        .or_else(|| extract_trailing_type_annotation(node, ctx.source));
 
     // Phase 2: consume pending_class_name — bind the first local to the class
     let mut pending_class = ctx.pending_class_name.take();
@@ -547,6 +587,48 @@ fn extract_call_return_types(
                 return Some(fs.signature.returns.clone());
             }
         }
+    }
+    None
+}
+
+/// Extract `---@type X` from a trailing comment on the same line as the given node.
+/// Handles patterns like: `local x = {} ---@type SomeClass`
+/// The trailing annotation can be either a `comment` extra or an `emmy_comment` statement.
+fn extract_trailing_type_annotation(node: tree_sitter::Node, source: &[u8]) -> Option<EmmyType> {
+    let end_row = node.end_position().row;
+    let next = node.next_sibling()?;
+    if next.start_position().row != end_row {
+        return None;
+    }
+    match next.kind() {
+        "comment" => {
+            let text = node_text(next, source).trim();
+            if let Some(rest) = text.strip_prefix("---@type") {
+                let type_text = rest.trim();
+                if !type_text.is_empty() {
+                    return Some(parse_type_from_str(type_text));
+                }
+            }
+        }
+        "emmy_comment" => {
+            for i in 0..next.named_child_count() {
+                if let Some(line_node) = next.named_child(i as u32) {
+                    if line_node.kind() == "emmy_line" {
+                        let text = node_text(line_node, source).trim();
+                        if let Some(rest) = text.strip_prefix("---") {
+                            let rest = rest.trim();
+                            if let Some(rest) = rest.strip_prefix("@type") {
+                                let type_text = rest.trim();
+                                if !type_text.is_empty() {
+                                    return Some(parse_type_from_str(type_text));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        _ => {}
     }
     None
 }
@@ -1136,7 +1218,8 @@ fn collect_return_statement_types(
 fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let pending_type = ctx
         .take_pending_type()
-        .or_else(|| extract_preceding_type_annotation(node, ctx.source));
+        .or_else(|| extract_preceding_type_annotation(node, ctx.source))
+        .or_else(|| extract_trailing_type_annotation(node, ctx.source));
 
     // Phase 2: consume pending_class_name for global assignment binding
     let pending_class = ctx.pending_class_name.take();

@@ -234,7 +234,6 @@ fn preceded_by_type_annotation(decl: tree_sitter::Node, source: &[u8]) -> bool {
     while let Some(n) = prev {
         match n.kind() {
             "emmy_comment" => {
-                // Look for `---@type ...` in the emmy block.
                 let text = node_text(n, source);
                 if text.contains("@type") {
                     return true;
@@ -245,6 +244,15 @@ fn preceded_by_type_annotation(decl: tree_sitter::Node, source: &[u8]) -> bool {
                 prev = n.prev_sibling();
             }
             _ => break,
+        }
+    }
+    // Also check trailing comment on the same line: `local x = {} ---@type Foo`
+    if let Some(next) = decl.next_sibling() {
+        if next.start_position().row == decl.end_position().row && next.kind() == "comment" {
+            let text = node_text(next, source);
+            if text.contains("@type") {
+                return true;
+            }
         }
     }
     false

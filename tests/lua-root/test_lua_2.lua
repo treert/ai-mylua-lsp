@@ -17,7 +17,7 @@ local function test2_1()
 end
 local a1_test2_1 = test2_1()
 
-
+-- test table
 local tt = {
     a = 1,
 }

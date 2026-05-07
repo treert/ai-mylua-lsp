@@ -38,3 +38,6 @@ function ClassB1:test_bbb()
     self:bbb(456)
     print(self.__class_name .. self.m_bbb, self.s_bbb)
 end
+
+local tt_tail = {} ---@type ClassA2
+tt_tail:Say()

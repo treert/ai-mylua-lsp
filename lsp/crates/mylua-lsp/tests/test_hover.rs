@@ -2099,3 +2099,41 @@ c2:test_c2()
         "hover on local class instance method `c2:test_c2()` should succeed (regression: local class)"
     );
 }
+
+#[test]
+fn hover_trailing_type_annotation() {
+    let src = r#"---@class MyClass
+MyClass = {}
+function MyClass:Say() end
+
+local tt = {} ---@type MyClass
+tt:Say()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_trailing_type.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // hover on `tt` in declaration (line 4, col 6) — should show MyClass
+    let result = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result.is_some(), "hover on trailing @type annotated variable should return result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("MyClass"),
+            "trailing @type should resolve to MyClass, got: {}",
+            content
+        );
+    }
+
+    // hover on `tt` in `tt:Say()` (line 5, col 0) — should also resolve
+    let result2 = hover::hover(doc, intern_uri(&uri), pos(5, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result2.is_some(), "hover on trailing @type variable usage should return result");
+    if let Some(h) = &result2 {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("MyClass"),
+            "trailing @type variable usage should resolve to MyClass, got: {}",
+            content
+        );
+    }
+}
