@@ -229,7 +229,10 @@ fn write_summary_if_requested(
             let output_path = summary_output_path(dir, input_path);
             match serde_json::to_string_pretty(summary) {
                 Ok(json) => match std::fs::write(&output_path, json) {
-                    Ok(()) => eprintln!("  summary: {}", output_path.display()),
+                    Ok(()) => {
+                        let display_path = output_path.canonicalize().unwrap_or(output_path.clone());
+                        eprintln!("  summary: {}", display_path.display());
+                    }
                     Err(e) => eprintln!(
                         "[ERROR] cannot write summary '{}': {}",
                         output_path.display(),
