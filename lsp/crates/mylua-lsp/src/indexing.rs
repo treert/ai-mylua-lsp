@@ -365,9 +365,14 @@ pub async fn run_workspace_scan(
                             path.display()
                         );
                     }
+                    let tree = if elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
+                        Some(tree)
+                    } else {
+                        None
+                    };
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, parse_elapsed_ms: elapsed_ms, summary, scope_tree })
+                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, summary, scope_tree })
                 })
                 .collect()
         })
@@ -428,16 +433,11 @@ pub async fn run_workspace_scan(
                 continue;
             }
             summaries_to_merge.push((pf.uri_id, pf.summary));
-            let tree = if pf.parse_elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
-                Some(pf.tree)
-            } else {
-                None
-            };
             docs.insert(
                 pf.uri_id,
                 Document {
                     lua_source: pf.lua_source,
-                    tree,
+                    tree: pf.tree,
                     scope_tree: pf.scope_tree,
                     last_diagnostic_signature: None,
                 },

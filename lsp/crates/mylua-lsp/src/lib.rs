@@ -173,8 +173,7 @@ pub struct Backend {
 pub(crate) struct ParsedFile {
     pub(crate) uri_id: UriId,
     pub(crate) lua_source: util::LuaSource,
-    pub(crate) tree: tree_sitter::Tree,
-    pub(crate) parse_elapsed_ms: u128,
+    pub(crate) tree: Option<tree_sitter::Tree>,
     pub(crate) summary: summary::DocumentSummary,
     pub(crate) scope_tree: scope::ScopeTree,
 }
