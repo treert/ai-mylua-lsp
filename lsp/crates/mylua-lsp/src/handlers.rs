@@ -849,8 +849,9 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
         let mut docs = self.documents.lock().unwrap();
-        for doc in docs.values_mut() {
-            let _ = doc.ensure_tree();
+        {
+            use rayon::prelude::*;
+            docs.par_iter_mut().for_each(|(_, doc)| { let _ = doc.ensure_tree(); });
         }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
@@ -886,8 +887,9 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let mut docs = self.documents.lock().unwrap();
-        for doc in docs.values_mut() {
-            let _ = doc.ensure_tree();
+        {
+            use rayon::prelude::*;
+            docs.par_iter_mut().for_each(|(_, doc)| { let _ = doc.ensure_tree(); });
         }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
