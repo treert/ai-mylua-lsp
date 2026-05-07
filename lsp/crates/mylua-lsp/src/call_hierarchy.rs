@@ -50,7 +50,10 @@ pub fn prepare_call_hierarchy(
     };
     let source = doc.source();
 
-    let Some(ident) = identifier_at_offset(doc.tree.root_node(), byte_offset) else {
+    let Some(root) = doc.root_node() else {
+        return Vec::new();
+    };
+    let Some(ident) = identifier_at_offset(root, byte_offset) else {
         return Vec::new();
     };
     let name = node_text(ident, source).to_string();

@@ -124,8 +124,7 @@ fn try_require_path_completion(
 ) -> Option<Vec<CompletionItem>> {
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
     let node = doc
-        .tree
-        .root_node()
+        .root_node()?
         .descendant_for_byte_range(offset, offset)?;
 
     // Walk up looking for a string node whose ancestor is `require("...")`.
@@ -215,7 +214,7 @@ fn try_dot_completion_ast(
 
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
-    let base_node = find_base_expression_node(doc.tree.root_node(), base_end)?;
+    let base_node = find_base_expression_node(doc.root_node()?, base_end)?;
     let base_fact = type_inference::infer_node_type_in_file_id(base_node, bytes, uri_id, &doc.scope_tree, index);
 
     let fields = resolver::get_fields_for_type_id(uri_id, &base_fact, index);

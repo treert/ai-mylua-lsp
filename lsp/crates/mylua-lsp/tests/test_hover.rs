@@ -173,6 +173,40 @@ end"#),
 }
 
 #[test]
+fn hover_cross_file_definition_doc_survives_dropped_tree() {
+    let files = [
+        ("defs.lua", r#"--- Returns a documented value
+---@return string
+function make_value()
+end"#),
+        ("main.lua", r#"local result = make_value()"#),
+    ];
+    let (mut docs, mut agg, _) = setup_workspace(&files);
+    let defs_uri_id = intern_uri(&make_uri("defs.lua"));
+    docs.get_mut(&defs_uri_id).unwrap().tree = None;
+
+    let main_uri = make_uri("main.lua");
+    let main_uri_id = intern_uri(&main_uri);
+    let doc = docs.get(&main_uri_id).unwrap();
+
+    let result = hover::hover(
+        doc,
+        main_uri_id,
+        pos(0, 16),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover should resolve cross-file global definition");
+    let content = hover_content_string(&result);
+
+    assert!(
+        content.contains("Returns a documented value"),
+        "hover should include definition doc comment even when definition tree was dropped, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_chain_call() {
     let src = read_fixture("hover/hover1.lua");
     let (doc, uri, mut agg) = setup_single_file(&src, "hover1.lua");

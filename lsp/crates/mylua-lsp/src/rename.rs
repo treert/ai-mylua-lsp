@@ -12,7 +12,7 @@ pub fn prepare_rename(
     position: Position,
 ) -> Option<PrepareRenameResponse> {
     let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
-    let node = crate::util::find_node_at_position(doc.tree.root_node(), offset)?;
+    let node = crate::util::find_node_at_position(doc.root_node()?, offset)?;
     let text = crate::util::node_text(node, doc.source());
 
     if LUA_KEYWORDS.contains(&text) {

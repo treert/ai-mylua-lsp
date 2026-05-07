@@ -64,7 +64,7 @@ pub fn parse_doc(parser: &mut tree_sitter::Parser, text: &str) -> Document {
     );
     Document {
         lua_source,
-        tree,
+        tree: Some(tree),
         scope_tree,
         last_diagnostic_signature: None,
     }
@@ -115,7 +115,7 @@ pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, Worksp
     let uri_id = intern_uri(&uri);
     let mut agg = WorkspaceAggregation::new();
     let summary =
-        summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+        summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
     // Register module mapping so resolve_module_to_id works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
         agg.set_require_mapping(module_name, uri_id);
@@ -142,7 +142,7 @@ pub fn setup_workspace(
         let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
         let summary =
-            summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+            summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_id works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri_id);
@@ -204,7 +204,7 @@ pub fn setup_workspace_from_dir(
                 uri_id,
                 Document {
                     lua_source,
-                    tree,
+                    tree: Some(tree),
                     scope_tree,
                     last_diagnostic_signature: None,
                 },
@@ -239,7 +239,7 @@ pub fn setup_workspace_with_library(
         let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
         let summary =
-            summary_builder::build_file_analysis(&uri, &doc.tree, doc.source(), doc.line_index()).0;
+            summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
         // Register module mapping so resolve_module_to_id works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri_id);
@@ -297,7 +297,7 @@ pub fn setup_workspace_with_library(
             uri_id,
             Document {
                 lua_source,
-                tree,
+                tree: Some(tree),
                 scope_tree,
                 last_diagnostic_signature: None,
             },

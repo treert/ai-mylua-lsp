@@ -142,7 +142,7 @@ fn references_emmy_type_scans_annotations() {
     let defn_uri = make_uri("defn.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
     let defn_summary = summary_builder::build_file_analysis(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_summary.1, last_diagnostic_signature: None };
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: Some(defn_tree), scope_tree: defn_summary.1, last_diagnostic_signature: None };
     let defn_summary = defn_summary.0;
 
     // Three distinct Emmy mentions of Foo in different annotation positions.
@@ -156,7 +156,7 @@ Bar = {}"#;
     let user_uri = make_uri("user.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
     let user_result = summary_builder::build_file_analysis(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_result.1, last_diagnostic_signature: None };
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: Some(user_tree), scope_tree: user_result.1, last_diagnostic_signature: None };
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
@@ -212,14 +212,14 @@ fn references_emmy_type_word_boundary() {
     let defn_uri = make_uri("d.lua");
     let defn_tree = parser.parse(defn_src.as_bytes(), None).unwrap();
     let defn_summary = summary_builder::build_file_analysis(&defn_uri, &defn_tree, defn_src.as_bytes(), &mylua_lsp::util::LineIndex::new(defn_src.as_bytes()));
-    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: defn_tree, scope_tree: defn_summary.1, last_diagnostic_signature: None };
+    let defn_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(defn_src.to_string()), tree: Some(defn_tree), scope_tree: defn_summary.1, last_diagnostic_signature: None };
     let defn_summary = defn_summary.0;
 
     let user_src = "---@type FooBar\nlocal x = nil";
     let user_uri = make_uri("u.lua");
     let user_tree = parser.parse(user_src.as_bytes(), None).unwrap();
     let user_result = summary_builder::build_file_analysis(&user_uri, &user_tree, user_src.as_bytes(), &mylua_lsp::util::LineIndex::new(user_src.as_bytes()));
-    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: user_tree, scope_tree: user_result.1, last_diagnostic_signature: None };
+    let user_doc = Document { lua_source: mylua_lsp::util::LuaSource::new(user_src.to_string()), tree: Some(user_tree), scope_tree: user_result.1, last_diagnostic_signature: None };
     let user_summary = user_result.0;
 
     let mut agg = WorkspaceAggregation::new();
@@ -296,7 +296,7 @@ print(b.name)"#;
     );
     let doc = Document {
         lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
-        tree,
+        tree: Some(tree),
         scope_tree: result.1,
         last_diagnostic_signature: None,
     };
@@ -428,7 +428,7 @@ d.legs = 4"#;
     );
     let doc = Document {
         lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
-        tree,
+        tree: Some(tree),
         scope_tree: result.1,
         last_diagnostic_signature: None,
     };
@@ -490,7 +490,7 @@ end"#;
     );
     let doc = Document {
         lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
-        tree,
+        tree: Some(tree),
         scope_tree: result.1,
         last_diagnostic_signature: None,
     };
@@ -552,7 +552,7 @@ end"#;
     );
     let doc = Document {
         lua_source: mylua_lsp::util::LuaSource::new(src.to_string()),
-        tree,
+        tree: Some(tree),
         scope_tree: result.1,
         last_diagnostic_signature: None,
     };

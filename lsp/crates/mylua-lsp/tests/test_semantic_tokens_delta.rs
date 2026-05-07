@@ -14,7 +14,7 @@ fn delta_zero_edits_for_identical_document() {
     let src = "local a = 1\nlocal b = 2\nprint(a, b)\n";
     let (doc, _uri, _agg) = setup_single_file(src, "same.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         "5.3",
@@ -32,14 +32,14 @@ fn delta_reflects_appended_line() {
     let (doc1, _, _) = setup_single_file(before, "before.lua");
     let (doc2, _, _) = setup_single_file(after, "after.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc1.tree.root_node(),
+        doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
         "5.3",
         doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc2.tree.root_node(),
+        doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
         "5.3",
@@ -67,14 +67,14 @@ fn delta_reflects_deleted_line() {
     let (doc1, _, _) = setup_single_file(before, "del1.lua");
     let (doc2, _, _) = setup_single_file(after, "del2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc1.tree.root_node(),
+        doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
         "5.3",
         doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc2.tree.root_node(),
+        doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
         "5.3",
@@ -93,14 +93,14 @@ fn delta_middle_edit_preserves_prefix_and_suffix() {
     let (doc1, _, _) = setup_single_file(before, "m1.lua");
     let (doc2, _, _) = setup_single_file(after, "m2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc1.tree.root_node(),
+        doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
         "5.3",
         doc1.line_index(),
     );
     let t2 = semantic_tokens::collect_semantic_tokens_with_version(
-        doc2.tree.root_node(),
+        doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
         "5.3",

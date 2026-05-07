@@ -26,6 +26,8 @@ use crate::util;
 use crate::workspace_scanner;
 use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
 
+const SLOW_PARSE_KEEP_TREE_THRESHOLD_MS: u128 = 500;
+
 // ── Index status notification helpers ──────────────────────────────
 
 pub(crate) async fn send_index_status(client: &Client, state: &str, indexed: u64, total: u64) {
@@ -355,7 +357,7 @@ pub async fn run_workspace_scan(
                     }
 
                     let elapsed_ms = file_started.elapsed().as_millis();
-                    if elapsed_ms > 500 {
+                    if elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
                         lsp_log!(
                             "[scan] SLOW {} ms ({} bytes): {}",
                             elapsed_ms,
@@ -365,7 +367,7 @@ pub async fn run_workspace_scan(
                     }
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, summary, scope_tree })
+                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, parse_elapsed_ms: elapsed_ms, summary, scope_tree })
                 })
                 .collect()
         })
@@ -426,11 +428,16 @@ pub async fn run_workspace_scan(
                 continue;
             }
             summaries_to_merge.push((pf.uri_id, pf.summary));
+            let tree = if pf.parse_elapsed_ms > SLOW_PARSE_KEEP_TREE_THRESHOLD_MS {
+                Some(pf.tree)
+            } else {
+                None
+            };
             docs.insert(
                 pf.uri_id,
                 Document {
                     lua_source: pf.lua_source,
-                    tree: pf.tree,
+                    tree,
                     scope_tree: pf.scope_tree,
                     last_diagnostic_signature: None,
                 },
@@ -638,12 +645,22 @@ async fn consumer_loop(
             let Some(doc) = docs.get(&uri_id) else {
                 continue;
             };
+            let temporary_tree;
+            let root = if let Some(root) = doc.root_node() {
+                root
+            } else {
+                temporary_tree = doc.parse_tree();
+                let Some(tree) = temporary_tree.as_ref() else {
+                    continue;
+                };
+                tree.root_node()
+            };
             let mut syntax =
-                diagnostics::collect_diagnostics(doc.tree.root_node(), doc.source(), doc.line_index());
+                diagnostics::collect_diagnostics(root, doc.source(), doc.line_index());
             let idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
             let semantic = diagnostics::collect_semantic_diagnostics_with_version_id(
-                doc.tree.root_node(),
+                root,
                 doc.source(),
                 uri_id,
                 &idx,
@@ -654,7 +671,7 @@ async fn consumer_loop(
             );
             syntax.extend(semantic);
             diagnostics::apply_diagnostic_suppressions(
-                doc.tree.root_node(),
+                root,
                 doc.source(),
                 syntax,
             )

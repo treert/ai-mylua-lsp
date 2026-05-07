@@ -69,7 +69,7 @@ flowchart TB
 4. **build_initial** — 原子一次性构建工作区聚合层
 5. **Ready** — 全能力可用
 
-**内存策略**：全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse。LSP 内部 `documents` 以进程级、只增不删的 `UriId` 为 key，跨文件功能通过全局 URI registry 在边界解析回原始 `Uri`。5 万文件级别峰值 RSS ~1.5–3GB。
+**内存策略**：全工作区 `text + scope_tree` 常驻内存，`tree_sitter::Tree` 仅对冷启动解析较慢的文件立即保留；普通文件的 AST 在 handler 首次需要时由 `Document::ensure_tree` 从常驻源码懒重建，重建后本进程内不再置空。LSP 内部 `documents` 以进程级、只增不删的 `UriId` 为 key，跨文件功能通过全局 URI registry 在边界解析回原始 `Uri`。
 
 **增量更新**：编辑期通过 `upsert_summary` 增量更新聚合索引，不必全库重建。
 

@@ -9,7 +9,7 @@ use tower_lsp_server::ls_types::{Diagnostic, Uri};
 
 pub struct Document {
     pub lua_source: LuaSource,
-    pub tree: tree_sitter::Tree,
+    pub tree: Option<tree_sitter::Tree>,
     pub scope_tree: ScopeTree,
     pub last_diagnostic_signature: Option<u64>,
 }
@@ -31,6 +31,32 @@ impl Document {
     #[inline]
     pub fn line_index(&self) -> &LineIndex {
         self.lua_source.line_index()
+    }
+
+    /// Returns the cached tree, if this document kept or already rebuilt it.
+    #[inline]
+    pub fn tree(&self) -> Option<&tree_sitter::Tree> {
+        self.tree.as_ref()
+    }
+
+    /// Returns the cached root node, if the tree is currently available.
+    #[inline]
+    pub fn root_node(&self) -> Option<tree_sitter::Node<'_>> {
+        self.tree().map(|tree| tree.root_node())
+    }
+
+    /// Lazily rebuilds the tree from the resident source text.
+    pub(crate) fn ensure_tree(&mut self) -> Option<&tree_sitter::Tree> {
+        if self.tree.is_none() {
+            self.tree = self.parse_tree();
+        }
+        self.tree()
+    }
+
+    /// Parses the resident source without writing the result back.
+    pub(crate) fn parse_tree(&self) -> Option<tree_sitter::Tree> {
+        let mut parser = crate::new_parser();
+        parser.parse(self.source(), None)
     }
 
     pub(crate) fn diagnostic_signature(diagnostics: &[Diagnostic]) -> u64 {
@@ -159,7 +185,7 @@ mod tests {
         );
         let mut doc = Document {
             lua_source,
-            tree,
+            tree: Some(tree),
             scope_tree,
             last_diagnostic_signature: None,
         };
@@ -171,5 +197,31 @@ mod tests {
         assert!(doc.remember_diagnostic_signature(&first));
         assert!(!doc.remember_diagnostic_signature(&same));
         assert!(doc.remember_diagnostic_signature(&changed));
+    }
+
+    #[test]
+    fn ensure_tree_rebuilds_missing_tree_from_source() {
+        let src = "local cached = 1";
+        let mut parser = new_parser();
+        let tree = parser.parse(src.as_bytes(), None).unwrap();
+        let lua_source = LuaSource::new(src.to_string());
+        let uri: Uri = "file:///tmp/cache.lua".parse().unwrap();
+        let (_, scope_tree) = summary_builder::build_file_analysis(
+            &uri,
+            &tree,
+            lua_source.source(),
+            lua_source.line_index(),
+        );
+        let mut doc = Document {
+            lua_source,
+            tree: None,
+            scope_tree,
+            last_diagnostic_signature: None,
+        };
+
+        let rebuilt = doc.ensure_tree().expect("tree should parse");
+
+        assert_eq!(rebuilt.root_node().kind(), "source_file");
+        assert!(doc.tree.is_some());
     }
 }

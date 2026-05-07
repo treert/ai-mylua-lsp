@@ -97,7 +97,7 @@ pub fn find_references_by_uri_id(
             // Scan only this file
             let source = doc.source();
             for offset in find_word_occurrences(source, name) {
-                let Some(node) = find_identifier_at(doc.tree.root_node(), offset, name.len()) else {
+                let Some(node) = doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
                     continue;
                 };
                 // Skip the declaration itself
@@ -121,7 +121,7 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
-                    let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
+                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
@@ -151,7 +151,7 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, field_name) {
-                    let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, field_name.len()) else {
+                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, field_name.len())) else {
                         continue;
                     };
                     // Skip the declaration position itself
@@ -211,7 +211,7 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
-                    let Some(node) = find_identifier_at(file_doc.tree.root_node(), offset, name.len()) else {
+                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
@@ -257,7 +257,7 @@ fn identify_at_cursor(
     }
 
     // 2. Find the identifier AST node at cursor
-    let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset);
+    let ident_node = doc.root_node().and_then(|root| find_node_at_position(root, byte_offset));
     let name_owned: String;
     let name: &str;
 
@@ -696,7 +696,10 @@ fn collect_emmy_type_references(
 ) {
     all_docs.for_each_document_id(|doc_uri_id, doc| {
         let source = doc.source();
-        let mut cursor = doc.tree.root_node().walk();
+        let Some(root) = doc.root_node() else {
+            return;
+        };
+        let mut cursor = root.walk();
         scan_type_in_comments(&mut cursor, type_name, source, doc_uri_id, locations, doc.line_index());
     });
 }

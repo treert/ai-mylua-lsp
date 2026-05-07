@@ -19,9 +19,9 @@ fn collect_all(
 ) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, name);
     let mut all =
-        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
     let semantic = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -30,7 +30,7 @@ fn collect_all(
         doc.line_index(),
     );
     all.extend(semantic);
-    diagnostics::apply_diagnostic_suppressions(doc.tree.root_node(), src.as_bytes(), all)
+    diagnostics::apply_diagnostic_suppressions(doc.root_node().unwrap(), src.as_bytes(), all)
 }
 
 #[test]

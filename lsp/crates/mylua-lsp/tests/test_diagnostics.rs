@@ -15,7 +15,7 @@ print(a, b)
 "#;
     let doc = parse_doc(&mut parser, src);
     let diags =
-        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
     assert!(
         diags.is_empty(),
         "clean code should have no diagnostics, got: {:?}",
@@ -29,7 +29,7 @@ fn diagnostics_for_syntax_errors() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
     let diags =
-        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
     // test1.lua contains intentional parse errors (e.g. "dfjsofjao", "if faf fsf")
     assert!(
         !diags.is_empty(),
@@ -43,7 +43,7 @@ fn diagnostics_for_define_test1() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
     let diags =
-        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
     // define/test1.lua has some intentionally invalid lines
     assert!(
         !diags.is_empty(),
@@ -57,7 +57,7 @@ fn syntax_error_range_does_not_swallow_following_statement() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let diags =
-        diagnostics::collect_diagnostics(doc.tree.root_node(), src.as_bytes(), doc.line_index());
+        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
     assert!(!diags.is_empty(), "expected syntax diagnostics");
     let syntax_errors: Vec<_> = diags
         .iter()
@@ -91,7 +91,7 @@ print(undefined_var)
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -116,7 +116,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "callback_param.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -141,7 +141,7 @@ handler(function(c) return c end)
     let (doc, uri, mut agg) = setup_single_file(src, "top_level_callback_param.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -172,7 +172,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "undef_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -223,7 +223,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "multi_chain.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -270,7 +270,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "undef_dotted.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -309,7 +309,7 @@ foo()
     let (doc, uri, mut agg) = setup_single_file(src, "bare_def.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -340,7 +340,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "local_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -371,7 +371,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "global_method.lua");
     let diag_config = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -399,7 +399,7 @@ print(t.no_exist)
     let mut cfg = DiagnosticsConfig::default();
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -428,7 +428,7 @@ local x = 42
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -457,7 +457,7 @@ local x = 42
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -507,7 +507,7 @@ a.b.c = 1
     let (doc, uri, mut agg) = setup_single_file(src, "chained_lhs.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -543,7 +543,7 @@ print(t.age)
     let (doc, uri, mut agg) = setup_single_file(src, "shape_fields.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -577,7 +577,7 @@ print(t[2])
     let (doc, uri, mut agg) = setup_single_file(src, "bracket_key.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -611,7 +611,7 @@ print(t.anything)
     let (doc, uri, mut agg) = setup_single_file(src, "dyn_bracket.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -650,7 +650,7 @@ print(t[1])
     // diagnostic path, so no diagnostic is expected here. This is a
     // smoke test for the `None` arm of `extract_single_field`.
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -681,7 +681,7 @@ print(t.no_exist)
     let mut cfg = DiagnosticsConfig::default();
     cfg.lua_field_error = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -726,7 +726,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "cross_globals.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -835,7 +835,7 @@ local c = getContainer()
     );
     let doc = mylua_lsp::document::Document {
         lua_source,
-        tree,
+        tree: Some(tree),
         scope_tree,
         last_diagnostic_signature: None,
     };
@@ -962,7 +962,7 @@ fn duplicate_table_key_reports_warning() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_key.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -996,7 +996,7 @@ fn duplicate_table_key_across_numeric_and_string_keys() {
     let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1023,7 +1023,7 @@ fn duplicate_table_key_off_via_config() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.duplicate_table_key = DiagnosticSeverityOption::Off;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1051,7 +1051,7 @@ fn unused_local_reports_when_enabled() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1075,7 +1075,7 @@ fn unused_local_skips_underscore_names() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1097,7 +1097,7 @@ fn unused_local_counts_reference_in_expression() {
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1124,7 +1124,7 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1153,7 +1153,7 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1182,7 +1182,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1210,7 +1210,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1242,7 +1242,7 @@ function utils:empty_func(arg1, arg2) end
     let mut cfg = DiagnosticsConfig::default();
     cfg.unused_local = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1274,7 +1274,7 @@ x = "not a number"
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1316,7 +1316,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.emmy_type_mismatch = DiagnosticSeverityOption::Error;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1347,7 +1347,7 @@ f(1, 2, 3)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1382,7 +1382,7 @@ f(1)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1412,7 +1412,7 @@ f(1, 2, 3, 4, 5)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1439,7 +1439,7 @@ fn argument_count_stdlib_math_max_accepts_varargs() {
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
 
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1466,7 +1466,7 @@ f(1, 2, 3)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1493,7 +1493,7 @@ f(1, 2)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1524,7 +1524,7 @@ f(1)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1558,7 +1558,7 @@ local function f(a) return a end
     let (doc, uri, mut agg) = setup_single_file(src, "param_name_mismatch_warning.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1590,7 +1590,7 @@ local function f(a) return a end
     let (doc, uri, mut agg) = setup_single_file(src, "param_name_match.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1617,7 +1617,7 @@ function T:set(value) end
     let (doc, uri, mut agg) = setup_single_file(src, "param_method_self.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1644,7 +1644,7 @@ local function f(a) return a end
     let (doc, uri, mut agg) = setup_single_file(src, "param_name_mismatch_doc_line.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1674,7 +1674,7 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1707,7 +1707,7 @@ f()
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1745,7 +1745,7 @@ g:hello("world")
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1776,7 +1776,7 @@ f(1)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1800,7 +1800,7 @@ f(1, 2, 3)
     let (doc, uri, mut agg) = setup_single_file(src, "argcount_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1827,7 +1827,7 @@ f("str", 42)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1862,7 +1862,7 @@ accepts(value)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1893,7 +1893,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1921,7 +1921,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1949,7 +1949,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -1976,7 +1976,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2006,7 +2006,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2043,7 +2043,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2067,7 +2067,7 @@ local function f() return "str" end
     let (doc, uri, mut agg) = setup_single_file(src, "return_off.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2099,7 +2099,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2127,7 +2127,7 @@ end
     let mut cfg = DiagnosticsConfig::default();
     cfg.return_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2159,7 +2159,7 @@ takes_number(s)
     let mut cfg = DiagnosticsConfig::default();
     cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2201,7 +2201,7 @@ utils2.hello()
     let (doc, uri, mut agg) = setup_single_file(src, "global_table_fn_decl.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2246,7 +2246,7 @@ utils2.hello()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc_b.tree.root_node(),
+        doc_b.root_node().unwrap(),
         file_b.as_bytes(),
         intern_uri(&uri_b),
         &mut agg,
@@ -2287,7 +2287,7 @@ print(utils2.bar)
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc_b.tree.root_node(),
+        doc_b.root_node().unwrap(),
         file_b.as_bytes(),
         intern_uri(&uri_b),
         &mut agg,
@@ -2334,7 +2334,7 @@ utils2.sub.hello()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc_b.tree.root_node(),
+        doc_b.root_node().unwrap(),
         file_b.as_bytes(),
         intern_uri(&uri_b),
         &mut agg,
@@ -2377,7 +2377,7 @@ utils2.doesnotexist()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc_b.tree.root_node(),
+        doc_b.root_node().unwrap(),
         file_b.as_bytes(),
         intern_uri(&uri_b),
         &mut agg,
@@ -2423,7 +2423,7 @@ print(utils.test_const.ON_Evt_HAHA1)
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         use_src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2472,7 +2472,7 @@ end
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         use_src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2517,7 +2517,7 @@ print(p.x, p.z)
     let (doc, uri, mut agg) = setup_single_file(src, "alias_shape.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2574,7 +2574,7 @@ local name = hero:getName()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        main_doc.tree.root_node(),
+        main_doc.root_node().unwrap(),
         main_src.as_bytes(),
         summary_id_by_uri(&agg, &main_uri),
         &mut agg,
@@ -2615,7 +2615,7 @@ local hero = P.new("Alice")
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        main_doc.tree.root_node(),
+        main_doc.root_node().unwrap(),
         main_src.as_bytes(),
         summary_id_by_uri(&agg, &main_uri),
         &mut agg,
@@ -2693,7 +2693,7 @@ hero:describe()
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        main_doc.tree.root_node(),
+        main_doc.root_node().unwrap(),
         main_src.as_bytes(),
         summary_id_by_uri(&agg, &main_uri),
         &mut agg,
@@ -2737,7 +2737,7 @@ process_numbers(my_list)  -- type mismatch: passing List<string> to List<number>
     let (doc, uri, mut agg) = setup_single_file(src, "generic_call_variance.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2771,7 +2771,7 @@ local list2 = list1  -- should not error
     let (doc, uri, mut agg) = setup_single_file(src, "generic_same.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -2808,7 +2808,7 @@ list = {}  -- should not error (backwards compat)
     let (doc, uri, mut agg) = setup_single_file(src, "generic_untyped.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,

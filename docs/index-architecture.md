@@ -183,8 +183,8 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 |------|--------|------|
 | **Scan** | 发现 .lua 文件列表 + 构建 module_entries，并通过进程级 URI registry 集中分配 `UriId` | 无 |
 | **Module Index** | 以 `module_name → UriId` 填充 module_index，此后 document_link 和 require 补全可用 | 短暂持 index 锁 |
-| **Parse** | rayon 全量并行：read → tree-sitter parse → build_summary → build_scope_tree；`ParsedFile` 携带 scan 阶段分配的 `UriId` | **不持任何锁** |
-| **Merge** | 原子 build_initial 构建全局索引（不清除 module_index），summary 与 document 使用同一套 `UriId` | 持 open_uris → documents → index |
+| **Parse** | rayon 全量并行：read → tree-sitter parse → build_summary → build_scope_tree；`ParsedFile` 携带 scan 阶段分配的 `UriId` 与单文件解析耗时 | **不持任何锁** |
+| **Merge** | 原子 build_initial 构建全局索引（不清除 module_index），summary 与 document 使用同一套 `UriId`；只为解析较慢的文件保留 AST，普通文件后续按需 `ensure_tree` | 持 open_uris → documents → index |
 | **Ready** | 设置 IndexState::Ready + seed 诊断队列 | 各锁短暂独立持有 |
 
 **关键设计**：
@@ -228,7 +228,8 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
 
 ### 6.4 冷启动重建
 
-- 冷启动始终从源码并行 parse，生成每文件 `DocumentSummary`
+- 冷启动始终从源码并行 parse，生成每文件 `DocumentSummary` 与常驻 `ScopeTree`
+- `tree_sitter::Tree` 冷启动后只保留慢解析文件；普通文件在 handler 首次需要 AST 时由 `Document::ensure_tree` 重建并缓存
 - 聚合层不持久化，Phase 3 从 summaries 原子重建
 - 增量更新只维护内存中的当前工作区状态
 

@@ -13,7 +13,7 @@ fn document_link_resolves_require_paren_form() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -46,7 +46,7 @@ fn document_link_resolves_from_module_map_before_summary_exists() {
     agg.set_require_mapping("util".to_string(), util_uri_id);
 
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -67,7 +67,7 @@ fn document_link_resolves_require_short_call() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -88,7 +88,7 @@ fn document_link_ignores_unresolved_module() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -109,7 +109,7 @@ fn document_link_ignores_non_require_calls() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -133,7 +133,7 @@ fn document_link_rejects_aliased_require() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),
@@ -157,7 +157,7 @@ fn document_link_multi_require_each_get_link() {
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &agg,
         doc.line_index(),

@@ -21,7 +21,7 @@ pub fn hover(
         return hover_type_name(&type_name, index, all_docs);
     }
 
-    let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
+    let ident_node = find_node_at_position(doc.root_node()?, byte_offset)?;
     let ident_text = node_text(ident_node, doc.source());
 
     // Request-path logs: bounded by user interaction (one hover click),
@@ -174,15 +174,9 @@ pub fn hover(
                             if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
                                 let def_byte = Some(td.range.start_byte);
                                 if let Some(db) = def_byte {
-                                    if let Some(def_node) = def_doc.tree.root_node()
-                                        .descendant_for_byte_range(db, db)
-                                    {
-                                        let stmt = find_enclosing_statement(def_node);
-                                        let comment_lines = collect_preceding_comments(stmt, def_doc.source());
-                                        let doc_text = extract_doc_lines(&comment_lines);
-                                        if !doc_text.is_empty() {
-                                            parts.push(doc_text);
-                                        }
+                                    let doc_text = definition_doc_text_at_byte(def_doc, db);
+                                    if !doc_text.is_empty() {
+                                        parts.push(doc_text);
                                     }
                                 }
                             }
@@ -302,15 +296,9 @@ fn hover_type_name(
         }
         // Include doc comments from the definition site.
         if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
-            if let Some(def_node) = def_doc.tree.root_node()
-                .descendant_for_byte_range(td.range.start_byte, td.range.start_byte)
-            {
-                let stmt = find_enclosing_statement(def_node);
-                let comment_lines = collect_preceding_comments(stmt, def_doc.source());
-                let doc_text = extract_doc_lines(&comment_lines);
-                if !doc_text.is_empty() {
-                    parts.push(doc_text);
-                }
+            let doc_text = definition_doc_text_at_byte(def_doc, td.range.start_byte);
+            if !doc_text.is_empty() {
+                parts.push(doc_text);
             }
         }
         return Some(Hover {
@@ -636,7 +624,14 @@ fn build_hover_for_definition(
     let source = doc.source();
 
     let def_start_byte = def.range.start_byte;
-    let def_node = doc.tree.root_node().descendant_for_byte_range(def_start_byte, def_start_byte)?;
+    let temporary_tree;
+    let root = if let Some(root) = doc.root_node() {
+        root
+    } else {
+        temporary_tree = doc.parse_tree();
+        temporary_tree.as_ref()?.root_node()
+    };
+    let def_node = root.descendant_for_byte_range(def_start_byte, def_start_byte)?;
 
     if let Some(field_node) = find_enclosing_table_field(def_node) {
         return build_hover_for_table_field(def, field_node, source, type_info);
@@ -695,6 +690,25 @@ fn build_hover_for_definition(
         }),
         range: Some(def.selection_range.into()),
     })
+}
+
+fn definition_doc_text_at_byte(doc: &Document, byte: usize) -> String {
+    let temporary_tree;
+    let root = if let Some(root) = doc.root_node() {
+        root
+    } else {
+        temporary_tree = doc.parse_tree();
+        let Some(tree) = temporary_tree.as_ref() else {
+            return String::new();
+        };
+        tree.root_node()
+    };
+    let Some(def_node) = root.descendant_for_byte_range(byte, byte) else {
+        return String::new();
+    };
+    let stmt = find_enclosing_statement(def_node);
+    let comment_lines = collect_preceding_comments(stmt, doc.source());
+    extract_doc_lines(&comment_lines)
 }
 
 fn build_hover_for_table_field(

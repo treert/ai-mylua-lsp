@@ -35,7 +35,7 @@ fn semantic_tokens_range_filters_to_range() {
 
     // Range covering lines 1..=2 (middle two lines)
     let tokens = semantic_tokens::collect_semantic_tokens_range(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         range(1, 0, 2, 0),
@@ -62,7 +62,7 @@ fn semantic_tokens_range_delta_encoding_starts_fresh() {
     let (doc, _uri, _agg) = setup_single_file(src, "d.lua");
 
     let tokens = semantic_tokens::collect_semantic_tokens_range(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         range(2, 0, 2, 20),
@@ -82,7 +82,7 @@ fn semantic_tokens_range_empty_range_returns_empty() {
 
     // Range on an empty line past EOF has no identifiers.
     let tokens = semantic_tokens::collect_semantic_tokens_range(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         range(100, 0, 100, 0),
@@ -98,13 +98,13 @@ fn semantic_tokens_range_full_file_equals_full_result() {
     let (doc, _uri, _agg) = setup_single_file(src, "full.lua");
 
     let full = semantic_tokens::collect_semantic_tokens(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         doc.line_index(),
     );
     let ranged = semantic_tokens::collect_semantic_tokens_range(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
         range(0, 0, 100, 0),

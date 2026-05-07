@@ -59,7 +59,10 @@ pub fn inlay_hints(
     let mut ctx = InlayCtx {
         source, line_index: doc.line_index(), uri_id, scope_tree: &doc.scope_tree, index, cfg, range_start, range_end, out: &mut out,
     };
-    let mut cursor = doc.tree.root_node().walk();
+    let Some(root) = doc.root_node() else {
+        return out;
+    };
+    let mut cursor = root.walk();
     walk(&mut cursor, &mut ctx);
     out
 }

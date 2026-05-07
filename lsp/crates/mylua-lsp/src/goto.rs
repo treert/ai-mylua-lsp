@@ -29,7 +29,7 @@ fn goto_definition_inner(
         return type_definition_for_name(&type_name, index, strategy);
     }
 
-    let ident_node = find_node_at_position(doc.tree.root_node(), byte_offset)?;
+    let ident_node = find_node_at_position(doc.root_node()?, byte_offset)?;
     let name = node_text(ident_node, doc.source());
     lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));
 
@@ -151,7 +151,7 @@ pub fn goto_type_definition(
     // type name via the resolver. If no Emmy type can be produced
     // (primitive, bare shape table, function, etc.), fall back to
     // `goto_definition` so the feature never goes silent.
-    if let Some(ident_node) = find_node_at_position(doc.tree.root_node(), byte_offset) {
+    if let Some(ident_node) = find_node_at_position(doc.root_node()?, byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
             if let Some(target) = type_definition_for_local(uri_id, &def.name, byte_offset, &doc.scope_tree, index, strategy) {

@@ -49,7 +49,7 @@ end
     let (doc, uri, mut agg) = setup_single_file(src, "io_stub.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -75,7 +75,7 @@ print(some_unknown_global)
     let (doc, uri, mut agg) = setup_single_file(src, "plain.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
@@ -111,7 +111,7 @@ fn meta_globals_still_participate_in_workspace_index() {
     );
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
-        doc.tree.root_node(),
+        doc.root_node().unwrap(),
         doc.source(),
         summary_id_by_uri(&agg, &user_uri),
         &mut agg,

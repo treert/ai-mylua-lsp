@@ -6,7 +6,7 @@ use test_helpers::*;
 fn parse_simple_local() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, "local abc = 1");
-    let root = doc.tree.root_node();
+    let root = doc.root_node().unwrap();
     assert_eq!(root.kind(), "source_file");
     assert!(!root.has_error(), "parse tree should have no errors");
 }
@@ -20,7 +20,7 @@ function hello(a, b)
 end
 "#;
     let doc = parse_doc(&mut parser, src);
-    assert!(!doc.tree.root_node().has_error());
+    assert!(!doc.root_node().unwrap().has_error());
 }
 
 #[test]
@@ -37,7 +37,7 @@ function uiButton:setX(x)
 end
 "#;
     let doc = parse_doc(&mut parser, src);
-    assert!(!doc.tree.root_node().has_error());
+    assert!(!doc.root_node().unwrap().has_error());
 }
 
 #[test]
@@ -45,7 +45,7 @@ fn parse_fixture_test1() {
     let src = read_fixture("parse/test1.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let root = doc.tree.root_node();
+    let root = doc.root_node().unwrap();
     assert_eq!(root.kind(), "source_file");
     // test1.lua has some intentionally broken lines, so we expect parse errors
 }
@@ -55,7 +55,7 @@ fn parse_fixture_test2() {
     let src = read_fixture("parse/test2.lua");
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, &src);
-    let root = doc.tree.root_node();
+    let root = doc.root_node().unwrap();
     assert_eq!(root.kind(), "source_file");
 }
 
@@ -72,7 +72,7 @@ local t = {
 }
 "#;
     let doc = parse_doc(&mut parser, src);
-    assert!(!doc.tree.root_node().has_error());
+    assert!(!doc.root_node().unwrap().has_error());
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn parse_method_call_chain() {
     let mut parser = new_parser();
     let src = "local x = obj:foo():bar():baz()";
     let doc = parse_doc(&mut parser, src);
-    assert!(!doc.tree.root_node().has_error());
+    assert!(!doc.root_node().unwrap().has_error());
 }
 
 #[test]
@@ -95,5 +95,5 @@ for k, v in pairs(t) do
 end
 "#;
     let doc = parse_doc(&mut parser, src);
-    assert!(!doc.tree.root_node().has_error());
+    assert!(!doc.root_node().unwrap().has_error());
 }

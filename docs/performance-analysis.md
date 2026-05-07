@@ -2,7 +2,7 @@
 
 > **目标**：支持 5 万个 Lua 文件级别（见 [`ai-readme.md`](../ai-readme.md)）。
 >
-> **核心设计契约**：全工作区 `text + tree + scope_tree` 常驻内存，不做 LRU / 懒 parse。代价是 5 万文件量级 RSS ~1.5–3GB，收益是任何跨文件跳转恒定低延迟。
+> **核心设计契约**：全工作区 `text + scope_tree` 常驻内存，冷启动仅保留解析较慢文件的 `tree_sitter::Tree`；普通文件 AST 在首次需要时懒重建，重建后不淘汰。
 
 ---
 
@@ -32,23 +32,25 @@
 
 ---
 
-## 3. 设计权衡：全内存驻留
+## 3. 设计权衡：AST 按需驻留
 
-全工作区 `text + tree + scope_tree` 常驻 `documents`，不做 LRU 驱逐。`documents` 内部使用进程级、只增不删的 `UriId` 作为 key，避免在热路径 HashMap 中反复哈希完整 URI。URI registry 预先保存路径字符串与排序优先级，少数边界路径再按 `UriId` 解析回 `Uri`。
+全工作区 `text + scope_tree` 常驻 `documents`，普通文件的 `tree_sitter::Tree` 在冷启动 merge 时释放，只保留解析耗时超过阈值的慢文件 AST。后续 handler 通过 `Document::ensure_tree` 按需从常驻源码重建 AST；一旦重建，本进程内不再主动置空。这里仍不做 LRU 驱逐，也不把 `ScopeTree` 变成可选数据。
+
+`documents` 内部使用进程级、只增不删的 `UriId` 作为 key，避免在热路径 HashMap 中反复哈希完整 URI。URI registry 预先保存路径字符串与排序优先级，少数边界路径再按 `UriId` 解析回 `Uri`。
 
 **5 万文件内存估算**（平均 5KB 源码）：
 
 | 组成 | 估算 |
 |------|------|
 | 源码文本 | ~250 MB |
-| tree-sitter Tree | ~500 MB – 1 GB |
+| tree-sitter Tree | 冷启动后仅慢文件常驻；随访问逐步回填 |
 | ScopeTree | ~100–300 MB |
 | Summary / 索引 | ~150–300 MB |
 | **合计** | **~1.5–3 GB** |
 
-**不做 LRU 的理由**：goto / hover / references / 级联诊断都需要任意文件的语法树。on-demand parse 会导致跨文件跳转 5–50ms 可感知卡顿。Lua AST 体量远小于 C++/Rust，全驻留内存成本可接受。
+**不做 LRU 的理由**：当前目标是降低冷启动后未访问文件的 AST 常驻内存，同时保持实现简单。诊断后台扫描对缺失 AST 使用临时 parse，不写回 `Document`；`references` / `rename` 这类全量扫描会主动补齐所有文件 AST，这会牺牲部分内存收益，但避免引入 LRU tracker 与淘汰一致性问题。
 
-**明确不做**：documents LRU、未打开文件懒 parse、Tree 分级驱逐。
+**明确不做**：documents LRU、Tree 分级驱逐、`ScopeTree` 懒加载。
 
 ---
 

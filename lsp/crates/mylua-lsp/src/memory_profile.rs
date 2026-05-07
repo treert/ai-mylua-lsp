@@ -28,7 +28,9 @@ impl DocumentMemoryStats {
         for doc in documents.values() {
             stats.source_bytes += doc.source().len();
             stats.line_start_count += doc.lua_source.line_start_count();
-            stats.tree_node_count += doc.tree.root_node().descendant_count();
+            if let Some(root) = doc.root_node() {
+                stats.tree_node_count += root.descendant_count();
+            }
 
             let scope_stats = doc.scope_tree.stats();
             stats.scope_count += scope_stats.scope_count;
@@ -107,7 +109,7 @@ fn log_top_documents(documents: &HashMap<UriId, Document>) {
         .map(|(uri_id, doc)| {
             let scope_stats = doc.scope_tree.stats();
             (
-                doc.tree.root_node().descendant_count(),
+                doc.root_node().map(|root| root.descendant_count()).unwrap_or(0),
                 doc.source().len(),
                 scope_stats.declaration_count,
                 scope_stats.scope_count,
@@ -161,7 +163,7 @@ mod tests {
             uri_id,
             Document {
                 lua_source,
-                tree,
+                tree: Some(tree),
                 scope_tree,
                 last_diagnostic_signature: None,
             },

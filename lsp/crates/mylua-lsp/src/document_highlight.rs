@@ -26,7 +26,7 @@ pub fn document_highlight(
     position: Position,
 ) -> Option<Vec<DocumentHighlight>> {
     let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
-    let clicked = find_node_at_position(doc.tree.root_node(), byte_offset)?;
+    let clicked = find_node_at_position(doc.root_node()?, byte_offset)?;
     let source = doc.source();
     let name = node_text(clicked, source);
     if name.is_empty() {
@@ -45,7 +45,7 @@ pub fn document_highlight(
         .map(|d| d.decl_byte);
 
     let mut highlights = Vec::new();
-    let root = doc.tree.root_node();
+    let root = doc.root_node()?;
     let mut cursor = root.walk();
     collect_highlights(
         &mut cursor,

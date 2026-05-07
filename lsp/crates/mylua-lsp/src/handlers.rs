@@ -356,7 +356,7 @@ impl LanguageServer for Backend {
             if let Some(doc) = old_doc {
                 last_diagnostic_signature = doc.last_diagnostic_signature;
                 text = doc.lua_source.into_text();
-                tree = Some(doc.tree);
+                tree = doc.tree;
             } else {
                 text = String::new();
                 tree = None;
@@ -543,11 +543,11 @@ impl LanguageServer for Backend {
     async fn did_change_configuration(&self, params: DidChangeConfigurationParams) {
         let cfg = LspConfig::from_value(params.settings);
         lsp_log!("[mylua-lsp] config updated: {:?}", cfg);
-        // Update the scanner global so newly created parsers pick up
-        // the changed setting. Already-parsed documents keep their
-        // existing scanner state; a full re-index (restart) is needed
-        // for the change to take effect on all files.
-        tree_sitter_mylua::set_top_keyword_default_disabled(!cfg.runtime.top_keyword);
+        // `runtime.top_keyword` affects the tree-sitter scanner global.
+        // Changing it mid-session would let lazy AST rebuilds use a
+        // different parse mode than the resident ScopeTree / index. Keep
+        // the parser mode pinned after initialize; a restart/full re-index
+        // is required for parser-affecting runtime changes.
         *self.config.lock().unwrap() = cfg;
     }
 
@@ -555,14 +555,21 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentSymbolParams,
     ) -> Result<Option<DocumentSymbolResponse>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(&params.text_document.uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
+            return Ok(None);
+        };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
+        let Some(root) = doc.root_node() else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         let summary = idx.summary_by_id(uri_id);
         let syms = symbols::collect_document_symbols(
-            doc.tree.root_node(),
+            root,
             doc.source(),
             summary,
             doc.line_index(),
@@ -574,10 +581,13 @@ impl LanguageServer for Backend {
         &self,
         params: FoldingRangeParams,
     ) -> Result<Option<Vec<FoldingRange>>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         Ok(Some(folding_range::folding_range(doc)))
     }
 
@@ -585,13 +595,19 @@ impl LanguageServer for Backend {
         &self,
         params: DocumentLinkParams,
     ) -> Result<Option<Vec<DocumentLink>>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
+            return Ok(None);
+        };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
+        let Some(root) = doc.root_node() else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
         Ok(Some(document_link::document_links(
-            doc.tree.root_node(),
+            root,
             doc.source(),
             &idx,
             doc.line_index(),
@@ -604,10 +620,14 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<CallHierarchyItem>>> {
         let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(&uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let items = call_hierarchy::prepare_call_hierarchy(doc, uri_id, position, &idx);
         if items.is_empty() {
@@ -640,10 +660,14 @@ impl LanguageServer for Backend {
         params: InlayHintParams,
     ) -> Result<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let cfg = self.config.lock().unwrap().inlay_hint.clone();
         Ok(Some(inlay_hint::inlay_hints(doc, uri_id, params.range, &idx, &cfg)))
@@ -653,10 +677,13 @@ impl LanguageServer for Backend {
         &self,
         params: SelectionRangeParams,
     ) -> Result<Option<Vec<SelectionRange>>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         Ok(Some(selection_range::selection_range(doc, &params.positions)))
     }
 
@@ -666,10 +693,13 @@ impl LanguageServer for Backend {
     ) -> Result<Option<Vec<DocumentHighlight>>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(uri)) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         Ok(document_highlight::document_highlight(doc, position))
     }
 
@@ -679,10 +709,14 @@ impl LanguageServer for Backend {
     ) -> Result<Option<GotoDefinitionResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         let result = goto::goto_definition(
@@ -717,10 +751,14 @@ impl LanguageServer for Backend {
     ) -> Result<Option<request::GotoTypeDefinitionResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         Ok(goto::goto_type_definition(doc, uri_id, position, &idx, &strategy))
@@ -736,10 +774,14 @@ impl LanguageServer for Backend {
     ) -> Result<Option<request::GotoDeclarationResponse>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         Ok(goto::goto_definition(
@@ -754,8 +796,17 @@ impl LanguageServer for Backend {
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        {
+            let Some(doc) = docs.get_mut(&uri_id) else {
+                return Ok(None);
+            };
+            if doc.ensure_tree().is_none() {
+                return Ok(None);
+            }
+        }
+        let Some(doc) = docs.get(&uri_id) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
@@ -765,10 +816,14 @@ impl LanguageServer for Backend {
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         let items = completion::complete(doc, uri_id, position, &idx);
         Ok(Some(CompletionResponse::Array(items)))
@@ -793,7 +848,10 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
-        let docs = self.documents.lock().unwrap();
+        let mut docs = self.documents.lock().unwrap();
+        for doc in docs.values_mut() {
+            let _ = doc.ensure_tree();
+        }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
@@ -814,17 +872,23 @@ impl LanguageServer for Backend {
         &self,
         params: TextDocumentPositionParams,
     ) -> Result<Option<PrepareRenameResponse>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         Ok(rename::prepare_rename(doc, params.position))
     }
 
     async fn rename(&self, params: RenameParams) -> Result<Option<WorkspaceEdit>> {
         let uri = &params.text_document_position.text_document.uri;
         let position = params.text_document_position.position;
-        let docs = self.documents.lock().unwrap();
+        let mut docs = self.documents.lock().unwrap();
+        for doc in docs.values_mut() {
+            let _ = doc.ensure_tree();
+        }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
@@ -851,10 +915,14 @@ impl LanguageServer for Backend {
     async fn signature_help(&self, params: SignatureHelpParams) -> Result<Option<SignatureHelp>> {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
         let idx = self.index.lock().unwrap();
         Ok(signature_help::signature_help(doc, uri_id, position, &idx))
     }
@@ -864,13 +932,20 @@ impl LanguageServer for Backend {
         params: SemanticTokensParams,
     ) -> Result<Option<SemanticTokensResult>> {
         let uri = params.text_document.uri;
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(&uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
+            return Ok(None);
+        };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
+        let Some(root) = doc.root_node() else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let data = semantic_tokens::collect_semantic_tokens_with_version(
-            doc.tree.root_node(),
+            root,
             doc.source(),
             &doc.scope_tree,
             &runtime_version,
@@ -900,13 +975,20 @@ impl LanguageServer for Backend {
         let previous_result_id = params.previous_result_id;
 
         // Load the current tokens regardless of cache state.
-        let docs = self.documents.lock().unwrap();
-        let Some((uri_id, doc)) = find_document(&docs, &uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let uri_id = intern_uri(&uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
+            return Ok(None);
+        };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
+        let Some(root) = doc.root_node() else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let new_tokens = semantic_tokens::collect_semantic_tokens_with_version(
-            doc.tree.root_node(),
+            root,
             doc.source(),
             &doc.scope_tree,
             &runtime_version,
@@ -958,13 +1040,19 @@ impl LanguageServer for Backend {
         &self,
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
-        let docs = self.documents.lock().unwrap();
-        let Some((_, doc)) = find_document(&docs, &params.text_document.uri) else {
+        let mut docs = self.documents.lock().unwrap();
+        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
+            return Ok(None);
+        };
+        if doc.ensure_tree().is_none() {
+            return Ok(None);
+        }
+        let Some(root) = doc.root_node() else {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
         let data = semantic_tokens::collect_semantic_tokens_range_with_version(
-            doc.tree.root_node(),
+            root,
             doc.source(),
             &doc.scope_tree,
             params.range,

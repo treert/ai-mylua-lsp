@@ -28,7 +28,7 @@ pub fn signature_help(
     let source = doc.source();
 
     // Find the enclosing function call whose argument list contains the cursor.
-    let call = find_enclosing_call(doc.tree.root_node(), offset)?;
+    let call = find_enclosing_call(doc.root_node()?, offset)?;
     let (signatures, is_method, primary_name) =
         resolve_call_signatures(call, source, uri_id, &doc.scope_tree, index)?;
     if signatures.is_empty() {

@@ -8,7 +8,7 @@ fn resolve_name(src: &str, line: u32, col: u32) -> Option<String> {
     let doc = parse_doc(&mut parser, src);
     let uri = make_uri("test.lua");
     let offset = doc.line_index().position_to_byte_offset(doc.source(), pos(line, col))?;
-    let ident = mylua_lsp::util::find_node_at_position(doc.tree.root_node(), offset)?;
+    let ident = mylua_lsp::util::find_node_at_position(doc.root_node().unwrap(), offset)?;
     let name = mylua_lsp::util::node_text(ident, doc.source());
     doc.scope_tree.resolve_id(offset, name, intern_uri(&uri))
         .map(|d| format!("{}: {}", d.name, kind_str(&d.kind)))

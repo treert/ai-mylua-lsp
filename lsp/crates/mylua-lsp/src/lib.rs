@@ -174,6 +174,7 @@ pub(crate) struct ParsedFile {
     pub(crate) uri_id: UriId,
     pub(crate) lua_source: util::LuaSource,
     pub(crate) tree: tree_sitter::Tree,
+    pub(crate) parse_elapsed_ms: u128,
     pub(crate) summary: summary::DocumentSummary,
     pub(crate) scope_tree: scope::ScopeTree,
 }
@@ -338,7 +339,7 @@ impl Backend {
                     let uri_id = intern_uri(&uri);
                     self.documents.lock().unwrap().insert(
                         uri_id,
-                        Document { lua_source, tree: old, scope_tree, last_diagnostic_signature },
+                        Document { lua_source, tree: Some(old), scope_tree, last_diagnostic_signature },
                     );
                 }
                 return;
@@ -371,7 +372,7 @@ impl Backend {
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri_id, Document { lua_source, tree, scope_tree, last_diagnostic_signature });
+                .insert(uri_id, Document { lua_source, tree: Some(tree), scope_tree, last_diagnostic_signature });
 
             // All diagnostics (both syntax and semantic) flow through
             // the unified scheduler → consumer_loop, which recomputes
@@ -429,7 +430,7 @@ impl Backend {
             self.documents
                 .lock()
                 .unwrap()
-                .insert(uri_id, Document { lua_source, tree, scope_tree, last_diagnostic_signature });
+                .insert(uri_id, Document { lua_source, tree: Some(tree), scope_tree, last_diagnostic_signature });
             Some(uri_id)
         } else {
             None
@@ -488,13 +489,19 @@ impl Backend {
             let Some(doc) = docs.get_mut(&uri_id) else {
                 return;
             };
+            if doc.ensure_tree().is_none() {
+                return;
+            };
+            let Some(root) = doc.root_node() else {
+                return;
+            };
             let syntax = diagnostics::collect_diagnostics(
-                doc.tree.root_node(),
+                root,
                 doc.source(),
                 doc.line_index(),
             );
             let diags = diagnostics::apply_diagnostic_suppressions(
-                doc.tree.root_node(),
+                root,
                 doc.source(),
                 syntax,
             );

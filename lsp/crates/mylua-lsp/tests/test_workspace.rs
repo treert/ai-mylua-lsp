@@ -125,7 +125,7 @@ fn require_map_survives_upsert() {
     let mod_uri_id = intern_uri(&mod_uri);
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
-    let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_doc.tree, mod_doc.source(), mod_doc.line_index()).0;
+    let mod_summary = summary_builder::build_file_analysis(&mod_uri, mod_doc.tree().unwrap(), mod_doc.source(), mod_doc.line_index()).0;
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.set_require_mapping("mymod".to_string(), mod_uri_id);
@@ -139,7 +139,7 @@ fn require_map_survives_upsert() {
 
     let new_src = "return { x = 2, y = 3 }";
     let new_doc = parse_doc(&mut parser, new_src);
-    let new_summary = summary_builder::build_file_analysis(&mod_uri, &new_doc.tree, new_doc.source(), new_doc.line_index()).0;
+    let new_summary = summary_builder::build_file_analysis(&mod_uri, new_doc.tree().unwrap(), new_doc.source(), new_doc.line_index()).0;
     agg.upsert_summary(mod_uri_id, new_summary);
 
     assert_eq!(
@@ -165,7 +165,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     let main_doc = parse_doc(&mut parser, "local Player = require(\"player\")\n");
     let main_summary = summary_builder::build_file_analysis(
         &main_uri,
-        &main_doc.tree,
+        main_doc.tree().unwrap(),
         main_doc.source(),
         main_doc.line_index(),
     ).0;
@@ -175,7 +175,7 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
     let player_doc = parse_doc(&mut parser, "Player = {}\nreturn Player\n");
     let player_summary = summary_builder::build_file_analysis(
         &player_uri,
-        &player_doc.tree,
+        player_doc.tree().unwrap(),
         player_doc.source(),
         player_doc.line_index(),
     ).0;

@@ -19,7 +19,9 @@ use crate::document::Document;
 use crate::util::LineIndex;
 
 pub fn selection_range(doc: &Document, positions: &[Position]) -> Vec<SelectionRange> {
-    let root = doc.tree.root_node();
+    let Some(root) = doc.root_node() else {
+        return Vec::new();
+    };
     let source = doc.source();
     positions
         .iter()
