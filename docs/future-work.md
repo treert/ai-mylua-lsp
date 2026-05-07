@@ -14,14 +14,7 @@
 - **方案**：改为 **per-name fingerprint**（`HashMap<String, u64>`），按名字逐个 diff，只标脏变化的名字。文件级 hash 保留作 quick check。
 - **验收**：改一个 class 的单个 field，其他 class 的下游文件不被标脏。
 
-### 1.3 [P4] 诊断路径请求级局部缓存（resolve_type local_cache）
-
-- **问题**：全局 `resolution_cache` 已移除（因 `&mut` 约束和失效 bug），但诊断遍历同一文件时可能对相同 base 重复解析。例如 `cfg.width`、`cfg.height`、`cfg.title` 各自独立 resolve `RequireRef("config")`。
-- **方案**：给 `resolve_type` 增加 `cache: Option<&mut HashMap<CacheKey, ResolvedType>>` 参数。诊断入口创建临时 HashMap，遍历完即丢弃；goto/hover 等传 `None`。无需失效逻辑——每次请求都是新 cache。
-- **优先级**：低。当前解析链都是 O(1) HashMap 查表，单次微秒级。仅在大文件（数千个字段访问）出现可测量延迟时再实施。
-- **验收**：大文件诊断耗时有可测量下降（profiling 对比）。
-
-### 1.5 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
+### 1.3 [P3] `TypeCandidate` 只存剪影 → 消费方二次线扫
 
 - **问题**：不含 fields / parents，消费方需回查 `summaries[uri].type_definitions` 做 `find()` 线扫。
 - **方案**：`type_definitions` 改为 `HashMap<String, TypeDefinition>`，O(1) 查询。注意同文件多同名 class 的去重。
@@ -55,29 +48,16 @@
 
 ---
 
-## 3. 内存优化
-
-### 3.1 [P2] 语法树 / 文件文本 LRU 缓存
-
-- **设计文档**：[`superpowers/specs/2026-05-01-ast-lru-cache-design.md`](superpowers/specs/2026-05-01-ast-lru-cache-design.md)
-- **问题**：`documents` 为每个文件常驻 `LuaSource + tree + scope_tree`，大型项目内存线性增长（2 万文件工作区 ~6.5GB），但大部分语法树不被频繁访问。
-- **核心思路**：拆分 `DocumentStore`——`LuaSource` 常驻，`tree + scope_tree` 走 LRU 缓存（`astCacheCapacity` 可配置）。慢文件（`slow_pinned`）和打开文件（`open_pinned`）双 pin 集合互不干扰。
-- **阻塞因素**：`references.rs` 和 `rename.rs` 全量遍历所有文件 AST，summary 层无引用反向索引，无法缩小扫描范围。LRU 淘汰的文件会被频繁 `parse_temp` 重建，收益受限。**建议先实现引用反向索引，再实施 LRU。**
-- **验收**：2 万文件工作区，AST 缓存容量 200，全流程无功能回归；内存 RSS 显著下降（预估释放 1.2~1.8GB）。
-
----
-
-## 4. 推荐落地顺序
+## 3. 推荐落地顺序
 
 1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
 2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
 3. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-4. **3.1** 语法树 LRU 缓存 — 依赖引用反向索引，否则淘汰收益受限
-5. 其余 P3 项按需补做
+4. 其余 P3 项按需补做
 
 ---
 
-## 5. 维护约定
+## 4. 维护约定
 
 - 已完成的条目直接从本文件删除；如涉及架构变更，同一次提交更新相关文档（`index-architecture.md`、`architecture.md` 等）。
 - 新增条目模板：
@@ -92,7 +72,7 @@
 
 ---
 
-## 6. 新增能力时的维护清单
+## 5. 新增能力时的维护清单
 
 - **新增诊断类别**：在 `DiagnosticsConfig` 加字段 + 默认 severity；默认开启时需在 fixture 上跑一遍确认不会在真实项目上产生大量噪声
 - **新增 LSP capability**：在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 对应集成测试文件
