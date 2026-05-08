@@ -40,6 +40,10 @@ fn goto_definition_inner(
         return Some(target);
     }
 
+    if let Some(target) = try_label_goto(doc, uri_id, ident_node) {
+        return Some(target);
+    }
+
     // Dotted-access goto: walk ancestors to find a `variable` /
     // `field_expression` node whose `field` is this identifier, then
     // resolve via the AST-driven infer chain (supports `a[1].b`,
@@ -317,6 +321,96 @@ fn resolved_to_goto(resolved: resolver::ResolvedType) -> Option<GotoDefinitionRe
         }));
     }
 
+    None
+}
+
+fn try_label_goto(
+    doc: &Document,
+    uri_id: UriId,
+    ident_node: tree_sitter::Node,
+) -> Option<GotoDefinitionResponse> {
+    let goto_stmt = ident_node.parent()?;
+    if goto_stmt.kind() != "goto_statement" {
+        return None;
+    }
+    let goto_name = goto_stmt.child_by_field_name("name")?;
+    if goto_name.id() != ident_node.id() {
+        return None;
+    }
+
+    let label_name = find_visible_label_for_goto(goto_stmt, doc.source(), node_text(ident_node, doc.source()))?;
+    Some(GotoDefinitionResponse::Scalar(Location {
+        uri: resolve_uri(uri_id),
+        range: doc.line_index().ts_node_to_byte_range(label_name, doc.source()).into(),
+    }))
+}
+
+fn find_visible_label_for_goto<'a>(
+    goto_stmt: tree_sitter::Node<'a>,
+    source: &'a [u8],
+    target_name: &str,
+) -> Option<tree_sitter::Node<'a>> {
+    let mut child = goto_stmt;
+    while let Some(block) = child.parent() {
+        if is_label_block(block.kind()) && should_search_label_block(block, child) {
+            if let Some(label) = find_label_in_block(block, source, target_name) {
+                return Some(label);
+            }
+            if block.kind() == "function_body" {
+                break;
+            }
+        }
+        child = block;
+    }
+    None
+}
+
+fn is_label_block(kind: &str) -> bool {
+    matches!(
+        kind,
+        "source_file"
+            | "do_statement"
+            | "while_statement"
+            | "repeat_statement"
+            | "if_statement"
+            | "elseif_clause"
+            | "else_clause"
+            | "for_numeric_statement"
+            | "for_generic_statement"
+            | "function_body"
+    )
+}
+
+fn should_search_label_block(block: tree_sitter::Node, child: tree_sitter::Node) -> bool {
+    !(block.kind() == "if_statement" && matches!(child.kind(), "elseif_clause" | "else_clause"))
+}
+
+fn find_label_in_block<'a>(
+    block: tree_sitter::Node<'a>,
+    source: &'a [u8],
+    target_name: &str,
+) -> Option<tree_sitter::Node<'a>> {
+    let mut cursor = block.walk();
+    if !cursor.goto_first_child() {
+        return None;
+    }
+    loop {
+        let child = cursor.node();
+        if child.kind() == "label_statement" {
+            if let Some(name_node) = child.child_by_field_name("name") {
+                if node_text(name_node, source) == target_name {
+                    return Some(name_node);
+                }
+            }
+        } else if !is_label_block(child.kind()) {
+            if let Some(label) = find_label_in_block(child, source, target_name) {
+                return Some(label);
+            }
+        }
+        if !cursor.goto_next_sibling() {
+            break;
+        }
+    }
     None
 }
 

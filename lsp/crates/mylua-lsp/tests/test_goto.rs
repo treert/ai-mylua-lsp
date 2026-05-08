@@ -242,6 +242,81 @@ print(myVar)"#;
 }
 
 #[test]
+fn goto_label_jumps_to_label_statement() {
+    let src = r#"do
+    goto fallback
+    print("not reached")
+    ::fallback::
+    print("reached")
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "goto_label.lua");
+
+    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(1, 9), &mut agg, &GotoStrategy::Auto)
+        .expect("goto on label name should resolve");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
+        assert_eq!(loc.range.start.line, 3, "should jump to ::fallback::");
+        assert_eq!(loc.range.start.character, 6, "should select the label name");
+    } else {
+        panic!("expected scalar goto response");
+    }
+}
+
+#[test]
+fn goto_label_can_jump_to_outer_block_label() {
+    let src = r#"::fallback::
+do
+    goto fallback
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "goto_outer_label.lua");
+
+    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 9), &mut agg, &GotoStrategy::Auto)
+        .expect("goto inside nested block should resolve an outer visible label");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
+        assert_eq!(loc.range.start.line, 0, "should jump to the outer label");
+        assert_eq!(loc.range.start.character, 2, "should select the outer label name");
+    } else {
+        panic!("expected scalar goto response");
+    }
+}
+
+#[test]
+fn goto_label_does_not_cross_function_boundary() {
+    let src = r#"::fallback::
+local function inner()
+    goto fallback
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "goto_function_boundary.lua");
+
+    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 9), &mut agg, &GotoStrategy::Auto);
+
+    assert!(
+        result.is_none(),
+        "goto inside a nested function must not resolve to an outer function/file label: {:?}",
+        result,
+    );
+}
+
+#[test]
+fn goto_label_does_not_cross_if_branch_blocks() {
+    let src = r#"if flag then
+    ::fallback::
+else
+    goto fallback
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "goto_if_branch.lua");
+
+    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(3, 9), &mut agg, &GotoStrategy::Auto);
+
+    assert!(
+        result.is_none(),
+        "goto in else branch must not resolve to a label scoped to then branch: {:?}",
+        result,
+    );
+}
+
+#[test]
 fn goto_local_function_definition() {
     let src = r#"local function foo()
     return 1
