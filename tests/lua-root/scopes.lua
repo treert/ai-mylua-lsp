@@ -83,6 +83,13 @@ local function joined(...)
 end
 print(joined("a", "b", "c"))
 
+do
+    goto fallback
+    print("not reached")
+    ::fallback::
+    print("reached")
+end
+
 return {
     counter = counter,
     joined = joined,
