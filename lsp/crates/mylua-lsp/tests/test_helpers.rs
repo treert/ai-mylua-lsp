@@ -13,8 +13,7 @@ use mylua_lsp::util::LuaSource;
 use mylua_lsp::workspace_scanner;
 use tower_lsp_server::ls_types::{Position, Uri};
 
-/// Project root: `F:\MyGit\ai-mylua-lsp` (or wherever the repo lives).
-/// Tests reference Lua fixtures relative to the repo root under `tests/`.
+/// Project root (repo root). Used by `bundled_lua54_library_path`.
 fn repo_root() -> PathBuf {
     let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // crates/mylua-lsp -> lsp -> repo root
@@ -26,18 +25,6 @@ fn repo_root() -> PathBuf {
         .parent()
         .unwrap()
         .to_path_buf()
-}
-
-/// Absolute path to a test fixture file under `tests/`.
-pub fn fixture_path(relative: &str) -> PathBuf {
-    repo_root().join("tests").join(relative)
-}
-
-/// Read a fixture file's contents.
-pub fn read_fixture(relative: &str) -> String {
-    let path = fixture_path(relative);
-    std::fs::read_to_string(&path)
-        .unwrap_or_else(|e| panic!("failed to read fixture {}: {}", path.display(), e))
 }
 
 /// Create a new tree-sitter parser configured for mylua.

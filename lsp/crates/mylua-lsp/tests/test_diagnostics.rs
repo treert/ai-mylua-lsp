@@ -25,29 +25,92 @@ print(a, b)
 
 #[test]
 fn diagnostics_for_syntax_errors() {
-    let src = read_fixture("parse/test1.lua");
+    let src = r#"local one = 1
+math.abs(1)
+
+---@type ...
+local one
+a.c.b.d
+尹飞
+
+尹飞
+
+fsfsd
+
+adfs.b
+bbs
+sfj
+afdsf
+ff
+fsf.bbbS
+
+
+
+
+local ppd = 1
+local pp=1
+print(ppd)
+local a <closed>,b<closed> = 1
+print(ppd)
+print(ppd)
+
+
+
+"#;
     let mut parser = new_parser();
-    let doc = parse_doc(&mut parser, &src);
+    let doc = parse_doc(&mut parser, src);
     let diags =
         diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
-    // test1.lua contains intentional parse errors (e.g. "dfjsofjao", "if faf fsf")
     assert!(
         !diags.is_empty(),
-        "parse/test1.lua should produce diagnostics"
+        "source with intentional errors should produce diagnostics"
     );
 }
 
 #[test]
 fn diagnostics_for_define_test1() {
-    let src = read_fixture("define/test1.lua");
+    let src = r#"if d then
+
+end
+
+
+local var = nil
+if var then
+    print(var)
+elseif a then
+    
+end
+
+
+
+if a then
+    print(a)
+end
+
+while condition do
+    
+end
+
+dfjsofjao
+sfjosjaf
+if faf fsf
+elseif fsf ffa
+end
+
+dd = 1
+local ddd = {}
+ddd.b = 1
+d[#ddd] = 2
+d[#dd]=3
+d[#ddd.b + #ddd.b] = #dd + 1
+d[#ddd.b + 1] = #dd + 1"#;
     let mut parser = new_parser();
-    let doc = parse_doc(&mut parser, &src);
+    let doc = parse_doc(&mut parser, src);
     let diags =
         diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
-    // define/test1.lua has some intentionally invalid lines
     assert!(
         !diags.is_empty(),
-        "define/test1.lua should produce parse-level diagnostics"
+        "source with intentionally invalid lines should produce parse-level diagnostics"
     );
 }
 

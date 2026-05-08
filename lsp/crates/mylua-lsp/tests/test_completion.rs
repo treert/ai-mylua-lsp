@@ -38,15 +38,62 @@ abcdefg."#;
 
 #[test]
 fn complete_emmy_class_methods() {
-    let src = read_fixture("complete/test2.lua");
-    let (doc, uri, mut agg) = setup_single_file(&src, "test2.lua");
+    let src = r#"---@class uiButton
+local uiButton = class('uiButton')
 
-    // After "uiButton:" at line 47, the user types inside setY1 body
-    // Try completing after `self:` — line 45, col 22 (inside setY1)
+---@return uiButton
+function uiButton:new()
+    return self
+end
+
+---@return uiButton
+function uiButton:setX(x)
+    self.x_ = x
+    return self
+end
+
+---@return uiButton
+function uiButton:setY(y)
+    self.y_ = y
+    self.setY():setY():setY():setY()
+    return self
+end
+
+local btn1 = uiButton.new()                    -- 返回类型 uiButton
+
+local btn2 = uiButton.new():setX(10)           -- 返回类型 any
+
+local btn3 = uiButton.new():setX(10):setY(10)  -- 返回类型 any
+
+_G.aaa = uiButton.new()
+local btn4 = _G.aaa.setX().setX():setX():setX():setX()
+
+local btn5 = uiButton:setX(1)
+
+---@return uiButton
+function setYa(y)
+    self.y_ = y
+    uiButton.setY():setY():setY():setY().setX()
+    return self
+end
+
+local btn6 = setYa();
+local btn7 = setYa().setX();
+
+
+---@return uiButton
+function uiButton:setY1(y)
+    local btn8 = self:setX()
+    local btn9 = self:setY()
+       
+end
+           
+           "#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test2.lua");
+
+    // Complete after `self:` — line 45, col 22 (inside setY1)
     let items = completion::complete(&doc, intern_uri(&uri), pos(45, 22), &mut agg);
-    // Should list methods like setX, setY, etc.
     let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
-    // At minimum the function should not panic; methods may appear
     let _ = labels;
 }
 
@@ -65,12 +112,10 @@ xy"#;
 
 #[test]
 fn complete_fixture_test4_table_field() {
-    let src = read_fixture("complete/test4.lua");
-    let (_doc, uri, _agg) = setup_single_file(&src, "test4.lua");
+    let src = "local abcdefg = {}\nabcdefg.abc = 1\n";
+    let (_doc, uri, _agg) = setup_single_file(src, "test4.lua");
 
     // `abcdefg.` at end of file — should complete with `abc`
-    // File content: abcdefg.abc = 1, then blank lines
-    // We add a dot expression to trigger completion
     let src_with_dot = format!("{}\nabcdefg.", src.trim());
     let mut parser = new_parser();
     let doc2 = parse_doc(&mut parser, &src_with_dot);

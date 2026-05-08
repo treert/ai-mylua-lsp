@@ -42,19 +42,63 @@ end
 
 #[test]
 fn parse_fixture_test1() {
-    let src = read_fixture("parse/test1.lua");
+    let src = r#"local one = 1
+math.abs(1)
+
+---@type ...
+local one
+a.c.b.d
+尹飞
+
+尹飞
+
+fsfsd
+
+adfs.b
+bbs
+sfj
+afdsf
+ff
+fsf.bbbS
+
+
+
+
+local ppd = 1
+local pp=1
+print(ppd)
+local a <closed>,b<closed> = 1
+print(ppd)
+print(ppd)
+
+
+
+"#;
     let mut parser = new_parser();
-    let doc = parse_doc(&mut parser, &src);
+    let doc = parse_doc(&mut parser, src);
     let root = doc.root_node().unwrap();
     assert_eq!(root.kind(), "source_file");
-    // test1.lua has some intentionally broken lines, so we expect parse errors
+    // test1 has some intentionally broken lines, so we expect parse errors
 }
 
 #[test]
 fn parse_fixture_test2() {
-    let src = read_fixture("parse/test2.lua");
+    let src = r#"local abcdef = {
+    anumber = 1, 
+    bstring = "string",
+    cany = b,
+    dtable = {
+        a = 
+    }
+}
+print(abcdef)
+
+local cdef123 = abcdef
+print(cdef123)
+
+afjsofjao"#;
     let mut parser = new_parser();
-    let doc = parse_doc(&mut parser, &src);
+    let doc = parse_doc(&mut parser, src);
     let root = doc.root_node().unwrap();
     assert_eq!(root.kind(), "source_file");
 }
