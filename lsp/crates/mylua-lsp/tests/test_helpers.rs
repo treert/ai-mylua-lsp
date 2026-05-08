@@ -154,67 +154,6 @@ pub fn setup_workspace(
     (docs, agg, parser)
 }
 
-/// Set up a workspace by scanning a real directory of Lua fixtures.
-/// This mimics what the LSP does on `initialized`.
-pub fn setup_workspace_from_dir(
-    dir_relative: &str,
-) -> (
-    HashMap<UriId, Document>,
-    WorkspaceAggregation,
-    tree_sitter::Parser,
-) {
-    let dir = fixture_path(dir_relative);
-    let mut parser = new_parser();
-    let mut docs = HashMap::new();
-    let mut agg = WorkspaceAggregation::new();
-
-    let roots = vec![dir.clone()];
-    let module_entries = workspace_scanner::scan_workspace_lua_files(
-        &roots,
-        &RequireConfig::default(),
-        &WorkspaceConfig::default(),
-    );
-    for (module, uri) in &module_entries {
-        let uri_id = intern_uri(&uri);
-        agg.set_require_mapping(module.clone(), uri_id);
-    }
-
-    let files = workspace_scanner::collect_lua_files(&roots, &WorkspaceConfig::default());
-    for file in &files {
-        let text = match std::fs::read_to_string(file) {
-            Ok(t) => t,
-            Err(_) => continue,
-        };
-        let uri = match workspace_scanner::path_to_uri(file) {
-            Some(u) => u,
-            None => continue,
-        };
-        let uri_id = intern_uri(&uri);
-        let tree = parser.parse(text.as_bytes(), None);
-        if let Some(tree) = tree {
-            let lua_source = LuaSource::new(text);
-            let (summary, scope_tree) = summary_builder::build_file_analysis(
-                &uri,
-                &tree,
-                lua_source.source(),
-                lua_source.line_index(),
-            );
-            agg.upsert_summary(uri_id, summary);
-            docs.insert(
-                uri_id,
-                Document {
-                    lua_source,
-                    tree: Some(tree),
-                    scope_tree,
-                    last_diagnostic_signature: None,
-                },
-            );
-        }
-    }
-
-    (docs, agg, parser)
-}
-
 /// Set up a workspace with one or more library roots scanned alongside
 /// workspace files. Mimics the production `run_workspace_scan` path:
 /// library file URIs are force-flagged `is_meta=true` on their

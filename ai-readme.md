@@ -30,7 +30,7 @@ ai-mylua-lsp/
 │       ├── tree-sitter-mylua/   # Tree-sitter 包装 crate
 │       └── mylua-lsp/           # LSP server 主 crate
 ├── vscode-extension/ # VS Code 扩展（TypeScript）
-├── tests/            # 测试 fixture + 端到端测试目录
+├── tests/            # 手工测试用 Lua 文件（可随意增删改，Rust 测试不依赖此目录）
 └── docs/             # 设计文档中心
 ```
 
