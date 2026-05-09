@@ -298,19 +298,21 @@ function tb:for()
 end
 ```
 
-建议不要把所有 keyword 全局变成 identifier。
+选择方案：不把所有 keyword 全局变成 `identifier`，只在语法上明确无歧义的位置放开。
 
-建议只在这些上下文放开：
+放开范围：
 
 - field access：`t.end`
 - table field key：`{ local = 1 }`
 - method/function name：`function t:for()` / `function t.end()`
 
-实现建议：
+实现方案：
 
-- 在 grammar 中引入 `_member_name` 或 `_name_like_identifier`。
-- 它可以匹配 `identifier` 和指定 keyword token。
-- 如果可能，用 `alias(..., $.identifier)`，减少 Rust analyzer 改动。
+- `scanner.c` 继续按现有方式扫描：keyword 仍然产出对应的 `word_*` token，普通名字产出 `identifier`。
+- 在 grammar 中引入 `_member_name` 或 `_name_like_identifier`，用于上述无歧义位置。
+- `_member_name` / `_name_like_identifier` 匹配 `identifier` 以及允许作为 name 的 keyword token。
+- 对 keyword token 使用 `alias(..., $.identifier)`，让语法树对 Rust analyzer 尽量保持为 `identifier`，减少后续分析逻辑改动。
+- 普通变量名、参数名、局部声明名等仍然只接受 `identifier`，例如不放开 `local end = 1` / `function f(end) end`。
 
 ### 12. 数字字面量支持 `_`
 
