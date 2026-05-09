@@ -873,6 +873,51 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
     }
 }
 
+#[test]
+fn hover_call_return_from_emmy_fun_field_shows_return_type() {
+    // `local ret2 = MiscManager:miscFunc(...)` — hover on `ret2` should
+    // show `number` (the return type of `fun():number`).
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+---@class UtilsLocals
+---@field MiscManager MiscManager
+
+---@type UtilsLocals
+utils.locals = {}
+
+local MiscManager = utils.locals.MiscManager
+
+local ret1 = MiscManager.m_misc_id
+local ret2 = MiscManager:miscFunc(MiscManager.m_misc_id)
+print(ret1)
+print(ret2)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_fun_field_call_return.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // Line 16: `print(ret1)` — hover on `ret1` at col 6
+    let result1 = hover::hover(doc, intern_uri(&uri), pos(16, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result1.is_some(), "hover on ret1 should return a result");
+    let text1 = hover_content_string(result1.as_ref().unwrap());
+    assert!(
+        text1.contains("number"),
+        "ret1 (from .m_misc_id) should be number, got:\n{}", text1,
+    );
+
+    // Line 17: `print(ret2)` — hover on `ret2` at col 6
+    let result2 = hover::hover(doc, intern_uri(&uri), pos(17, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result2.is_some(), "hover on ret2 should return a result");
+    let text2 = hover_content_string(result2.as_ref().unwrap());
+    assert!(
+        text2.contains("number"),
+        "ret2 (from :miscFunc() with fun():number) should be number, got:\n{}", text2,
+    );
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
     use tower_lsp_server::ls_types::HoverContents;

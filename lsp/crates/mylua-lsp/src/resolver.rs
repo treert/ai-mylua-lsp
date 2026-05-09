@@ -842,7 +842,38 @@ fn resolve_field_access(
 
     match &base_resolved.type_fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
-            resolve_table_field(base_ctx, *shape_id, field, agg)
+            let result = resolve_table_field(base_ctx, *shape_id, field, agg);
+            if result.type_fact != TypeFact::Unknown || result.def_location.is_some() {
+                return result;
+            }
+            // Fallback: when the table shape doesn't contain the field,
+            // check if the original base was a GlobalRef and try a
+            // qualified name lookup in global_shard (e.g. `utils.locals`
+            // registered as a global TableExtension rather than a shape
+            // field).
+            if let TypeFact::Stub(SymbolicStub::GlobalRef { name }) = base {
+                let qualified = format!("{}.{}", name, field);
+                if let Some(candidates) = agg.global_shard.get(&qualified).cloned() {
+                    if let Some(c) = candidates.first() {
+                        let candidate_ctx = ResolveCtx::new(c.source_uri_id());
+                        let mut resolved = resolve_recursive(
+                            candidate_ctx,
+                            &c.type_fact,
+                            agg,
+                            depth + 1,
+                            visited,
+                        );
+                        if resolved.def_location.is_none() {
+                            resolved.def_location = Some(ResolvedLocation {
+                                uri_id: c.source_uri_id(),
+                                range: c.selection_range,
+                            });
+                        }
+                        return resolved;
+                    }
+                }
+            }
+            result
         }
 
         TypeFact::Known(KnownType::EmmyType(type_name)) => {

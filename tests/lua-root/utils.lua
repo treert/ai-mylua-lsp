@@ -24,3 +24,20 @@ utils.test_const = require('test_const')
 
 --- 2222
 -- utils.test_const = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+---@class UtilsLocals
+---@field MiscManager MiscManager
+
+
+---@type UtilsLocals
+utils.locals = {}
+
+
+local MiscManager = utils.locals.MiscManager
+
+local ret1 = MiscManager.m_misc_id
+local ret2 = MiscManager:miscFunc(MiscManager.m_misc_id)

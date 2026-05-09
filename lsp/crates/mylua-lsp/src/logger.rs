@@ -64,6 +64,19 @@ pub fn init(workspace_root: &Path, enable_file_log: bool) {
         log_path.display()
     ));
 
+    // Build configuration info
+    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let rust_version = option_env!("RUSTC_VERSION")
+        .or(option_env!("CARGO_PKG_RUST_VERSION"))
+        .filter(|s| !s.is_empty())
+        .unwrap_or("unknown");
+    log(&format!(
+        "[mylua-lsp] build: profile={}, target={}, rust={}",
+        profile,
+        std::env::consts::ARCH,
+        rust_version,
+    ));
+
     // Print executable path and its last-modified time so we can
     // quickly verify the correct binary is running and up-to-date.
     match std::env::current_exe() {
