@@ -778,6 +778,101 @@ end
     );
 }
 
+#[test]
+fn hover_local_assigned_from_emmy_class_field_shows_type() {
+    // Bug: `local MiscManager = utils.locals.MiscManager` — hovering on the
+    // LHS `MiscManager` (the declaration itself) should show the type
+    // `MiscManager` (the EmmyClass), same as hovering on the RHS field.
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+---@class UtilsLocals
+---@field MiscManager MiscManager
+
+---@type UtilsLocals
+utils.locals = {}
+
+local MiscManager = utils.locals.MiscManager
+
+MiscManager:miscFunc(MiscManager.m_misc_id)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_local_field_type.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // Line 12: `local MiscManager = utils.locals.MiscManager`
+    // `MiscManager` on the LHS starts at col 6
+    let result = hover::hover(doc, intern_uri(&uri), pos(12, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result.is_some(), "hover on LHS local MiscManager should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        // The hover must include type information — not just the variable name.
+        // When the bug is present, type_info is None so no "Type:" line appears.
+        assert!(
+            content.contains("Type:"),
+            "hover on local MiscManager (LHS) should include Type info, got: {}",
+            content
+        );
+        assert!(
+            content.contains("MiscManager"),
+            "hover on local MiscManager (LHS) should show MiscManager type, got: {}",
+            content
+        );
+    }
+}
+
+#[test]
+fn hover_method_on_local_from_emmy_class_field_shows_type() {
+    // `MiscManager:miscFunc(...)` — hover on `miscFunc` should show its type
+    // `fun():number` from the EmmyClass field definition.
+    // Also `MiscManager.m_misc_id` — hover on `m_misc_id` should show `number`.
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+---@class UtilsLocals
+---@field MiscManager MiscManager
+
+---@type UtilsLocals
+utils.locals = {}
+
+local MiscManager = utils.locals.MiscManager
+
+MiscManager:miscFunc(MiscManager.m_misc_id)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_local_field_method.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // Line 14: `MiscManager:miscFunc(MiscManager.m_misc_id)`
+    // `miscFunc` starts at col 12
+    let result = hover::hover(doc, intern_uri(&uri), pos(14, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result.is_some(), "hover on miscFunc should return a result");
+    if let Some(h) = &result {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("fun()") || content.contains("number"),
+            "hover on miscFunc should show function type info, got: {}",
+            content
+        );
+    }
+
+    // `m_misc_id` starts at col 33
+    let result2 = hover::hover(doc, intern_uri(&uri), pos(14, 33), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    assert!(result2.is_some(), "hover on m_misc_id should return a result");
+    if let Some(h) = &result2 {
+        let content = hover_content_string(h);
+        assert!(
+            content.contains("number"),
+            "hover on m_misc_id should show number type, got: {}",
+            content
+        );
+    }
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
     use tower_lsp_server::ls_types::HoverContents;

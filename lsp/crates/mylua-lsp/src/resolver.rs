@@ -145,6 +145,19 @@ fn resolve_field_chain_inner(
     let mut visited = HashSet::new();
     let mut current = ResolvedType::from_fact(ctx, base_fact.clone());
 
+    // When the base itself is a nested FieldOf stub (e.g. the scope tree
+    // stores `FieldOf { base: FieldOf { base: GlobalRef("utils"), ... }, ... }`
+    // for `local X = a.b.c`), flatten it into a sub-chain and pre-resolve
+    // it with this same function (which has the global_prefix fallback).
+    // Without this, the loop below sees an unresolved FieldOf stub as
+    // `current` and `resolve_field_access` fails for the same reason.
+    if let Some((inner_base, inner_fields)) = flatten_field_of_chain(base_fact) {
+        let pre = resolve_field_chain_inner(ctx, &inner_base, &inner_fields, agg, false);
+        if pre.type_fact != TypeFact::Unknown {
+            current = pre;
+        }
+    }
+
     let mut global_prefix = match base_fact {
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.to_string()),
         TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
@@ -207,7 +220,44 @@ pub fn resolve_local_in_file(
         Some(tf) => tf.clone(),
         None => return ResolvedType::unknown(ResolveCtx::new(owner_uri_id)),
     };
+
+    // For nested FieldOf stubs (e.g. `local x = a.b.c`), flatten into a
+    // base + field chain and use `resolve_field_chain` which has global
+    // shard qualified-name fallback. Without this, `resolve_type` alone
+    // fails when intermediate fields are registered as qualified globals
+    // (e.g. `utils.locals` via `---@type` assignment) rather than as
+    // entries inside a table shape.
+    if let Some((base, fields)) = flatten_field_of_chain(&fact) {
+        let result = resolve_field_chain(owner_uri_id, &base, &fields, agg);
+        if result.type_fact != TypeFact::Unknown {
+            return result;
+        }
+    }
+
     resolve_type(owner_uri_id, &fact, agg)
+}
+
+/// Flatten a nested `FieldOf { base: FieldOf { ... }, field }` chain into
+/// a base `TypeFact` and a vector of field names (in access order).
+/// Returns `None` if the fact is not a `FieldOf` stub at all.
+fn flatten_field_of_chain(fact: &TypeFact) -> Option<(TypeFact, Vec<String>)> {
+    let TypeFact::Stub(SymbolicStub::FieldOf { base, field }) = fact else {
+        return None;
+    };
+    let mut fields = vec![field.to_string()];
+    let mut current = base.as_ref();
+    loop {
+        match current {
+            TypeFact::Stub(SymbolicStub::FieldOf { base: inner_base, field: inner_field }) => {
+                fields.push(inner_field.to_string());
+                current = inner_base.as_ref();
+            }
+            _ => {
+                fields.reverse();
+                return Some((current.clone(), fields));
+            }
+        }
+    }
 }
 
 /// Get completable fields for a type (for dot-completion).
