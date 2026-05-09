@@ -107,19 +107,6 @@ impl LanguageServer for Backend {
             negotiated_encoding.as_str()
         );
 
-        // Boot the diagnostic scheduler consumer. It waits on an
-        // `index_state == Ready` gate internally, so it's safe to
-        // start before `initialized` fires / workspace scan completes.
-        start_diagnostic_consumer(
-            self.scheduler.clone(),
-            self.documents.clone(),
-            self.index.clone(),
-            self.config.clone(),
-            self.index_state.clone(),
-            self.library_uris.clone(),
-            self.client.clone(),
-        );
-
         Ok(InitializeResult {
             capabilities: ServerCapabilities {
                 position_encoding: Some(negotiated_encoding),
@@ -234,14 +221,14 @@ impl LanguageServer for Backend {
         // `did_open` / `hover` / `completion` behind the whole scan.
         //
         // During the scan window `IndexState` remains `Initializing`:
-        //   - `consumer_loop` gates semantic diagnostics on Ready.
+        //   - diagnostic consumer is not yet started.
         //   - goto / hover / completion / references serve per-file
         //     queries from whatever is in `documents` + `index` at
         //     the moment (potentially partial for cross-file lookups).
         //
-        // Seed-bulk of the diagnostic scheduler moved into
-        // `run_workspace_scan` after the `Ready` transition so that
-        // `documents` is populated before we enumerate URIs to seed.
+        // After the scan completes (`IndexState::Ready`), we start the
+        // diagnostic consumer which immediately begins draining the
+        // scheduler queue seeded by `run_workspace_scan`.
         let client = self.client.clone();
         // `roots`, `library_roots`, `library_file_uris` were resolved
         // at the very top of this handler (before the first `.await`)
@@ -253,8 +240,16 @@ impl LanguageServer for Backend {
         let open_uris = self.open_uris.clone();
         let scheduler = self.scheduler.clone();
         let index_state = self.index_state.clone();
+        let library_uris = self.library_uris.clone();
 
         tokio::spawn(async move {
+            let diag_client = client.clone();
+            let diag_scheduler = scheduler.clone();
+            let diag_documents = documents.clone();
+            let diag_index = index.clone();
+            let diag_config = config.clone();
+            let diag_index_state = index_state.clone();
+
             indexing::run_workspace_scan(
                 client,
                 roots,
@@ -269,6 +264,16 @@ impl LanguageServer for Backend {
                 started_at,
             )
             .await;
+
+            start_diagnostic_consumer(
+                diag_scheduler,
+                diag_documents,
+                diag_index,
+                diag_config,
+                diag_index_state,
+                library_uris,
+                diag_client,
+            );
         });
     }
 

@@ -588,11 +588,10 @@ pub(crate) fn start_diagnostic_consumer(
     });
 }
 
-/// Single-consumer loop draining `DiagnosticScheduler.pop()`. Waits
-/// for the workspace index to reach `Ready` before doing any work
-/// (gated before pop — otherwise popping a Hot URI while Not Ready
-/// would require re-enqueuing it which would silently downgrade to
-/// Cold on the next loop iteration).
+/// Single-consumer loop draining `DiagnosticScheduler.pop()`.
+/// Normally started after `run_workspace_scan` completes (i.e.
+/// `IndexState::Ready` is already set), but the Ready gate at the
+/// top of the loop is kept as a defensive check.
 ///
 /// Mirrors the body of the legacy `schedule_semantic_diagnostics`
 /// closure: snapshot text → compute (syntax + semantic) → text
