@@ -119,9 +119,35 @@ flowchart TB
 
 ## 4. 并发与安全
 
-- **per-URI `edit_locks`**，固定锁顺序：`edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
+### 4.1 锁顺序（CRITICAL）
+
+全局唯一规范锁序：
+
+```
+edit_locks → open_uris → documents → index → config → scheduler.inner
+```
+
+**规则**：
+
+1. 同一函数/块中需要持有多把锁时，**必须**按上述从左到右的顺序获取。
+2. 若只需一把锁，可在任意时机获取（无顺序约束）。
+3. 若能将两次获取拆成独立作用域（第一把锁释放后再获取第二把），则不受此约束。
+4. 即使两处代码获取的锁集合不重叠，也建议遵循此序以降低未来组合风险。
+
+**违规后果**：经典 AB-BA 死锁。诊断 consumer 持有 `documents` 等待 `index`，而另一 handler 持有 `index` 等待 `documents`，两者永久互等。表现为 LSP 完全无响应（hover Loading、进度数字冻结）。
+
+**已知历史 bug**：`completion_resolve` 曾以 `index → documents` 反序获取锁，在补全 resolve 与后台诊断并发时触发死锁。修复：交换获取顺序使其与规范一致。
+
+**自查方法**：
+- `let idx = self.index.lock()` 和 `let docs = self.documents.lock()` 出现在同一函数中时，`docs` 必须在 `idx` 之前绑定。
+- 临时值（如 `self.index.lock().unwrap().remove_file(id);`）在语句末尾释放，不构成同时持有，但仍建议保持视觉顺序。
+
+### 4.2 其他并发要点
+
+- **per-URI `edit_locks`**：防止同一文件并发编辑竞争
 - **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
 - **可取消**：遵守 `$/cancelRequest`
+- **consumer_loop**：单线程串行消费诊断队列，持有 `documents` + `index` 锁期间执行 CPU 密集计算（语义诊断）。此窗口内所有需要这两把锁的 handler 会被阻塞，属于已知 trade-off。
 
 ## 5. 技术选型
 

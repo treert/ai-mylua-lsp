@@ -839,8 +839,8 @@ impl LanguageServer for Backend {
         item: CompletionItem,
     ) -> Result<CompletionItem> {
         let local_uri_id = completion_resolve_local_uri_id(&item);
-        let idx = self.index.lock().unwrap();
         let docs = self.documents.lock().unwrap();
+        let idx = self.index.lock().unwrap();
         Ok(completion::resolve_completion(
             item,
             &idx,
