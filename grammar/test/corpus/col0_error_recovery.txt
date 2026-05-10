@@ -2,6 +2,7 @@
 Missing inner 'end' — func2 is now a separate top-level declaration
 ================================================================================
 
+---#enable top_keyword
 function func1()
     if a == 1 then
 
@@ -15,28 +16,34 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (function_declaration
     (top_word_function)
-    name: (function_name (identifier))
+    name: (function_name
+      (identifier))
     body: (function_body
       parameters: (parameter_list)
       (if_statement
         (word_if)
         condition: (binary_expression
-          left: (variable (identifier))
+          left: (variable
+            (identifier))
           right: (number))
         (word_then)
         (word_end))
       (MISSING word_end)))
   (function_declaration
     (top_word_function)
-    name: (function_name (identifier))
+    name: (function_name
+      (identifier))
     body: (function_body
       parameters: (parameter_list)
       (if_statement
         (word_if)
         condition: (binary_expression
-          left: (variable (identifier))
+          left: (variable
+            (identifier))
           right: (number))
         (word_then)
         (word_end))
@@ -46,6 +53,7 @@ end
 Missing 'end' before a top-level local — local is now a separate top-level declaration
 ================================================================================
 
+---#enable top_keyword
 function foo()
     if a == 1 then
         bar()
@@ -54,27 +62,35 @@ local x = 1
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_function)
-    (function_name (identifier))
+    (function_name
+      (identifier))
     (parameter_list)
     (word_if)
     (binary_expression
-      left: (variable (identifier))
+      left: (variable
+        (identifier))
       right: (number))
     (word_then)
     (function_call
-      callee: (variable (identifier))
+      callee: (variable
+        (identifier))
       arguments: (arguments)))
   (local_declaration
     (top_word_local)
-    names: (attribute_name_list (identifier))
-    values: (expression_list (number))))
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (number))))
 
 ================================================================================
 Missing multiple block terminators — other() is now a separate top-level declaration
 ================================================================================
 
+---#enable top_keyword
 function foo()
     if a then
         while b do
@@ -84,22 +100,29 @@ function other() end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_function)
-    (function_name (identifier))
+    (function_name
+      (identifier))
     (parameter_list)
     (word_if)
-    (variable (identifier))
+    (variable
+      (identifier))
     (word_then)
     (word_while)
-    (variable (identifier))
+    (variable
+      (identifier))
     (word_do)
     (function_call
-      callee: (variable (identifier))
+      callee: (variable
+        (identifier))
       arguments: (arguments)))
   (function_declaration
     (top_word_function)
-    name: (function_name (identifier))
+    name: (function_name
+      (identifier))
     body: (function_body
       parameters: (parameter_list)
       (word_end))))
@@ -108,6 +131,7 @@ function other() end
 Top-level return still belongs to the enclosing broken function and error is deferred
 ================================================================================
 
+---#enable top_keyword
 function foo()
     if a == 1 then
 
@@ -118,19 +142,24 @@ return 123
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (function_declaration
     (top_word_function)
-    name: (function_name (identifier))
+    name: (function_name
+      (identifier))
     body: (function_body
       parameters: (parameter_list)
       (if_statement
         (word_if)
         condition: (binary_expression
-          left: (variable (identifier))
+          left: (variable
+            (identifier))
           right: (number))
         (word_then)
         (word_end))
       (return_statement
         (word_return)
-        (expression_list (number)))
+        (expression_list
+          (number)))
       (MISSING word_end))))

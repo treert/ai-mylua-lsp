@@ -21,7 +21,7 @@ end
 
 (source_file
   (do_statement
-    (top_word_do)
+    (word_do)
     (word_end)))
 
 ================================================================================
@@ -37,7 +37,7 @@ goto done
   (label_statement
     name: (identifier))
   (goto_statement
-    (top_word_goto)
+    (word_goto)
     name: (identifier)))
 
 ================================================================================
@@ -51,7 +51,7 @@ end
 
 (source_file
   (while_statement
-    (top_word_while)
+    (word_while)
     condition: (true
       (word_true))
     (word_do)
@@ -68,7 +68,7 @@ until true
 
 (source_file
   (repeat_statement
-    (top_word_repeat)
+    (word_repeat)
     (word_until)
     condition: (true
       (word_true))))
@@ -86,7 +86,7 @@ end
 
 (source_file
   (if_statement
-    (top_word_if)
+    (word_if)
     condition: (variable
       (identifier))
     (word_then)
@@ -110,7 +110,7 @@ end
 
 (source_file
   (for_numeric_statement
-    (top_word_for)
+    (word_for)
     name: (identifier)
     start: (number)
     stop: (number)
@@ -128,7 +128,7 @@ end
 
 (source_file
   (for_numeric_statement
-    (top_word_for)
+    (word_for)
     name: (identifier)
     start: (number)
     stop: (number)
@@ -148,7 +148,7 @@ end
 
 (source_file
   (for_generic_statement
-    (top_word_for)
+    (word_for)
     names: (name_list
       (identifier)
       (identifier))
@@ -175,7 +175,7 @@ end
 
 (source_file
   (function_declaration
-    (top_word_function)
+    (word_function)
     name: (function_name
       (identifier))
     body: (function_body
@@ -193,7 +193,7 @@ end
 
 (source_file
   (function_declaration
-    (top_word_function)
+    (word_function)
     name: (function_name
       (identifier)
       method: (identifier))
@@ -212,7 +212,7 @@ end
 
 (source_file
   (local_function_declaration
-    (top_word_local)
+    (word_local)
     (word_function)
     name: (identifier)
     body: (function_body
@@ -229,7 +229,7 @@ local x = 1
 
 (source_file
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -245,7 +245,7 @@ local x <const> = 42
 
 (source_file
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier)
       (attribute
@@ -316,7 +316,7 @@ local d = "a" .. "-" .. "b"
 
 (source_file
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -324,7 +324,7 @@ local d = "a" .. "-" .. "b"
         (short_string
           (short_string_content_double)))))
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -332,7 +332,7 @@ local d = "a" .. "-" .. "b"
         (short_string
           (short_string_content_double)))))
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -340,7 +340,7 @@ local d = "a" .. "-" .. "b"
         (short_string
           (short_string_content_single)))))
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -368,7 +368,7 @@ local c = { "-", "--", "---" }
 
 (source_file
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -376,7 +376,7 @@ local c = { "-", "--", "---" }
         (short_string
           (short_string_content_double)))))
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -384,7 +384,7 @@ local c = { "-", "--", "---" }
         (short_string
           (short_string_content_double)))))
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list
@@ -414,7 +414,7 @@ local x = (32 - 32) / 2 -
 
 (source_file
   (local_declaration
-    (top_word_local)
+    (word_local)
     names: (attribute_name_list
       (identifier))
     values: (expression_list

@@ -2,6 +2,7 @@
 Top-level: all 8 keywords at column 0 (regression: no top_* leaks in AST)
 ================================================================================
 
+---#enable top_keyword
 if a then
   b()
 end
@@ -29,6 +30,8 @@ goto done
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (if_statement
     (top_word_if)
     condition: (variable
@@ -122,6 +125,7 @@ goto done
 Nested: all keywords indented inside a function (no top token interference)
 ================================================================================
 
+---#enable top_keyword
 function outer()
   if a then
     while true do
@@ -140,6 +144,8 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (function_declaration
     (top_word_function)
     name: (function_name
@@ -188,6 +194,7 @@ end
 Expression-level function_definition is unaffected
 ================================================================================
 
+---#enable top_keyword
 local f = function(x)
   return x + 1
 end
@@ -196,6 +203,8 @@ local t = { fn = function() end }
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (local_declaration
     (top_word_local)
     names: (attribute_name_list
@@ -233,6 +242,7 @@ local t = { fn = function() end }
 Error front-load: if missing end, then top-level if
 ================================================================================
 
+---#enable top_keyword
 if a then
   b()
 if c then
@@ -241,6 +251,8 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_if)
     (variable
@@ -261,6 +273,7 @@ end
 Error front-load: if missing end, then top-level do
 ================================================================================
 
+---#enable top_keyword
 if a then
   b()
 do
@@ -270,6 +283,8 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_if)
     (variable
@@ -292,6 +307,7 @@ end
 Error front-load: while missing end, then top-level function
 ================================================================================
 
+---#enable top_keyword
 while true do
   x()
 function foo()
@@ -300,6 +316,8 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_while)
     (true
@@ -321,6 +339,7 @@ end
 Error front-load: for missing end, then top-level local
 ================================================================================
 
+---#enable top_keyword
 for i = 1, 10 do
   x()
 local y = 2
@@ -328,6 +347,8 @@ local y = 2
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_for)
     (identifier)
@@ -349,6 +370,7 @@ local y = 2
 Error front-load: repeat missing until, then top-level goto
 ================================================================================
 
+---#enable top_keyword
 repeat
   x()
 goto done
@@ -357,6 +379,8 @@ goto done
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_repeat)
     (function_call
@@ -373,6 +397,7 @@ goto done
 Error front-load: do missing end, then top-level if
 ================================================================================
 
+---#enable top_keyword
 do
   x()
 if a then
@@ -381,6 +406,8 @@ end
 ---
 
 (source_file
+  (emmy_comment
+    (emmy_line))
   (ERROR
     (top_word_do)
     (function_call

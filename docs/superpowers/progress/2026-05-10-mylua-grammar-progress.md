@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement）；下一步处理 top_keyword corpus/default 差异或 named/spread args
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement）；top_keyword corpus/default 差异已收尾；下一步处理 named/spread args 或 safe access 链式增强
 
 ## 入口文档
 
@@ -77,10 +77,19 @@
 - standalone `obj?()` / `obj?:method(1)` function call statement
 - safe `?.` / `?:` unknown-field diagnostics 降噪；普通 `.` / `:` 仍按原逻辑报告
 
+### top_keyword corpus/default 差异收尾
+
+已改：
+
+- `grammar/test/corpus/statements.txt`
+  - 普通 statements corpus 改为匹配 scanner 默认 `top_keyword_disabled = true` 的 `word_*` 期望
+- `grammar/test/corpus/col0_error_recovery.txt`
+- `grammar/test/corpus/top_level_keyword_split.txt`
+  - 显式加入 `---#enable top_keyword`，保留顶层关键字错误前置恢复测试语义
+
 待继续：
 
 - 可选：再支持链式 `obj?.field?.nested`
-- 处理 `npx tree-sitter test` 中 top_keyword 默认值与 corpus 期望不一致导致的剩余失败。
 
 ## 当前验证结果
 
@@ -88,35 +97,27 @@
 
 ```bash
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/grammar
-npx tree-sitter generate
-npx tree-sitter test --file-name mylua.txt
+npx tree-sitter test --file-name statements.txt
+npx tree-sitter test --file-name col0_error_recovery.txt
+npx tree-sitter test --file-name top_level_keyword_split.txt
 npx tree-sitter test
-
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
-cargo test
-cargo test -p mylua-lsp --test test_mylua_parse parse_mylua_safe_access_and_call_syntax
-cargo test -p mylua-lsp --test test_diagnostics safe_field_access_suppresses_unknown_field_diagnostic
-cargo test -p mylua-lsp --test test_diagnostics safe_method_call_suppresses_unknown_field_diagnostic
 ```
 
 结果：
 
-- `npx tree-sitter generate`: passed
-- `npx tree-sitter test --file-name mylua.txt`: 4/4 passed（新增 standalone safe call statement）
-- `cargo test`: passed
-- `parse_mylua_safe_access_and_call_syntax`: passed（已包含 standalone `obj?()` / `obj?:method(1)`）
-- `safe_field_access_suppresses_unknown_field_diagnostic`: passed
-- `safe_method_call_suppresses_unknown_field_diagnostic`: passed
-- `npx tree-sitter test`: failed，剩余失败在 `col0_error_recovery`、`statements`、`top_level_keyword_split`；当前观察为 tree-sitter CLI 使用 scanner 默认 `top_keyword_disabled = true`，而这些 corpus 多数仍期望 `top_word_*`。
-- 相关 `read_lints`: no new errors；`grammar/grammar.js` 仅有既有 hint（`EMMY_PREC` unused / CommonJS module）
+- `npx tree-sitter test --file-name statements.txt`: 20/20 passed
+- `npx tree-sitter test --file-name col0_error_recovery.txt`: 4/4 passed
+- `npx tree-sitter test --file-name top_level_keyword_split.txt`: 11/11 passed
+- `npx tree-sitter test`: 51/51 passed
+- 本轮仅调整 corpus 源输入/期望，未修改 parser/Rust 源码；上一轮 `npx tree-sitter generate` 与 `cargo test` 结果仍保持记录为 passed
 
 ## 当前工作区变更
 
 ```text
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
- M grammar/grammar.js
- M grammar/test/corpus/mylua.txt
- M lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
+ M grammar/test/corpus/col0_error_recovery.txt
+ M grammar/test/corpus/statements.txt
+ M grammar/test/corpus/top_level_keyword_split.txt
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -125,19 +126,16 @@ cargo test -p mylua-lsp --test test_diagnostics safe_method_call_suppresses_unkn
 
 优先继续 P2/P3 中尚未完成的 parser 子任务，建议顺序：
 
-1. top_keyword corpus/default 差异收尾
-   - 明确 tree-sitter CLI corpus 是否应显式 `---#enable top_keyword`，或调整测试期望为默认 `top_keyword_disabled = true`
-   - 目标是恢复 `npx tree-sitter test` 全量通过
-2. safe access/call 可选增强
-   - 可选：再支持链式 `obj?.field?.nested`
-3. named/spread args
+1. named/spread args
    - `f(a=1)`
    - `f(*args)`
    - 启用 `parse_mylua_named_args_fixture`
-4. keyword-as-name 完整范围
+2. safe access/call 可选增强
+   - 可选：再支持链式 `obj?.field?.nested`
+3. keyword-as-name 完整范围
    - 当前仅为 `continue` label/goto 做了最小适配
-5. `$function`
-6. `$string` scanner mode
+4. `$function`
+5. `$string` scanner mode
 
 ## 重要注意事项
 
