@@ -428,9 +428,26 @@ module.exports = grammar({
     ),
 
     _argument_expression_list: $ => seq(
-      $._expression,
-      repeat(seq(',', $._expression)),
+      $._argument,
+      repeat(seq(',', $._argument)),
       optional(','),
+    ),
+
+    _argument: $ => choice(
+      $.named_argument,
+      $.spread_argument,
+      $._expression,
+    ),
+
+    named_argument: $ => seq(
+      field('name', $.identifier),
+      '=',
+      field('value', $._expression),
+    ),
+
+    spread_argument: $ => seq(
+      '*',
+      field('value', $._expression),
     ),
 
     // ========================================================================

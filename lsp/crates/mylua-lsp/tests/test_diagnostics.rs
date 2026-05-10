@@ -1591,6 +1591,135 @@ f(1, 2, 3, 4, 5)
 }
 
 #[test]
+fn argument_count_skips_spread_argument_expansion() {
+    let src = r#"
+local args = {1, 2, 3}
+local function f(a) return a end
+f(*args, 13)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_spread_argument.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "spread argument source should parse before diagnostics: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "spread arguments should suppress conservative count diagnostics, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_type_uses_named_argument_value() {
+    let src = r#"
+---@param a number
+local function f(a) return a end
+f(a="not a number")
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype_named_argument.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "named argument source should parse before diagnostics: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("declared 'number', got 'string'")),
+        "named argument value should participate in type diagnostics, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn nested_spread_does_not_suppress_outer_argument_count() {
+    let src = r#"
+local args = {1, 2, 3}
+local function g(...) return 1 end
+local function f(a) return a end
+f(g(*args), 2)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_nested_spread.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "nested spread source should parse before diagnostics: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.message.contains("Call to 'f' passes 2 argument(s)")),
+        "spread inside nested call must not suppress outer call count diagnostics, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn reordered_named_arguments_skip_positional_type_mismatch() {
+    let src = r#"
+---@param a number
+---@param b string
+---@param c boolean
+local function f(a, b, c) end
+f(a=1, c=true, b="ok")
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype_named_reordered.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "reordered named argument source should parse before diagnostics: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("Argument")),
+        "reordered named args should not be checked positionally, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn argument_count_stdlib_math_max_accepts_varargs() {
     let lib = bundled_lua54_library_path();
     let user_file = ("math_max_user.lua", "local x = math.max(1, 2)\n");

@@ -125,3 +125,53 @@ obj?:method(1)
         (expression_list
           (number))))))
 
+================================================================================
+MyLua named and spread call arguments
+================================================================================
+
+f(a=1, c=3, b=2)
+f(11, c=33, *args)
+f(*[100], 13)
+
+---
+
+(source_file
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (expression_list
+          (named_argument
+            name: (identifier)
+            value: (number))
+          (named_argument
+            name: (identifier)
+            value: (number))
+          (named_argument
+            name: (identifier)
+            value: (number))))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (expression_list
+          (number)
+          (named_argument
+            name: (identifier)
+            value: (number))
+          (spread_argument
+            value: (variable
+              (identifier)))))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (expression_list
+          (spread_argument
+            value: (array_constructor
+              (number)))
+          (number))))))
+

@@ -53,7 +53,16 @@ pub(super) fn check_call_argument_diagnostics(
         let Some(args_node) = call.child_by_field_name("arguments") else {
             continue;
         };
+        let has_spread_argument =
+            crate::util::call_args_contain_top_level_spread_argument(args_node, source);
         let (actual_count, arg_exprs) = collect_call_arguments(args_node, source);
+
+        // MyLua spread arguments expand dynamically from a table/map, so a
+        // positional count/type pairing is not reliable in the first phase.
+        // Keep diagnostics conservative until named/spread-aware matching lands.
+        if has_spread_argument {
+            continue;
+        }
 
         // Count match: any overload compatible with the actual count
         // clears the diagnostic.
@@ -105,6 +114,9 @@ pub(super) fn check_call_argument_diagnostics(
                 continue;
             };
             let visible_params = visible_params_for(&best_sig, is_method);
+            if has_unaligned_named_arguments(args_node, source, &visible_params) {
+                continue;
+            }
             for (i, arg_expr) in arg_exprs.iter().enumerate() {
                 // Vararg param absorbs everything past its position.
                 let param_idx = i;
@@ -151,6 +163,28 @@ fn collect_function_calls<'tree>(
             collect_function_calls(child, out);
         }
     }
+}
+
+fn has_unaligned_named_arguments(
+    args: tree_sitter::Node,
+    source: &[u8],
+    visible_params: &[crate::type_system::ParamInfo],
+) -> bool {
+    for (i, arg) in crate::util::call_arg_nodes(args, source).iter().enumerate() {
+        if arg.kind() != "named_argument" {
+            continue;
+        }
+        let Some(name) = arg.child_by_field_name("name") else {
+            return true;
+        };
+        let Some(param) = visible_params.get(i) else {
+            return true;
+        };
+        if crate::util::node_text(name, source) != param.name {
+            return true;
+        }
+    }
+    false
 }
 
 /// Count actual arguments at a `function_call`'s `arguments` node and

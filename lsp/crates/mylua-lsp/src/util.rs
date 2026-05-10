@@ -599,15 +599,27 @@ pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<
 /// Extract individual argument-expression nodes from a `function_call`'s
 /// `arguments` node.
 ///
-/// Handles the three grammar forms:
+/// Handles the grammar forms:
 /// - Paren form `f(a, b)` — the `arguments` node contains an
 ///   `expression_list` child whose named children are the actual args.
+/// - MyLua named/spread wrappers — `f(a=1)` returns the `value` expression;
+///   `f(*args)` returns the spread source expression for best-effort callers.
 /// - Table form `f{...}` — the `arguments` node itself is the single arg.
 /// - String form `f "x"` — the `arguments` node itself is the single arg.
 ///
 /// For the paren form, if the `expression_list` is absent (zero-arg call),
 /// returns an empty vector.
 pub fn extract_call_arg_nodes<'tree>(
+    args: tree_sitter::Node<'tree>,
+    source: &[u8],
+) -> Vec<tree_sitter::Node<'tree>> {
+    call_arg_nodes(args, source)
+        .into_iter()
+        .map(call_argument_value_node)
+        .collect()
+}
+
+pub fn call_arg_nodes<'tree>(
     args: tree_sitter::Node<'tree>,
     source: &[u8],
 ) -> Vec<tree_sitter::Node<'tree>> {
@@ -634,6 +646,22 @@ pub fn extract_call_arg_nodes<'tree>(
         }
     }
     exprs
+}
+
+fn call_argument_value_node<'tree>(node: tree_sitter::Node<'tree>) -> tree_sitter::Node<'tree> {
+    match node.kind() {
+        "named_argument" | "spread_argument" => node.child_by_field_name("value").unwrap_or(node),
+        _ => node,
+    }
+}
+
+pub fn call_args_contain_top_level_spread_argument(
+    args: tree_sitter::Node,
+    source: &[u8],
+) -> bool {
+    call_arg_nodes(args, source)
+        .iter()
+        .any(|arg| arg.kind() == "spread_argument")
 }
 
 /// Check whether a `table_constructor` AST node uses ONLY bracket-key

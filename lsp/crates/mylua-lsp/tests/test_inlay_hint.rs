@@ -99,6 +99,30 @@ fn inlay_hints_skip_argument_same_name_as_param() {
 }
 
 #[test]
+fn inlay_hints_skip_named_and_spread_arguments() {
+    let src = "local args = {1, 2}\nlocal function foo(a, b, c) end\nfoo(c=3, b=2)\nfoo(*args)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "named_spread_inlay.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "named/spread inlay source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let hints = inlay_hint::inlay_hints(
+        &doc,
+        intern_uri(&uri),
+        full_range(),
+        &mut agg,
+        &cfg(true, true, false),
+    );
+    let labels: Vec<String> = hints.iter().map(label).collect();
+    assert!(
+        labels.is_empty(),
+        "named/spread args should not emit positional parameter hints, got: {:?}",
+        labels,
+    );
+}
+
+#[test]
 fn inlay_hints_variable_type_for_primitive() {
     let src = "local n = 42\n";
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");

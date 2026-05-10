@@ -80,7 +80,22 @@ obj?:method(1)
 }
 
 #[test]
-#[ignore = "requires P3 named/spread argument grammar"]
+fn parse_mylua_named_and_spread_args_syntax() {
+    assert_source_parses(
+        "named/spread argument MyLua syntax",
+        r#"
+local function f(a, b, c) return a end
+local args = {a = 1, b = 2, c = 3}
+f(a=1, c=3, b=2)
+f(11, c=33, *args)
+f(b=11, *args, a=11, g())
+f(*[100], 13)
+"#,
+    );
+}
+
+#[test]
+#[ignore = "fixture still contains P5 dollar string/function syntax"]
 fn parse_mylua_named_args_fixture() {
     assert_fixture_parses("tests/lua-root/mylua/func-named-args.mylua");
 }

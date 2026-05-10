@@ -161,8 +161,14 @@ fn collect_parameter_name_hints(
         return;
     }
 
-    let arg_exprs = crate::util::extract_call_arg_nodes(args, source);
+    let arg_exprs = crate::util::call_arg_nodes(args, source);
+    if arg_exprs.iter().any(|expr| expr.kind() == "spread_argument") {
+        return;
+    }
     for (arg_index, expr) in arg_exprs.iter().enumerate() {
+        if expr.kind() == "named_argument" {
+            continue;
+        }
         emit_param_hint(&params, arg_index, *expr, source, out, line_index);
     }
 }
