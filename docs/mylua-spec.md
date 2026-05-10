@@ -162,15 +162,11 @@ assert((false ?? 1) == false)
 - 只检查左侧是否为 `nil`。
 - 与 Lua 的 `or` 不同，`false ?? x` 结果仍是 `false`。
 
-第一阶段：
+设计：
 
 - parser 支持 `??`。
-- type inference 可以先粗略处理为左右类型 union 或 unknown。
-
-后续增强：
-
-- 如果左侧确定非 nil，结果偏向左侧类型。
-- 如果左侧可能 nil，结果为左侧去 nil 后与右侧合并。
+- type inference 结果直接选择左侧类型。
+- 该操作符主要用于左侧为 `nil` 时赋予默认值，因此右侧表达式的类型应与左侧类型一致。
 
 ### 6. `?` 安全访问 / 安全调用
 
@@ -328,6 +324,8 @@ end
 - field access：`t.end`
 - table field key：`{ local = 1 }`
 - method/function name：`function t:for()` / `function t.end()`
+- goto label：`goto end`
+- label declaration：`::end::`
 
 实现方案：
 
