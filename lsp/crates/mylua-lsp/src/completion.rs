@@ -78,6 +78,11 @@ pub fn complete(
         return Vec::new();
     }
 
+    // MyLua call-side named arguments: `foo(co|)` → `count=` from the callee signature.
+    if let Some(items) = try_named_argument_name_completion(doc, uri_id, position, index) {
+        return items;
+    }
+
     // Fallback: identifier prefix completion (locals + globals + keywords).
     let prefix = get_prefix(doc, position);
     let mut items = Vec::new();
@@ -295,6 +300,212 @@ fn is_plain_dollar_string_content_node(node: tree_sitter::Node) -> bool {
         _ => None,
     })
     .unwrap_or(false)
+}
+
+fn try_named_argument_name_completion(
+    doc: &Document,
+    uri_id: UriId,
+    position: Position,
+    index: &WorkspaceAggregation,
+) -> Option<Vec<CompletionItem>> {
+    if !is_mylua_uri(uri_id) {
+        return None;
+    }
+
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
+    let source = doc.source();
+    let call = find_enclosing_completion_call(doc.root_node()?, offset)?;
+    let args = call.child_by_field_name("arguments")?;
+    if source.get(args.start_byte()).copied() != Some(b'(') {
+        return None;
+    }
+
+    let prefix = current_named_argument_prefix(args, offset, source)?;
+    let (signatures, is_method, _name) = crate::signature_help::resolve_call_signatures(
+        call,
+        source,
+        uri_id,
+        &doc.scope_tree,
+        index,
+    )?;
+    let signature = signatures.first()?;
+    let used_names = used_named_argument_names(args, source);
+
+    let items: Vec<CompletionItem> = signature
+        .params
+        .iter()
+        .filter(|param| !(is_method && param.name == "self"))
+        .filter(|param| param.name.as_str().starts_with(&prefix))
+        .filter(|param| !used_names.contains(param.name.as_str()))
+        .map(|param| {
+            let name = param.name.to_string();
+            CompletionItem {
+                label: name.clone(),
+                kind: Some(CompletionItemKind::FIELD),
+                detail: Some("named argument".to_string()),
+                insert_text: Some(format!("{}=", name)),
+                ..Default::default()
+            }
+        })
+        .collect();
+
+    if items.is_empty() {
+        None
+    } else {
+        Some(items)
+    }
+}
+
+fn is_mylua_uri(uri_id: UriId) -> bool {
+    resolve_uri(uri_id).as_str().ends_with(".mylua")
+}
+
+fn find_enclosing_completion_call(
+    root: tree_sitter::Node,
+    byte_offset: usize,
+) -> Option<tree_sitter::Node> {
+    let mut node = root
+        .descendant_for_byte_range(byte_offset, byte_offset)
+        .or_else(|| {
+            byte_offset
+                .checked_sub(1)
+                .and_then(|probe| root.descendant_for_byte_range(probe, probe))
+        })?;
+    loop {
+        if node.kind() == "function_call" {
+            if let Some(args) = node.child_by_field_name("arguments") {
+                if byte_offset >= args.start_byte() && byte_offset <= args.end_byte() {
+                    return Some(node);
+                }
+            }
+        }
+        node = node.parent()?;
+    }
+}
+
+fn current_named_argument_prefix(
+    args: tree_sitter::Node,
+    byte_offset: usize,
+    source: &[u8],
+) -> Option<String> {
+    let start = current_argument_start(args, byte_offset, source)?;
+    let end = byte_offset.min(args.end_byte());
+    if end < start || has_top_level_equals(&source[start..end]) {
+        return None;
+    }
+
+    let mut prefix_start = end;
+    while prefix_start > start {
+        let b = source[prefix_start - 1];
+        if b.is_ascii_alphanumeric() || b == b'_' {
+            prefix_start -= 1;
+        } else {
+            break;
+        }
+    }
+
+    let before_prefix = &source[start..prefix_start];
+    let trimmed = trim_ascii_whitespace(before_prefix);
+    if !trimmed.is_empty() || source.get(prefix_start).copied() == Some(b'*') {
+        return None;
+    }
+
+    Some(String::from_utf8_lossy(&source[prefix_start..end]).to_string())
+}
+
+fn current_argument_start(
+    args: tree_sitter::Node,
+    byte_offset: usize,
+    source: &[u8],
+) -> Option<usize> {
+    let start = args.start_byte().checked_add(1)?;
+    let end = byte_offset.min(args.end_byte());
+    if end < start {
+        return None;
+    }
+
+    let mut arg_start = start;
+    scan_top_level(source, start, end, |idx, b| {
+        if b == b',' {
+            arg_start = idx + 1;
+        }
+    });
+    Some(arg_start)
+}
+
+fn has_top_level_equals(slice: &[u8]) -> bool {
+    let mut found = false;
+    scan_top_level(slice, 0, slice.len(), |_idx, b| {
+        if b == b'=' {
+            found = true;
+        }
+    });
+    found
+}
+
+fn scan_top_level(
+    source: &[u8],
+    start: usize,
+    end: usize,
+    mut on_top_level: impl FnMut(usize, u8),
+) {
+    let mut depth_paren: i32 = 0;
+    let mut depth_brace: i32 = 0;
+    let mut depth_bracket: i32 = 0;
+    let mut i = start;
+    while i < end {
+        let b = source[i];
+        match b {
+            b'(' => depth_paren += 1,
+            b')' => depth_paren -= 1,
+            b'{' => depth_brace += 1,
+            b'}' => depth_brace -= 1,
+            b'[' => depth_bracket += 1,
+            b']' => depth_bracket -= 1,
+            b'"' | b'\'' => {
+                let quote = b;
+                i += 1;
+                while i < end {
+                    if source[i] == b'\\' && i + 1 < end {
+                        i += 2;
+                        continue;
+                    }
+                    if source[i] == quote {
+                        break;
+                    }
+                    i += 1;
+                }
+            }
+            _ if depth_paren == 0 && depth_brace == 0 && depth_bracket == 0 => {
+                on_top_level(i, b);
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+fn trim_ascii_whitespace(slice: &[u8]) -> &[u8] {
+    let mut start = 0;
+    let mut end = slice.len();
+    while start < end && slice[start].is_ascii_whitespace() {
+        start += 1;
+    }
+    while end > start && slice[end - 1].is_ascii_whitespace() {
+        end -= 1;
+    }
+    &slice[start..end]
+}
+
+fn used_named_argument_names(args: tree_sitter::Node, source: &[u8]) -> HashSet<String> {
+    crate::util::call_arg_nodes(args, source)
+        .into_iter()
+        .filter(|arg| arg.kind() == "named_argument")
+        .filter_map(|arg| arg.child_by_field_name("name"))
+        .map(|name| node_text(name, source).to_string())
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

@@ -300,6 +300,49 @@ local s = $"lo""#;
 }
 
 #[test]
+fn complete_named_argument_names_from_call_signature() {
+    let src = r#"---@param alpha number
+---@param beta string
+---@param count boolean
+function foo(alpha, beta, count) end
+
+foo(c)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "named_arg_completion.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "named-argument completion source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+
+    let items = completion::complete(&doc, intern_uri(&uri), pos(5, 5), &mut agg);
+    let count = items
+        .iter()
+        .find(|item| item.label == "count")
+        .expect("call argument completion should suggest matching parameter name `count`");
+    assert_eq!(count.insert_text.as_deref(), Some("count="));
+}
+
+#[test]
+fn complete_named_argument_names_only_for_mylua_files() {
+    let src = r#"---@param alpha number
+---@param beta string
+---@param count boolean
+function foo(alpha, beta, count) end
+
+foo(c)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "named_arg_completion.lua");
+
+    let items = completion::complete(&doc, intern_uri(&uri), pos(5, 5), &mut agg);
+    assert!(
+        items
+            .iter()
+            .all(|item| item.insert_text.as_deref() != Some("count=")),
+        "Lua files must not offer MyLua named-argument insertion, got: {:?}",
+        items,
+    );
+}
+
+#[test]
 fn complete_dot_base_after_call_chain_is_ast_driven() {
     // Regression for the string-splitn('.') based approach: clicking `.` on
     // the result of a method call — even if we can't yet infer the exact
