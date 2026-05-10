@@ -42,10 +42,10 @@ MyLua runtime 与语法设计参考：
 
 测试样例：
 
-- `/Users/zhuguosen/MyGit/mylua/lua/testes/dollarext.lua`
-- `/Users/zhuguosen/MyGit/mylua/lua/testes/array.lua`
-- `/Users/zhuguosen/MyGit/mylua/lua/testes/func-named-args.lua`
-- `/Users/zhuguosen/MyGit/mylua/lua/testes/continue.lua`
+- `tests/lua-root/mylua/dollarext.mylua`
+- `tests/lua-root/mylua/array.mylua`
+- `tests/lua-root/mylua/func-named-args.mylua`
+- `tests/lua-root/mylua/continue.mylua`
 
 ## MyLua 语法扩展范围
 
