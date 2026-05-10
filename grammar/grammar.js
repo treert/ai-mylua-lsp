@@ -156,7 +156,10 @@ module.exports = grammar({
       field('right', $.expression_list),
     ),
 
-    function_call_statement: $ => $.function_call,
+    function_call_statement: $ => choice(
+      $.function_call,
+      alias($._safe_function_call, $.function_call),
+    ),
 
     label_statement: $ => seq('::', field('name', $._name_like_identifier), '::'),
 

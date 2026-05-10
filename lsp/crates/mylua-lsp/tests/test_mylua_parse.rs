@@ -73,6 +73,8 @@ local index_value = obj?["key"]
 local call_value = obj?()
 local method_value = obj?:method(1)
 local combined = obj?.field ?? default_value
+obj?()
+obj?:method(1)
 "#,
     );
 }

@@ -101,3 +101,27 @@ local method_value = obj?:method(1)
           (expression_list
             (number)))))))
 
+================================================================================
+MyLua standalone safe call statements
+================================================================================
+
+obj?()
+obj?:method(1)
+
+---
+
+(source_file
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      method: (identifier)
+      arguments: (arguments
+        (expression_list
+          (number))))))
+
