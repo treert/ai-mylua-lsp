@@ -22,7 +22,7 @@ pub(super) fn check_param_annotation_diagnostics(
             lua_params.insert("self".to_string());
         }
         let anchor = match fun.kind() {
-            "function_definition" => {
+            "function_definition" | "dollar_function" => {
                 crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
             }
             _ => fun,
@@ -53,7 +53,7 @@ fn collect_function_like_nodes<'tree>(
 ) {
     if matches!(
         node.kind(),
-        "function_declaration" | "local_function_declaration" | "function_definition"
+        "function_declaration" | "local_function_declaration" | "function_definition" | "dollar_function"
     ) {
         out.push(node);
     }

@@ -38,7 +38,7 @@ pub(super) fn infer_expression_type(
             TypeFact::Known(KnownType::Table(shape_id))
         }
 
-        "function_definition" => {
+        "function_definition" | "dollar_function" => {
             // Extract params from the `parameters` list on the
             // function_body child; fall through to Emmy-annotation
             // enrichment on the enclosing `local f = function(...)`
@@ -199,6 +199,12 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
             // For array-like table literals `{ 1, 2, "a" }`, infer the
             // element type so generic unification can bind `T` in `T[]`.
             infer_table_array_element_type_lightweight(ctx, node)
+        }
+        "function_definition" | "dollar_function" => {
+            TypeFact::Known(KnownType::Function(FunctionSignature {
+                params: vec![],
+                returns: vec![],
+            }))
         }
         _ => TypeFact::Unknown,
     }

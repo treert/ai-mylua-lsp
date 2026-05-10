@@ -28,7 +28,7 @@ fn collect_function_like_nodes<'tree>(
 ) {
     if matches!(
         node.kind(),
-        "function_declaration" | "local_function_declaration" | "function_definition"
+        "function_declaration" | "local_function_declaration" | "function_definition" | "dollar_function"
     ) {
         out.push(node);
     }
@@ -52,7 +52,7 @@ fn inspect_function_returns(
     // `local_declaration` / `assignment_statement`. For the named
     // forms, the declaration node itself carries the comments.
     let anchor = match fun.kind() {
-        "function_definition" => {
+        "function_definition" | "dollar_function" => {
             crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
         }
         _ => fun,
@@ -114,7 +114,7 @@ fn collect_return_statements<'tree>(
     // statements belong to them, not the outer function.
     if matches!(
         node.kind(),
-        "function_declaration" | "local_function_declaration" | "function_definition"
+        "function_declaration" | "local_function_declaration" | "function_definition" | "dollar_function"
     ) {
         return;
     }

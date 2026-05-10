@@ -73,7 +73,7 @@ fn collect_calls_in_scope(
             }
             return;
         }
-        "function_definition" => {
+        "function_definition" | "dollar_function" => {
             // Anonymous function — caller_name for its body is the
             // binding anchor if we can identify one, else inherit
             // from the outer scope. We only set a meaningful name

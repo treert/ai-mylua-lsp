@@ -278,3 +278,98 @@ goto end
   (label_statement
     name: (identifier)))
 
+================================================================================
+MyLua dollar function
+================================================================================
+
+local f1 = ${ return "f1" }
+local f2 = $(ff){ return "f2 " .. ff() }
+local f3 = $(...){ return select("#", ...) }
+consume ${ return 1 }
+consume $(x, y,){ return x + y }
+
+---
+
+(source_file
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (dollar_function
+        body: (dollar_function_body
+          (return_statement
+            (word_return)
+            (expression_list
+              (string
+                (short_string
+                  (short_string_content_double)))))))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (dollar_function
+        body: (dollar_function_body
+          parameters: (parameter_list
+            (identifier))
+          (return_statement
+            (word_return)
+            (expression_list
+              (binary_expression
+                left: (string
+                  (short_string
+                    (short_string_content_double)))
+                right: (function_call
+                  callee: (variable
+                    (identifier))
+                  arguments: (arguments)))))))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (dollar_function
+        body: (dollar_function_body
+          parameters: (parameter_list)
+          (return_statement
+            (word_return)
+            (expression_list
+              (function_call
+                callee: (variable
+                  (identifier))
+                arguments: (arguments
+                  (expression_list
+                    (string
+                      (short_string
+                        (short_string_content_double)))
+                    (vararg_expression))))))))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (dollar_function
+          body: (dollar_function_body
+            (return_statement
+              (word_return)
+              (expression_list
+                (number))))))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (dollar_function
+          body: (dollar_function_body
+            parameters: (parameter_list
+              (identifier)
+              (identifier))
+            (return_statement
+              (word_return)
+              (expression_list
+                (binary_expression
+                  left: (variable
+                    (identifier))
+                  right: (variable
+                    (identifier)))))))))))

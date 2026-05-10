@@ -398,6 +398,7 @@ module.exports = grammar({
       $.string,
       $.vararg_expression,
       $.function_definition,
+      $.dollar_function,
       $._prefix_expression,
       $.table_constructor,
       $.array_constructor,
@@ -453,6 +454,7 @@ module.exports = grammar({
       seq('(', optional(alias($._argument_expression_list, $.expression_list)), ')'),
       $.table_constructor,
       $.string,
+      $.dollar_function,
     ),
 
     _argument_expression_list: $ => seq(
@@ -483,6 +485,15 @@ module.exports = grammar({
     // ========================================================================
 
     function_definition: $ => seq($.word_function, field('body', $.function_body)),
+
+    dollar_function: $ => seq('$', field('body', $.dollar_function_body)),
+
+    dollar_function_body: $ => seq(
+      optional(field('parameters', $.parameter_list)),
+      '{',
+      optional($._block),
+      '}',
+    ),
 
     function_body: $ => seq(
       field('parameters', $.parameter_list),

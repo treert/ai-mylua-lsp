@@ -421,7 +421,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 continue;
             }
 
-            let (type_fact, function_expr_body) = if val.kind() == "function_definition" {
+            let (type_fact, function_expr_body) = if matches!(val.kind(), "function_definition" | "dollar_function") {
                 let body = val.child_by_field_name("body");
                 let func_id = ctx.alloc_function_id();
                 let fs = build_function_summary(ctx, &name, node, body, false);
@@ -1581,7 +1581,7 @@ fn register_nested_field_write(
 }
 
 fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    if node.kind() == "function_definition" {
+    if matches!(node.kind(), "function_definition" | "dollar_function") {
         visit_anonymous_function_definition(ctx, node);
         return;
     }

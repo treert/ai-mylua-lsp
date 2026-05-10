@@ -131,6 +131,7 @@ fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<Folding
         "function_declaration"
         | "local_function_declaration"
         | "function_definition"
+        | "dollar_function"
         | "do_statement"
         | "while_statement"
         | "repeat_statement"

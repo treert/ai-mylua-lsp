@@ -75,10 +75,11 @@ local x = 1
         (identifier))
       right: (number))
     (word_then)
-    (function_call
-      callee: (variable
-        (identifier))
-      arguments: (arguments)))
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments))))
   (local_declaration
     (top_word_local)
     names: (attribute_name_list
@@ -115,10 +116,11 @@ function other() end
     (variable
       (identifier))
     (word_do)
-    (function_call
-      callee: (variable
-        (identifier))
-      arguments: (arguments)))
+    (function_call_statement
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments))))
   (function_declaration
     (top_word_function)
     name: (function_name

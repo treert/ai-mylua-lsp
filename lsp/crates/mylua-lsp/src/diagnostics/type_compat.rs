@@ -14,7 +14,7 @@ pub(crate) fn infer_literal_type(
         "table_constructor" => {
             TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
         }
-        "function_definition" => {
+        "function_definition" | "dollar_function" => {
             TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
                 params: vec![],
                 returns: vec![],
@@ -190,7 +190,7 @@ pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
         "table_constructor" => {
             TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
         }
-        "function_definition" => {
+        "function_definition" | "dollar_function" => {
             TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
                 params: vec![],
                 returns: vec![],
