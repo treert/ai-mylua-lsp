@@ -32,15 +32,11 @@
 - `.lua` 文件不会因为扩展语法直接解析失败。
 - 后续仍可提供“标准 Lua 严格模式”。
 
-## 参考文档与测试样例
+## 测试样例
 
-MyLua runtime 与语法设计参考：
+当前文档已内聚描述 MyLua 语法设计，不再依赖外部 MyLua runtime 文档作为阅读前置。
 
-- `/Users/zhuguosen/MyGit/mylua/lua/doc/mylua.bnf`
-- `/Users/zhuguosen/MyGit/mylua/lua/doc/mylua.md`
-- `/Users/zhuguosen/MyGit/mylua/lua/README.md`
-
-测试样例：
+验证样例：
 
 - `tests/lua-root/mylua/dollarext.mylua`
 - `tests/lua-root/mylua/array.mylua`
