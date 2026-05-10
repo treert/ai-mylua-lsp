@@ -372,6 +372,29 @@ pub fn find_node_at_position<'a>(
     Some(node)
 }
 
+pub fn emmy_context_node_at<'a>(
+    root: tree_sitter::Node<'a>,
+    source: &[u8],
+    byte_offset: usize,
+) -> Option<tree_sitter::Node<'a>> {
+    let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
+    for _ in 0..=ANCESTOR_WALK_LIMIT {
+        match node.kind() {
+            "emmy_line" => return Some(node),
+            "emmy_comment" | "comment" if node_text(node, source).starts_with("---") => {
+                return Some(node);
+            }
+            _ => {}
+        }
+        node = node.parent()?;
+    }
+    crate::logger::log(&format!(
+        "[emmy_context_node_at] hit depth limit ({}) at byte {}",
+        ANCESTOR_WALK_LIMIT, byte_offset,
+    ));
+    None
+}
+
 pub fn extract_field_chain<'a>(
     mut node: tree_sitter::Node<'a>,
     source: &[u8],
@@ -662,10 +685,7 @@ fn call_argument_value_node<'tree>(node: tree_sitter::Node<'tree>) -> tree_sitte
     }
 }
 
-pub fn call_args_contain_top_level_spread_argument(
-    args: tree_sitter::Node,
-    source: &[u8],
-) -> bool {
+pub fn call_args_contain_top_level_spread_argument(args: tree_sitter::Node, source: &[u8]) -> bool {
     call_arg_nodes(args, source)
         .iter()
         .any(|arg| arg.kind() == "spread_argument")

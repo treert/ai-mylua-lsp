@@ -48,18 +48,7 @@
 
 ---
 
-## 3. EmmyLua 注解
-
-### 3.1 [P3] `emmy_type_name_at_byte` 无 AST 上下文
-
-- **问题**：`lsp/crates/mylua-lsp/src/emmy.rs::emmy_type_name_at_byte` 用纯字节扫描判定光标是否在 `---@...` 行的结构区。多行字符串/长注释里出现 emmy 样式的文本（例如 `[[\n  local x = ---@type Foo\n]]`）会被误识别为真正的类型引用，导致 hover/goto/references 出现错误命中。
-- **方案**：调用入口（`hover.rs::hover` / `goto.rs::goto_definition` / `references.rs`）改用 AST 先把光标定位到节点，仅当祖先链含 `emmy_comment` / `comment` 时再调 `emmy_type_name_at_byte`。
-- **验收**：用户构造的"长字符串内含 emmy-like 行"用例不再触发类型 ref 误命中；既有 trailing/leading emmy 行的 goto/hover 行为保持不变。
-- **风险**：触发条件极冷门，目前为已知限制（见函数 doc）。
-
----
-
-## 4. 推荐落地顺序
+## 3. 推荐落地顺序
 
 1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
 2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
@@ -68,7 +57,7 @@
 
 ---
 
-## 5. 维护约定
+## 4. 维护约定
 
 - 已完成的条目直接从本文件删除；如涉及架构变更，同一次提交更新相关文档（`index-architecture.md`、`architecture.md` 等）。
 - 新增条目模板：
@@ -83,7 +72,7 @@
 
 ---
 
-## 6. 新增能力时的维护清单
+## 5. 新增能力时的维护清单
 
 - **新增诊断类别**：在 `DiagnosticsConfig` 加字段 + 默认 severity；默认开启时需在 fixture 上跑一遍确认不会在真实项目上产生大量噪声
 - **新增 LSP capability**：在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 对应集成测试文件

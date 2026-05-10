@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径）；下一步继续 P6 hover/goto/references/semantic tokens 稳定性覆盖
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径），第二批已收尾（hover/goto/references 的 AST 锚定 Emmy 解析与 semantic tokens `$string` smoke 覆盖）；下一步继续 P6 signature help/completion 细分场景或进入 P7/P8 前置 diagnostics
 
 ## 入口文档
 
@@ -165,11 +165,32 @@
   - 新增 `document_link_ignores_dollar_string_require_argument`
 - `lsp/crates/mylua-lsp/tests/test_signature_help.rs`
   - 新增 `signature_help_dollar_string_short_call_active_param_is_zero`
+- `lsp/crates/mylua-lsp/src/emmy.rs`
+  - 新增 `emmy_type_name_at_byte_in_range`，在 AST comment/emmy 节点范围内锚定解析 Emmy 类型名，避免同一物理行前序 `$string` 文本中的 `---` 干扰真实 trailing Emmy 注解
+- `lsp/crates/mylua-lsp/src/util.rs`
+  - 新增 `emmy_context_node_at`，用 AST 上下文门禁定位具体 `emmy_line` / `emmy_comment` / 短 Emmy `comment` 节点，并过滤普通/长注释
+- `lsp/crates/mylua-lsp/src/hover.rs`
+- `lsp/crates/mylua-lsp/src/goto.rs`
+- `lsp/crates/mylua-lsp/src/references.rs`
+  - `emmy_type_name_at_byte` 仅在 `emmy_line` / `emmy_comment` / `comment` AST 上下文内调用，避免 `$string` 内容中的 `---@type Foo` 文本误触发类型 hover/goto/references
+  - `references` 的 raw-word fallback 同样限制在 Emmy/comment 上下文，避免 `$string` 普通文本被当成类型/全局引用
+- `lsp/crates/mylua-lsp/tests/test_hover.rs`
+  - 新增 `hover_dollar_string_emmy_like_text_does_not_resolve_as_type`
+- `lsp/crates/mylua-lsp/tests/test_goto.rs`
+  - 新增 `goto_dollar_string_emmy_like_text_does_not_resolve_as_type`
+- `lsp/crates/mylua-lsp/tests/test_references.rs`
+  - 新增 `references_dollar_string_plain_text_words_do_not_resolve_as_types`
+- `lsp/crates/mylua-lsp/tests/test_semantic_tokens_range.rs`
+  - 新增 `semantic_tokens_dollar_string_interpolation_smoke`
 
 本轮已继续：
 
 - `$string` parser/scanner 第一阶段已完成，P0 中两个被 P5 阻塞的 fixture parser tests 已启用。
 - P6 第一批已完成：module completion 不再把 `$string` 插值内部的普通字符串当成 require 静态路径；document link 明确忽略动态 `$string` require 参数；signature help 验证 `foo $"..."` 无括号调用保持 active parameter = 0。
+- P6 第二批已完成：hover/goto/references 不再把 `$string` 内容或 `${"..."}` 内普通字符串中的 `---@type BaseCls` 文本当成 Emmy 类型注解；真实 trailing Emmy 类型注解仍可解析。
+- code review 后补齐边界：同一行 `$string` 假 `---@type FakeCls` 不再遮蔽后续真实 trailing `---@type BaseCls`；references 不再收集 Emmy 描述区、普通注释和长注释中的同名伪引用。
+- semantic tokens 已补 `$name` 与 `${name}` 插值 smoke 覆盖，确认 `$string` 普通内容不产 token、插值 identifier 仍产 token。
+- `docs/future-work.md` 已移除完成的 `emmy_type_name_at_byte` 无 AST 上下文条目。
 
 ## 当前验证结果
 
@@ -199,11 +220,17 @@ rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completio
 ## 当前工作区变更
 
 ```text
+ M docs/future-work.md
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
- M lsp/crates/mylua-lsp/src/completion.rs
- M lsp/crates/mylua-lsp/tests/test_completion.rs
- M lsp/crates/mylua-lsp/tests/test_document_link.rs
- M lsp/crates/mylua-lsp/tests/test_signature_help.rs
+ M lsp/crates/mylua-lsp/src/emmy.rs
+ M lsp/crates/mylua-lsp/src/goto.rs
+ M lsp/crates/mylua-lsp/src/hover.rs
+ M lsp/crates/mylua-lsp/src/references.rs
+ M lsp/crates/mylua-lsp/src/util.rs
+ M lsp/crates/mylua-lsp/tests/test_goto.rs
+ M lsp/crates/mylua-lsp/tests/test_hover.rs
+ M lsp/crates/mylua-lsp/tests/test_references.rs
+ M lsp/crates/mylua-lsp/tests/test_semantic_tokens_range.rs
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -213,9 +240,9 @@ rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completio
 优先继续 P6 / 后续语义稳定子任务：
 
 1. P6 LSP 基础能力稳定
-   - hover / goto / references / semantic tokens 对 `dollar_string`、`dollar_interpolation` 不崩溃
    - signature help 继续补 `${expr}` 内部普通调用、named/spread 场景的定位回归
    - completion 继续补普通 `$string` 内容区不误触发大量无关补全的策略评估；require/module completion 的 `$string` 动态路径误触发已修复
+   - hover / goto / references 已加 Emmy AST 上下文门禁；后续如遇普通 string/long string 中类似误触发，可复用同一门禁策略补测试
    - document link 已确认忽略 `$string` require 参数；后续如进入 P8 常量折叠，再单独设计无插值 `$string` 的静态路径策略
 2. `$string` 专属 diagnostics（P7/P8 前置）
    - `${expr}` 不允许跨物理行
@@ -232,5 +259,7 @@ rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completio
 - `dollar_string` 第一阶段已显式跳过 `extract_string_literal`；后续除非做 P8 常量折叠，否则不要接入 require / document link / module completion 静态路径解析。
 - require/module completion 当前只允许直接作为 `require` 参数的普通静态 `string` 触发；不要重新放宽为“任意 require 祖先下的字符串”，否则 `$"... ${"..."} ..."` 会误触发。
 - `$name` 插值当前复用外部 `identifier` token；scanner 会在裸 `$` 处停下，非法 `$` 形态留给后续 diagnostics。
+- hover/goto/references 不应直接调用纯字节级 `emmy_type_name_at_byte`；入口应先用 `emmy_context_node_at` 定位 AST Emmy 节点，再用 `emmy_type_name_at_byte_in_range` 按节点范围锚定解析。
+- references 的 raw-word fallback 只能用于 Emmy/comment 上下文；references 收集侧也要用结构化 Emmy 解析确认候选，避免描述区、普通注释、长注释伪引用。
 - named/spread 第一阶段只做 parser + 保守 diagnostics；后续如要精确语义，需按参数名重做 call args/signature help/inlay hints 匹配。
 - 不要运行全仓库 `cargo fmt`，会产生大量无关格式化 diff；如需格式化，限制在本次修改文件。

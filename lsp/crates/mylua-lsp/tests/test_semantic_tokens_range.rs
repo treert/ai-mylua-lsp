@@ -29,6 +29,41 @@ fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Range {
 }
 
 #[test]
+fn semantic_tokens_dollar_string_interpolation_smoke() {
+    let src = r#"local name = "world"
+local s = $"hello $name ${name}"
+"#;
+    let (doc, _uri, _agg) = setup_single_file(src, "dollar_string_tokens.mylua");
+
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "dollar string interpolation should parse without errors"
+    );
+    let tokens = semantic_tokens::collect_semantic_tokens(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &doc.scope_tree,
+        doc.line_index(),
+    );
+    let positions = absolute_cols(&tokens);
+    assert!(
+        positions.contains(&(1, 19, 4)),
+        "$name interpolation should produce a token for `name`: {:?}",
+        positions
+    );
+    assert!(
+        positions.contains(&(1, 26, 4)),
+        "dollar-brace interpolation should produce a token for `name`: {:?}",
+        positions
+    );
+    assert!(
+        !positions.contains(&(1, 12, 5)),
+        "plain dollar string content should not produce semantic tokens: {:?}",
+        positions
+    );
+}
+
+#[test]
 fn semantic_tokens_range_filters_to_range() {
     let src = "local a = 1\nlocal b = 2\nlocal c = 3\nlocal d = 4\n";
     let (doc, _uri, _agg) = setup_single_file(src, "r.lua");

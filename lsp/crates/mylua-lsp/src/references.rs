@@ -4,7 +4,7 @@ use crate::document::{Document, DocumentLookup};
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
 use crate::uri_id::{resolve_uri, UriId};
-use crate::util::{find_node_at_position, node_text, LineIndex};
+use crate::util::{emmy_context_node_at, find_node_at_position, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -278,22 +278,35 @@ fn identify_at_cursor(
     index: &WorkspaceAggregation,
     _all_docs: &impl DocumentLookup,
 ) -> Option<Identity> {
+    let root = doc.root_node()?;
+    let emmy_context = emmy_context_node_at(root, doc.source(), byte_offset);
+
     // 1. Check if cursor is on a type name inside an Emmy annotation
-    if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
-        return Some(Identity::TypeName { name: type_name });
+    if let Some(emmy_node) = emmy_context {
+        if let Some(type_name) = crate::emmy::emmy_type_name_at_byte_in_range(
+            doc.source(),
+            byte_offset,
+            emmy_node.start_byte(),
+            emmy_node.end_byte(),
+        ) {
+            return Some(Identity::TypeName { name: type_name });
+        }
     }
 
     // 2. Find the identifier AST node at cursor
-    let ident_node = doc
-        .root_node()
-        .and_then(|root| find_node_at_position(root, byte_offset));
+    let ident_node = find_node_at_position(root, byte_offset);
     let name_owned: String;
     let name: &str;
 
     if let Some(n) = ident_node {
         name = node_text(n, doc.source());
     } else {
-        // Fallback: extract word from raw source (e.g. in emmy_line text)
+        // Fallback: extract word from raw source only in Emmy/comment text.
+        // Outside comments (for example inside string or dollar_string content),
+        // raw words are not semantic identifiers.
+        if emmy_context.is_none() {
+            return None;
+        }
         name_owned = extract_word_at(doc.text(), byte_offset)?;
         name = name_owned.as_str();
         // If it's a word in an emmy annotation and a known type, treat as TypeName
@@ -833,6 +846,9 @@ fn emit_type_matches_in_node(
         Some(b) => b,
         None => return,
     };
+    if node.kind() == "comment" && !line_bytes.starts_with(b"---") {
+        return;
+    }
     let pattern = type_name.as_bytes();
     if pattern.is_empty() || pattern.len() > line_bytes.len() {
         return;
@@ -847,14 +863,24 @@ fn emit_type_matches_in_node(
             if before_ok && after_ok {
                 let abs_start = node_start_byte + i;
                 let abs_end = abs_start + pattern.len();
-                if let (Some(start), Some(end)) = (
-                    line_index.byte_offset_to_position(source, abs_start),
-                    line_index.byte_offset_to_position(source, abs_end),
-                ) {
-                    locations.push(ReferenceLocation {
-                        uri_id,
-                        range: Range { start, end },
-                    });
+                if crate::emmy::emmy_type_name_at_byte_in_range(
+                    source,
+                    abs_start,
+                    node.start_byte(),
+                    node.end_byte(),
+                )
+                .as_deref()
+                    == Some(type_name)
+                {
+                    if let (Some(start), Some(end)) = (
+                        line_index.byte_offset_to_position(source, abs_start),
+                        line_index.byte_offset_to_position(source, abs_end),
+                    ) {
+                        locations.push(ReferenceLocation {
+                            uri_id,
+                            range: Range { start, end },
+                        });
+                    }
                 }
                 i += pattern.len();
                 continue;

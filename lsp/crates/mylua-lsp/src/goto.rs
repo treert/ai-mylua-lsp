@@ -5,7 +5,8 @@ use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
-    extract_field_chain, extract_string_literal, find_node_at_position, node_text, walk_ancestors,
+    emmy_context_node_at, extract_field_chain, extract_string_literal, find_node_at_position,
+    node_text, walk_ancestors,
 };
 use tower_lsp_server::ls_types::*;
 
@@ -29,11 +30,19 @@ fn goto_definition_inner(
     let byte_offset = doc
         .line_index()
         .position_to_byte_offset(doc.source(), position)?;
-    if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
-        return type_definition_for_name(&type_name, index, strategy);
+    let root = doc.root_node()?;
+    if let Some(emmy_node) = emmy_context_node_at(root, doc.source(), byte_offset) {
+        if let Some(type_name) = crate::emmy::emmy_type_name_at_byte_in_range(
+            doc.source(),
+            byte_offset,
+            emmy_node.start_byte(),
+            emmy_node.end_byte(),
+        ) {
+            return type_definition_for_name(&type_name, index, strategy);
+        }
     }
 
-    let ident_node = find_node_at_position(doc.root_node()?, byte_offset)?;
+    let ident_node = find_node_at_position(root, byte_offset)?;
     let name = node_text(ident_node, doc.source());
     lsp_log!(
         "[goto] ident='{}' kind='{}' parent='{}'",

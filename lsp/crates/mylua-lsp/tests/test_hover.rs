@@ -2785,6 +2785,89 @@ local escaped = nil
 }
 
 #[test]
+fn hover_dollar_string_emmy_like_text_does_not_resolve_as_type() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+local outer = $" ---@type BaseCls"
+local nested = $"${" ---@type BaseCls"}"
+local typed = nil ---@type BaseCls
+local mixed = $" ---@type FakeCls" ---@type BaseCls
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dollar_string_emmy_like_hover.mylua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+    let offsets: Vec<_> = src
+        .match_indices("BaseCls")
+        .map(|(offset, _)| offset)
+        .collect();
+
+    let outer_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[2])
+        .unwrap();
+    let outer_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        outer_pos,
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        outer_word.is_none(),
+        "dollar string content must not act as Emmy type text"
+    );
+
+    let nested_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[3])
+        .unwrap();
+    let nested_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        nested_pos,
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        nested_word.is_none(),
+        "strings inside dollar interpolation must not act as Emmy type text"
+    );
+
+    let typed_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[4])
+        .unwrap();
+    let typed_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        typed_pos,
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        typed_word.is_some(),
+        "real trailing Emmy type annotations should still resolve"
+    );
+
+    let mixed_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[5])
+        .unwrap();
+    let mixed_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        mixed_pos,
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        mixed_word.is_some(),
+        "real trailing Emmy annotations should not be shadowed by earlier dollar string text"
+    );
+}
+
+#[test]
 fn hover_blank_line_between_class_and_variable() {
     // A blank line between `---@class Foo` and the following variable must
     // prevent the class from binding to that variable.

@@ -343,6 +343,110 @@ fn references_emmy_type_word_boundary() {
 }
 
 #[test]
+fn references_dollar_string_plain_text_words_do_not_resolve_as_types() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+local s = $"plain BaseCls ${"BaseCls"}"
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "dollar_string_references.mylua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+    let offsets: Vec<_> = src
+        .match_indices("BaseCls")
+        .map(|(offset, _)| offset)
+        .collect();
+
+    let plain_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[2])
+        .unwrap();
+    let plain_refs = references::find_references(
+        doc,
+        intern_uri(&uri),
+        plain_pos,
+        true,
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+        &ReferencesStrategy::Best,
+    );
+    assert!(
+        plain_refs
+            .as_ref()
+            .map(|locs| locs.is_empty())
+            .unwrap_or(true),
+        "dollar string content must not act as type references: {:?}",
+        plain_refs
+    );
+
+    let nested_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[3])
+        .unwrap();
+    let nested_refs = references::find_references(
+        doc,
+        intern_uri(&uri),
+        nested_pos,
+        true,
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+        &ReferencesStrategy::Best,
+    );
+    assert!(
+        nested_refs
+            .as_ref()
+            .map(|locs| locs.is_empty())
+            .unwrap_or(true),
+        "strings inside dollar interpolation must not act as type references: {:?}",
+        nested_refs
+    );
+}
+
+#[test]
+fn references_type_collection_ignores_non_semantic_comment_text() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+---@class OtherCls @ BaseCls appears in docs only
+OtherCls = {}
+
+-- plain BaseCls prose
+--[[
+---@type BaseCls
+]]
+local typed = nil ---@type BaseCls
+"#;
+    let (doc, uri, agg) = setup_single_file(src, "comment_text_references.mylua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let locs = references::find_references(
+        doc,
+        intern_uri(&uri),
+        pos(0, 10),
+        true,
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+        &ReferencesStrategy::Best,
+    )
+    .expect("references should resolve for BaseCls");
+
+    assert!(
+        locs.iter().any(|loc| loc.range.start.line == 10),
+        "real trailing Emmy type annotation should be collected: {:?}",
+        locs
+    );
+    for line in [3, 6, 8] {
+        assert!(
+            locs.iter().all(|loc| loc.range.start.line != line),
+            "non-semantic comment text on line {} must not be collected: {:?}",
+            line,
+            locs
+        );
+    }
+}
+
+#[test]
 fn references_exclude_declaration() {
     let src = r#"local myvar = 1
 print(myvar)

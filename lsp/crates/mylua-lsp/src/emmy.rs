@@ -254,9 +254,44 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
     if full_rel < emmy_start {
         return None;
     }
-    let line = &full_line[emmy_start..];
-    let rel = full_rel - emmy_start;
+    emmy_type_name_in_line(&full_line[emmy_start..], full_rel - emmy_start)
+}
 
+pub fn emmy_type_name_at_byte_in_range(
+    source: &[u8],
+    byte_offset: usize,
+    context_start: usize,
+    context_end: usize,
+) -> Option<String> {
+    if byte_offset > source.len() || context_start >= context_end || context_end > source.len() {
+        return None;
+    }
+
+    let physical_line_start = source[..byte_offset]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let physical_line_end = source[byte_offset..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|i| byte_offset + i)
+        .unwrap_or(source.len());
+
+    let line_start = physical_line_start.max(context_start);
+    let line_end = physical_line_end.min(context_end);
+    if byte_offset < line_start || byte_offset > line_end {
+        return None;
+    }
+
+    let line = &source[line_start..line_end];
+    if !line.starts_with(b"---") {
+        return None;
+    }
+    emmy_type_name_in_line(line, byte_offset - line_start)
+}
+
+fn emmy_type_name_in_line(line: &[u8], rel: usize) -> Option<String> {
     let at = line.iter().position(|&b| b == b'@')?;
     if !line[..at]
         .iter()

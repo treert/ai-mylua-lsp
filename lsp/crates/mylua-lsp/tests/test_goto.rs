@@ -1112,6 +1112,87 @@ local escaped = nil
 }
 
 #[test]
+fn goto_dollar_string_emmy_like_text_does_not_resolve_as_type() {
+    let src = r#"---@class BaseCls
+BaseCls = {}
+
+local outer = $" ---@type BaseCls"
+local nested = $"${" ---@type BaseCls"}"
+local typed = nil ---@type BaseCls
+local mixed = $" ---@type FakeCls" ---@type BaseCls
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dollar_string_emmy_like_goto.mylua");
+    let offsets: Vec<_> = src
+        .match_indices("BaseCls")
+        .map(|(offset, _)| offset)
+        .collect();
+
+    let outer_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[2])
+        .unwrap();
+    let outer_word = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        outer_pos,
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        outer_word.is_none(),
+        "dollar string content must not act as Emmy type text"
+    );
+
+    let nested_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[3])
+        .unwrap();
+    let nested_word = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        nested_pos,
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        nested_word.is_none(),
+        "strings inside dollar interpolation must not act as Emmy type text"
+    );
+
+    let typed_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[4])
+        .unwrap();
+    let typed_word = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        typed_pos,
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        typed_word.is_some(),
+        "real trailing Emmy type annotations should still resolve"
+    );
+
+    let mixed_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), offsets[5])
+        .unwrap();
+    let mixed_word = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        mixed_pos,
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        mixed_word.is_some(),
+        "real trailing Emmy annotations should not be shadowed by earlier dollar string text"
+    );
+}
+
+#[test]
 fn goto_type_in_trailing_type_annotation() {
     // Regression: clicking on the type name inside a same-line trailing
     // `---@type Foo` should jump to the class definition, just like a
