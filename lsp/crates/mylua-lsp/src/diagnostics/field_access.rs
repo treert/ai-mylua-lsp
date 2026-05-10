@@ -68,6 +68,31 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
     false
 }
 
+fn has_question_marker_between(
+    left: tree_sitter::Node,
+    right: tree_sitter::Node,
+    source: &[u8],
+) -> bool {
+    if left.end_byte() > right.start_byte() || right.start_byte() > source.len() {
+        return false;
+    }
+    source[left.end_byte()..right.start_byte()].contains(&b'?')
+}
+
+fn is_safe_field_access(node: tree_sitter::Node, source: &[u8]) -> bool {
+    match (
+        node.child_by_field_name("object"),
+        node.child_by_field_name("field"),
+    ) {
+        (Some(object), Some(field)) => has_question_marker_between(object, field, source),
+        _ => false,
+    }
+}
+
+fn is_safe_method_call(callee: tree_sitter::Node, method: tree_sitter::Node, source: &[u8]) -> bool {
+    has_question_marker_between(callee, method, source)
+}
+
 fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
     let node = cursor.node();
 
@@ -75,7 +100,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
         && node.child_by_field_name("object").is_some()
         && node.child_by_field_name("field").is_some();
 
-    if is_dotted && !is_assignment_target(node) {
+    if is_dotted && !is_assignment_target(node) && !is_safe_field_access(node, ctx.source) {
         if let Some((base_node, fields)) = extract_field_chain(node, ctx.source) {
             check_dotted_field(ctx, node, base_node, &fields);
         }
@@ -86,37 +111,39 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
             node.child_by_field_name("callee"),
             node.child_by_field_name("method"),
         ) {
-            let base_fact = crate::type_inference::infer_node_type_in_file_id(
-                callee,
-                ctx.source,
-                ctx.uri_id,
-                ctx.scope_tree,
-                ctx.index,
-            );
-            let field_name = node_text(method, ctx.source).to_string();
-            let resolved_base = resolver::resolve_type(ctx.uri_id, &base_fact, ctx.index);
+            if !is_safe_method_call(callee, method, ctx.source) {
+                let base_fact = crate::type_inference::infer_node_type_in_file_id(
+                    callee,
+                    ctx.source,
+                    ctx.uri_id,
+                    ctx.scope_tree,
+                    ctx.index,
+                );
+                let field_name = node_text(method, ctx.source).to_string();
+                let resolved_base = resolver::resolve_type(ctx.uri_id, &base_fact, ctx.index);
 
-            if let TypeFact::Known(KnownType::EmmyType(type_name)) = &resolved_base.type_fact {
-                if let Some(severity) = ctx.emmy_severity {
-                    let field_resolved = resolver::resolve_field_chain(
-                        resolved_base.owner_uri_id,
-                        &resolved_base.type_fact,
-                        std::slice::from_ref(&field_name),
-                        ctx.index,
-                    );
-                    if field_resolved.type_fact == TypeFact::Unknown {
-                        let qualified = format!("{}.{}", type_name, field_name);
-                        if !ctx.index.global_shard.contains_key(&qualified) {
-                            ctx.diagnostics.push(Diagnostic {
-                                range: ctx.line_index.ts_node_to_range(method, ctx.source),
-                                severity: Some(severity),
-                                source: Some("mylua".to_string()),
-                                message: format!(
-                                    "Unknown field '{}' on type '{}'",
-                                    field_name, type_name
-                                ),
-                                ..Default::default()
-                            });
+                if let TypeFact::Known(KnownType::EmmyType(type_name)) = &resolved_base.type_fact {
+                    if let Some(severity) = ctx.emmy_severity {
+                        let field_resolved = resolver::resolve_field_chain(
+                            resolved_base.owner_uri_id,
+                            &resolved_base.type_fact,
+                            std::slice::from_ref(&field_name),
+                            ctx.index,
+                        );
+                        if field_resolved.type_fact == TypeFact::Unknown {
+                            let qualified = format!("{}.{}", type_name, field_name);
+                            if !ctx.index.global_shard.contains_key(&qualified) {
+                                ctx.diagnostics.push(Diagnostic {
+                                    range: ctx.line_index.ts_node_to_range(method, ctx.source),
+                                    severity: Some(severity),
+                                    source: Some("mylua".to_string()),
+                                    message: format!(
+                                        "Unknown field '{}' on type '{}'",
+                                        field_name, type_name
+                                    ),
+                                    ..Default::default()
+                                });
+                            }
                         }
                     }
                 }

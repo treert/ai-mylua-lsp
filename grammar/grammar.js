@@ -304,6 +304,20 @@ module.exports = grammar({
       ),
     ),
 
+    _safe_variable: $ => choice(
+      seq(
+        field('object', $._prefix_expression),
+        token.immediate('?['),
+        optional(field('index', $._expression)),
+        ']',
+      ),
+      seq(
+        field('object', $._prefix_expression),
+        token.immediate('?.'),
+        field('field', $.identifier),
+      ),
+    ),
+
     name_list: $ => seq($.identifier, repeat(seq(',', $.identifier))),
 
     attribute_name_list: $ => seq(
@@ -354,6 +368,8 @@ module.exports = grammar({
       $.vararg_expression,
       $.function_definition,
       $._prefix_expression,
+      prec.dynamic(-10, alias($._safe_variable, $.variable)),
+      prec.dynamic(-10, alias($._safe_function_call, $.function_call)),
       $.table_constructor,
       $.array_constructor,
     ),
@@ -383,6 +399,20 @@ module.exports = grammar({
       seq(
         field('callee', $._prefix_expression),
         ':',
+        field('method', $.identifier),
+        field('arguments', $.arguments),
+      ),
+    ),
+
+    _safe_function_call: $ => choice(
+      seq(
+        field('callee', $._prefix_expression),
+        token.immediate('?'),
+        field('arguments', $.arguments),
+      ),
+      seq(
+        field('callee', $._prefix_expression),
+        token.immediate('?:'),
         field('method', $.identifier),
         field('arguments', $.arguments),
       ),

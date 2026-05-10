@@ -47,3 +47,57 @@ a[] = 4
     right: (expression_list
       (number))))
 
+================================================================================
+MyLua safe access and call
+================================================================================
+
+local field_value = obj?.field
+local index_value = obj?["key"]
+local call_value = obj?()
+local method_value = obj?:method(1)
+
+---
+
+(source_file
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (variable
+        object: (variable
+          (identifier))
+        field: (identifier))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (variable
+        object: (variable
+          (identifier))
+        index: (string
+          (short_string
+            (short_string_content_double))))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (function_call
+        callee: (variable
+          (identifier))
+        arguments: (arguments))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (function_call
+        callee: (variable
+          (identifier))
+        method: (identifier)
+        arguments: (arguments
+          (expression_list
+            (number)))))))
+

@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1 完成；P2 低风险 grammar 子集部分完成；P3+ 待继续
+**状态**: P0/P1/P2 完成；P3 safe access/call 表达式形态已接入；standalone safe call statement 待继续
 
 ## 入口文档
 
@@ -58,44 +58,65 @@
 - number literal 支持 `_`
 - `??` 作为 `binary_expression` operator
 
+### P3：safe access/call 表达式形态
+
+已改：
+
+- `grammar/grammar.js`
+- `grammar/test/corpus/mylua.txt`
+- `lsp/crates/mylua-lsp/tests/test_mylua_parse.rs`
+- `lsp/crates/mylua-lsp/src/diagnostics/field_access.rs`
+- `lsp/crates/mylua-lsp/tests/test_diagnostics.rs`
+
+已支持：
+
+- `obj?.field`
+- `obj?["key"]`
+- `local v = obj?()`
+- `local v = obj?:method(1)`
+- safe `?.` / `?:` unknown-field diagnostics 降噪；普通 `.` / `:` 仍按原逻辑报告
+
+待继续：
+
+- standalone safe call statement：`obj?()` / `obj?:method()` 直接作为语句时，会影响 `top_level_keyword_split` 错误恢复 corpus，需单独处理。
+
 ## 当前验证结果
 
 最近一次验证命令：
 
 ```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/grammar
+npx tree-sitter generate
+npx tree-sitter test --file-name mylua.txt
+npx tree-sitter test
+
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
 cargo test
-
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp/grammar
-npx tree-sitter test --file-name mylua.txt
-
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp/vscode-extension
-npm run compile
-node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('package.json ok')"
+cargo test -p mylua-lsp --test test_mylua_parse parse_mylua_safe_access_and_call_syntax
+cargo test -p mylua-lsp --test test_diagnostics safe_field_access_suppresses_unknown_field_diagnostic
+cargo test -p mylua-lsp --test test_diagnostics safe_method_call_suppresses_unknown_field_diagnostic
 ```
 
 结果：
 
+- `npx tree-sitter generate`: passed
+- `npx tree-sitter test --file-name mylua.txt`: 3/3 passed
 - `cargo test`: passed
-- `npx tree-sitter test --file-name mylua.txt`: 2/2 passed
-- `npm run compile`: passed
-- `package.json` JSON parse: passed
-- 相关 `read_lints`: no new diagnostics
+- `parse_mylua_safe_access_and_call_syntax`: passed
+- `safe_field_access_suppresses_unknown_field_diagnostic`: passed
+- `safe_method_call_suppresses_unknown_field_diagnostic`: passed
+- `npx tree-sitter test`: failed，当前失败集中在 `top_level_keyword_split` 的错误恢复期望（引入 standalone safe call statement 时更明显；当前仍需继续排查 safe primary 对错误恢复成本的影响）
+- 相关 `read_lints`: no new errors；`grammar/grammar.js` 仅有既有 hint（`EMMY_PREC` unused / CommonJS module）
 
 ## 当前工作区变更
 
 ```text
+ M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
  M grammar/grammar.js
- M grammar/package.json
- M grammar/src/scanner.c
- M lsp/crates/mylua-lsp/src/config.rs
- M lsp/crates/mylua-lsp/src/handlers.rs
- M lsp/crates/mylua-lsp/src/workspace_scanner.rs
- M vscode-extension/package.json
- M vscode-extension/src/extension.ts
-?? docs/superpowers/plans/2026-05-10-mylua-implementation-plan.md
-?? grammar/test/corpus/mylua.txt
-?? lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
+ M grammar/test/corpus/mylua.txt
+ M lsp/crates/mylua-lsp/src/diagnostics/field_access.rs
+ M lsp/crates/mylua-lsp/tests/test_diagnostics.rs
+ M lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -104,11 +125,10 @@ node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.
 
 优先继续 P2/P3 中尚未完成的 parser 子任务，建议顺序：
 
-1. safe access/call
-   - `obj?.field`
-   - `obj?['key']`
-   - `obj?()`
-   - `obj?:method()`
+1. safe access/call 收尾
+   - 排查 `npx tree-sitter test` 中 `top_level_keyword_split` 错误恢复回归
+   - 在不破坏错误恢复的前提下支持 standalone `obj?()` / `obj?:method()` 语句
+   - 可选：再支持链式 `obj?.field?.nested`
 2. named/spread args
    - `f(a=1)`
    - `f(*args)`

@@ -64,6 +64,20 @@ fn parse_mylua_array_fixture() {
 }
 
 #[test]
+fn parse_mylua_safe_access_and_call_syntax() {
+    assert_source_parses(
+        "safe access/call MyLua syntax",
+        r#"
+local field_value = obj?.field
+local index_value = obj?["key"]
+local call_value = obj?()
+local method_value = obj?:method(1)
+local combined = obj?.field ?? default_value
+"#,
+    );
+}
+
+#[test]
 #[ignore = "requires P3 named/spread argument grammar"]
 fn parse_mylua_named_args_fixture() {
     assert_fixture_parses("tests/lua-root/mylua/func-named-args.mylua");
