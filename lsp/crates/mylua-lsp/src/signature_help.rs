@@ -37,7 +37,8 @@ pub fn signature_help(
         return None;
     }
 
-    let active_parameter = compute_active_parameter(call, offset, source, is_method);
+    let active_parameter =
+        compute_active_parameter(call, offset, source, is_method, signatures.first());
 
     let sig_infos: Vec<SignatureInformation> = signatures
         .iter()
@@ -380,7 +381,8 @@ fn compute_active_parameter(
     call: tree_sitter::Node,
     byte_offset: usize,
     source: &[u8],
-    _is_method: bool,
+    is_method: bool,
+    signature: Option<&FunctionSignature>,
 ) -> u32 {
     let Some(args) = call.child_by_field_name("arguments") else {
         return 0;
@@ -390,6 +392,11 @@ fn compute_active_parameter(
     if source.get(args.start_byte()).copied() != Some(b'(') {
         return 0;
     }
+    if let Some(active) =
+        active_named_argument_parameter(args, byte_offset, source, is_method, signature)
+    {
+        return active;
+    }
     // Arguments node spans `(...)`. Count top-level `,` between args.start + 1
     // (past `(`) and byte_offset, inside the `arguments` span.
     let start = args.start_byte() + 1;
@@ -398,6 +405,31 @@ fn compute_active_parameter(
         return 0;
     }
     count_top_level_commas(&source[start..end])
+}
+
+fn active_named_argument_parameter(
+    args: tree_sitter::Node,
+    byte_offset: usize,
+    source: &[u8],
+    is_method: bool,
+    signature: Option<&FunctionSignature>,
+) -> Option<u32> {
+    let signature = signature?;
+    let named_arg = crate::util::call_arg_nodes(args, source)
+        .into_iter()
+        .find(|arg| {
+            arg.kind() == "named_argument"
+                && byte_offset >= arg.start_byte()
+                && byte_offset <= arg.end_byte()
+        })?;
+    let name = named_arg.child_by_field_name("name")?;
+    let name = node_text(name, source);
+    signature
+        .params
+        .iter()
+        .filter(|param| !(is_method && param.name == "self"))
+        .position(|param| param.name == name)
+        .map(|idx| idx as u32)
 }
 
 /// Count top-level (depth-0) `,` bytes in the given slice, treating

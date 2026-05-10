@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径），第二批已收尾（hover/goto/references 的 AST 锚定 Emmy 解析与 semantic tokens `$string` smoke 覆盖）；下一步继续 P6 signature help/completion 细分场景或进入 P7/P8 前置 diagnostics
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径），第二批已收尾（hover/goto/references 的 AST 锚定 Emmy 解析与 semantic tokens `$string` smoke 覆盖），第三批进行中（signature help named argument active parameter 按参数名定位已完成）；下一步继续 P6 signature help/completion 细分场景或进入 P7/P8 前置 diagnostics
 
 ## 入口文档
 
@@ -163,8 +163,11 @@
   - 新增 `complete_require_path_ignores_string_nested_in_dollar_interpolation`
 - `lsp/crates/mylua-lsp/tests/test_document_link.rs`
   - 新增 `document_link_ignores_dollar_string_require_argument`
+- `lsp/crates/mylua-lsp/src/signature_help.rs`
+  - `active_parameter` 对光标所在的 `named_argument` 优先按已解析签名参数名映射；匹配不到或非 named 场景仍回退原有 top-level 逗号计数
 - `lsp/crates/mylua-lsp/tests/test_signature_help.rs`
   - 新增 `signature_help_dollar_string_short_call_active_param_is_zero`
+  - 新增 `signature_help_named_argument_uses_parameter_name_for_active_param`
 - `lsp/crates/mylua-lsp/src/emmy.rs`
   - 新增 `emmy_type_name_at_byte_in_range`，在 AST comment/emmy 节点范围内锚定解析 Emmy 类型名，避免同一物理行前序 `$string` 文本中的 `---` 干扰真实 trailing Emmy 注解
 - `lsp/crates/mylua-lsp/src/util.rs`
@@ -191,6 +194,7 @@
 - code review 后补齐边界：同一行 `$string` 假 `---@type FakeCls` 不再遮蔽后续真实 trailing `---@type BaseCls`；references 不再收集 Emmy 描述区、普通注释和长注释中的同名伪引用。
 - semantic tokens 已补 `$name` 与 `${name}` 插值 smoke 覆盖，确认 `$string` 普通内容不产 token、插值 identifier 仍产 token。
 - `docs/future-work.md` 已移除完成的 `emmy_type_name_at_byte` 无 AST 上下文条目。
+- 本次继续 P6 signature help 细分场景：新增 named argument active parameter 回归测试，先 RED（`c=` 被错误定位到 positional slot 0），再修复为按签名参数名高亮 `c` 对应参数；非 named/匹配不到场景保持原有逗号计数。
 
 ## 当前验证结果
 
@@ -198,39 +202,27 @@
 
 ```bash
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
-cargo test -p mylua-lsp --test test_completion complete_require_path_ignores_string_nested_in_dollar_interpolation -- --nocapture
-cargo test -p mylua-lsp --test test_completion -- --nocapture
-cargo test -p mylua-lsp --test test_document_link document_link_ignores_dollar_string_require_argument -- --nocapture
-cargo test -p mylua-lsp --test test_signature_help signature_help_dollar_string_short_call_active_param_is_zero -- --nocapture
-cargo test -p mylua-lsp --test test_completion --test test_document_link --test test_signature_help
-rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completion.rs crates/mylua-lsp/tests/test_document_link.rs crates/mylua-lsp/tests/test_signature_help.rs
+cargo test -p mylua-lsp --test test_signature_help signature_help_named_argument_uses_parameter_name_for_active_param -- --nocapture
+cargo test -p mylua-lsp --test test_signature_help -- --nocapture
+rustfmt crates/mylua-lsp/src/signature_help.rs crates/mylua-lsp/tests/test_signature_help.rs
+cargo test -p mylua-lsp --test test_signature_help
 ```
 
 结果：
 
-- 新增 RED 验证：`complete_require_path_ignores_string_nested_in_dollar_interpolation` 初次失败，确认 `$string` 插值内部普通字符串会误触发 require module completion；修复后 passed。
-- `cargo test -p mylua-lsp --test test_completion -- --nocapture`: passed（12 passed）
-- `cargo test -p mylua-lsp --test test_document_link document_link_ignores_dollar_string_require_argument -- --nocapture`: passed（1 passed）
-- `cargo test -p mylua-lsp --test test_signature_help signature_help_dollar_string_short_call_active_param_is_zero -- --nocapture`: passed（1 passed）
-- `cargo test -p mylua-lsp --test test_completion --test test_document_link --test test_signature_help`: passed（12 + 8 + 16 passed）
-- `rustfmt` 仅作用于本轮 4 个 Rust 修改文件，passed
-- `read_lints`：`completion.rs`、`test_completion.rs`、`test_document_link.rs`、`test_signature_help.rs` 无诊断
+- 新增 RED 验证：`signature_help_named_argument_uses_parameter_name_for_active_param` 初次失败，确认 `foo(c=true, ...)` 中光标位于 `c=` 时 active parameter 仍错误为 positional slot 0；修复后 passed。
+- `cargo test -p mylua-lsp --test test_signature_help -- --nocapture`: passed（17 passed）
+- `rustfmt` 仅作用于本次 2 个 Rust 修改文件，passed
+- `cargo test -p mylua-lsp --test test_signature_help`: passed（17 passed）
+- `read_lints`：`signature_help.rs`、`test_signature_help.rs` 无诊断
 - 本轮未重复运行 grammar 侧 `npx tree-sitter generate/test`；上轮记录仍为 `generate` passed、`tree-sitter test` 55/55 passed。
 
 ## 当前工作区变更
 
 ```text
- M docs/future-work.md
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
- M lsp/crates/mylua-lsp/src/emmy.rs
- M lsp/crates/mylua-lsp/src/goto.rs
- M lsp/crates/mylua-lsp/src/hover.rs
- M lsp/crates/mylua-lsp/src/references.rs
- M lsp/crates/mylua-lsp/src/util.rs
- M lsp/crates/mylua-lsp/tests/test_goto.rs
- M lsp/crates/mylua-lsp/tests/test_hover.rs
- M lsp/crates/mylua-lsp/tests/test_references.rs
- M lsp/crates/mylua-lsp/tests/test_semantic_tokens_range.rs
+ M lsp/crates/mylua-lsp/src/signature_help.rs
+ M lsp/crates/mylua-lsp/tests/test_signature_help.rs
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -240,7 +232,7 @@ rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completio
 优先继续 P6 / 后续语义稳定子任务：
 
 1. P6 LSP 基础能力稳定
-   - signature help 继续补 `${expr}` 内部普通调用、named/spread 场景的定位回归
+   - signature help 继续补 `${expr}` 内部普通调用、spread 场景的定位回归；named argument active parameter 按参数名定位已补一条回归
    - completion 继续补普通 `$string` 内容区不误触发大量无关补全的策略评估；require/module completion 的 `$string` 动态路径误触发已修复
    - hover / goto / references 已加 Emmy AST 上下文门禁；后续如遇普通 string/long string 中类似误触发，可复用同一门禁策略补测试
    - document link 已确认忽略 `$string` require 参数；后续如进入 P8 常量折叠，再单独设计无插值 `$string` 的静态路径策略
@@ -261,5 +253,5 @@ rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completio
 - `$name` 插值当前复用外部 `identifier` token；scanner 会在裸 `$` 处停下，非法 `$` 形态留给后续 diagnostics。
 - hover/goto/references 不应直接调用纯字节级 `emmy_type_name_at_byte`；入口应先用 `emmy_context_node_at` 定位 AST Emmy 节点，再用 `emmy_type_name_at_byte_in_range` 按节点范围锚定解析。
 - references 的 raw-word fallback 只能用于 Emmy/comment 上下文；references 收集侧也要用结构化 Emmy 解析确认候选，避免描述区、普通注释、长注释伪引用。
-- named/spread 第一阶段只做 parser + 保守 diagnostics；后续如要精确语义，需按参数名重做 call args/signature help/inlay hints 匹配。
+- named/spread 第一阶段只做 parser + 保守 diagnostics；signature help 的 named argument active parameter 已按参数名做局部增强，后续如要完整精确语义，还需继续重做 call args diagnostics、spread 与 inlay hints 匹配。
 - 不要运行全仓库 `cargo fmt`，会产生大量无关格式化 diff；如需格式化，限制在本次修改文件。

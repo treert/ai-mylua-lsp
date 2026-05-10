@@ -185,6 +185,34 @@ foo $"hello ${bar(1, 2)}""#;
 }
 
 #[test]
+fn signature_help_named_argument_uses_parameter_name_for_active_param() {
+    let src = r#"---@param a number
+---@param b string
+---@param c boolean
+function foo(a, b, c) end
+
+foo(c=true, a=1, b="ok")"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "named_arg_sig.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "named-argument signature source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+
+    let c_pos = doc
+        .line_index()
+        .byte_offset_to_position(doc.source(), src.find("c=true").unwrap() + 1)
+        .unwrap();
+    let h = signature_help::signature_help(&doc, intern_uri(&uri), c_pos, &mut agg)
+        .expect("signatureHelp should resolve for named argument");
+    assert_eq!(
+        h.active_parameter,
+        Some(2),
+        "named argument `c=` should highlight parameter `c`, not positional slot 0"
+    );
+}
+
+#[test]
 fn signature_help_picks_correct_overload_for_class_with_same_method_name() {
     // Regression: the previous `ends_with(".m")` / `ends_with(":m")` scan
     // iterated a HashMap and could pick the wrong class's overloads when
