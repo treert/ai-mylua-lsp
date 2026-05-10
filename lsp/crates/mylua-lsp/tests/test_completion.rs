@@ -280,6 +280,26 @@ fn complete_require_path_ignores_string_nested_in_dollar_interpolation() {
 }
 
 #[test]
+fn complete_dollar_string_plain_content_suppresses_generic_items() {
+    let src = r#"local localName = 1
+local s = $"lo""#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dollar_string_completion.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "dollar-string completion source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+
+    let items = completion::complete(&doc, intern_uri(&uri), pos(1, 14), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        !labels.contains(&"localName") && !labels.contains(&"local"),
+        "plain dollar-string content must not offer generic Lua completions: {:?}",
+        labels,
+    );
+}
+
+#[test]
 fn complete_dot_base_after_call_chain_is_ast_driven() {
     // Regression for the string-splitn('.') based approach: clicking `.` on
     // the result of a method call — even if we can't yet infer the exact

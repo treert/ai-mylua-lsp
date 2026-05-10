@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径），第二批已收尾（hover/goto/references 的 AST 锚定 Emmy 解析与 semantic tokens `$string` smoke 覆盖），第三批进行中（signature help named argument active parameter 按参数名定位已完成）；下一步继续 P6 signature help/completion 细分场景或进入 P7/P8 前置 diagnostics
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径），第二批已收尾（hover/goto/references 的 AST 锚定 Emmy 解析与 semantic tokens `$string` smoke 覆盖），第三批进行中（signature help named argument active parameter 按参数名定位已完成；completion `$string` 普通内容区通用补全降噪已完成）；下一步继续 P6 signature help/completion 细分场景或进入 P7/P8 前置 diagnostics
 
 ## 入口文档
 
@@ -159,8 +159,10 @@
   - `require` module completion 从“任意祖先 `require` 调用中的字符串”收紧为“直接作为 `require` 参数的普通静态 `string`”
   - 修复 `$"... ${"..."} ..."` 插值内部普通字符串误触发 require/module completion 的问题
   - 保留普通 `require("")` 与 `require ""` 的模块补全行为
+  - 新增 `$string` 普通内容/`$$` 转义区门禁，避免 fallback locals/globals/keywords 把字符串内容当 Lua 标识符上下文；`${expr}` / `$name` 插值上下文暂不屏蔽，保留后续语义补全空间
 - `lsp/crates/mylua-lsp/tests/test_completion.rs`
   - 新增 `complete_require_path_ignores_string_nested_in_dollar_interpolation`
+  - 新增 `complete_dollar_string_plain_content_suppresses_generic_items`
 - `lsp/crates/mylua-lsp/tests/test_document_link.rs`
   - 新增 `document_link_ignores_dollar_string_require_argument`
 - `lsp/crates/mylua-lsp/src/signature_help.rs`
@@ -195,6 +197,7 @@
 - semantic tokens 已补 `$name` 与 `${name}` 插值 smoke 覆盖，确认 `$string` 普通内容不产 token、插值 identifier 仍产 token。
 - `docs/future-work.md` 已移除完成的 `emmy_type_name_at_byte` 无 AST 上下文条目。
 - 本次继续 P6 signature help 细分场景：新增 named argument active parameter 回归测试，先 RED（`c=` 被错误定位到 positional slot 0），再修复为按签名参数名高亮 `c` 对应参数；非 named/匹配不到场景保持原有逗号计数。
+- 本次继续 P6 completion 细分场景：新增 `$string` 普通内容区通用补全降噪回归测试，先 RED（`$"lo"` 中错误出现 `localName` / `local`），再通过 AST 上下文门禁在 `dollar_string_content` / `dollar_escape` 内跳过 fallback locals/globals/keywords；`${expr}` / `$name` 暂保持不屏蔽。
 
 ## 当前验证结果
 
@@ -202,27 +205,25 @@
 
 ```bash
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
-cargo test -p mylua-lsp --test test_signature_help signature_help_named_argument_uses_parameter_name_for_active_param -- --nocapture
-cargo test -p mylua-lsp --test test_signature_help -- --nocapture
-rustfmt crates/mylua-lsp/src/signature_help.rs crates/mylua-lsp/tests/test_signature_help.rs
-cargo test -p mylua-lsp --test test_signature_help
+cargo test -p mylua-lsp --test test_completion complete_dollar_string_plain_content_suppresses_generic_items -- --nocapture
+rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completion.rs
+cargo test -p mylua-lsp --test test_completion
 ```
 
 结果：
 
-- 新增 RED 验证：`signature_help_named_argument_uses_parameter_name_for_active_param` 初次失败，确认 `foo(c=true, ...)` 中光标位于 `c=` 时 active parameter 仍错误为 positional slot 0；修复后 passed。
-- `cargo test -p mylua-lsp --test test_signature_help -- --nocapture`: passed（17 passed）
-- `rustfmt` 仅作用于本次 2 个 Rust 修改文件，passed
-- `cargo test -p mylua-lsp --test test_signature_help`: passed（17 passed）
-- `read_lints`：`signature_help.rs`、`test_signature_help.rs` 无诊断
+- 新增 RED 验证：`complete_dollar_string_plain_content_suppresses_generic_items` 初次失败，确认 `$"lo"` 普通内容区错误出现 `localName` / `local` 通用补全；修复后单测 passed。
+- `rustfmt` 仅作用于本次 2 个 Rust 修改文件，passed。
+- `cargo test -p mylua-lsp --test test_completion`: passed（13 passed）。
+- `read_lints`：`completion.rs`、`test_completion.rs` 无诊断。
 - 本轮未重复运行 grammar 侧 `npx tree-sitter generate/test`；上轮记录仍为 `generate` passed、`tree-sitter test` 55/55 passed。
 
 ## 当前工作区变更
 
 ```text
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
- M lsp/crates/mylua-lsp/src/signature_help.rs
- M lsp/crates/mylua-lsp/tests/test_signature_help.rs
+ M lsp/crates/mylua-lsp/src/completion.rs
+ M lsp/crates/mylua-lsp/tests/test_completion.rs
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -233,7 +234,7 @@ cargo test -p mylua-lsp --test test_signature_help
 
 1. P6 LSP 基础能力稳定
    - signature help 继续补 `${expr}` 内部普通调用、spread 场景的定位回归；named argument active parameter 按参数名定位已补一条回归
-   - completion 继续补普通 `$string` 内容区不误触发大量无关补全的策略评估；require/module completion 的 `$string` 动态路径误触发已修复
+   - completion 已补普通 `$string` 内容/`$$` 转义区不误触发通用 locals/globals/keywords 的回归；后续可评估 `$name` / `${expr}` 内部补全策略，以及调用参数位置 named argument name completion
    - hover / goto / references 已加 Emmy AST 上下文门禁；后续如遇普通 string/long string 中类似误触发，可复用同一门禁策略补测试
    - document link 已确认忽略 `$string` require 参数；后续如进入 P8 常量折叠，再单独设计无插值 `$string` 的静态路径策略
 2. `$string` 专属 diagnostics（P7/P8 前置）

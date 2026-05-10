@@ -73,6 +73,11 @@ pub fn complete(
         return items;
     }
 
+    // Plain `$string` text is not Lua code; don't leak generic locals/globals/keywords there.
+    if is_plain_dollar_string_content_position(doc, position) {
+        return Vec::new();
+    }
+
     // Fallback: identifier prefix completion (locals + globals + keywords).
     let prefix = get_prefix(doc, position);
     let mut items = Vec::new();
@@ -254,6 +259,42 @@ fn same_node(left: tree_sitter::Node, right: tree_sitter::Node) -> bool {
     left.kind() == right.kind()
         && left.start_byte() == right.start_byte()
         && left.end_byte() == right.end_byte()
+}
+
+fn is_plain_dollar_string_content_position(doc: &Document, position: Position) -> bool {
+    let Some(offset) = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)
+    else {
+        return false;
+    };
+    let Some(root) = doc.root_node() else {
+        return false;
+    };
+
+    [Some(offset), offset.checked_sub(1)]
+        .into_iter()
+        .flatten()
+        .any(|probe| {
+            root.descendant_for_byte_range(probe, probe)
+                .map(is_plain_dollar_string_content_node)
+                .unwrap_or(false)
+        })
+}
+
+fn is_plain_dollar_string_content_node(node: tree_sitter::Node) -> bool {
+    match node.kind() {
+        "dollar_string_content" | "dollar_escape" => return true,
+        "dollar_interpolation" | "dollar_name_interpolation" => return false,
+        _ => {}
+    }
+
+    walk_ancestors(node, |parent| match parent.kind() {
+        "dollar_string_content" | "dollar_escape" => Some(true),
+        "dollar_interpolation" | "dollar_name_interpolation" | "dollar_string" => Some(false),
+        _ => None,
+    })
+    .unwrap_or(false)
 }
 
 // ---------------------------------------------------------------------------
