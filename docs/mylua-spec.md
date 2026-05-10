@@ -79,7 +79,7 @@ end
 
 ### 3. `$string`
 
-新增 `$` 字符串语法糖。
+新增 `$` 字符串语法糖，并在 AST 中与普通 `string` 明确区分。
 
 示例：
 
@@ -87,18 +87,41 @@ end
 local s = "world"
 print($"hello $s")
 print($"1+2=${1+2}")
+print($"price is $$100")
+print($"hello ${format("world")}\
+next line ${name}")
 ```
 
-第一阶段建议：
+语法设计：
 
-- parser 把 `$"..."` / `$'...'` 接受为 `dollar_string`。
-- 类型推断先按 `string` 处理。
-- `${...}` 插值内容第一版可以不做完整 AST 嵌套解析，先保证整体不报语法错误。
+- `$"..."` / `$'...'` 解析为独立的 `dollar_string` 节点，不归入普通 `string` 节点。
+- `dollar_string` 是表达式，类型推断按 `string` 处理。
+- `dollar_string` 支持普通字符串转义，包括行尾转义换行。
+- 普通 `$` 必须写成 `$$`。
+- `$name` 解析为简单插值节点。
+- `${expr}` 解析为表达式插值节点，内部 `expr` 生成完整表达式 AST。
+- `${expr}` 内允许普通 `"..."` / `'...'` 字符串。
 
-后续增强：
+AST 结构：
 
-- 对 `${expr}` 内部表达式做 AST 支持。
-- 支持 hover/goto/diagnostics 进入插值表达式。
+- `dollar_string`
+  - `dollar_string_content`
+  - `dollar_escape`：表示 `$$`
+  - `dollar_name_interpolation`：表示 `$name`
+  - `dollar_interpolation`：表示 `${expr}`，并包含完整表达式子树
+
+限制与诊断：
+
+- `${expr}` 内不支持嵌套 `dollar_string`。
+- `${expr}` 整体必须在同一物理行内结束。
+- 上述两个限制由 diagnostics 扫描 AST 后报错，不在 grammar 中复制一套受限表达式语法。
+- `dollar_string` 自身不限制为单行；允许通过行尾转义换行实现多行内容，每行都可以包含独立的 `${expr}`。
+
+实现要求：
+
+- parser 生成完整 `dollar_string` AST，方便 LSP 扫描并提示标准 Lua 不支持 `$string`。
+- `dollar_string_content` 的外部扫描优先级高于关键字/identifier 扫描，避免 `$"if local end"` 中的内容被识别为 Lua 关键字。
+- `${expr}` 内部复用普通表达式解析，因此关键字/identifier 扫描逻辑继续复用现有 scanner。
 
 ### 4. `$function`
 
