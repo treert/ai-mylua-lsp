@@ -206,10 +206,16 @@ export function activate(context: vscode.ExtensionContext) {
   };
 
   const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'lua' }],
+    documentSelector: [
+      { scheme: 'file', language: 'lua' },
+      { scheme: 'file', language: 'mylua' },
+    ],
     initializationOptions: collectLspConfig(context),
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.lua'),
+      fileEvents: [
+        vscode.workspace.createFileSystemWatcher('**/*.lua'),
+        vscode.workspace.createFileSystemWatcher('**/*.mylua'),
+      ],
     },
   };
 

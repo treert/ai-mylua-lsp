@@ -119,7 +119,7 @@ pub struct WorkspaceConfig {
 impl Default for WorkspaceConfig {
     fn default() -> Self {
         Self {
-            include: vec!["**/*.lua".to_string()],
+            include: vec!["**/*.lua".to_string(), "**/*.mylua".to_string()],
             exclude: vec!["**/.*".to_string(), "**/node_modules".to_string()],
             index_mode: IndexMode::Merged,
             library: Vec::new(),

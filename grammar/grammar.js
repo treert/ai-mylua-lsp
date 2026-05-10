@@ -3,18 +3,19 @@
 
 // Lua operator precedence (lowest to highest, per Lua 5.4 §3.4.8)
 const PREC = {
-  OR: 1,
-  AND: 2,
-  COMPARE: 3,
-  BIT_OR: 4,
-  BIT_XOR: 5,
-  BIT_AND: 6,
-  SHIFT: 7,
-  CONCAT: 8,
-  ADD: 9,
-  MUL: 10,
-  UNARY: 11,
-  POWER: 12,
+  NIL_COALESCE: 1,
+  OR: 2,
+  AND: 3,
+  COMPARE: 4,
+  BIT_OR: 5,
+  BIT_XOR: 6,
+  BIT_AND: 7,
+  SHIFT: 8,
+  CONCAT: 9,
+  ADD: 10,
+  MUL: 11,
+  UNARY: 12,
+  POWER: 13,
 };
 
 // EmmyLua type expression precedence
@@ -60,6 +61,7 @@ module.exports = grammar({
     $.word_goto,
     $.word_return,
     $.word_break,
+    $.word_continue,
     // expression-level keywords
     $.word_and,
     $.word_or,
@@ -79,6 +81,7 @@ module.exports = grammar({
   conflicts: $ => [
     [$.function_call_statement, $._prefix_expression],
     [$._primary_expression, $.function_call],
+    [$._array_expression_list, $.field],
   ],
 
   supertypes: $ => [
@@ -131,6 +134,7 @@ module.exports = grammar({
       $.function_call_statement,
       $.label_statement,
       $.break_statement,
+      $.continue_statement,
       alias($._goto_statement, $.goto_statement),
       alias($._do_statement, $.do_statement),
       alias($._while_statement, $.while_statement),
@@ -154,13 +158,20 @@ module.exports = grammar({
 
     function_call_statement: $ => $.function_call,
 
-    label_statement: $ => seq('::', field('name', $.identifier), '::'),
+    label_statement: $ => seq('::', field('name', $._name_like_identifier), '::'),
 
     break_statement: $ => $.word_break,
 
+    continue_statement: $ => $.word_continue,
+
+    _name_like_identifier: $ => choice(
+      $.identifier,
+      alias($.word_continue, $.identifier),
+    ),
+
     // -- goto (top / nested) --
-    _top_goto_statement: $ => seq($.top_word_goto, field('name', $.identifier)),
-    _goto_statement: $ => seq($.word_goto, field('name', $.identifier)),
+    _top_goto_statement: $ => seq($.top_word_goto, field('name', $._name_like_identifier)),
+    _goto_statement: $ => seq($.word_goto, field('name', $._name_like_identifier)),
 
     // -- do (top / nested) --
     _top_do_statement: $ => seq($.top_word_do, optional($._block), $.word_end),
@@ -283,7 +294,7 @@ module.exports = grammar({
       seq(
         field('object', $._prefix_expression),
         '[',
-        field('index', $._expression),
+        optional(field('index', $._expression)),
         ']',
       ),
       seq(
@@ -315,6 +326,7 @@ module.exports = grammar({
     ),
 
     binary_expression: $ => choice(
+      prec.right(PREC.NIL_COALESCE, seq(field('left', $._expression), field('operator', '??'), field('right', $._expression))),
       prec.left(PREC.OR,      seq(field('left', $._expression), field('operator', $.word_or),  field('right', $._expression))),
       prec.left(PREC.AND,     seq(field('left', $._expression), field('operator', $.word_and), field('right', $._expression))),
       prec.left(PREC.COMPARE, seq(field('left', $._expression), field('operator', choice('<', '<=', '>', '>=', '==', '~=')), field('right', $._expression))),
@@ -343,6 +355,7 @@ module.exports = grammar({
       $.function_definition,
       $._prefix_expression,
       $.table_constructor,
+      $.array_constructor,
     ),
 
     nil: $ => $.word_nil,
@@ -376,9 +389,15 @@ module.exports = grammar({
     ),
 
     arguments: $ => choice(
-      seq('(', optional($.expression_list), ')'),
+      seq('(', optional(alias($._argument_expression_list, $.expression_list)), ')'),
       $.table_constructor,
       $.string,
+    ),
+
+    _argument_expression_list: $ => seq(
+      $._expression,
+      repeat(seq(',', $._expression)),
+      optional(','),
     ),
 
     // ========================================================================
@@ -404,8 +423,9 @@ module.exports = grammar({
         $.identifier,
         repeat(seq(',', $.identifier)),
         optional(seq(',', '...')),
+        optional(','),
       ),
-      '...',
+      seq('...', optional(',')),
     ),
 
     // ========================================================================
@@ -424,6 +444,18 @@ module.exports = grammar({
       optional($._field_separator),
     ),
 
+    array_constructor: $ => seq(
+      '[',
+      optional($._array_expression_list),
+      ']',
+    ),
+
+    _array_expression_list: $ => seq(
+      $._expression,
+      repeat(seq($._field_separator, $._expression)),
+      optional($._field_separator),
+    ),
+
     field: $ => choice(
       seq('[', field('key', $._expression), ']', '=', field('value', $._expression)),
       seq(field('key', $.identifier), '=', field('value', $._expression)),
@@ -437,17 +469,17 @@ module.exports = grammar({
     // ========================================================================
 
     number: _ => {
-      const decimal_integer = /[0-9]+/;
-      const hex_integer = /0[xX][0-9a-fA-F]+/;
+      const decimal_integer = /[0-9][0-9_]*/;
+      const hex_integer = /0[xX][0-9a-fA-F][0-9a-fA-F_]*/;
       const decimal_float = choice(
-        /[0-9]+\.[0-9]*([eE][+-]?[0-9]+)?/,
-        /[0-9]+[eE][+-]?[0-9]+/,
-        /\.[0-9]+([eE][+-]?[0-9]+)?/,
+        /[0-9][0-9_]*\.[0-9_]*([eE][+-]?[0-9][0-9_]*)?/,
+        /[0-9][0-9_]*[eE][+-]?[0-9][0-9_]*/,
+        /\.[0-9][0-9_]*([eE][+-]?[0-9][0-9_]*)?/,
       );
       const hex_float = choice(
-        /0[xX][0-9a-fA-F]+\.[0-9a-fA-F]*([pP][+-]?[0-9]+)?/,
-        /0[xX][0-9a-fA-F]+[pP][+-]?[0-9]+/,
-        /0[xX]\.[0-9a-fA-F]+([pP][+-]?[0-9]+)?/,
+        /0[xX][0-9a-fA-F][0-9a-fA-F_]*\.[0-9a-fA-F_]*([pP][+-]?[0-9][0-9_]*)?/,
+        /0[xX][0-9a-fA-F][0-9a-fA-F_]*[pP][+-]?[0-9][0-9_]*/,
+        /0[xX]\.[0-9a-fA-F][0-9a-fA-F_]*([pP][+-]?[0-9][0-9_]*)?/,
       );
       return token(choice(hex_float, hex_integer, decimal_float, decimal_integer));
     },

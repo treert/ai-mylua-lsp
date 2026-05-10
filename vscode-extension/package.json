@@ -29,11 +29,22 @@
         "aliases": ["Lua", "lua"],
         "extensions": [".lua"],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "mylua",
+        "aliases": ["MyLua", "mylua"],
+        "extensions": [".mylua"],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
       {
         "language": "lua",
+        "scopeName": "source.lua",
+        "path": "./syntaxes/lua.tmLanguage.json"
+      },
+      {
+        "language": "mylua",
         "scopeName": "source.lua",
         "path": "./syntaxes/lua.tmLanguage.json"
       }
@@ -45,13 +56,22 @@
           "variable.defaultLibrary": ["support.variable.lua"],
           "variable.global": ["variable.other.global.lua"]
         }
+      },
+      {
+        "language": "mylua",
+        "scopes": {
+          "variable.defaultLibrary": ["support.variable.lua"],
+          "variable.global": ["variable.other.global.lua"]
+        }
       }
     ],
     "configurationDefaults": {
       "editor.semanticTokenColorCustomizations": {
         "rules": {
           "variable.defaultLibrary:lua": "#ee9d28",
-          "variable.global:lua": "#d19a66"
+          "variable.global:lua": "#d19a66",
+          "variable.defaultLibrary:mylua": "#ee9d28",
+          "variable.global:mylua": "#d19a66"
         }
       }
     },
@@ -103,7 +123,7 @@
         "mylua.workspace.include": {
           "type": "array",
           "items": { "type": "string" },
-          "default": ["**/*.lua"],
+          "default": ["**/*.lua", "**/*.mylua"],
           "description": "Glob patterns for files to include in workspace indexing."
         },
         "mylua.workspace.exclude": {

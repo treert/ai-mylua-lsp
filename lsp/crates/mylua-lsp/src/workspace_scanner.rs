@@ -26,7 +26,6 @@ impl FileFilter {
         }
         !self.exclude.is_match(relative_path)
     }
-
 }
 
 fn build_globset(patterns: &[String]) -> GlobSet {
@@ -39,7 +38,7 @@ fn build_globset(patterns: &[String]) -> GlobSet {
     builder.build().unwrap_or_else(|_| GlobSet::empty())
 }
 
-/// Scan a directory recursively for .lua files.
+/// Scan a directory recursively for Lua/MyLua files.
 /// Returns a list of (module_name, Uri) pairs for building the module index.
 pub fn scan_workspace_lua_files(
     roots: &[PathBuf],
@@ -117,8 +116,11 @@ pub fn file_path_to_module_name(file: &Path) -> Option<String> {
     // Strip leading `/`
     let trimmed = without_drive.trim_start_matches('/');
 
-    // Strip `.lua` extension
-    let without_ext = trimmed.strip_suffix(".lua").unwrap_or(trimmed);
+    // Strip Lua/MyLua extension
+    let without_ext = trimmed
+        .strip_suffix(".mylua")
+        .or_else(|| trimmed.strip_suffix(".lua"))
+        .unwrap_or(trimmed);
 
     if without_ext.is_empty() {
         return None;
@@ -201,7 +203,14 @@ pub fn module_last_segment(module_name: &str) -> &str {
     }
 }
 
-/// Collect all .lua file paths in the workspace (for batch indexing).
+/// Returns true for source files handled by this language server.
+pub fn is_lua_like_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| matches!(ext, "lua" | "mylua"))
+}
+
+/// Collect all Lua/MyLua file paths in the workspace (for batch indexing).
 pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) -> Vec<PathBuf> {
     let mut files = Vec::new();
     let filter = FileFilter::from_config(workspace_config);
@@ -214,7 +223,7 @@ pub fn collect_lua_files(roots: &[PathBuf], workspace_config: &WorkspaceConfig) 
 }
 
 /// Walk a directory tree using `jwalk` for parallel I/O, returning all
-/// `.lua` files accepted by `filter`. Directory pruning happens inside
+/// Lua/MyLua files accepted by `filter`. Directory pruning happens inside
 /// `process_read_dir` so excluded subtrees (e.g. `node_modules`,
 /// `.git`) never trigger further `readdir` syscalls.
 fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
@@ -254,7 +263,7 @@ fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
             continue;
         }
         let path = entry.path();
-        if path.extension().is_some_and(|ext| ext == "lua") {
+        if is_lua_like_path(&path) {
             let relative = path
                 .strip_prefix(base)
                 .unwrap_or(&path)
@@ -458,7 +467,9 @@ fn lowercase_drive_in_uri(uri: Uri) -> Uri {
                 let mut owned = s.to_owned();
                 // SAFETY: replacing one ASCII byte with another ASCII byte
                 // preserves UTF-8 validity.
-                unsafe { owned.as_bytes_mut()[8] = lower; }
+                unsafe {
+                    owned.as_bytes_mut()[8] = lower;
+                }
                 if let Ok(new_uri) = owned.parse::<Uri>() {
                     return new_uri;
                 }
@@ -487,6 +498,27 @@ mod tests {
         let file = Path::new("/project/game/init.lua");
         let result = file_path_to_module_name(file);
         assert_eq!(result, Some("project.game".to_string()));
+    }
+
+    #[test]
+    fn mylua_file_module_name() {
+        let file = Path::new("/project/game/player.mylua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game.player".to_string()));
+    }
+
+    #[test]
+    fn init_mylua_strips_init_segment() {
+        let file = Path::new("/project/game/init.mylua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("project.game".to_string()));
+    }
+
+    #[test]
+    fn root_init_mylua_returns_init() {
+        let file = Path::new("/init.mylua");
+        let result = file_path_to_module_name(file);
+        assert_eq!(result, Some("init".to_string()));
     }
 
     #[test]
@@ -584,6 +616,42 @@ mod tests {
     }
 
     #[test]
+    fn default_workspace_scan_collects_lua_and_mylua_files() {
+        let root = unique_temp_dir("mylua_scan");
+        let nested = root.join("pkg");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("main.lua"), "return {}\n").unwrap();
+        std::fs::write(nested.join("mod.mylua"), "return {}\n").unwrap();
+        std::fs::write(root.join("ignored.txt"), "return {}\n").unwrap();
+
+        let config = WorkspaceConfig::default();
+        let files = collect_lua_files(&[root.clone()], &config);
+        let rels: std::collections::HashSet<_> = files
+            .iter()
+            .map(|path| {
+                path.strip_prefix(&root)
+                    .unwrap()
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            })
+            .collect();
+
+        assert!(rels.contains("main.lua"));
+        assert!(rels.contains("pkg/mod.mylua"));
+        assert!(!rels.contains("ignored.txt"));
+
+        let modules = scan_workspace_lua_files(&[root.clone()], &RequireConfig::default(), &config);
+        let module_names: std::collections::HashSet<_> = modules
+            .iter()
+            .map(|(name, _)| module_last_segment(name).to_string())
+            .collect();
+        assert!(module_names.contains("main"));
+        assert!(module_names.contains("mod"));
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn library_resolver_deduplicates_same_canonical_path() {
         let p = unique_temp_dir("dedupe");
         std::fs::create_dir_all(&p).unwrap();
@@ -623,5 +691,4 @@ mod tests {
         let out = resolve_library_roots(&["stubs".to_string()], &[]);
         assert!(out.is_empty());
     }
-
 }

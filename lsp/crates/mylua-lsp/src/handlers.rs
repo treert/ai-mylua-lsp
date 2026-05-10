@@ -504,7 +504,7 @@ impl LanguageServer for Backend {
             match change.typ {
                 FileChangeType::CREATED | FileChangeType::CHANGED => {
                     if let Some(path) = uri_to_path(&change.uri) {
-                        if path.extension().is_some_and(|e| e == "lua") {
+                        if workspace_scanner::is_lua_like_path(&path) {
                             if !workspace_scanner::should_index_path(&path, &roots, &filter) {
                                 continue;
                             }

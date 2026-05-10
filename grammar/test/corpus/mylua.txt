@@ -1,0 +1,49 @@
+================================================================================
+MyLua continue statement
+================================================================================
+
+for i = 1, 10 do
+  continue
+end
+
+---
+
+(source_file
+  (for_numeric_statement
+    (word_for)
+    name: (identifier)
+    start: (number)
+    stop: (number)
+    (word_do)
+    (continue_statement
+      (word_continue))
+    (word_end)))
+
+================================================================================
+MyLua array constructor and push index
+================================================================================
+
+local a = [1, nil, 3]
+a[] = 4
+
+---
+
+(source_file
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (array_constructor
+        (number)
+        (nil
+          (word_nil))
+        (number))))
+  (assignment_statement
+    left: (variable_list
+      (variable
+        object: (variable
+          (identifier))))
+    right: (expression_list
+      (number))))
+

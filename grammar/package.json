@@ -19,7 +19,7 @@
   "tree-sitter": [
     {
       "scope": "source.lua",
-      "file-types": ["lua"],
+      "file-types": ["lua", "mylua"],
       "injection-regex": "lua"
     }
   ]

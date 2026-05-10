@@ -1,0 +1,126 @@
+# MyLua 语法支持 — 进度记录
+
+**日期**: 2026-05-10  
+**状态**: P0/P1 完成；P2 低风险 grammar 子集部分完成；P3+ 待继续
+
+## 入口文档
+
+- Spec: `docs/mylua-spec.md`
+- Plan: `docs/superpowers/plans/2026-05-10-mylua-implementation-plan.md`
+
+## 本轮已完成
+
+### P0：测试闭环
+
+- 新增 `grammar/test/corpus/mylua.txt`
+  - 当前覆盖并通过：`continue`、`array_constructor`、`t[] = value`
+- 新增 `lsp/crates/mylua-lsp/tests/test_mylua_parse.rs`
+  - 已启用：低风险语法、`continue.mylua`、`array.mylua`
+  - 已保留但 `#[ignore]`：named/spread args、`$string` / `$function` fixture
+
+### P1：`.mylua` 后缀接入
+
+已改：
+
+- `vscode-extension/package.json`
+  - 注册 `mylua` language id 与 `.mylua` 后缀
+  - `.mylua` 复用现有 Lua TextMate grammar / semantic token scope
+  - `mylua.workspace.include` 默认包含 `**/*.mylua`
+- `vscode-extension/src/extension.ts`
+  - `documentSelector` 同时匹配 `lua` / `mylua`
+  - watcher 同时监听 `**/*.lua` / `**/*.mylua`
+- `lsp/crates/mylua-lsp/src/config.rs`
+  - 默认 include 改为 `['**/*.lua', '**/*.mylua']`
+- `lsp/crates/mylua-lsp/src/workspace_scanner.rs`
+  - 新增 `is_lua_like_path`
+  - workspace scan 收集 `.lua` / `.mylua`
+  - `file_path_to_module_name` strip `.lua` / `.mylua`
+  - `init.mylua` 与 `init.lua` 一样映射为目录模块名
+- `lsp/crates/mylua-lsp/src/handlers.rs`
+  - watcher create/change 使用 `is_lua_like_path`
+
+### P2：已完成的低风险 grammar 子集
+
+已改：
+
+- `grammar/grammar.js`
+- `grammar/src/scanner.c`
+- `grammar/src/parser.c`（由 `npx tree-sitter generate` 生成）
+
+已支持：
+
+- `continue_statement`
+- `continue` 可作为 `goto continue` / `::continue::` 名称
+- `array_constructor`: `[]`, `[1, nil, 3]`
+- `t[] = value` parser 接受
+- 函数定义参数尾逗号：`function f(a, b,) end`
+- 函数调用参数尾逗号：`f(1, 2,)`
+- number literal 支持 `_`
+- `??` 作为 `binary_expression` operator
+
+## 当前验证结果
+
+最近一次验证命令：
+
+```bash
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
+cargo test
+
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/grammar
+npx tree-sitter test --file-name mylua.txt
+
+cd /Users/zhuguosen/MyGit/ai-mylua-lsp/vscode-extension
+npm run compile
+node -e "JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('package.json ok')"
+```
+
+结果：
+
+- `cargo test`: passed
+- `npx tree-sitter test --file-name mylua.txt`: 2/2 passed
+- `npm run compile`: passed
+- `package.json` JSON parse: passed
+- 相关 `read_lints`: no new diagnostics
+
+## 当前工作区变更
+
+```text
+ M grammar/grammar.js
+ M grammar/package.json
+ M grammar/src/scanner.c
+ M lsp/crates/mylua-lsp/src/config.rs
+ M lsp/crates/mylua-lsp/src/handlers.rs
+ M lsp/crates/mylua-lsp/src/workspace_scanner.rs
+ M vscode-extension/package.json
+ M vscode-extension/src/extension.ts
+?? docs/superpowers/plans/2026-05-10-mylua-implementation-plan.md
+?? grammar/test/corpus/mylua.txt
+?? lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
+```
+
+注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
+
+## 下次继续建议
+
+优先继续 P2/P3 中尚未完成的 parser 子任务，建议顺序：
+
+1. safe access/call
+   - `obj?.field`
+   - `obj?['key']`
+   - `obj?()`
+   - `obj?:method()`
+2. named/spread args
+   - `f(a=1)`
+   - `f(*args)`
+   - 启用 `parse_mylua_named_args_fixture`
+3. keyword-as-name 完整范围
+   - 当前仅为 `continue` label/goto 做了最小适配
+4. `$function`
+5. `$string` scanner mode
+
+## 重要注意事项
+
+- `parse_mylua_named_args_fixture` 和 `parse_mylua_dollar_extensions_fixture` 当前是 `#[ignore]`，后续实现对应语法时再启用。
+- `t[]` 当前 AST 没有显式 `empty_index` 节点，只是 `variable` 缺少 `index` field；Rust analyzer 后续读取 index 时必须允许 `None`。
+- `dollar_string` 第一阶段不要接入 `extract_string_literal` / require / document link。
+- 不要运行全仓库 `cargo fmt`，会产生大量无关格式化 diff；如需格式化，限制在本次修改文件。
