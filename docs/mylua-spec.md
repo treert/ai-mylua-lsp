@@ -90,38 +90,52 @@ print($"1+2=${1+2}")
 print($"price is $$100")
 print($"hello ${format("world")}\
 next line ${name}")
+print $"short-call $s"
 ```
 
 语法设计：
 
-- `$"..."` / `$'...'` 解析为独立的 `dollar_string` 节点，不归入普通 `string` 节点。
+```bnf
+dollar_string ::= '$' ( '"' { dollar_string_item } '"' | "'" { dollar_string_item } "'" )
+dollar_string_item ::= dollar_string_content | dollar_escape | dollar_name_interpolation | dollar_interpolation
+dollar_escape ::= '$$'
+dollar_name_interpolation ::= '$' Name
+dollar_interpolation ::= '${' exp '}'
+```
+
+- `$"..."` / `$'...'` 解析为独立的 `dollar_string` 节点，不归入普通 `string` 节点，也不复用 `short_string` 节点。
 - `dollar_string` 是表达式，类型推断按 `string` 处理。
-- `dollar_string` 支持普通字符串转义，包括行尾转义换行。
+- `dollar_string` 也允许作为无括号调用参数，与 Lua 原生 `f "x"` 类似，例如 `print $"hello"`。
+- `dollar_string` 遵循普通短字符串转义规则；不允许裸换行，但允许行尾转义换行和 `\z` 吞空白。
 - 普通 `$` 必须写成 `$$`。
 - `$name` 解析为简单插值节点。
 - `${expr}` 解析为表达式插值节点，内部 `expr` 生成完整表达式 AST。
-- `${expr}` 内允许普通 `"..."` / `'...'` 字符串。
+- `${expr}` 内允许普通 `"..."` / `'...'` 字符串，内部字符串的引号不能结束外层 `dollar_string`。
 
 AST 结构：
 
 - `dollar_string`
   - `dollar_string_content`
   - `dollar_escape`：表示 `$$`
-  - `dollar_name_interpolation`：表示 `$name`
+  - `dollar_name_interpolation`：表示 `$name`，包含 `identifier` 子节点
   - `dollar_interpolation`：表示 `${expr}`，并包含完整表达式子树
 
 限制与诊断：
 
 - `${expr}` 内不支持嵌套 `dollar_string`。
-- `${expr}` 整体必须在同一物理行内结束。
+- `${expr}` 的 `{` 和匹配的 `}` 必须在同一物理行内。
 - 上述两个限制由 diagnostics 扫描 AST 后报错，不在 grammar 中复制一套受限表达式语法。
-- `dollar_string` 自身不限制为单行；允许通过行尾转义换行实现多行内容，每行都可以包含独立的 `${expr}`。
+- `dollar_string` 自身可以通过普通短字符串的行尾转义跨物理行；每个 `${expr}` 只按自己的起始行检查，不要求与整个 `dollar_string` 的起始行相同。
+- `$` 后只允许 `$`、`Name` 或 `{`；其他形式应产生 syntax error 或 MyLua 专属诊断。
 
 实现要求：
 
 - parser 生成完整 `dollar_string` AST，方便 LSP 扫描并提示标准 Lua 不支持 `$string`。
+- `dollar_string` 需要加入 `_primary_expression`，并加入 `arguments` 以支持 `f $"x"` 这种无括号调用参数。
 - `dollar_string_content` 的外部扫描优先级高于关键字/identifier 扫描，避免 `$"if local end"` 中的内容被识别为 Lua 关键字。
+- 外部 scanner 需要维护 `dollar_string` 模式；进入 `${expr}` 后恢复普通表达式扫描，匹配 `}` 后回到 `dollar_string` 内容扫描。
 - `${expr}` 内部复用普通表达式解析，因此关键字/identifier 扫描逻辑继续复用现有 scanner。
+- 静态字面量提取（例如 `require` 路径、document link、相关 completion）第一阶段只识别普通 `string`，不要把 `dollar_string` 当成可静态解析的 literal。
 
 ### 4. `$function`
 
@@ -137,12 +151,13 @@ local f2 = $(ff){ return "f2 " .. ff() }
 语法：
 
 ```bnf
-dollar_func ::= '$' [ '(' [parlist] ')' ] '{' block '}'
+dollar_function ::= '$' [ '(' [parlist] ')' ] '{' block '}'
 ```
 
 建议：
 
 - parser 增加 `dollar_function`。
+- `dollar_function` 是表达式，也允许作为无括号调用参数，与 `dollar_string` 保持一致。
 - analyzer 中尽量把它按普通 `function_definition` 处理。
 - 如果 AST 能复用 `function_body` / `parameter_list`，后续 summary、signature help、hover 改动会更小。
 
@@ -388,7 +403,9 @@ local c = 0x00_14_22_01_23_45
 
 - 增加 keyword：`continue`。
 - 增加 operator：`??`。
-- 增加 tokens/productions：`$string`、`$function`、`array_constructor`、`safe access/call`、`named_argument`、`spread_argument`。
+- 增加 `dollar_string` / `dollar_function` productions：既作为 `_primary_expression`，也作为 `arguments` 的无括号单参数形式。
+- `dollar_string` 使用独立 AST 节点和 scanner mode；不要把它包进普通 `string` / `short_string` 节点。
+- 增加 tokens/productions：`array_constructor`、`safe access/call`、`named_argument`、`spread_argument`。
 - 放开参数尾逗号。
 - 放开部分 keyword-as-name 上下文。
 - 扩展 number regex 支持 `_`。
@@ -409,17 +426,20 @@ cargo test
 - `summary_builder`
 - `type_infer`
 - `util::extract_call_arg_nodes`
+- `util::extract_string_literal`
+- `document_link` / require module path extraction
 - diagnostics：`field_access`、`call_args`、`duplicate_key`、`syntax`
-- hover/goto/references/signature_help/semantic_tokens
+- hover/goto/references/signature_help/semantic_tokens/completion
 
 第一阶段原则：
 
 - 新 AST 节点不应导致 panic 或大量误报。
 - `array_constructor` 可先按 table 处理。
-- `dollar_string` 可先按 string 处理。
+- `dollar_string` 类型可先按 string 处理，但不作为普通静态字符串字面量提取。
 - `dollar_function` 可先按 function 处理。
 - `continue_statement` 可先无语义处理。
 - `named_argument` / `spread_argument` 先保证 call args 提取合理。
+- `dollar_string` / `dollar_function` 的无括号调用形式要在 call args 提取、signature help、argument diagnostics 中按单参数处理。
 
 ## 推荐里程碑
 
@@ -435,8 +455,8 @@ cargo test
 
 - `.mylua`
 - `continue`
-- `$string`
-- `$function`
+- `dollar_string`：表达式、插值、`$$`、无括号调用参数
+- `dollar_function`：表达式、无括号调用参数
 - `??`
 - `?.` / `?[]` / `?()` / `?:method()`
 - `[]`
@@ -456,9 +476,10 @@ cargo test
 包含：
 
 - `array_constructor` 类型近似为 table。
-- `dollar_string` 类型为 string。
+- `dollar_string` 类型为 string，但不参与普通字符串的静态 module path 提取。
+- `dollar_string` diagnostics 覆盖嵌套 `$string`、多行 `${expr}` 和非法 `$` 后缀。
 - `dollar_function` 类型为 function。
-- call args 支持 named/spread。
+- call args 支持 named/spread 以及 `$string` / `$function` 无括号单参数形式。
 - optional chain 的 field diagnostics 初步降噪。
 - `t[]` 相关逻辑避免空 index 崩溃。
 
@@ -476,6 +497,7 @@ cargo test
 - `array` / `map` 类型区分。
 - `t[]` 只允许赋值左侧的语义诊断。
 - `.lua` 严格模式诊断开关。
+- 可选：对没有插值的 `dollar_string` 做常量折叠，再用于 require/document link 等静态能力。
 
 ## 难度评估
 
@@ -491,13 +513,13 @@ cargo test
 ### 中等
 
 - `[]` array constructor。
-- `$string`。
 - `$function`。
 - keyword-as-name。
 - optional chain parser 支持。
 
 ### 较复杂
 
+- `$string` 的 scanner mode、插值 AST、无括号调用参数和专属 diagnostics。
 - named args / `*args` 的完整 diagnostics 和 signature help。
 - optional chain 的精确类型推断和诊断降噪。
 - `??` nil-aware 类型推断。
@@ -514,9 +536,9 @@ cargo test
    - 先保证 MyLua 文件不报 syntax error。
    - 再逐步补齐 hover/goto/diagnostics/type inference。
 
-3. **尽量复用现有 AST 节点语义**
+3. **复用语义，不混淆 AST 节点边界**
    - `dollar_function` 尽量复用 function 相关结构。
-   - `dollar_string` 尽量复用 string 相关结构。
+   - `dollar_string` 保持独立 AST 节点；类型和运行时结果按 string 处理，但不要默认复用普通 `string` 的静态字面量提取逻辑。
    - `array_constructor` 第一阶段可近似为 table。
 
 4. **`.lua` 严格模式用 diagnostics 实现**
