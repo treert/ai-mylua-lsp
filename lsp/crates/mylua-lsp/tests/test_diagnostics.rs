@@ -559,6 +559,71 @@ obj:missing()
 }
 
 #[test]
+fn plain_field_access_with_question_comment_still_reports_unknown_field() {
+    let src = r#"
+local t = { name = "hello" }
+print(t -- ? comment
+    .no_exist)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "plain_field_question_comment.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.lua_field_error = DiagnosticSeverityOption::Error;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown_no_exist: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field 'no_exist'"))
+        .collect();
+    assert_eq!(
+        unknown_no_exist.len(),
+        1,
+        "plain `.` access must still report Unknown field when intervening comment contains `?`, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn plain_method_call_with_question_comment_still_reports_unknown_field() {
+    let src = r#"
+---@class Foo
+---@field exists fun(self: Foo)
+---@type Foo
+local obj = nil
+obj -- ?: comment
+    :missing()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "plain_method_question_comment.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.emmy_unknown_field = DiagnosticSeverityOption::Error;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown_missing: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field 'missing'"))
+        .collect();
+    assert_eq!(
+        unknown_missing.len(),
+        1,
+        "plain `:` call must still report Unknown field when intervening comment contains `?`, got: {:?}",
+        diags
+    );
+}
+
+#[test]
 fn emmy_type_mismatch_string_vs_number() {
     let src = r#"
 ---@type string

@@ -69,9 +69,14 @@ fn parse_mylua_safe_access_and_call_syntax() {
         "safe access/call MyLua syntax",
         r#"
 local field_value = obj?.field
+local chained_value = obj?.field?.nested
 local index_value = obj?["key"]
 local call_value = obj?()
 local method_value = obj?:method(1)
+local field_call = obj?.field()
+local safe_field_call = obj?.field?()
+local call_field = obj?().field
+local safe_index_chain = obj?["key"]?.nested
 local combined = obj?.field ?? default_value
 obj?()
 obj?:method(1)

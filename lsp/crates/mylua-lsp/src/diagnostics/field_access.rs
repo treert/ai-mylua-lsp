@@ -68,29 +68,21 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
     false
 }
 
-fn has_question_marker_between(
-    left: tree_sitter::Node,
-    right: tree_sitter::Node,
-    source: &[u8],
-) -> bool {
-    if left.end_byte() > right.start_byte() || right.start_byte() > source.len() {
-        return false;
+fn node_has_direct_child_kind(node: tree_sitter::Node, kind: &str) -> bool {
+    for i in 0..node.child_count() {
+        if node.child(i as u32).is_some_and(|child| child.kind() == kind) {
+            return true;
+        }
     }
-    source[left.end_byte()..right.start_byte()].contains(&b'?')
+    false
 }
 
-fn is_safe_field_access(node: tree_sitter::Node, source: &[u8]) -> bool {
-    match (
-        node.child_by_field_name("object"),
-        node.child_by_field_name("field"),
-    ) {
-        (Some(object), Some(field)) => has_question_marker_between(object, field, source),
-        _ => false,
-    }
+fn is_safe_field_access(node: tree_sitter::Node) -> bool {
+    node_has_direct_child_kind(node, "?.")
 }
 
-fn is_safe_method_call(callee: tree_sitter::Node, method: tree_sitter::Node, source: &[u8]) -> bool {
-    has_question_marker_between(callee, method, source)
+fn is_safe_method_call(node: tree_sitter::Node) -> bool {
+    node_has_direct_child_kind(node, "?:")
 }
 
 fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
@@ -100,7 +92,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
         && node.child_by_field_name("object").is_some()
         && node.child_by_field_name("field").is_some();
 
-    if is_dotted && !is_assignment_target(node) && !is_safe_field_access(node, ctx.source) {
+    if is_dotted && !is_assignment_target(node) && !is_safe_field_access(node) {
         if let Some((base_node, fields)) = extract_field_chain(node, ctx.source) {
             check_dotted_field(ctx, node, base_node, &fields);
         }
@@ -111,7 +103,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
             node.child_by_field_name("callee"),
             node.child_by_field_name("method"),
         ) {
-            if !is_safe_method_call(callee, method, ctx.source) {
+            if !is_safe_method_call(node) {
                 let base_fact = crate::type_inference::infer_node_type_in_file_id(
                     callee,
                     ctx.source,

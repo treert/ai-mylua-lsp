@@ -371,8 +371,6 @@ module.exports = grammar({
       $.vararg_expression,
       $.function_definition,
       $._prefix_expression,
-      prec.dynamic(-10, alias($._safe_variable, $.variable)),
-      prec.dynamic(-10, alias($._safe_function_call, $.function_call)),
       $.table_constructor,
       $.array_constructor,
     ),
@@ -390,6 +388,8 @@ module.exports = grammar({
       $.variable,
       $.function_call,
       $.parenthesized_expression,
+      prec.dynamic(-10, alias($._safe_variable, $.variable)),
+      prec.dynamic(-10, alias($._safe_function_call, $.function_call)),
     ),
 
     parenthesized_expression: $ => seq('(', $._expression, ')'),
