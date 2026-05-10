@@ -187,3 +187,94 @@ f(*[100], 13)
               (number)))
           (number))))))
 
+================================================================================
+MyLua keyword-as-name contexts
+================================================================================
+
+local tb = { local = 1, end = 2 }
+tb.end = 3
+local x = tb.for
+local y = tb?.return
+tb:for()
+tb?:return()
+function tb:for() end
+function tb.while() end
+goto end
+::end::
+
+---
+
+(source_file
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (table_constructor
+        (field_list
+          (field
+            key: (identifier)
+            value: (number))
+          (field
+            key: (identifier)
+            value: (number))))))
+  (assignment_statement
+    left: (variable_list
+      (variable
+        object: (variable
+          (identifier))
+        field: (identifier)))
+    right: (expression_list
+      (number)))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (variable
+        object: (variable
+          (identifier))
+        field: (identifier))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (variable
+        object: (variable
+          (identifier))
+        field: (identifier))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      method: (identifier)
+      arguments: (arguments)))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      method: (identifier)
+      arguments: (arguments)))
+  (function_declaration
+    (word_function)
+    name: (function_name
+      (identifier)
+      method: (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (word_end)))
+  (function_declaration
+    (word_function)
+    name: (function_name
+      (identifier)
+      (identifier))
+    body: (function_body
+      parameters: (parameter_list)
+      (word_end)))
+  (goto_statement
+    (word_goto)
+    name: (identifier))
+  (label_statement
+    name: (identifier)))
+

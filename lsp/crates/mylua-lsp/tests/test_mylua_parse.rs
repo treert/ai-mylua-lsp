@@ -39,6 +39,21 @@ fn assert_fixture_parses(relative_path: &str) {
     assert_source_parses(&path.display().to_string(), &source);
 }
 
+fn assert_source_has_error(name: &str, source: &str) {
+    let mut parser = new_parser();
+    let tree = parser
+        .parse(source.as_bytes(), None)
+        .unwrap_or_else(|| panic!("parser returned None for {name}"));
+    let root = tree.root_node();
+
+    assert_eq!(root.kind(), "source_file");
+    assert!(
+        root.has_error(),
+        "{name} should keep rejecting keyword in ambiguous name positions:\n{}",
+        root.to_sexp(),
+    );
+}
+
 #[test]
 fn parse_mylua_low_risk_syntax() {
     assert_source_parses(
@@ -97,6 +112,37 @@ f(b=11, *args, a=11, g())
 f(*[100], 13)
 "#,
     );
+}
+
+#[test]
+fn parse_mylua_keyword_as_name_syntax() {
+    assert_source_parses(
+        "keyword-as-name MyLua syntax",
+        r#"
+local tb = { local = 1, end = 2 }
+tb.end = 3
+local x = tb.for
+local y = tb?.return
+tb:for()
+tb?:return()
+function tb:for() end
+function tb.while() end
+goto end
+::end::
+"#,
+    );
+}
+
+#[test]
+fn parse_mylua_rejects_keywords_in_ambiguous_name_positions() {
+    for (name, source) in [
+        ("local declaration name", "local end = 1"),
+        ("function parameter", "function f(local) end"),
+        ("numeric for variable", "for end = 1, 3 do end"),
+        ("local function name", "local function while() end"),
+    ] {
+        assert_source_has_error(name, source);
+    }
 }
 
 #[test]

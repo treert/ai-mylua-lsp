@@ -169,7 +169,35 @@ module.exports = grammar({
 
     _name_like_identifier: $ => choice(
       $.identifier,
+      $._keyword_identifier,
+    ),
+
+    _member_name: $ => $._name_like_identifier,
+
+    _keyword_identifier: $ => choice(
+      alias($.word_end, $.identifier),
+      alias($.word_local, $.identifier),
+      alias($.word_if, $.identifier),
+      alias($.word_then, $.identifier),
+      alias($.word_elseif, $.identifier),
+      alias($.word_else, $.identifier),
+      alias($.word_while, $.identifier),
+      alias($.word_do, $.identifier),
+      alias($.word_repeat, $.identifier),
+      alias($.word_until, $.identifier),
+      alias($.word_for, $.identifier),
+      alias($.word_in, $.identifier),
+      alias($.word_function, $.identifier),
+      alias($.word_goto, $.identifier),
+      alias($.word_return, $.identifier),
+      alias($.word_break, $.identifier),
       alias($.word_continue, $.identifier),
+      alias($.word_and, $.identifier),
+      alias($.word_or, $.identifier),
+      alias($.word_not, $.identifier),
+      alias($.word_nil, $.identifier),
+      alias($.word_true, $.identifier),
+      alias($.word_false, $.identifier),
     ),
 
     // -- goto (top / nested) --
@@ -286,8 +314,8 @@ module.exports = grammar({
 
     function_name: $ => seq(
       $.identifier,
-      repeat(seq('.', $.identifier)),
-      optional(seq(':', field('method', $.identifier))),
+      repeat(seq('.', $._member_name)),
+      optional(seq(':', field('method', $._member_name))),
     ),
 
     variable_list: $ => seq($.variable, repeat(seq(',', $.variable))),
@@ -303,7 +331,7 @@ module.exports = grammar({
       seq(
         field('object', $._prefix_expression),
         '.',
-        field('field', $.identifier),
+        field('field', $._member_name),
       ),
     ),
 
@@ -317,7 +345,7 @@ module.exports = grammar({
       seq(
         field('object', $._prefix_expression),
         token.immediate('?.'),
-        field('field', $.identifier),
+        field('field', $._member_name),
       ),
     ),
 
@@ -402,7 +430,7 @@ module.exports = grammar({
       seq(
         field('callee', $._prefix_expression),
         ':',
-        field('method', $.identifier),
+        field('method', $._member_name),
         field('arguments', $.arguments),
       ),
     ),
@@ -416,7 +444,7 @@ module.exports = grammar({
       seq(
         field('callee', $._prefix_expression),
         token.immediate('?:'),
-        field('method', $.identifier),
+        field('method', $._member_name),
         field('arguments', $.arguments),
       ),
     ),
@@ -508,7 +536,7 @@ module.exports = grammar({
 
     field: $ => choice(
       seq('[', field('key', $._expression), ']', '=', field('value', $._expression)),
-      seq(field('key', $.identifier), '=', field('value', $._expression)),
+      seq(field('key', $._member_name), '=', field('value', $._expression)),
       field('value', $._expression),
     ),
 
