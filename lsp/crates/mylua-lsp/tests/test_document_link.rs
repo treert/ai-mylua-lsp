@@ -87,6 +87,33 @@ fn document_link_resolves_require_short_call() {
 }
 
 #[test]
+fn document_link_ignores_dollar_string_require_argument() {
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("main.mylua", r#"local u = require($"util ${"helper"}")"#),
+        ("util.lua", "return 1\n"),
+        ("helper.lua", "return 2\n"),
+    ]);
+    let uri = make_uri("main.mylua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.mylua opened");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "dollar-string require source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let links = document_link::document_links(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &agg,
+        doc.line_index(),
+    );
+    assert!(
+        links.is_empty(),
+        "dollar_string require arguments are dynamic and must not produce links: {:?}",
+        links,
+    );
+}
+
+#[test]
 fn document_link_ignores_unresolved_module() {
     // `require("no_such_module")` has no workspace target — suppress
     // the link rather than emit a dangling one.

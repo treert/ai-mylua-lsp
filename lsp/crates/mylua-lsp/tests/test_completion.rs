@@ -240,6 +240,46 @@ fn complete_require_path_from_index() {
 }
 
 #[test]
+fn complete_require_path_ignores_string_nested_in_dollar_interpolation() {
+    use mylua_lsp::{aggregation::WorkspaceAggregation, summary_builder};
+
+    let mut parser = new_parser();
+    let caller_src = r#"local m = require($"prefix ${""}")"#;
+    let caller_uri = make_uri("caller.mylua");
+    let caller_uri_id = intern_uri(&caller_uri);
+    let caller_doc = parse_doc(&mut parser, caller_src);
+    assert!(
+        !caller_doc.root_node().unwrap().has_error(),
+        "dollar-string require source should parse: {}",
+        caller_doc.root_node().unwrap().to_sexp()
+    );
+    let caller_summary = summary_builder::build_file_analysis(
+        &caller_uri,
+        caller_doc.tree().unwrap(),
+        caller_doc.source(),
+        caller_doc.line_index(),
+    )
+    .0;
+
+    let mut agg = WorkspaceAggregation::new();
+    agg.set_require_mapping(
+        "game.player".to_string(),
+        intern_uri(&make_uri("player.lua")),
+    );
+    agg.upsert_summary(caller_uri_id, caller_summary);
+
+    // Cursor inside the ordinary string nested in `${""}`. It is not the
+    // top-level require argument, so module-path completion must not trigger.
+    let items = completion::complete(&caller_doc, caller_uri_id, pos(0, 30), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    assert!(
+        !labels.contains(&"game.player"),
+        "nested string inside dollar interpolation must not offer require modules: {:?}",
+        labels,
+    );
+}
+
+#[test]
 fn complete_dot_base_after_call_chain_is_ast_driven() {
     // Regression for the string-splitn('.') based approach: clicking `.` on
     // the result of a method call — even if we can't yet infer the exact

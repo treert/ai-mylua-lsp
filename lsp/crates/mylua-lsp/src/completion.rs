@@ -188,22 +188,72 @@ fn try_require_path_completion(
     Some(items)
 }
 
-/// Returns true if `string_node` is an argument of a `require(...)`
-/// call — its nearest `function_call` ancestor has `callee` reading
-/// `require`. Uses `walk_ancestors` for depth-capped traversal.
+/// Returns true if `string_node` is the direct string argument of a
+/// `require(...)` call. Nested strings inside expressions such as MyLua
+/// `$"... ${"..."} ..."` must not trigger module-path completion.
 fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool {
     walk_ancestors(string_node, |p| {
-        if p.kind() == "function_call" {
-            let callee_is_require = p
-                .child_by_field_name("callee")
-                .map(|callee| node_text(callee, source) == "require")
-                .unwrap_or(false);
-            Some(callee_is_require)
-        } else {
-            None
+        if p.kind() != "function_call" {
+            return None;
         }
+        let callee_is_require = p
+            .child_by_field_name("callee")
+            .map(|callee| node_text(callee, source) == "require")
+            .unwrap_or(false);
+        if !callee_is_require {
+            return Some(false);
+        }
+        Some(is_direct_require_string_argument(p, string_node, source))
     })
     .unwrap_or(false)
+}
+
+fn is_direct_require_string_argument(
+    call: tree_sitter::Node,
+    string_node: tree_sitter::Node,
+    source: &[u8],
+) -> bool {
+    let Some(args) = call.child_by_field_name("arguments") else {
+        return false;
+    };
+    match source.get(args.start_byte()).copied() {
+        Some(b'"') | Some(b'\'') => {
+            let direct = if args.kind() == "string" {
+                Some(args)
+            } else {
+                args.named_child(0).filter(|c| c.kind() == "string")
+            };
+            direct
+                .map(|arg| same_or_descendant(arg, string_node))
+                .unwrap_or(false)
+        }
+        Some(b'(') => {
+            let Some(list) = (0..args.named_child_count())
+                .filter_map(|i| args.named_child(i as u32))
+                .find(|c| c.kind() == "expression_list")
+            else {
+                return false;
+            };
+            if list.named_child_count() != 1 {
+                return false;
+            }
+            list.named_child(0)
+                .filter(|first| first.kind() == "string" && same_or_descendant(*first, string_node))
+                .is_some()
+        }
+        _ => false,
+    }
+}
+
+fn same_or_descendant(parent: tree_sitter::Node, child: tree_sitter::Node) -> bool {
+    same_node(parent, child)
+        || (child.start_byte() >= parent.start_byte() && child.end_byte() <= parent.end_byte())
+}
+
+fn same_node(left: tree_sitter::Node, right: tree_sitter::Node) -> bool {
+    left.kind() == right.kind()
+        && left.start_byte() == right.start_byte()
+        && left.end_byte() == right.end_byte()
 }
 
 // ---------------------------------------------------------------------------

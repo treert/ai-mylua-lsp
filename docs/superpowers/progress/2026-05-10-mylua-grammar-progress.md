@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；下一步进入 P6 LSP 基础能力稳定
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；P6 LSP 基础能力稳定第一批已收尾（require/module completion、document link、signature help 的 `$string` 关键路径）；下一步继续 P6 hover/goto/references/semantic tokens 稳定性覆盖
 
 ## 入口文档
 
@@ -151,50 +151,59 @@
 - `lsp/crates/mylua-lsp/tests/test_diagnostics.rs`
   - 新增 `$string` 作为 string 参与参数类型诊断的回归测试
 
+### P6：LSP 基础能力稳定（第一批）
+
+已改：
+
+- `lsp/crates/mylua-lsp/src/completion.rs`
+  - `require` module completion 从“任意祖先 `require` 调用中的字符串”收紧为“直接作为 `require` 参数的普通静态 `string`”
+  - 修复 `$"... ${"..."} ..."` 插值内部普通字符串误触发 require/module completion 的问题
+  - 保留普通 `require("")` 与 `require ""` 的模块补全行为
+- `lsp/crates/mylua-lsp/tests/test_completion.rs`
+  - 新增 `complete_require_path_ignores_string_nested_in_dollar_interpolation`
+- `lsp/crates/mylua-lsp/tests/test_document_link.rs`
+  - 新增 `document_link_ignores_dollar_string_require_argument`
+- `lsp/crates/mylua-lsp/tests/test_signature_help.rs`
+  - 新增 `signature_help_dollar_string_short_call_active_param_is_zero`
+
 本轮已继续：
 
 - `$string` parser/scanner 第一阶段已完成，P0 中两个被 P5 阻塞的 fixture parser tests 已启用。
+- P6 第一批已完成：module completion 不再把 `$string` 插值内部的普通字符串当成 require 静态路径；document link 明确忽略动态 `$string` require 参数；signature help 验证 `foo $"..."` 无括号调用保持 active parameter = 0。
 
 ## 当前验证结果
 
 最近一次验证命令：
 
 ```bash
-cd /Users/zhuguosen/MyGit/ai-mylua-lsp/grammar
-npx tree-sitter generate
-npx tree-sitter test
-
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
-cargo test -p mylua-lsp --test test_mylua_parse parse_mylua -- --nocapture
-cargo test -p mylua-lsp --test test_diagnostics argument_type_mismatch_treats_dollar_string_as_string
-cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_string
+cargo test -p mylua-lsp --test test_completion complete_require_path_ignores_string_nested_in_dollar_interpolation -- --nocapture
+cargo test -p mylua-lsp --test test_completion -- --nocapture
+cargo test -p mylua-lsp --test test_document_link document_link_ignores_dollar_string_require_argument -- --nocapture
+cargo test -p mylua-lsp --test test_signature_help signature_help_dollar_string_short_call_active_param_is_zero -- --nocapture
+cargo test -p mylua-lsp --test test_completion --test test_document_link --test test_signature_help
+rustfmt crates/mylua-lsp/src/completion.rs crates/mylua-lsp/tests/test_completion.rs crates/mylua-lsp/tests/test_document_link.rs crates/mylua-lsp/tests/test_signature_help.rs
 ```
 
 结果：
 
-- `npx tree-sitter generate`: passed
-- `npx tree-sitter test`: 55/55 passed
-- `cargo test -p mylua-lsp --test test_mylua_parse parse_mylua -- --nocapture`: passed（11 passed, 0 ignored）
-- `cargo test -p mylua-lsp --test test_diagnostics argument_type_mismatch_treats_dollar_string_as_string`: passed（1 passed）
-- `cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_string`: passed（1 passed）
-- `parse_mylua_named_args_fixture` / `parse_mylua_dollar_extensions_fixture` 已启用并通过
-- `read_lints`：`test_mylua_parse.rs`、`test_diagnostics.rs`、`util.rs`、`summary_builder/type_infer.rs`、`type_inference.rs`、`diagnostics/type_compat.rs` 无诊断；`grammar/grammar.js` 仅保留既有 TypeScript hint（`EMMY_PREC` 未使用、CommonJS 模块提示）
+- 新增 RED 验证：`complete_require_path_ignores_string_nested_in_dollar_interpolation` 初次失败，确认 `$string` 插值内部普通字符串会误触发 require module completion；修复后 passed。
+- `cargo test -p mylua-lsp --test test_completion -- --nocapture`: passed（12 passed）
+- `cargo test -p mylua-lsp --test test_document_link document_link_ignores_dollar_string_require_argument -- --nocapture`: passed（1 passed）
+- `cargo test -p mylua-lsp --test test_signature_help signature_help_dollar_string_short_call_active_param_is_zero -- --nocapture`: passed（1 passed）
+- `cargo test -p mylua-lsp --test test_completion --test test_document_link --test test_signature_help`: passed（12 + 8 + 16 passed）
+- `rustfmt` 仅作用于本轮 4 个 Rust 修改文件，passed
+- `read_lints`：`completion.rs`、`test_completion.rs`、`test_document_link.rs`、`test_signature_help.rs` 无诊断
+- 本轮未重复运行 grammar 侧 `npx tree-sitter generate/test`；上轮记录仍为 `generate` passed、`tree-sitter test` 55/55 passed。
 
 ## 当前工作区变更
 
 ```text
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
- M grammar/grammar.js
- M grammar/src/scanner.c
- M grammar/test/corpus/col0_error_recovery.txt
- M grammar/test/corpus/mylua.txt
- M grammar/test/corpus/top_level_keyword_split.txt
- M lsp/crates/mylua-lsp/src/diagnostics/type_compat.rs
- M lsp/crates/mylua-lsp/src/summary_builder/type_infer.rs
- M lsp/crates/mylua-lsp/src/type_inference.rs
- M lsp/crates/mylua-lsp/src/util.rs
- M lsp/crates/mylua-lsp/tests/test_diagnostics.rs
- M lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
+ M lsp/crates/mylua-lsp/src/completion.rs
+ M lsp/crates/mylua-lsp/tests/test_completion.rs
+ M lsp/crates/mylua-lsp/tests/test_document_link.rs
+ M lsp/crates/mylua-lsp/tests/test_signature_help.rs
 ```
 
 注意：`docs/README.md` 不记录 `docs/superpowers` 内容，已保持不修改。
@@ -204,9 +213,10 @@ cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_strin
 优先继续 P6 / 后续语义稳定子任务：
 
 1. P6 LSP 基础能力稳定
-   - hover / goto / references / semantic tokens / completion 对 `dollar_string`、`dollar_interpolation` 不崩溃
-   - signature help 在 `print $"..."` / `${expr}` 附近定位可接受
-   - document link / require / module completion 继续确认只基于普通静态 `string`
+   - hover / goto / references / semantic tokens 对 `dollar_string`、`dollar_interpolation` 不崩溃
+   - signature help 继续补 `${expr}` 内部普通调用、named/spread 场景的定位回归
+   - completion 继续补普通 `$string` 内容区不误触发大量无关补全的策略评估；require/module completion 的 `$string` 动态路径误触发已修复
+   - document link 已确认忽略 `$string` require 参数；后续如进入 P8 常量折叠，再单独设计无插值 `$string` 的静态路径策略
 2. `$string` 专属 diagnostics（P7/P8 前置）
    - `${expr}` 不允许跨物理行
    - `${expr}` 内不支持嵌套 `dollar_string`
@@ -220,6 +230,7 @@ cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_strin
 - `parse_mylua_named_args_fixture` 与 `parse_mylua_dollar_extensions_fixture` 已启用；后续如果新增 MyLua fixture，应默认纳入 parser smoke test。
 - `t[]` 当前 AST 没有显式 `empty_index` 节点，只是 `variable` 缺少 `index` field；Rust analyzer 后续读取 index 时必须允许 `None`。
 - `dollar_string` 第一阶段已显式跳过 `extract_string_literal`；后续除非做 P8 常量折叠，否则不要接入 require / document link / module completion 静态路径解析。
+- require/module completion 当前只允许直接作为 `require` 参数的普通静态 `string` 触发；不要重新放宽为“任意 require 祖先下的字符串”，否则 `$"... ${"..."} ..."` 会误触发。
 - `$name` 插值当前复用外部 `identifier` token；scanner 会在裸 `$` 处停下，非法 `$` 形态留给后续 diagnostics。
 - named/spread 第一阶段只做 parser + 保守 diagnostics；后续如要精确语义，需按参数名重做 call args/signature help/inlay hints 匹配。
 - 不要运行全仓库 `cargo fmt`，会产生大量无关格式化 diff；如需格式化，限制在本次修改文件。

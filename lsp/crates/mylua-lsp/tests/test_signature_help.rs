@@ -158,6 +158,33 @@ foo{a=1, b=2, c=3}"#;
 }
 
 #[test]
+fn signature_help_dollar_string_short_call_active_param_is_zero() {
+    let src = r#"---@param s string
+function foo(s) end
+
+foo $"hello ${bar(1, 2)}""#;
+    let (doc, uri, mut agg) = setup_single_file(src, "dollar_string_sig.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "dollar-string short-call source should parse: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+
+    let h = signature_help::signature_help(&doc, intern_uri(&uri), pos(3, 8), &mut agg)
+        .expect("signatureHelp should resolve for dollar-string short-call");
+    assert_eq!(
+        h.active_parameter,
+        Some(0),
+        "dollar_string short-call is one implicit argument"
+    );
+    assert!(
+        h.signatures[0].label.contains("s: string"),
+        "signature should include the string parameter, got: {}",
+        h.signatures[0].label,
+    );
+}
+
+#[test]
 fn signature_help_picks_correct_overload_for_class_with_same_method_name() {
     // Regression: the previous `ends_with(".m")` / `ends_with(":m")` scan
     // iterated a HashMap and could pick the wrong class's overloads when
