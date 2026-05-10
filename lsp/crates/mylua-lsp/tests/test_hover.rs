@@ -1,8 +1,8 @@
 mod test_helpers;
 
+use mylua_lsp::hover;
 use std::collections::HashMap;
 use test_helpers::*;
-use mylua_lsp::hover;
 
 const HOVER1_SRC: &str = r#"---@class uiButton
 local uiButton = class('uiButton')
@@ -74,8 +74,17 @@ print(abc)"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `abc` in the second line (line 1, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover should return a result for local variable `abc`");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover should return a result for local variable `abc`"
+    );
 }
 
 #[test]
@@ -92,8 +101,17 @@ print(abcd)"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `abcd` in the print line (line 6, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(6, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on table variable should return result");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on table variable should return result"
+    );
 }
 
 #[test]
@@ -104,7 +122,13 @@ fn hover_emmy_class_return_type() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `btn1` (line 21, col 6) — should show uiButton
-    let result = hover::hover(doc, intern_uri(&uri), pos(21, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(21, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on btn1 should return result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -133,7 +157,13 @@ local a1_test = test()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(10, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on a1_test should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -161,7 +191,13 @@ local a1_test2 = test2()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(9, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on a1_test2 should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -189,7 +225,13 @@ local a1_test3 = test3()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(9, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on a1_test3 should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -204,11 +246,17 @@ local a1_test3 = test3()"#;
 #[test]
 fn hover_local_from_cross_file_dotted_call_shows_return_type() {
     let files = [
-        ("class_defs.lua", r#"---@class ClassA1
-ClassA1 = {}"#),
-        ("utils.lua", r#"---@return ClassA1
+        (
+            "class_defs.lua",
+            r#"---@class ClassA1
+ClassA1 = {}"#,
+        ),
+        (
+            "utils.lua",
+            r#"---@return ClassA1
 function utils.get_a1()
-end"#),
+end"#,
+        ),
         ("main.lua", r#"local a123 = utils.get_a1()"#),
     ];
     let (docs, mut agg, _) = setup_workspace(&files);
@@ -216,7 +264,13 @@ end"#),
     let uri_id = intern_uri(&uri);
     let doc = docs.get(&uri_id).unwrap();
 
-    let result = hover::hover(doc, uri_id, pos(0, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        uri_id,
+        pos(0, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on a123 should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -236,10 +290,13 @@ end"#),
 #[test]
 fn hover_cross_file_definition_doc_survives_dropped_tree() {
     let files = [
-        ("defs.lua", r#"--- Returns a documented value
+        (
+            "defs.lua",
+            r#"--- Returns a documented value
 ---@return string
 function make_value()
-end"#),
+end"#,
+        ),
         ("main.lua", r#"local result = make_value()"#),
     ];
     let (mut docs, mut agg, _) = setup_workspace(&files);
@@ -275,7 +332,13 @@ fn hover_chain_call() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `btn5` (line 30, col 6) — uiButton:setX(1)
-    let result = hover::hover(doc, intern_uri(&uri), pos(30, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(30, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on btn5 should return result");
 }
 
@@ -287,7 +350,13 @@ fn hover_fixture_hover5_table_fields() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `abcd` (line 6, col 6) — should show table fields
-    let result = hover::hover(doc, intern_uri(&uri), pos(6, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on abcd should return result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -307,8 +376,17 @@ fn hover_fixture_hover5_alias() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `cdef` (line 8, col 6) — aliased from abcd
-    let result = hover::hover(doc, intern_uri(&uri), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on cdef (alias of abcd) should return result");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on cdef (alias of abcd) should return result"
+    );
 }
 
 #[test]
@@ -319,7 +397,13 @@ fn hover_no_result_on_keyword() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `local` keyword (line 0, col 0)
-    let result = hover::hover(doc, intern_uri(&uri), pos(0, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(0, 0),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     // Keywords may or may not produce hover — this mainly tests no panic
     let _ = result;
 }
@@ -337,7 +421,13 @@ local x = UMiscSystemLibrary"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `UMiscSystemLibrary` at the assignment (line 4, col 0)
-    let result = hover::hover(doc, intern_uri(&uri), pos(4, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 0),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -364,8 +454,17 @@ function MyObj.doSomething(x) end"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `doSomething` in the function declaration (line 7, col 15)
-    let result = hover::hover(doc, intern_uri(&uri), pos(7, 15), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover should return a result at function declaration site");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 15),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover should return a result at function declaration site"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
@@ -391,8 +490,17 @@ function greet(name) end"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `greet` in the function declaration (line 2, col 9)
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover should return result at simple function declaration");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover should return result at simple function declaration"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
@@ -418,8 +526,17 @@ local y = doSomething("hello")"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `doSomething` at the call site (line 7, col 10)
-    let result = hover::hover(doc, intern_uri(&uri), pos(7, 10), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover should return a result for function");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 10),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover should return a result for function"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
@@ -441,7 +558,13 @@ print(x)"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `x` at the usage site (line 3, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover should return result for x");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -469,7 +592,13 @@ x.bar = 1"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `x` in `x.bar = 1` (line 3, col 0) — should show local variable, not field
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 0),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover should return result for base x");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -505,8 +634,17 @@ local _ = a.b.c"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on the middle `b` in `a.b.c` (line 7, col 12)
-    let result = hover::hover(doc, intern_uri(&uri), pos(7, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on middle field `b` should return a result");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on middle field `b` should return a result"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
@@ -528,7 +666,13 @@ obj.qux = 1"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `qux` in `obj.qux = 1` (line 3, col 4) — should resolve the field
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 4),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover should return result for field qux");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -543,10 +687,7 @@ obj.qux = 1"#;
 #[test]
 fn hover_nested_require_returned_local_table_field() {
     let (docs, mut agg, _) = setup_workspace(&[
-        (
-            "main.lua",
-            r#"print(utils.test_const.B)"#,
-        ),
+        ("main.lua", r#"print(utils.test_const.B)"#),
         (
             "utils.lua",
             r#"utils = {}
@@ -571,8 +712,14 @@ return test_const"#,
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("test_const".to_string(), target_uri_id);
 
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(0, 23), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on utils.test_const.B should resolve");
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(0, 23),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on utils.test_const.B should resolve");
     let content = hover_content_string(&result);
     assert!(
         content.contains("Type: `string`"),
@@ -626,8 +773,14 @@ return settings"#,
     let target_uri_id = summary_id_by_uri(&agg, &target_uri);
     agg.set_require_mapping("settings".to_string(), target_uri_id);
 
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(1, 15), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on settings.host should resolve");
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 15),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on settings.host should resolve");
     let content = hover_content_string(&result);
     assert!(
         content.contains("Type: `string`"),
@@ -656,8 +809,17 @@ end
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `function ABC:f1()` is at line 2; `A` is col 9.
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on method base `ABC` should resolve to the local, got None");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on method base `ABC` should resolve to the local, got None"
+    );
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
         !content.contains("function ABC:f1"),
@@ -681,7 +843,13 @@ end
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `function ABC:f1()` — `f1` starts at col 13.
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 13),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on method name `f1` should succeed");
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -707,7 +875,13 @@ end
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `function A1213:f()` — `A1213` starts at col 9.
-    let result = hover::hover(doc, intern_uri(&uri), pos(0, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(0, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     if let Some(h) = result {
         let content = hover_content_string(&h);
         assert!(
@@ -735,7 +909,13 @@ end
 
     // `function a.b.c()` at line 2: `a` col 9, `.` col 10, `b` col 11,
     // `.` col 12, `c` col 13. Hover on intermediate `b` (col 11).
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 11), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 11),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     if let Some(h) = result {
         let content = hover_content_string(&h);
         assert!(
@@ -745,7 +925,13 @@ end
         );
     }
     // Tail `c` (col 13) still shows the function decl.
-    let tail = hover::hover(doc, intern_uri(&uri), pos(2, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let tail = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 13),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(tail.is_some(), "tail hover should succeed");
     let tail_content = hover_content_string(tail.as_ref().unwrap());
     assert!(
@@ -768,8 +954,17 @@ end
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `function foo()` — `foo` starts at col 9.
-    let result = hover::hover(doc, intern_uri(&uri), pos(0, 9), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on bare function name should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(0, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on bare function name should succeed"
+    );
     let content = hover_content_string(result.as_ref().unwrap());
     assert!(
         content.contains("function foo"),
@@ -804,8 +999,17 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
 
     // Line 12: `local MiscManager = utils.locals.MiscManager`
     // `MiscManager` on the LHS starts at col 6
-    let result = hover::hover(doc, intern_uri(&uri), pos(12, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on LHS local MiscManager should return a result");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on LHS local MiscManager should return a result"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         // The hover must include type information — not just the variable name.
@@ -849,7 +1053,13 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
 
     // Line 14: `MiscManager:miscFunc(MiscManager.m_misc_id)`
     // `miscFunc` starts at col 12
-    let result = hover::hover(doc, intern_uri(&uri), pos(14, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(14, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on miscFunc should return a result");
     if let Some(h) = &result {
         let content = hover_content_string(h);
@@ -861,8 +1071,17 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
     }
 
     // `m_misc_id` starts at col 33
-    let result2 = hover::hover(doc, intern_uri(&uri), pos(14, 33), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result2.is_some(), "hover on m_misc_id should return a result");
+    let result2 = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(14, 33),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result2.is_some(),
+        "hover on m_misc_id should return a result"
+    );
     if let Some(h) = &result2 {
         let content = hover_content_string(h);
         assert!(
@@ -900,21 +1119,35 @@ print(ret2)"#;
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Line 16: `print(ret1)` — hover on `ret1` at col 6
-    let result1 = hover::hover(doc, intern_uri(&uri), pos(16, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result1 = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(16, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result1.is_some(), "hover on ret1 should return a result");
     let text1 = hover_content_string(result1.as_ref().unwrap());
     assert!(
         text1.contains("number"),
-        "ret1 (from .m_misc_id) should be number, got:\n{}", text1,
+        "ret1 (from .m_misc_id) should be number, got:\n{}",
+        text1,
     );
 
     // Line 17: `print(ret2)` — hover on `ret2` at col 6
-    let result2 = hover::hover(doc, intern_uri(&uri), pos(17, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result2 = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(17, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result2.is_some(), "hover on ret2 should return a result");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
         text2.contains("number"),
-        "ret2 (from :miscFunc() with fun():number) should be number, got:\n{}", text2,
+        "ret2 (from :miscFunc() with fun():number) should be number, got:\n{}",
+        text2,
     );
 }
 
@@ -948,15 +1181,22 @@ fn hover_local_anonymous_function_shows_params() {
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Hover on `f` in `print(f)` — line 1, col 6
-    let result = hover::hover(doc, intern_uri(&uri), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover should return something for local f");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover should return something for local f");
     let text = hover_content_string(&result);
     // Lock on the formatted signature `fun(a, b)` rather than loose
     // `a` / `b` substrings — those also appear in the decl-line code
     // block regardless of whether the anon-function sig was derived.
     assert!(
         text.contains("fun(a, b)"),
-        "hover should display formatted signature `fun(a, b)`, got:\n{}", text,
+        "hover should display formatted signature `fun(a, b)`, got:\n{}",
+        text,
     );
 }
 
@@ -977,21 +1217,35 @@ print(b)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `a` (first name → first return = number)
-    let h_a = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on a");
+    let h_a = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on a");
     let text_a = hover_content_string(&h_a);
     assert!(
         text_a.contains("number") && !text_a.contains("string"),
-        "a should be number (first return), got:\n{}", text_a,
+        "a should be number (first return), got:\n{}",
+        text_a,
     );
 
     // hover on `b` (second name → second return = string)
-    let h_b = hover::hover(doc, intern_uri(&uri), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on b");
+    let h_b = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on b");
     let text_b = hover_content_string(&h_b);
     assert!(
         text_b.contains("string"),
-        "b should be string (second return), got:\n{}", text_b,
+        "b should be string (second return), got:\n{}",
+        text_b,
     );
 }
 
@@ -1012,16 +1266,34 @@ print(b)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `a` gets the sole return type.
-    let h_a = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)).expect("hover on a");
+    let h_a = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on a");
     let text_a = hover_content_string(&h_a);
-    assert!(text_a.contains("number"), "a should be number, got:\n{}", text_a);
+    assert!(
+        text_a.contains("number"),
+        "a should be number, got:\n{}",
+        text_a
+    );
 
     // `b` must not falsely claim `number`.
-    if let Some(h) = hover::hover(doc, intern_uri(&uri), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
+    if let Some(h) = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    ) {
         let text_b = hover_content_string(&h);
         assert!(
             !text_b.contains("`number`"),
-            "extra name beyond returns should NOT be typed `number`, got:\n{}", text_b,
+            "extra name beyond returns should NOT be typed `number`, got:\n{}",
+            text_b,
         );
     }
 }
@@ -1048,18 +1320,32 @@ print(b)
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    if let Some(h) = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
+    if let Some(h) = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    ) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`number`") && !text.contains("Type: number"),
-            "method call `obj:m()` must not inherit top-level `obj()`'s number return, got:\n{}", text,
+            "method call `obj:m()` must not inherit top-level `obj()`'s number return, got:\n{}",
+            text,
         );
     }
-    if let Some(h) = hover::hover(doc, intern_uri(&uri), pos(5, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
+    if let Some(h) = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    ) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`string`") && !text.contains("Type: string"),
-            "method call `obj:m()` must not inherit top-level `obj()`'s string return, got:\n{}", text,
+            "method call `obj:m()` must not inherit top-level `obj()`'s string return, got:\n{}",
+            text,
         );
     }
 }
@@ -1083,11 +1369,18 @@ print(a)
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    if let Some(h) = hover::hover(doc, intern_uri(&uri), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs)) {
+    if let Some(h) = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    ) {
         let text = hover_content_string(&h);
         assert!(
             !text.contains("`number`") && !text.contains("Type: number"),
-            "dotted call `mod.f()` must not pick up top-level `f()`'s number return, got:\n{}", text,
+            "dotted call `mod.f()` must not pick up top-level `f()`'s number return, got:\n{}",
+            text,
         );
     }
 }
@@ -1106,8 +1399,14 @@ print(f)
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on Emmy-annotated anon function should resolve");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on Emmy-annotated anon function should resolve");
     let text = hover_content_string(&result);
     // The full Emmy-merged signature should appear in the "Type:"
     // line — locking on `fun(a: number, b: string): boolean` ensures
@@ -1116,7 +1415,8 @@ print(f)
     // come through the Emmy-comment markdown block regardless).
     assert!(
         text.contains("fun(a: number, b: string): boolean"),
-        "hover Type should be fully formatted signature, got:\n{}", text,
+        "hover Type should be fully formatted signature, got:\n{}",
+        text,
     );
 }
 
@@ -1136,14 +1436,21 @@ print(a.b.c)
 
     // Line 2 (0-indexed): `print(a.b.c)` — position on final `c`
     // columns: p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
-    let h = hover::hover(doc, intern_uri(&uri), pos(2, 10), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on final .c should produce a result");
+    let h = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 10),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on final .c should produce a result");
     let text = hover_content_string(&h);
     // Summary builder infers `1` literal as `number` (not `integer`).
     // Lock on the Type line to prove the nested shape write survived.
     assert!(
         text.contains("Type: `number`"),
-        "final .c of chained write should resolve to number, got:\n{}", text,
+        "final .c of chained write should resolve to number, got:\n{}",
+        text,
     );
 }
 
@@ -1162,12 +1469,19 @@ print(a.b.c.d)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Line 3 `print(a.b.c.d)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10 .=11 d=12
-    let h = hover::hover(doc, intern_uri(&uri), pos(3, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on final .d should produce a result");
+    let h = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on final .d should produce a result");
     let text = hover_content_string(&h);
     assert!(
         text.contains("Type: `number`"),
-        "on-demand nested shape should carry number type for .d, got:\n{}", text,
+        "on-demand nested shape should carry number type for .d, got:\n{}",
+        text,
     );
 }
 
@@ -1191,12 +1505,19 @@ print(make().n)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Line 7 `print(make().n)` — p=0 r=1 i=2 n=3 t=4 (=5 m=6 a=7 k=8 e=9 (=10 )=11 .=12 n=13
-    let h = hover::hover(doc, intern_uri(&uri), pos(7, 13), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on make().n should produce a result");
+    let h = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 13),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on make().n should produce a result");
     let text = hover_content_string(&h);
     assert!(
         text.contains("integer"),
-        "field `n` on `make()` CallReturn should resolve to integer, got:\n{}", text,
+        "field `n` on `make()` CallReturn should resolve to integer, got:\n{}",
+        text,
     );
 }
 
@@ -1210,8 +1531,11 @@ fn hover_chained_lhs_with_call_does_not_pollute_shape() {
 foo().c = 1
 "#;
     let (_doc, _uri, agg) = setup_single_file(src, "call_lhs.lua");
-    let junk: Vec<String> = agg.global_shard.iter_all_entries()
-        .into_iter().map(|(k, _)| k)
+    let junk: Vec<String> = agg
+        .global_shard
+        .iter_all_entries()
+        .into_iter()
+        .map(|(k, _)| k)
         .filter(|k| k.contains('('))
         .collect();
     assert!(
@@ -1243,7 +1567,13 @@ print(a[1].name)
     // returns something. Whether the summary_builder's array_element_type
     // path catches the `a[1] = {...}` pattern is orthogonal; the branch
     // addition itself is the contract here.
-    let _ = hover::hover(doc, intern_uri(&uri), pos(2, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let _ = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
 }
 
 #[test]
@@ -1263,7 +1593,11 @@ print(a.b)
     assert!(
         !agg.global_shard.contains_key("a.b.c"),
         "bail on local base must not leak into global_shard, got entries: {:?}",
-        agg.global_shard.iter_all_entries().into_iter().map(|(k, _)| k).collect::<Vec<_>>(),
+        agg.global_shard
+            .iter_all_entries()
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect::<Vec<_>>(),
     );
     assert!(
         !agg.global_shard.contains_key("a.b"),
@@ -1274,12 +1608,19 @@ print(a.b)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // `print(a.b)` line 3 col 8 (b)
-    let h = hover::hover(doc, intern_uri(&uri), pos(3, 8), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on .b should resolve");
+    let h = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 8),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on .b should resolve");
     let text = hover_content_string(&h);
     assert!(
         text.contains("number"),
-        "a.b should remain number (not rewritten to Table), got:\n{}", text,
+        "a.b should remain number (not rewritten to Table), got:\n{}",
+        text,
     );
 }
 
@@ -1290,8 +1631,11 @@ fn hover_chained_lhs_with_subscript_does_not_pollute_shape() {
 a[1].c = 1
 "#;
     let (_doc, _uri, agg) = setup_single_file(src, "subscript_lhs.lua");
-    let junk: Vec<String> = agg.global_shard.iter_all_entries()
-        .into_iter().map(|(k, _)| k)
+    let junk: Vec<String> = agg
+        .global_shard
+        .iter_all_entries()
+        .into_iter()
+        .map(|(k, _)| k)
         .filter(|k| k.contains('[') || k.contains(']'))
         .collect();
     assert!(
@@ -1321,8 +1665,14 @@ print(p.x)
     // cursor on `x` in `print(p.x)` — the `x` identifier sits at col 8
     // on line 5 (0-indexed: `print(p.x)` → `(` is col 5, `p` is col 6,
     // `.` is col 7, `x` is col 8).
-    let h = hover::hover(doc, intern_uri(&uri), pos(5, 8), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on p.x must resolve");
+    let h = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 8),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on p.x must resolve");
     let text = hover_content_string(&h);
     assert!(
         text.contains("number"),
@@ -1355,20 +1705,29 @@ print(identity)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `identity` at the usage site (line 11, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(11, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on identity should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(11, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on identity should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("identity doc"),
-        "hover should include the contiguous doc comment, got:\n{}", text,
+        "hover should include the contiguous doc comment, got:\n{}",
+        text,
     );
     assert!(
         !text.contains("FEATURE"),
-        "hover must NOT include the comment block separated by a blank line, got:\n{}", text,
+        "hover must NOT include the comment block separated by a blank line, got:\n{}",
+        text,
     );
     assert!(
         !text.contains("bullet"),
-        "hover must NOT include the comment block separated by a blank line, got:\n{}", text,
+        "hover must NOT include the comment block separated by a blank line, got:\n{}",
+        text,
     );
 }
 
@@ -1384,12 +1743,19 @@ print(top_str)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `top_str` at the usage site (line 1, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on top_str should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on top_str should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("hover type should be string?"),
-        "hover should include the trailing comment, got:\n{}", text,
+        "hover should include the trailing comment, got:\n{}",
+        text,
     );
 }
 
@@ -1406,12 +1772,19 @@ print(abc)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `abc` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on abc should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on abc should succeed");
     let text = hover_content_string(&result);
     assert!(
         !text.contains("this is on the next line"),
-        "hover should NOT include a comment from a different line, got:\n{}", text,
+        "hover should NOT include a comment from a different line, got:\n{}",
+        text,
     );
 }
 
@@ -1427,8 +1800,14 @@ print(xyz)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `xyz` at the usage site (line 1, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on xyz should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on xyz should succeed");
     let text = hover_content_string(&result);
     // The `---@type number` should be handled by preceding-comment logic
     // (if it's a preceding sibling) or not at all — but NOT by trailing.
@@ -1436,7 +1815,8 @@ print(xyz)
     // plain doc text in the hover.
     assert!(
         !text.contains("---@type number"),
-        "hover should NOT show raw Emmy annotation as trailing doc, got:\n{}", text,
+        "hover should NOT show raw Emmy annotation as trailing doc, got:\n{}",
+        text,
     );
 }
 
@@ -1453,16 +1833,24 @@ print(s)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `s` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on s should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
         !text.contains("T = number"),
-        "hover on `s` must NOT include the trailing comment from the previous line, got:\n{}", text,
+        "hover on `s` must NOT include the trailing comment from the previous line, got:\n{}",
+        text,
     );
     assert!(
         text.contains("T = string"),
-        "hover on `s` should include its own trailing comment, got:\n{}", text,
+        "hover on `s` should include its own trailing comment, got:\n{}",
+        text,
     );
 }
 
@@ -1484,16 +1872,24 @@ print(s)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `s` at the usage site (line 8, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on s should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("string"),
-        "hover on `s` should show type `string` (inferred from generic), got:\n{}", text,
+        "hover on `s` should show type `string` (inferred from generic), got:\n{}",
+        text,
     );
     assert!(
         !text.contains("Type: T"),
-        "hover on `s` should NOT show raw generic param `T`, got:\n{}", text,
+        "hover on `s` should NOT show raw generic param `T`, got:\n{}",
+        text,
     );
 }
 
@@ -1515,8 +1911,14 @@ print(s)
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on s should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(10, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("Type: `string`"),
@@ -1543,8 +1945,14 @@ print(s)
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on s should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(10, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("Type: `string`"),
@@ -1571,12 +1979,19 @@ print(n)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `n` at the usage site (line 8, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(8, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on n should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on n should succeed");
     let text = hover_content_string(&result);
     assert!(
         text.contains("number"),
-        "hover on `n` should show type `number` (inferred from generic), got:\n{}", text,
+        "hover on `n` should show type `number` (inferred from generic), got:\n{}",
+        text,
     );
 }
 
@@ -1602,21 +2017,38 @@ print(sum)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `add` in `M.add(1, 2)` — line 9, col 14 is `add`
-    let result = hover::hover(doc, intern_uri(&uri), pos(9, 14), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on `add` in `M.add(1, 2)` should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 14),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on `add` in `M.add(1, 2)` should succeed"
+    );
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         text.contains("number"),
-        "hover on `add` should show number return type, got:\n{}", text,
+        "hover on `add` should show number return type, got:\n{}",
+        text,
     );
 
     // hover on `sum` — should show number type
-    let result2 = hover::hover(doc, intern_uri(&uri), pos(10, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result2 = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(10, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result2.is_some(), "hover on `sum` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
         text2.contains("number"),
-        "hover on `sum` should show number type, got:\n{}", text2,
+        "hover on `sum` should show number type, got:\n{}",
+        text2,
     );
 }
 
@@ -1637,8 +2069,14 @@ mm.hi()
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(9, 3), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on `hi` returned by creat_module() should use the local table shape");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 3),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on `hi` returned by creat_module() should use the local table shape");
     let text = hover_content_string(&result);
     assert!(
         text.contains("function m.hi()"),
@@ -1702,8 +2140,14 @@ v.x
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(7, 2), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on unresolved field should still produce fallback hover");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 2),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on unresolved field should still produce fallback hover");
     let text = hover_content_string(&result);
     assert!(
         !text.contains("Type: `number`"),
@@ -1724,8 +2168,14 @@ end
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Line 2: `    return self.value`, hover on `value`.
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 18), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on self.value should use obj's table shape");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 18),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on self.value should use obj's table shape");
     let text = hover_content_string(&result);
     assert!(
         text.contains("Type: `number`"),
@@ -1754,10 +2204,8 @@ return M
 local sum = math_utils.add(1, 2)
 print(sum)
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("math_utils.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("math_utils.lua", mod_src), ("main.lua", main_src)]);
     // Register require mapping
     let mod_uri = make_uri("math_utils.lua");
     let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
@@ -1767,21 +2215,38 @@ print(sum)
     let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
 
     // hover on `add` in `math_utils.add(1, 2)` — line 1, col 23 is `add`
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(1, 23), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on `add` in cross-file `math_utils.add(1, 2)` should succeed");
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 23),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on `add` in cross-file `math_utils.add(1, 2)` should succeed"
+    );
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         text.contains("number"),
-        "hover on cross-file `add` should show number return type, got:\n{}", text,
+        "hover on cross-file `add` should show number return type, got:\n{}",
+        text,
     );
 
     // hover on `sum` — should show number type (call return resolved cross-file)
-    let result2 = hover::hover(main_doc, intern_uri(&main_uri), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result2 = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result2.is_some(), "hover on `sum` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
         text2.contains("number"),
-        "hover on cross-file `sum` should show number type, got:\n{}", text2,
+        "hover on cross-file `sum` should show number type, got:\n{}",
+        text2,
     );
 }
 
@@ -1798,10 +2263,8 @@ return M
     let main_src = r#"mm = require("test_create_module")
 mm.hi()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("test_create_module.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("test_create_module.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("test_create_module.lua");
     let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("test_create_module".to_string(), mod_uri_id);
@@ -1809,8 +2272,14 @@ mm.hi()
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
 
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(1, 3), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on global require returned table function should resolve");
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 3),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on global require returned table function should resolve");
     let text = hover_content_string(&result);
     assert!(
         text.contains("function M.hi()"),
@@ -1845,10 +2314,8 @@ return Player
 local hero = Player.new("Alice")
 local name = hero:getName()
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("player.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
     let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
@@ -1857,7 +2324,13 @@ local name = hero:getName()
     let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
 
     // hover on `new` in `Player.new("Alice")` — line 1, col 20
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(1, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 20),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result.is_some(),
         "hover on `new` in cross-file `Player.new(\"Alice\")` should succeed \
@@ -1866,26 +2339,41 @@ local name = hero:getName()
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         text.contains("Player"),
-        "hover on `Player.new` should mention Player type, got:\n{}", text,
+        "hover on `Player.new` should mention Player type, got:\n{}",
+        text,
     );
 
     // hover on `hero` — should show Player type (resolved via module_return_type)
-    let result2 = hover::hover(main_doc, intern_uri(&main_uri), pos(1, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result2 = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result2.is_some(), "hover on `hero` should succeed");
     let text2 = hover_content_string(result2.as_ref().unwrap());
     assert!(
         text2.contains("Player"),
-        "hover on `hero` should show Player type, got:\n{}", text2,
+        "hover on `hero` should show Player type, got:\n{}",
+        text2,
     );
 
     // hover on `name` — should preserve the return type through
     // `hero` (a call return) and then `hero:getName()` (a method return).
-    let result3 = hover::hover(main_doc, intern_uri(&main_uri), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result3 = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result3.is_some(), "hover on `name` should succeed");
     let text3 = hover_content_string(result3.as_ref().unwrap());
     assert!(
         text3.contains("string"),
-        "hover on `name` should show string type, got:\n{}", text3,
+        "hover on `name` should show string type, got:\n{}",
+        text3,
     );
 }
 
@@ -1939,10 +2427,8 @@ local hero = Player.new(1, "Alice")
 hero:take_damage(5)
 hero:pick_up("sword")
 "#;
-    let (docs, mut agg, _parser) = setup_workspace(&[
-        ("player.lua", mod_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let mod_uri = make_uri("player.lua");
     let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
     agg.set_require_mapping("player".to_string(), mod_uri_id);
@@ -1951,7 +2437,13 @@ hero:pick_up("sword")
     let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
 
     // hover on `take_damage` — line 2, col 7
-    let result = hover::hover(main_doc, intern_uri(&main_uri), pos(2, 7), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(2, 7),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result.is_some(),
         "hover on `take_damage` (inherited from local Damageable class) should succeed"
@@ -1959,11 +2451,18 @@ hero:pick_up("sword")
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         text.contains("dmg"),
-        "hover on `take_damage` should show parameter info, got:\n{}", text,
+        "hover on `take_damage` should show parameter info, got:\n{}",
+        text,
     );
 
     // hover on `pick_up` — line 3, col 7 (global Player, should still work)
-    let result2 = hover::hover(main_doc, intern_uri(&main_uri), pos(3, 7), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result2 = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(3, 7),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result2.is_some(),
         "hover on `pick_up` (defined on global Player) should succeed"
@@ -1990,7 +2489,13 @@ local a1 = ClassA1:new()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(13, 19), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(13, 19),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result.is_some(),
         "hover on inherited `new` from BaseCls should succeed"
@@ -2023,7 +2528,13 @@ local a1 = ClassA1:new()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(13, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(13, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on a1 should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
@@ -2053,8 +2564,17 @@ local value = Phantom:new()"#;
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let result = hover::hover(doc, intern_uri(&uri), pos(13, 22), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover should still produce fallback method hover");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(13, 22),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover should still produce fallback method hover"
+    );
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         !text.contains("BaseCls:new") && !text.contains("function BaseCls:new"),
@@ -2077,12 +2597,19 @@ ClassA1 = {}
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // Hover `BaseCls` in `---@class ClassA1:BaseCls`.
-    let result = hover::hover(doc, intern_uri(&uri), pos(4, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on Emmy parent type should resolve");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 20),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on Emmy parent type should resolve");
     let text = hover_content_string(&result);
     assert!(
         text.contains("---@class BaseCls"),
-        "hover should show the BaseCls type definition, got:\n{}", text
+        "hover should show the BaseCls type definition, got:\n{}",
+        text
     );
 }
 
@@ -2099,7 +2626,13 @@ ClassA1 = {}
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // The description word `BaseCls` is not part of the type expression.
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 20),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result.is_none(),
         "description words in Emmy comments must not act as type references"
@@ -2124,13 +2657,25 @@ Child = {}
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let param_desc = hover::hover(doc, intern_uri(&uri), pos(6, 20), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let param_desc = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 20),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         param_desc.is_none(),
         "unmarked @param description words must not act as type references"
     );
 
-    let class_desc = hover::hover(doc, intern_uri(&uri), pos(9, 25), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let class_desc = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 25),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         class_desc.is_none(),
         "unmarked @class description words must not act as type references"
@@ -2156,18 +2701,31 @@ Holder = {}
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let table_key = hover::hover(doc, intern_uri(&uri), pos(6, 11), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let table_key = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 11),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         table_key.is_none(),
         "table field keys in type expressions must not act as type references"
     );
 
-    let bracket_key = hover::hover(doc, intern_uri(&uri), pos(10, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("bracket field key type should resolve");
+    let bracket_key = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(10, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("bracket field key type should resolve");
     let text = hover_content_string(&bracket_key);
     assert!(
         text.contains("---@class BaseCls"),
-        "hover should show the BaseCls type definition, got:\n{}", text
+        "hover should show the BaseCls type definition, got:\n{}",
+        text
     );
 }
 
@@ -2189,19 +2747,37 @@ local escaped = nil
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
-    let literal_word = hover::hover(doc, intern_uri(&uri), pos(3, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let literal_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         literal_word.is_none(),
         "string literal contents must not act as type references"
     );
 
-    let key_word = hover::hover(doc, intern_uri(&uri), pos(6, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let key_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         key_word.is_none(),
         "string table keys must not act as type references"
     );
 
-    let escaped_word = hover::hover(doc, intern_uri(&uri), pos(9, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let escaped_word = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         escaped_word.is_none(),
         "escaped quotes must not expose string literal contents as type references"
@@ -2222,12 +2798,19 @@ print(my_m)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `my_m` at the usage site (line 3, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on my_m should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         !text.contains("MyClass"),
-        "blank line should prevent @class from binding; got:\n{}", text,
+        "blank line should prevent @class from binding; got:\n{}",
+        text,
     );
 }
 
@@ -2243,12 +2826,19 @@ print(my_m)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `my_m` at the usage site (line 2, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(2, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(result.is_some(), "hover on my_m should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
         text.contains("MyClass"),
-        "without blank line, @class should bind to variable; got:\n{}", text,
+        "without blank line, @class should bind to variable; got:\n{}",
+        text,
     );
 }
 
@@ -2287,14 +2877,26 @@ c2:test_c2()
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `test_c1` in `c1:test_c1()` — line 23, col 4
-    let result_global = hover::hover(doc, intern_uri(&uri), pos(23, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result_global = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(23, 4),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result_global.is_some(),
         "hover on global class instance method `c1:test_c1()` should succeed"
     );
 
     // hover on `test_c2` in `c2:test_c2()` — line 24, col 4
-    let result_local = hover::hover(doc, intern_uri(&uri), pos(24, 4), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let result_local = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(24, 4),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         result_local.is_some(),
         "hover on local class instance method `c2:test_c2()` should succeed (regression: local class)"
@@ -2315,8 +2917,17 @@ tt:Say()
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `tt` in declaration (line 4, col 6) — should show MyClass
-    let result = hover::hover(doc, intern_uri(&uri), pos(4, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result.is_some(), "hover on trailing @type annotated variable should return result");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result.is_some(),
+        "hover on trailing @type annotated variable should return result"
+    );
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
@@ -2327,8 +2938,17 @@ tt:Say()
     }
 
     // hover on `tt` in `tt:Say()` (line 5, col 0) — should also resolve
-    let result2 = hover::hover(doc, intern_uri(&uri), pos(5, 0), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
-    assert!(result2.is_some(), "hover on trailing @type variable usage should return result");
+    let result2 = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 0),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    assert!(
+        result2.is_some(),
+        "hover on trailing @type variable usage should return result"
+    );
     if let Some(h) = &result2 {
         let content = hover_content_string(h);
         assert!(
@@ -2355,15 +2975,23 @@ print(tt)
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
     // hover on `tt` at the declaration site (line 3, col 6)
-    let result = hover::hover(doc, intern_uri(&uri), pos(3, 6), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
-        .expect("hover on tt should succeed");
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on tt should succeed");
     let content = hover_content_string(&result);
     assert!(
         content.contains("MyClass"),
-        "hover should resolve trailing @type to MyClass, got:\n{}", content,
+        "hover should resolve trailing @type to MyClass, got:\n{}",
+        content,
     );
     assert!(
         content.contains("tail desc"),
-        "hover should include the @-desc from trailing `---@type X @ desc`, got:\n{}", content,
+        "hover should include the @-desc from trailing `---@type X @ desc`, got:\n{}",
+        content,
     );
 }

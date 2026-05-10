@@ -21,11 +21,10 @@ use tower_lsp_server::ls_types::*;
 use crate::document::Document;
 use crate::util::{find_node_at_position, is_ancestor_or_equal, node_text, LineIndex};
 
-pub fn document_highlight(
-    doc: &Document,
-    position: Position,
-) -> Option<Vec<DocumentHighlight>> {
-    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+pub fn document_highlight(doc: &Document, position: Position) -> Option<Vec<DocumentHighlight>> {
+    let byte_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     let clicked = find_node_at_position(doc.root_node()?, byte_offset)?;
     let source = doc.source();
     let name = node_text(clicked, source);
@@ -92,7 +91,15 @@ fn collect_highlights(
 
     if cursor.goto_first_child() {
         loop {
-            collect_highlights(cursor, name, source, scope_tree, target_decl_byte, line_index, out);
+            collect_highlights(
+                cursor,
+                name,
+                source,
+                scope_tree,
+                target_decl_byte,
+                line_index,
+                out,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }
@@ -182,4 +189,3 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
     }
     DocumentHighlightKind::READ
 }
-

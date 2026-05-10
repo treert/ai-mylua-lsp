@@ -28,14 +28,20 @@ fn workspace_symbol_fuzzy_finds_fields_across_classes() {
     // Two classes each with a `bar` field in different files — both
     // should appear as distinct FIELD entries with their respective
     // container_name.
-    let a = ("a.lua", r#"---@class Foo
+    let a = (
+        "a.lua",
+        r#"---@class Foo
 ---@field bar integer
 Foo = {}
-"#);
-    let b = ("b.lua", r#"---@class Bar
+"#,
+    );
+    let b = (
+        "b.lua",
+        r#"---@class Bar
 ---@field bar string
 Bar = {}
-"#);
+"#,
+    );
     let (_docs, agg, _parser) = setup_workspace(&[a, b]);
 
     let results = search_workspace_symbols("bar", &agg);
@@ -43,7 +49,12 @@ Bar = {}
         .iter()
         .filter(|s| s.name == "bar" && s.kind == SymbolKind::FIELD)
         .collect();
-    assert_eq!(bar_fields.len(), 2, "both fields should surface, got: {:?}", bar_fields);
+    assert_eq!(
+        bar_fields.len(),
+        2,
+        "both fields should surface, got: {:?}",
+        bar_fields
+    );
     let containers: Vec<_> = bar_fields
         .iter()
         .filter_map(|s| s.container_name.as_deref())
@@ -91,7 +102,12 @@ function Foo.bar() end
         .iter()
         .find(|s| s.name == "bar")
         .unwrap_or_else(|| panic!("bar should be found, got: {:?}", results));
-    assert_eq!(entry.kind, SymbolKind::FUNCTION, "dot-form should be FUNCTION, got {:?}", entry.kind);
+    assert_eq!(
+        entry.kind,
+        SymbolKind::FUNCTION,
+        "dot-form should be FUNCTION, got {:?}",
+        entry.kind
+    );
     assert_eq!(entry.container_name.as_deref(), Some("Foo"));
 }
 
@@ -112,7 +128,8 @@ Foo.bar = function() end
         .find(|s| s.name == "bar" && s.container_name.as_deref() == Some("Foo"));
     if let Some(e) = entry {
         assert_eq!(
-            e.kind, SymbolKind::FUNCTION,
+            e.kind,
+            SymbolKind::FUNCTION,
             "`Foo.bar = function() end` should also be FUNCTION, got {:?}",
             e.kind,
         );
@@ -122,11 +139,16 @@ Foo.bar = function() end
     // accepts that case as long as no spurious FIELD entry appears.
     let field_entries: Vec<_> = results
         .iter()
-        .filter(|s| s.name == "bar" && s.kind == SymbolKind::FIELD && s.container_name.as_deref() == Some("Foo"))
+        .filter(|s| {
+            s.name == "bar"
+                && s.kind == SymbolKind::FIELD
+                && s.container_name.as_deref() == Some("Foo")
+        })
         .collect();
     assert!(
         field_entries.is_empty(),
-        "no spurious FIELD entry for a function-valued accessor, got: {:?}", field_entries,
+        "no spurious FIELD entry for a function-valued accessor, got: {:?}",
+        field_entries,
     );
 }
 

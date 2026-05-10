@@ -13,19 +13,49 @@
 /// Names common to **every** supported Lua version.
 const COMMON: &[&str] = &[
     // Basic functions
-    "print", "type", "tostring", "tonumber", "error", "assert",
-    "pcall", "xpcall", "pairs", "ipairs", "next", "select",
-    "require", "dofile", "loadfile", "load", "rawget", "rawset",
-    "rawequal", "rawlen", "setmetatable", "getmetatable",
+    "print",
+    "type",
+    "tostring",
+    "tonumber",
+    "error",
+    "assert",
+    "pcall",
+    "xpcall",
+    "pairs",
+    "ipairs",
+    "next",
+    "select",
+    "require",
+    "dofile",
+    "loadfile",
+    "load",
+    "rawget",
+    "rawset",
+    "rawequal",
+    "rawlen",
+    "setmetatable",
+    "getmetatable",
     "collectgarbage",
     // Standard library tables
-    "table", "string", "math", "io", "os", "debug", "coroutine",
-    "package", "arg",
+    "table",
+    "string",
+    "math",
+    "io",
+    "os",
+    "debug",
+    "coroutine",
+    "package",
+    "arg",
     // Reserved / global meta
-    "_G", "_ENV", "_VERSION",
+    "_G",
+    "_ENV",
+    "_VERSION",
     // Literals / keywords that show up as identifiers in some AST
     // contexts and should never trip "undefined global".
-    "self", "true", "false", "nil",
+    "self",
+    "true",
+    "false",
+    "nil",
 ];
 
 /// Added in Lua 5.2 (and kept in 5.3 / 5.4). Prior to 5.2, these
@@ -91,10 +121,8 @@ pub fn builtins_for(version: &str) -> Vec<&'static str> {
 /// Lua language keywords — shared by completion (to offer keyword items)
 /// and rename (to reject renaming to a keyword).
 pub const LUA_KEYWORDS: &[&str] = &[
-    "and", "break", "do", "else", "elseif", "end",
-    "false", "for", "function", "goto", "if", "in",
-    "local", "nil", "not", "or", "repeat", "return",
-    "then", "true", "until", "while",
+    "and", "break", "do", "else", "elseif", "end", "false", "for", "function", "goto", "if", "in",
+    "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
 #[cfg(test)]

@@ -34,7 +34,11 @@ fn selection_range_grows_monotonically_outward() {
     let result = selection_range(&doc, &[pos(0, 10)]);
     assert_eq!(result.len(), 1, "one chain per input position");
     let ranges = chain_ranges(&result[0]);
-    assert!(ranges.len() >= 3, "should have at least 3 tiers of growth, got {:?}", ranges);
+    assert!(
+        ranges.len() >= 3,
+        "should have at least 3 tiers of growth, got {:?}",
+        ranges
+    );
 
     // Each subsequent range should strictly contain the previous.
     for w in ranges.windows(2) {
@@ -47,7 +51,8 @@ fn selection_range_grows_monotonically_outward() {
         assert!(
             outer_start <= inner_start && outer_end >= inner_end,
             "each outer range should contain the inner: outer={:?} inner={:?}",
-            outer, inner,
+            outer,
+            inner,
         );
     }
 }
@@ -91,10 +96,11 @@ fn selection_range_skips_unnamed_tokens() {
     // should be a named node span.
     let ranges = chain_ranges(&result[0]);
     let first = &ranges[0];
-    let single_char = first.start.line == first.end.line
-        && first.end.character == first.start.character + 1;
+    let single_char =
+        first.start.line == first.end.line && first.end.character == first.start.character + 1;
     assert!(
         !single_char || ranges.len() > 1,
-        "chain shouldn't stall on single-char unnamed tokens, got: {:?}", ranges,
+        "chain shouldn't stall on single-char unnamed tokens, got: {:?}",
+        ranges,
     );
 }

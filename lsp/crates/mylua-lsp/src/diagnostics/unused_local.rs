@@ -1,7 +1,7 @@
+use crate::lua_symbol::LuaSymbol;
 use crate::scope::{ScopeDecl, ScopeTree};
 use crate::types::DefKind;
 use crate::util::node_text;
-use crate::lua_symbol::LuaSymbol;
 use tower_lsp_server::ls_types::*;
 
 /// Warn on locals that are declared but never referenced. Uses the
@@ -84,9 +84,7 @@ fn count_identifier_references(
             // Skip if this identifier IS the declaration itself —
             // decl.decl_byte's occurrence is the binding, not a use.
             if byte != decl.decl_byte {
-                *ref_count
-                    .entry((decl.name, decl.decl_byte))
-                    .or_insert(0) += 1;
+                *ref_count.entry((decl.name, decl.decl_byte)).or_insert(0) += 1;
             }
         }
     }

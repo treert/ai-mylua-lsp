@@ -2,9 +2,9 @@
 
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::config::DiagnosticsConfig;
 use mylua_lsp::diagnostics;
+use test_helpers::*;
 
 #[test]
 fn meta_file_is_detected_and_flagged() {
@@ -31,7 +31,10 @@ fn meta_placed_after_code_is_not_treated_as_meta() {
     let src = "local x = 1\n---@meta\n";
     let (_doc, uri, agg) = setup_single_file(src, "late_meta.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary present");
-    assert!(!summary.is_meta, "late `---@meta` must not flag the file as a stub");
+    assert!(
+        !summary.is_meta,
+        "late `---@meta` must not flag the file as a stub"
+    );
 }
 
 #[test]
@@ -58,8 +61,11 @@ end
         doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Undefined global")),
-        "meta files must not produce undefinedGlobal diagnostics, got: {:?}", diags,
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Undefined global")),
+        "meta files must not produce undefinedGlobal diagnostics, got: {:?}",
+        diags,
     );
 }
 
@@ -84,8 +90,11 @@ print(some_unknown_global)
         doc.line_index(),
     );
     assert!(
-        diags.iter().any(|d| d.message.contains("some_unknown_global")),
-        "non-meta file should still flag unknown globals, got: {:?}", diags,
+        diags
+            .iter()
+            .any(|d| d.message.contains("some_unknown_global")),
+        "non-meta file should still flag unknown globals, got: {:?}",
+        diags,
     );
 }
 
@@ -99,16 +108,10 @@ fn meta_globals_still_participate_in_workspace_index() {
             "my_stub.lua",
             "---@meta mylib\n\nmylib_api = {}\nfunction mylib_api.open(path) end\n",
         ),
-        (
-            "user.lua",
-            "local f = mylib_api.open(\"/tmp/foo\")\n",
-        ),
+        ("user.lua", "local f = mylib_api.open(\"/tmp/foo\")\n"),
     ]);
     let user_uri = make_uri("user.lua");
-    let (doc, _, _) = setup_single_file(
-        "local f = mylib_api.open(\"/tmp/foo\")\n",
-        "user.lua",
-    );
+    let (doc, _, _) = setup_single_file("local f = mylib_api.open(\"/tmp/foo\")\n", "user.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc.root_node().unwrap(),
@@ -121,6 +124,7 @@ fn meta_globals_still_participate_in_workspace_index() {
     );
     assert!(
         diags.iter().all(|d| !d.message.contains("mylib_api")),
-        "meta-contributed global must suppress undefinedGlobal in consumers, got: {:?}", diags,
+        "meta-contributed global must suppress undefinedGlobal in consumers, got: {:?}",
+        diags,
     );
 }

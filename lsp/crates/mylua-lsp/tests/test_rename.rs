@@ -1,9 +1,9 @@
 mod test_helpers;
 
-use std::collections::HashMap;
 use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::rename;
 use mylua_lsp::uri_id::intern_uri;
+use std::collections::HashMap;
 use test_helpers::*;
 
 /// Collect all text edits from a WorkspaceEdit across all URIs,
@@ -13,15 +13,12 @@ use test_helpers::*;
 fn collect_edits(
     edit: &tower_lsp_server::ls_types::WorkspaceEdit,
 ) -> Vec<(String, u32, u32, String)> {
-    let Some(changes) = &edit.changes else { return Vec::new() };
+    let Some(changes) = &edit.changes else {
+        return Vec::new();
+    };
     let mut out: Vec<(String, u32, u32, String)> = Vec::new();
     for (uri, edits) in changes {
-        let suffix = uri
-            .as_str()
-            .rsplit('/')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let suffix = uri.as_str().rsplit('/').next().unwrap_or("").to_string();
         for e in edits {
             out.push((
                 suffix.clone(),
@@ -95,10 +92,7 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     // — its own `@class`, all `@type Foo`, `@param x Foo`,
     // `@return Foo`, `@class Bar : Foo`, and `@field m fun(...): Foo`
     // referencing it.
-    let a = (
-        "a.lua",
-        "---@class Foo\n---@field val integer\nFoo = {}\n",
-    );
+    let a = ("a.lua", "---@class Foo\n---@field val integer\nFoo = {}\n");
     let b = (
         "b.lua",
         "---@type Foo\nlocal f = nil\n---@param x Foo\n---@return Foo\nfunction use(x) return x end\n---@class Bar : Foo\nBar = {}\n",
@@ -116,35 +110,37 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     let edits = collect_edits(&result);
     assert!(
         edits.iter().all(|e| e.3 == "Gadget"),
-        "all edits should use the new name, got: {:?}", edits,
+        "all edits should use the new name, got: {:?}",
+        edits,
     );
 
     // Must touch both files.
     let a_edits: Vec<_> = edits.iter().filter(|e| e.0 == "a.lua").collect();
     let b_edits: Vec<_> = edits.iter().filter(|e| e.0 == "b.lua").collect();
-    assert!(!a_edits.is_empty(), "a.lua must be edited (the `@class Foo` itself)");
-    assert!(!b_edits.is_empty(), "b.lua must be edited (all annotation refs)");
+    assert!(
+        !a_edits.is_empty(),
+        "a.lua must be edited (the `@class Foo` itself)"
+    );
+    assert!(
+        !b_edits.is_empty(),
+        "b.lua must be edited (all annotation refs)"
+    );
 
     // Expect at least 4 references in b.lua: `@type`, `@param x`,
     // `@return`, `@class Bar : Foo`. The `Foo = {}` line in a.lua is
     // a Lua-side global assignment, not counted as an Emmy ref.
     assert!(
         b_edits.len() >= 4,
-        "b.lua should have ≥4 annotation edits, got: {:?}", b_edits,
+        "b.lua should have ≥4 annotation edits, got: {:?}",
+        b_edits,
     );
 }
 
 #[test]
 fn rename_emmy_class_field_in_annotation() {
     // Renaming a field name inside `@field` annotations across files.
-    let a = (
-        "a.lua",
-        "---@class Foo\n---@field bar integer\nFoo = {}\n",
-    );
-    let b = (
-        "b.lua",
-        "---@type Foo\nlocal f = nil\nprint(f.bar)\n",
-    );
+    let a = ("a.lua", "---@class Foo\n---@field bar integer\nFoo = {}\n");
+    let b = ("b.lua", "---@type Foo\nlocal f = nil\nprint(f.bar)\n");
     let (docs, agg, _parser) = setup_workspace(&[a, b]);
     let a_uri = make_uri("a.lua");
     let a_uri_id = intern_uri(&a_uri);
@@ -152,8 +148,7 @@ fn rename_emmy_class_field_in_annotation() {
     let doc = docs.get(&a_uri_id).unwrap();
 
     // Click on `bar` in `---@field bar integer` — line 1, col 10.
-    let maybe = rename::rename(doc, a_uri_id, pos(1, 10), "value", &agg, &view)
-        .expect("rename ok");
+    let maybe = rename::rename(doc, a_uri_id, pos(1, 10), "value", &agg, &view).expect("rename ok");
 
     // Emmy @field renames may or may not be fully supported yet
     // (references scanning looks for identifier tokens in the AST,
@@ -164,7 +159,8 @@ fn rename_emmy_class_field_in_annotation() {
         let edits = collect_edits(&edit);
         assert!(
             edits.iter().all(|e| e.3 == "value"),
-            "all edits should use new name, got: {:?}", edits,
+            "all edits should use new name, got: {:?}",
+            edits,
         );
     }
 }

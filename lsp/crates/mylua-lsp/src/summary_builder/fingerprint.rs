@@ -135,7 +135,10 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
                 hash_type_fact(arg, hasher);
             }
         }
-        SymbolicStub::FunctionCallReturn { func_name, call_arg_types } => {
+        SymbolicStub::FunctionCallReturn {
+            func_name,
+            call_arg_types,
+        } => {
             "function_call_return".hash(hasher);
             func_name.hash(hasher);
             call_arg_types.len().hash(hasher);
@@ -165,9 +168,11 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
     // Hash global contributions including their type facts
     let mut globals: Vec<_> = ctx.global_contributions.iter().collect();
     globals.sort_by(|a, b| {
-        a.name
-            .cmp(&b.name)
-            .then_with(|| a.selection_range.start_byte.cmp(&b.selection_range.start_byte))
+        a.name.cmp(&b.name).then_with(|| {
+            a.selection_range
+                .start_byte
+                .cmp(&b.selection_range.start_byte)
+        })
     });
     for global in &globals {
         global.name.hash(&mut hasher);
@@ -246,6 +251,9 @@ mod tests {
             returns: Vec::new(),
         };
 
-        assert_ne!(hash_function_signature(&required), hash_function_signature(&optional));
+        assert_ne!(
+            hash_function_signature(&required),
+            hash_function_signature(&optional)
+        );
     }
 }

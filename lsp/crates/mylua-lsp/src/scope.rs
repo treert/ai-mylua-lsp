@@ -79,7 +79,11 @@ impl ScopeTree {
     pub fn stats(&self) -> ScopeTreeStats {
         ScopeTreeStats {
             scope_count: self.scopes.len(),
-            declaration_count: self.scopes.iter().map(|scope| scope.declarations.len()).sum(),
+            declaration_count: self
+                .scopes
+                .iter()
+                .map(|scope| scope.declarations.len())
+                .sum(),
             child_link_count: self.scopes.iter().map(|scope| scope.children.len()).sum(),
         }
     }
@@ -146,12 +150,19 @@ impl ScopeTree {
         result
     }
 
-    pub fn scope_byte_range_for_def(&self, byte_offset: usize, name: &str) -> Option<(usize, usize)> {
+    pub fn scope_byte_range_for_def(
+        &self,
+        byte_offset: usize,
+        name: &str,
+    ) -> Option<(usize, usize)> {
         let name = get_lua_symbol(name)?;
         let scope_id = self.innermost_scope(byte_offset)?;
         let mut current = scope_id;
         loop {
-            if self.find_decl_in_scope(current, byte_offset, name).is_some() {
+            if self
+                .find_decl_in_scope(current, byte_offset, name)
+                .is_some()
+            {
                 let scope = &self.scopes[current];
                 return Some((scope.byte_start, scope.byte_end));
             }
@@ -162,7 +173,11 @@ impl ScopeTree {
         }
     }
 
-    pub fn resolve_type(&self, byte_offset: usize, name: &str) -> Option<&crate::type_system::TypeFact> {
+    pub fn resolve_type(
+        &self,
+        byte_offset: usize,
+        name: &str,
+    ) -> Option<&crate::type_system::TypeFact> {
         self.resolve_decl(byte_offset, name)?.type_fact.as_ref()
     }
 
@@ -188,15 +203,20 @@ impl ScopeTree {
         }
     }
 
-    fn find_decl_in_scope(&self, scope_id: usize, byte_offset: usize, name: LuaSymbol) -> Option<&ScopeDecl> {
+    fn find_decl_in_scope(
+        &self,
+        scope_id: usize,
+        byte_offset: usize,
+        name: LuaSymbol,
+    ) -> Option<&ScopeDecl> {
         let scope = &self.scopes[scope_id];
         let mut best: Option<&ScopeDecl> = None;
         for decl in &scope.declarations {
             if decl.name != name {
                 continue;
             }
-            let on_decl_name = byte_offset >= decl.decl_byte
-                && byte_offset < decl.decl_byte + decl.name.len();
+            let on_decl_name =
+                byte_offset >= decl.decl_byte && byte_offset < decl.decl_byte + decl.name.len();
             if on_decl_name || decl.visible_after_byte <= byte_offset {
                 best = Some(decl);
             }
@@ -211,7 +231,6 @@ impl ScopeTree {
         };
         self.scopes[scope_id].kind == ScopeKind::File
     }
-
 }
 
 #[cfg(test)]
@@ -329,4 +348,3 @@ mod tests {
         assert_eq!(stats.child_link_count, 1);
     }
 }
-

@@ -1,4 +1,6 @@
-use crate::emmy::{parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation, EmmyTableFieldKey, EmmyType};
+use crate::emmy::{
+    emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation, EmmyTableFieldKey, EmmyType,
+};
 use crate::lua_symbol::intern_lua_symbol;
 use crate::summary::*;
 use crate::util::{encode_col, node_text, LineIndex};
@@ -19,10 +21,16 @@ pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Nod
         ctx.type_definitions.push(TypeDefinition {
             name: intern_lua_symbol(&cname),
             kind: TypeDefinitionKind::Class,
-            parents: parents.iter().map(|parent| intern_lua_symbol(parent)).collect(),
+            parents: parents
+                .iter()
+                .map(|parent| intern_lua_symbol(parent))
+                .collect(),
             fields,
             alias_type: None,
-            generic_params: generic_params.iter().map(|param| intern_lua_symbol(param)).collect(),
+            generic_params: generic_params
+                .iter()
+                .map(|param| intern_lua_symbol(param))
+                .collect(),
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
             anchor_shape_id: None,
@@ -30,18 +38,21 @@ pub(super) fn flush_pending_class(ctx: &mut BuildContext, node: tree_sitter::Nod
     }
 }
 
-pub(super) fn emit_pending_class_as_typedef(
-    ctx: &mut BuildContext,
-    node: tree_sitter::Node,
-) {
+pub(super) fn emit_pending_class_as_typedef(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if let Some((cname, prev_parents, fields, gparams, name_range)) = ctx.pending_class.take() {
         ctx.type_definitions.push(TypeDefinition {
             name: intern_lua_symbol(&cname),
             kind: TypeDefinitionKind::Class,
-            parents: prev_parents.iter().map(|parent| intern_lua_symbol(parent)).collect(),
+            parents: prev_parents
+                .iter()
+                .map(|parent| intern_lua_symbol(parent))
+                .collect(),
             fields,
             alias_type: None,
-            generic_params: gparams.iter().map(|param| intern_lua_symbol(param)).collect(),
+            generic_params: gparams
+                .iter()
+                .map(|param| intern_lua_symbol(param))
+                .collect(),
             range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
             name_range: Some(name_range),
             anchor_shape_id: None,
@@ -57,7 +68,9 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
     // A name_range is computed per line by locating the identifier
     // token within the raw line text.
     for i in 0..node.named_child_count() {
-        let Some(line_node) = node.named_child(i as u32) else { continue };
+        let Some(line_node) = node.named_child(i as u32) else {
+            continue;
+        };
         if line_node.kind() != "emmy_line" {
             continue;
         }
@@ -100,7 +113,11 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                     }
                 }
             }
-            EmmyAnnotation::Field { name: fname, type_expr, .. } => {
+            EmmyAnnotation::Field {
+                name: fname,
+                type_expr,
+                ..
+            } => {
                 if let Some((_, _, ref mut fields, _, _)) = ctx.pending_class {
                     let full_range = ctx.line_index.ts_node_to_byte_range(line_node, ctx.source);
                     let name_range = find_name_range_in_line(
@@ -242,7 +259,10 @@ fn find_name_range_in_line(
     if tag == "field" {
         if let Some((word, next_cursor)) = read_identifier(bytes, cursor) {
             if word != name
-                && matches!(word.as_str(), "public" | "private" | "protected" | "package")
+                && matches!(
+                    word.as_str(),
+                    "public" | "private" | "protected" | "package"
+                )
             {
                 cursor = next_cursor;
                 while cursor < bytes.len() && (bytes[cursor] == b' ' || bytes[cursor] == b'\t') {
@@ -253,12 +273,11 @@ fn find_name_range_in_line(
     }
 
     // Now expect the `name` identifier at `cursor`.
-    if cursor + name.len() <= bytes.len()
-        && &bytes[cursor..cursor + name.len()] == name.as_bytes()
+    if cursor + name.len() <= bytes.len() && &bytes[cursor..cursor + name.len()] == name.as_bytes()
     {
         // Confirm word boundary on both sides to avoid partial matches.
-        let before_ok = cursor == 0
-            || !bytes[cursor - 1].is_ascii_alphanumeric() && bytes[cursor - 1] != b'_';
+        let before_ok =
+            cursor == 0 || !bytes[cursor - 1].is_ascii_alphanumeric() && bytes[cursor - 1] != b'_';
         let after_idx = cursor + name.len();
         let after_ok = after_idx >= bytes.len()
             || !(bytes[after_idx].is_ascii_alphanumeric() || bytes[after_idx] == b'_');
@@ -316,7 +335,10 @@ fn byte_span_to_byte_range(
         start_byte,
         end_byte,
         start_row: start_row as u32,
-        start_col: encode_col(line_index.line_bytes_for_row(source, start_row), start_col_byte),
+        start_col: encode_col(
+            line_index.line_bytes_for_row(source, start_row),
+            start_col_byte,
+        ),
         end_row: end_row as u32,
         end_col: encode_col(line_index.line_bytes_for_row(source, end_row), end_col_byte),
     }

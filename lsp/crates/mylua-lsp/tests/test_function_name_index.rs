@@ -66,7 +66,10 @@ fn get_function_by_name_does_not_find_local_function() {
     );
     // But it should still exist in function_summaries (accessible by ID).
     assert!(
-        summary.function_summaries.values().any(|fs| fs.name == "helper"),
+        summary
+            .function_summaries
+            .values()
+            .any(|fs| fs.name == "helper"),
         "local function must still be in function_summaries",
     );
 }
@@ -102,7 +105,9 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "shadow.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.get_function_by_name("f").expect("global f must be found");
+    let fs = summary
+        .get_function_by_name("f")
+        .expect("global f must be found");
     // The global declaration is on line 1 (0-indexed).
     assert!(
         fs.range.start_row <= 1,
@@ -110,10 +115,16 @@ end
         fs.range.start_row,
     );
     // The local one should exist in function_summaries but not be returned.
-    let all_f: Vec<_> = summary.function_summaries.values()
+    let all_f: Vec<_> = summary
+        .function_summaries
+        .values()
         .filter(|fs| fs.name == "f")
         .collect();
-    assert_eq!(all_f.len(), 2, "both local and global f should be in function_summaries");
+    assert_eq!(
+        all_f.len(),
+        2,
+        "both local and global f should be in function_summaries"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -130,7 +141,9 @@ end
     let (_doc, uri, agg) = setup_single_file(src, "caller_id.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
     // There should be a call site for `print` inside `outer`.
-    let cs = summary.call_sites.iter()
+    let cs = summary
+        .call_sites
+        .iter()
         .find(|cs| cs.callee_name == "print")
         .expect("print call site");
     assert_eq!(cs.caller_name, "outer");
@@ -140,7 +153,10 @@ end
     );
     // The ID must point to a valid function summary.
     let id = cs.caller_id.unwrap();
-    let fs = summary.function_summaries.get(&id).expect("function_summaries[caller_id]");
+    let fs = summary
+        .function_summaries
+        .get(&id)
+        .expect("function_summaries[caller_id]");
     assert_eq!(fs.name, "outer");
 }
 
@@ -149,10 +165,15 @@ fn call_site_caller_id_none_at_top_level() {
     let src = "print('top')\n";
     let (_doc, uri, agg) = setup_single_file(src, "top_level.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let cs = summary.call_sites.iter()
+    let cs = summary
+        .call_sites
+        .iter()
         .find(|cs| cs.callee_name == "print")
         .expect("print call site");
-    assert!(cs.caller_name.is_empty(), "top-level caller_name must be empty");
+    assert!(
+        cs.caller_name.is_empty(),
+        "top-level caller_name must be empty"
+    );
     assert!(cs.caller_id.is_none(), "top-level caller_id must be None");
 }
 
@@ -165,12 +186,20 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "global_caller.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let cs = summary.call_sites.iter()
+    let cs = summary
+        .call_sites
+        .iter()
         .find(|cs| cs.callee_name == "print")
         .expect("print call site");
     assert_eq!(cs.caller_name, "G");
-    assert!(cs.caller_id.is_some(), "global function caller must have an ID");
+    assert!(
+        cs.caller_id.is_some(),
+        "global function caller must have an ID"
+    );
     let id = cs.caller_id.unwrap();
-    let fs = summary.function_summaries.get(&id).expect("summary must contain G");
+    let fs = summary
+        .function_summaries
+        .get(&id)
+        .expect("summary must contain G");
     assert_eq!(fs.name, "G");
 }

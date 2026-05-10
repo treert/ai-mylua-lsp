@@ -1,9 +1,9 @@
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
 use mylua_lsp::uri_id::intern_uri;
+use test_helpers::*;
 
 #[test]
 fn goto_unresolved_dotted_field_does_not_fallback_to_bare_global_name() {
@@ -12,10 +12,7 @@ fn goto_unresolved_dotted_field_does_not_fallback_to_bare_global_name() {
     local Class = Actor:GetClass()
     Class = Actor.ParentClass
 end"#;
-    let (docs, mut agg, _) = setup_workspace(&[
-        ("main.lua", main_src),
-        ("other.lua", other_src),
-    ]);
+    let (docs, mut agg, _) = setup_workspace(&[("main.lua", main_src), ("other.lua", other_src)]);
     let main_uri = make_uri("main.lua");
     let main_doc = docs.get(&intern_uri(&main_uri)).expect("main doc");
 
@@ -24,7 +21,8 @@ end"#;
         intern_uri(&main_uri),
         pos(0, 15),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
 
     assert!(
         result.is_none(),
@@ -44,7 +42,8 @@ local XX = UE4.Class()"#;
         intern_uri(&uri),
         pos(1, 15),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
 
     assert!(
         result.is_none(),
@@ -220,7 +219,13 @@ print(a.b.c)
     let (doc, uri, mut agg) = setup_single_file(src, "nested_goto.lua");
 
     // Line 2 `print(a.b.c)` — p=0 r=1 i=2 n=3 t=4 (=5 a=6 .=7 b=8 .=9 c=10
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(2, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(
         result.is_some(),
         "goto on chained .c should jump to the assignment site, got None",
@@ -234,7 +239,13 @@ print(myVar)"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `myVar` on line 1, col 6
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(1, 6), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(result.is_some(), "goto should find definition of `myVar`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "myVar defined on line 0");
@@ -251,8 +262,14 @@ fn goto_label_jumps_to_label_statement() {
 end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "goto_label.lua");
 
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(1, 9), &mut agg, &GotoStrategy::Auto)
-        .expect("goto on label name should resolve");
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(1, 9),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on label name should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
         assert_eq!(loc.range.start.line, 3, "should jump to ::fallback::");
@@ -270,12 +287,21 @@ do
 end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "goto_outer_label.lua");
 
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 9), &mut agg, &GotoStrategy::Auto)
-        .expect("goto inside nested block should resolve an outer visible label");
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(2, 9),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto inside nested block should resolve an outer visible label");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
         assert_eq!(loc.range.start.line, 0, "should jump to the outer label");
-        assert_eq!(loc.range.start.character, 2, "should select the outer label name");
+        assert_eq!(
+            loc.range.start.character, 2,
+            "should select the outer label name"
+        );
     } else {
         panic!("expected scalar goto response");
     }
@@ -289,7 +315,13 @@ local function inner()
 end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "goto_function_boundary.lua");
 
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 9), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(2, 9),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
 
     assert!(
         result.is_none(),
@@ -307,7 +339,13 @@ else
 end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "goto_if_branch.lua");
 
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(3, 9), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(3, 9),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
 
     assert!(
         result.is_none(),
@@ -325,7 +363,13 @@ local x = foo()"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `foo` on line 3, col 10
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(3, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(3, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(result.is_some(), "goto should find definition of `foo`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "foo defined on line 0");
@@ -340,8 +384,17 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `param1` on line 1, col 10
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(1, 10), &mut agg, &GotoStrategy::Auto);
-    assert!(result.is_some(), "goto should find definition of parameter `param1`");
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(1, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        result.is_some(),
+        "goto should find definition of parameter `param1`"
+    );
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "param1 defined on line 0");
     }
@@ -355,7 +408,13 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `i` on line 1, col 10
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(1, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(1, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(result.is_some(), "goto should find for-variable `i`");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 0, "for-variable i defined on line 0");
@@ -368,15 +427,21 @@ fn goto_no_result_for_undefined() {
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // on `totally_undefined_name_xyz`
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(0, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(0, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     // May or may not find something (globals index etc.), but should not panic
     let _ = result;
 }
 
 #[test]
 fn goto_require_jumps_to_module_return() {
-    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
+    use mylua_lsp::{document::Document, summary_builder};
 
     let mut parser = new_parser();
 
@@ -384,15 +449,35 @@ fn goto_require_jumps_to_module_return() {
     let mod_uri = make_uri("mymod.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let _mod_doc = Document { lua_source: mod_lua_source, tree: Some(mod_tree), scope_tree: mod_scope, last_diagnostic_signature: None };
+    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(
+        &mod_uri,
+        &mod_tree,
+        mod_lua_source.source(),
+        mod_lua_source.line_index(),
+    );
+    let _mod_doc = Document {
+        lua_source: mod_lua_source,
+        tree: Some(mod_tree),
+        scope_tree: mod_scope,
+        last_diagnostic_signature: None,
+    };
 
     let caller_src = "local m = require(\"mymod\")\nprint(m)";
     let caller_uri = make_uri("caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let (caller_summary, caller_scope) = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
-    let caller_doc = Document { lua_source: caller_lua_source, tree: Some(caller_tree), scope_tree: caller_scope, last_diagnostic_signature: None };
+    let (caller_summary, caller_scope) = summary_builder::build_file_analysis(
+        &caller_uri,
+        &caller_tree,
+        caller_lua_source.source(),
+        caller_lua_source.line_index(),
+    );
+    let caller_doc = Document {
+        lua_source: caller_lua_source,
+        tree: Some(caller_tree),
+        scope_tree: caller_scope,
+        last_diagnostic_signature: None,
+    };
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     let mod_uri_id = intern_uri(&mod_uri);
@@ -404,7 +489,12 @@ fn goto_require_jumps_to_module_return() {
     // Click on `m` (line 0 col 6) in caller.lua — should jump to mymod.lua's
     // `return M` (line 2, column 0).
     let result = mylua_lsp::goto::goto_definition(
-        &caller_doc, intern_uri(&caller_uri), pos(0, 6), &mut agg, &GotoStrategy::Auto)
+        &caller_doc,
+        intern_uri(&caller_uri),
+        pos(0, 6),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
     .expect("require goto should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -426,8 +516,8 @@ fn goto_require_with_attribute_before_target() {
     // to pick `values.named_child(2)` for `y` (off-by-attribute) and
     // miss the require goto entirely. After fix, clicking `y` must
     // still jump to the required module.
-    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
+    use mylua_lsp::{document::Document, summary_builder};
 
     let mut parser = new_parser();
 
@@ -435,7 +525,13 @@ fn goto_require_with_attribute_before_target() {
     let mod_uri = make_uri("attr_mod.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let mod_summary = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index()).0;
+    let mod_summary = summary_builder::build_file_analysis(
+        &mod_uri,
+        &mod_tree,
+        mod_lua_source.source(),
+        mod_lua_source.line_index(),
+    )
+    .0;
 
     // `y` is the *second* identifier in the names list but it corresponds
     // to `values.named_child(1)` (index 1 among expression values), not
@@ -444,8 +540,12 @@ fn goto_require_with_attribute_before_target() {
     let caller_uri = make_uri("attr_caller.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let (caller_summary, caller_scope) =
-        summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
+    let (caller_summary, caller_scope) = summary_builder::build_file_analysis(
+        &caller_uri,
+        &caller_tree,
+        caller_lua_source.source(),
+        caller_lua_source.line_index(),
+    );
     let caller_doc = Document {
         lua_source: caller_lua_source,
         tree: Some(caller_tree),
@@ -461,9 +561,14 @@ fn goto_require_with_attribute_before_target() {
     agg.upsert_summary(caller_uri_id, caller_summary);
 
     // `y` is at column 17 in `local x <const>, y = ...`
-    let result =
-        goto::goto_definition(&caller_doc, intern_uri(&caller_uri), pos(0, 17), &mut agg, &GotoStrategy::Auto)
-            .expect("goto on `y` should resolve");
+    let result = goto::goto_definition(
+        &caller_doc,
+        intern_uri(&caller_uri),
+        pos(0, 17),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on `y` should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
         assert_eq!(
@@ -502,7 +607,13 @@ fn goto_position_with_chinese_comment_on_same_line() {
     let (doc, uri, mut agg) = setup_single_file(src, "utf16.lua");
 
     // `myVar` in print(myVar) at line 2 col 6 (ASCII line, utf-16 == byte)
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(2, 6), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(result.is_some(), "goto should resolve myVar");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 1, "myVar declared on line 1");
@@ -593,15 +704,30 @@ end"#;
     let (doc, uri, mut agg) = setup_single_file(src, "test.lua");
 
     // `inner` at line 3, col 10 -> should go to line 2
-    let result = goto::goto_definition(&doc, intern_uri(&uri), pos(3, 10), &mut agg, &GotoStrategy::Auto);
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(3, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(result.is_some(), "goto should find `inner` in nested scope");
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
         assert_eq!(loc.range.start.line, 2, "inner defined on line 2");
     }
 
     // `outer` at line 4, col 10 -> should go to line 0
-    let result2 = goto::goto_definition(&doc, intern_uri(&uri), pos(4, 10), &mut agg, &GotoStrategy::Auto);
-    assert!(result2.is_some(), "goto should find `outer` from parent scope");
+    let result2 = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(4, 10),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+    assert!(
+        result2.is_some(),
+        "goto should find `outer` from parent scope"
+    );
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result2 {
         assert_eq!(loc.range.start.line, 0, "outer defined on line 0");
     }
@@ -612,8 +738,8 @@ end"#;
 /// definition in the module file via `resolve_require_global_name`.
 #[test]
 fn goto_require_returning_global_table_method() {
-    use mylua_lsp::{document::Document, summary_builder};
     use mylua_lsp::util::LuaSource;
+    use mylua_lsp::{document::Document, summary_builder};
 
     let mut parser = new_parser();
 
@@ -628,8 +754,18 @@ return Player"#;
     let mod_uri = make_uri("player.lua");
     let mod_tree = parser.parse(mod_src.as_bytes(), None).unwrap();
     let mod_lua_source = LuaSource::new(mod_src.to_string());
-    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(&mod_uri, &mod_tree, mod_lua_source.source(), mod_lua_source.line_index());
-    let _mod_doc = Document { lua_source: mod_lua_source, tree: Some(mod_tree), scope_tree: mod_scope, last_diagnostic_signature: None };
+    let (mod_summary, mod_scope) = summary_builder::build_file_analysis(
+        &mod_uri,
+        &mod_tree,
+        mod_lua_source.source(),
+        mod_lua_source.line_index(),
+    );
+    let _mod_doc = Document {
+        lua_source: mod_lua_source,
+        tree: Some(mod_tree),
+        scope_tree: mod_scope,
+        last_diagnostic_signature: None,
+    };
 
     // main.lua: require("player") and call Player.new("Alice")
     let caller_src = r#"local Player = require("player")
@@ -637,8 +773,19 @@ local hero = Player.new("Alice")"#;
     let caller_uri = make_uri("main.lua");
     let caller_tree = parser.parse(caller_src.as_bytes(), None).unwrap();
     let caller_lua_source = LuaSource::new(caller_src.to_string());
-    let caller_summary = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index()).0;
-    let (_, caller_scope) = summary_builder::build_file_analysis(&caller_uri, &caller_tree, caller_lua_source.source(), caller_lua_source.line_index());
+    let caller_summary = summary_builder::build_file_analysis(
+        &caller_uri,
+        &caller_tree,
+        caller_lua_source.source(),
+        caller_lua_source.line_index(),
+    )
+    .0;
+    let (_, caller_scope) = summary_builder::build_file_analysis(
+        &caller_uri,
+        &caller_tree,
+        caller_lua_source.source(),
+        caller_lua_source.line_index(),
+    );
     let caller_doc = Document {
         lua_source: caller_lua_source,
         tree: Some(caller_tree),
@@ -655,17 +802,19 @@ local hero = Player.new("Alice")"#;
 
     // Click on `new` in `Player.new("Alice")` — line 1, col 20
     let result = goto::goto_definition(
-        &caller_doc, intern_uri(&caller_uri), pos(1, 20), &mut agg, &GotoStrategy::Auto) ;
+        &caller_doc,
+        intern_uri(&caller_uri),
+        pos(1, 20),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
     assert!(
         result.is_some(),
         "goto on `new` in `Player.new(\"Alice\")` should resolve \
          (require returning global table)"
     );
     if let Some(tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc)) = &result {
-        assert_eq!(
-            loc.uri, mod_uri,
-            "should jump to player.lua"
-        );
+        assert_eq!(loc.uri, mod_uri, "should jump to player.lua");
         assert_eq!(
             loc.range.start.line, 2,
             "should land on `function Player.new(name)` (line 2), got: {:?}",
@@ -677,10 +826,7 @@ local hero = Player.new("Alice")"#;
 #[test]
 fn goto_nested_require_returned_local_table_field() {
     let (docs, mut agg, _) = setup_workspace(&[
-        (
-            "main.lua",
-            r#"print(utils.test_const.B)"#,
-        ),
+        ("main.lua", r#"print(utils.test_const.B)"#),
         (
             "utils.lua",
             r#"utils = {}
@@ -709,7 +855,8 @@ return test_const"#,
         intern_uri(&main_uri),
         pos(0, 23),
         &mut agg,
-        &GotoStrategy::Auto) 
+        &GotoStrategy::Auto,
+    )
     .expect("goto on utils.test_const.B should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -753,7 +900,8 @@ return settings"#,
         intern_uri(&main_uri),
         pos(1, 15),
         &mut agg,
-        &GotoStrategy::Auto)
+        &GotoStrategy::Auto,
+    )
     .expect("goto on settings.host should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &result {
@@ -789,7 +937,8 @@ ClassA1 = {}
         intern_uri(&uri),
         pos(3, 20),
         &mut agg,
-        &GotoStrategy::Auto) 
+        &GotoStrategy::Auto,
+    )
     .expect("goto on Emmy parent type should resolve");
 
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
@@ -815,7 +964,8 @@ ClassA1 = {}
         intern_uri(&uri),
         pos(3, 20),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         result.is_none(),
         "description words in Emmy comments must not act as type references"
@@ -844,7 +994,8 @@ Holder = {}
         intern_uri(&uri),
         pos(6, 25),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         class_desc.is_none(),
         "unmarked @class description words must not act as type references"
@@ -855,7 +1006,8 @@ Holder = {}
         intern_uri(&uri),
         pos(10, 20),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         field_desc.is_none(),
         "unmarked @field description words must not act as type references"
@@ -884,7 +1036,8 @@ Holder = {}
         intern_uri(&uri),
         pos(6, 17),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         param_name.is_none(),
         "function type parameter names must not act as type references"
@@ -895,7 +1048,8 @@ Holder = {}
         intern_uri(&uri),
         pos(10, 12),
         &mut agg,
-        &GotoStrategy::Auto) 
+        &GotoStrategy::Auto,
+    )
     .expect("bracket field key type should resolve");
     if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = key_type {
         assert_eq!(loc.range.start.line, 1, "should jump to BaseCls anchor");
@@ -925,7 +1079,8 @@ local escaped = nil
         intern_uri(&uri),
         pos(3, 12),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         literal_word.is_none(),
         "string literal contents must not act as type references"
@@ -936,7 +1091,8 @@ local escaped = nil
         intern_uri(&uri),
         pos(6, 12),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         key_word.is_none(),
         "string table keys must not act as type references"
@@ -947,7 +1103,8 @@ local escaped = nil
         intern_uri(&uri),
         pos(9, 12),
         &mut agg,
-        &GotoStrategy::Auto) ;
+        &GotoStrategy::Auto,
+    );
     assert!(
         escaped_word.is_none(),
         "escaped quotes must not expose string literal contents as type references"
@@ -975,15 +1132,21 @@ print(tt)
         intern_uri(&uri),
         pos(3, 25),
         &mut agg,
-        &GotoStrategy::Auto);
+        &GotoStrategy::Auto,
+    );
 
     let response = result.expect("goto on `MyClass` in trailing `---@type` should resolve");
     let loc = match response {
         tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(l) => l,
-        tower_lsp_server::ls_types::GotoDefinitionResponse::Array(mut v) => v.pop().expect("non-empty"),
+        tower_lsp_server::ls_types::GotoDefinitionResponse::Array(mut v) => {
+            v.pop().expect("non-empty")
+        }
         tower_lsp_server::ls_types::GotoDefinitionResponse::Link(mut v) => {
             let l = v.pop().expect("non-empty");
-            tower_lsp_server::ls_types::Location { uri: l.target_uri, range: l.target_range }
+            tower_lsp_server::ls_types::Location {
+                uri: l.target_uri,
+                range: l.target_range,
+            }
         }
     };
     // For `---@class X\nX = {}`, the type anchor is the value-side

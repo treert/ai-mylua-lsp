@@ -45,7 +45,8 @@ fn semantic_tokens_range_filters_to_range() {
     let lines: Vec<u32> = positions.iter().map(|(l, _, _)| *l).collect();
     assert!(
         lines.iter().all(|l| *l >= 1 && *l <= 2),
-        "all tokens should be within lines 1..=2, got lines: {:?}", lines,
+        "all tokens should be within lines 1..=2, got lines: {:?}",
+        lines,
     );
     // Must not include `a` (line 0) or `d` (line 3)
     assert!(!lines.contains(&0));
@@ -68,9 +69,15 @@ fn semantic_tokens_range_delta_encoding_starts_fresh() {
         range(2, 0, 2, 20),
         doc.line_index(),
     );
-    assert!(!tokens.is_empty(), "line 2 should have at least the `c` token");
+    assert!(
+        !tokens.is_empty(),
+        "line 2 should have at least the `c` token"
+    );
     // First (and only) token: `c` at line 2 col 6, length 1.
-    assert_eq!(tokens[0].delta_line, 2, "delta_line should be absolute for first token");
+    assert_eq!(
+        tokens[0].delta_line, 2,
+        "delta_line should be absolute for first token"
+    );
     assert_eq!(tokens[0].delta_start, 6);
     assert_eq!(tokens[0].length, 1);
 }
@@ -110,7 +117,11 @@ fn semantic_tokens_range_full_file_equals_full_result() {
         range(0, 0, 100, 0),
         doc.line_index(),
     );
-    assert_eq!(full.len(), ranged.len(), "full equivalent range should yield same count");
+    assert_eq!(
+        full.len(),
+        ranged.len(),
+        "full equivalent range should yield same count"
+    );
     for (f, r) in full.iter().zip(ranged.iter()) {
         assert_eq!(f.delta_line, r.delta_line);
         assert_eq!(f.delta_start, r.delta_start);

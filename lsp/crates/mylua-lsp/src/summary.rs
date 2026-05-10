@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use serde::Serialize;
+use std::collections::HashMap;
 use tower_lsp_server::ls_types::Uri;
 
 use crate::lua_symbol::{get_lua_symbol, LuaSymbol};
@@ -174,16 +174,15 @@ impl DocumentSummary {
     pub fn get_function_by_name(&self, name: &str) -> Option<&FunctionSummary> {
         let normalized = name.replace(':', ".");
         let symbol = get_lua_symbol(&normalized)?;
-        self.function_name_index.get(&symbol)
+        self.function_name_index
+            .get(&symbol)
             .and_then(|id| self.function_summaries.get(id))
     }
 
     /// Iterate all (ID, FunctionSummary) pairs. Useful for fingerprinting,
     /// aggregation, and diagnostics that need to examine all functions.
     pub fn iter_functions(&self) -> impl Iterator<Item = (FunctionSummaryId, &FunctionSummary)> {
-        self.function_summaries
-            .iter()
-            .map(|(id, fs)| (*id, fs))
+        self.function_summaries.iter().map(|(id, fs)| (*id, fs))
     }
 }
 

@@ -65,7 +65,6 @@ pub fn path_uri(id: UriId) -> &'static str {
     registry().path(id)
 }
 
-
 /// Return the precomputed candidate ordering key for an id.
 pub fn priority_uri(id: UriId) -> UriPriority {
     registry().priority(id)

@@ -14,8 +14,11 @@ local b = "hello"
 print(a, b)
 "#;
     let doc = parse_doc(&mut parser, src);
-    let diags =
-        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
+    let diags = diagnostics::collect_diagnostics(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        doc.line_index(),
+    );
     assert!(
         diags.is_empty(),
         "clean code should have no diagnostics, got: {:?}",
@@ -59,8 +62,11 @@ print(ppd)
 "#;
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
-    let diags =
-        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
+    let diags = diagnostics::collect_diagnostics(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        doc.line_index(),
+    );
     assert!(
         !diags.is_empty(),
         "source with intentional errors should produce diagnostics"
@@ -106,8 +112,11 @@ d[#ddd.b + #ddd.b] = #dd + 1
 d[#ddd.b + 1] = #dd + 1"#;
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
-    let diags =
-        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
+    let diags = diagnostics::collect_diagnostics(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        doc.line_index(),
+    );
     assert!(
         !diags.is_empty(),
         "source with intentionally invalid lines should produce parse-level diagnostics"
@@ -119,8 +128,11 @@ fn syntax_error_range_does_not_swallow_following_statement() {
     let src = "local broken = function(\n\nprint(broken)\n";
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
-    let diags =
-        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
+    let diags = diagnostics::collect_diagnostics(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        doc.line_index(),
+    );
     assert!(!diags.is_empty(), "expected syntax diagnostics");
     let syntax_errors: Vec<_> = diags
         .iter()
@@ -851,7 +863,10 @@ print(Audit.enabled)
     let resolved_by_id =
         resolver::resolve_field_chain_in_file_id(uri_id, &base, &["enabled".to_string()], &mut agg);
     assert!(
-        matches!(resolved_by_id.type_fact, TypeFact::Known(KnownType::Boolean)),
+        matches!(
+            resolved_by_id.type_fact,
+            TypeFact::Known(KnownType::Boolean)
+        ),
         "UriId field-chain resolution should find Audit.enabled, got: {}",
         resolved_by_id.type_fact,
     );
@@ -865,7 +880,13 @@ print(Audit.enabled)
     let docs = std::collections::HashMap::from([(intern_uri(&uri), doc)]);
     let d = docs.get(&intern_uri(&uri)).unwrap();
     // `Audit.enabled` — `enabled` starts at col 12 (0-based) on line 4 (`print(Audit.enabled)`).
-    let hv = hover::hover(d, intern_uri(&uri), pos(4, 12), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs));
+    let hv = hover::hover(
+        d,
+        intern_uri(&uri),
+        pos(4, 12),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
     assert!(
         hv.is_some(),
         "hover on Audit.enabled after warm cache should produce a result"
@@ -909,8 +930,12 @@ local c = getContainer()
     let byte_offset = src.len() - 1;
     let resolved =
         resolver::resolve_local_in_file(uri_id, "c", byte_offset, &doc.scope_tree, &mut agg);
-    let field_result =
-        resolver::resolve_field_chain(resolved.owner_uri_id, &resolved.type_fact, &["value".to_string()], &mut agg);
+    let field_result = resolver::resolve_field_chain(
+        resolved.owner_uri_id,
+        &resolved.type_fact,
+        &["value".to_string()],
+        &mut agg,
+    );
     assert!(
         matches!(&field_result.type_fact, TypeFact::Known(KnownType::String)),
         "Container<string>.value should resolve to string, got: {}",
@@ -970,14 +995,20 @@ fn resolver_preserves_branch_owner_for_cross_file_union_tables() {
     ]);
     let main_uri = make_uri("main.lua");
     let main_uri_id = summary_id_by_uri(&agg, &main_uri);
-    assert!(docs.contains_key(&main_uri_id), "main doc should be indexed");
+    assert!(
+        docs.contains_key(&main_uri_id),
+        "main doc should be indexed"
+    );
 
     let union = TypeFact::Union(vec![
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".into() }),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".into() }),
+        TypeFact::Stub(SymbolicStub::RequireRef {
+            module_path: "left_mod".into(),
+        }),
+        TypeFact::Stub(SymbolicStub::RequireRef {
+            module_path: "right_mod".into(),
+        }),
     ]);
-    let resolved =
-        resolver::resolve_field_chain(main_uri_id, &union, &["value".to_string()], &agg);
+    let resolved = resolver::resolve_field_chain(main_uri_id, &union, &["value".to_string()], &agg);
 
     assert!(
         matches!(resolved.type_fact, TypeFact::Known(KnownType::Number)),
@@ -998,8 +1029,12 @@ fn resolver_preserves_branch_owner_for_cross_file_union_field_chain() {
     ]);
     let main_uri_id = summary_id_by_uri(&agg, &make_uri("main.lua"));
     let union = TypeFact::Union(vec![
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "left_mod".into() }),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path: "right_mod".into() }),
+        TypeFact::Stub(SymbolicStub::RequireRef {
+            module_path: "left_mod".into(),
+        }),
+        TypeFact::Stub(SymbolicStub::RequireRef {
+            module_path: "right_mod".into(),
+        }),
     ]);
     let resolved = resolver::resolve_field_chain(
         main_uri_id,
@@ -1993,7 +2028,9 @@ end
         doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Return statement yields")),
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Return statement yields")),
         "omitting a trailing optional return must not be flagged, got: {:?}",
         diags,
     );
@@ -2021,7 +2058,9 @@ end
         doc.line_index(),
     );
     assert!(
-        diags.iter().all(|d| !d.message.contains("Return statement yields")),
+        diags
+            .iter()
+            .all(|d| !d.message.contains("Return statement yields")),
         "omitting trailing optional returns across @return lines must not be flagged, got: {:?}",
         diags,
     );
@@ -2305,7 +2344,9 @@ utils2.hello()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern_uri(&uri_b)).expect("file_b document present");
+    let doc_b = docs
+        .get(&intern_uri(&uri_b))
+        .expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2346,7 +2387,9 @@ print(utils2.bar)
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern_uri(&uri_b)).expect("file_b document present");
+    let doc_b = docs
+        .get(&intern_uri(&uri_b))
+        .expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2393,7 +2436,9 @@ utils2.sub.hello()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("nested_def.lua", file_a), ("nested_use.lua", file_b)]);
     let uri_b = make_uri("nested_use.lua");
-    let doc_b = docs.get(&intern_uri(&uri_b)).expect("file_b document present");
+    let doc_b = docs
+        .get(&intern_uri(&uri_b))
+        .expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2436,7 +2481,9 @@ utils2.doesnotexist()
     let (docs, mut agg, _parser) =
         setup_workspace(&[("utils2_def.lua", file_a), ("utils2_use.lua", file_b)]);
     let uri_b = make_uri("utils2_use.lua");
-    let doc_b = docs.get(&intern_uri(&uri_b)).expect("file_b document present");
+    let doc_b = docs
+        .get(&intern_uri(&uri_b))
+        .expect("file_b document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2633,7 +2680,9 @@ local name = hero:getName()
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main.lua document present");
+    let main_doc = docs
+        .get(&intern_uri(&main_uri))
+        .expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2674,7 +2723,9 @@ local hero = P.new("Alice")
     let (docs, mut agg, _parser) =
         setup_workspace(&[("player.lua", mod_src), ("main.lua", main_src)]);
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main.lua document present");
+    let main_doc = docs
+        .get(&intern_uri(&main_uri))
+        .expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
@@ -2752,7 +2803,9 @@ hero:describe()
     agg.set_require_mapping("player".to_string(), mod_uri_id);
 
     let main_uri = make_uri("main.lua");
-    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main.lua document present");
+    let main_doc = docs
+        .get(&intern_uri(&main_uri))
+        .expect("main.lua document present");
 
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(

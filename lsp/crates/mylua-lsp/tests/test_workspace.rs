@@ -7,12 +7,9 @@ use test_helpers::*;
 #[test]
 fn workspace_global_priority_by_path_depth() {
     use mylua_lsp::resolver;
-    use mylua_lsp::type_system::{TypeFact, SymbolicStub, KnownType};
+    use mylua_lsp::type_system::{KnownType, SymbolicStub, TypeFact};
 
-    let shallow_file = (
-        "test_utils.lua",
-        "---@type SubClass\nGLOBAL.Foo = nil\n",
-    );
+    let shallow_file = ("test_utils.lua", "---@type SubClass\nGLOBAL.Foo = nil\n");
     let deep_file = (
         "deep/nested/base_stub.lua",
         "---@type BaseClass\nGLOBAL.Foo = nil\n",
@@ -21,7 +18,9 @@ fn workspace_global_priority_by_path_depth() {
     // Insert deep file first, then shallow — sorting should still put shallow first
     let (_docs, mut agg, _parser) = setup_workspace(&[deep_file, shallow_file]);
 
-    let candidates = agg.global_shard.get("GLOBAL.Foo")
+    let candidates = agg
+        .global_shard
+        .get("GLOBAL.Foo")
         .expect("GLOBAL.Foo should be in global_shard");
     assert_eq!(candidates.len(), 2, "should have two candidates");
 
@@ -29,12 +28,17 @@ fn workspace_global_priority_by_path_depth() {
     let owner_uri_id = summary_id_by_uri(&agg, &make_uri("test_utils.lua"));
     let resolved = resolver::resolve_type(
         owner_uri_id,
-        &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
+        &TypeFact::Stub(SymbolicStub::GlobalRef {
+            name: "GLOBAL.Foo".into(),
+        }),
         &mut agg,
     );
     match &resolved.type_fact {
         TypeFact::Known(KnownType::EmmyType(name)) => {
-            assert_eq!(name, "SubClass", "resolver should pick the shallower file's type");
+            assert_eq!(
+                name, "SubClass",
+                "resolver should pick the shallower file's type"
+            );
         }
         other => panic!("expected EmmyType(SubClass), got {:?}", other),
     }
@@ -52,7 +56,13 @@ fn require_map_survives_upsert() {
     let mod_uri_id = intern_uri(&mod_uri);
     let mod_src = "return { x = 1 }";
     let mod_doc = parse_doc(&mut parser, mod_src);
-    let mod_summary = summary_builder::build_file_analysis(&mod_uri, mod_doc.tree().unwrap(), mod_doc.source(), mod_doc.line_index()).0;
+    let mod_summary = summary_builder::build_file_analysis(
+        &mod_uri,
+        mod_doc.tree().unwrap(),
+        mod_doc.source(),
+        mod_doc.line_index(),
+    )
+    .0;
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.set_require_mapping("mymod".to_string(), mod_uri_id);
@@ -66,7 +76,13 @@ fn require_map_survives_upsert() {
 
     let new_src = "return { x = 2, y = 3 }";
     let new_doc = parse_doc(&mut parser, new_src);
-    let new_summary = summary_builder::build_file_analysis(&mod_uri, new_doc.tree().unwrap(), new_doc.source(), new_doc.line_index()).0;
+    let new_summary = summary_builder::build_file_analysis(
+        &mod_uri,
+        new_doc.tree().unwrap(),
+        new_doc.source(),
+        new_doc.line_index(),
+    )
+    .0;
     agg.upsert_summary(mod_uri_id, new_summary);
 
     assert_eq!(
@@ -95,7 +111,8 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
         main_doc.tree().unwrap(),
         main_doc.source(),
         main_doc.line_index(),
-    ).0;
+    )
+    .0;
 
     let player_uri = make_uri("player.lua");
     let player_uri_id = intern_uri(&player_uri);
@@ -105,11 +122,15 @@ fn require_resolution_uses_the_same_uri_id_for_module_and_summary() {
         player_doc.tree().unwrap(),
         player_doc.source(),
         player_doc.line_index(),
-    ).0;
+    )
+    .0;
 
     let mut agg = mylua_lsp::aggregation::WorkspaceAggregation::new();
     agg.set_require_mapping("player".to_string(), player_uri_id);
-    agg.build_initial(vec![(main_uri_id, main_summary), (player_uri_id, player_summary)]);
+    agg.build_initial(vec![
+        (main_uri_id, main_summary),
+        (player_uri_id, player_summary),
+    ]);
 
     assert_eq!(
         resolver::resolve_require_global_name("player", &agg).as_deref(),
@@ -129,13 +150,13 @@ fn workspace_global_priority_annotation_path_segment() {
         "annotation/module.lua",
         "---@type SubClass\nGLOBAL.Foo = nil\n",
     );
-    
+
     // Case 2: "my-annotation-helper" contains substring but is NOT a segment match
     let helper_file = (
         "my-annotation-helper/module.lua",
         "---@type BaseClass\nGLOBAL.Foo = nil\n",
     );
-    
+
     // Case 3: Regular file for baseline
     let normal_file = (
         "normal/module.lua",
@@ -145,15 +166,19 @@ fn workspace_global_priority_annotation_path_segment() {
     // Setup with all three files
     let (_docs, agg, _parser) = setup_workspace(&[helper_file, normal_file, annotation_file]);
 
-    let candidates = agg.global_shard.get("GLOBAL.Foo")
+    let candidates = agg
+        .global_shard
+        .get("GLOBAL.Foo")
         .expect("GLOBAL.Foo should be in global_shard");
-    
+
     assert_eq!(candidates.len(), 3, "should have three candidates");
 
     let owner_uri_id = summary_id_by_uri(&agg, &make_uri("annotation/module.lua"));
     let resolved = resolver::resolve_type(
         owner_uri_id,
-        &TypeFact::Stub(SymbolicStub::GlobalRef { name: "GLOBAL.Foo".into() }),
+        &TypeFact::Stub(SymbolicStub::GlobalRef {
+            name: "GLOBAL.Foo".into(),
+        }),
         &agg,
     );
     match &resolved.type_fact {

@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::completion;
 use mylua_lsp::uri_id::intern_uri;
+use test_helpers::*;
 
 #[test]
 fn complete_local_variable() {
@@ -119,7 +119,13 @@ fn complete_fixture_test4_table_field() {
     let src_with_dot = format!("{}\nabcdefg.", src.trim());
     let mut parser = new_parser();
     let doc2 = parse_doc(&mut parser, &src_with_dot);
-    let summary = mylua_lsp::summary_builder::build_file_analysis(&uri, doc2.tree().unwrap(), doc2.source(), doc2.line_index()).0;
+    let summary = mylua_lsp::summary_builder::build_file_analysis(
+        &uri,
+        doc2.tree().unwrap(),
+        doc2.source(),
+        doc2.line_index(),
+    )
+    .0;
     let mut agg2 = mylua_lsp::aggregation::WorkspaceAggregation::new();
     let uri_id = intern_uri(&uri);
     agg2.upsert_summary(uri_id, summary);
@@ -179,7 +185,8 @@ fn complete_emmy_tag_bare_at() {
         assert!(
             labels.contains(expected),
             "`---@` should include `{}`, got: {:?}",
-            expected, labels,
+            expected,
+            labels,
         );
     }
 }
@@ -194,11 +201,18 @@ fn complete_require_path_from_index() {
     let caller_uri_id = intern_uri(&caller_uri);
     let caller_doc = parse_doc(&mut parser, caller_src);
     let caller_summary = summary_builder::build_file_analysis(
-        &caller_uri, caller_doc.tree().unwrap(), caller_doc.source(), caller_doc.line_index(),
-    ).0;
+        &caller_uri,
+        caller_doc.tree().unwrap(),
+        caller_doc.source(),
+        caller_doc.line_index(),
+    )
+    .0;
 
     let mut agg = WorkspaceAggregation::new();
-    agg.set_require_mapping("game.player".to_string(), intern_uri(&make_uri("player.lua")));
+    agg.set_require_mapping(
+        "game.player".to_string(),
+        intern_uri(&make_uri("player.lua")),
+    );
     agg.set_require_mapping("game.world".to_string(), intern_uri(&make_uri("world.lua")));
     agg.set_require_mapping("util.log".to_string(), intern_uri(&make_uri("log.lua")));
     agg.upsert_summary(caller_uri_id, caller_summary);
@@ -210,7 +224,8 @@ fn complete_require_path_from_index() {
         assert!(
             labels.contains(expected),
             "require completion should list `{}`, got: {:?}",
-            expected, labels,
+            expected,
+            labels,
         );
     }
     // All items inside a require string should be MODULE, not KEYWORD.

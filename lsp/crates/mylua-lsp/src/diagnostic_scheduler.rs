@@ -208,12 +208,8 @@ impl DiagnosticScheduler {
     }
 
     fn collection_snapshot(&self) -> CollectionSnapshot {
-        let open = {
-            self.open_uris.lock().unwrap().clone()
-        };
-        let scope = {
-            self.config.lock().unwrap().diagnostics.scope.clone()
-        };
+        let open = { self.open_uris.lock().unwrap().clone() };
+        let scope = { self.config.lock().unwrap().diagnostics.scope.clone() };
         let all_uri_ids = self.all_uri_ids();
 
         CollectionSnapshot {
@@ -282,7 +278,9 @@ mod tests {
     use tower_lsp_server::ls_types::Uri;
 
     fn id(raw: i32) -> UriId {
-        let uri: Uri = format!("file:///diagnostic_scheduler/{}.lua", raw).parse().unwrap();
+        let uri: Uri = format!("file:///diagnostic_scheduler/{}.lua", raw)
+            .parse()
+            .unwrap();
         intern_uri(&uri)
     }
 
@@ -349,7 +347,8 @@ mod tests {
 
     #[tokio::test]
     async fn schedule_debounces_with_shared_gen_collapse() {
-        let s = DiagnosticScheduler::new_for_test(vec![id(1), id(2)], vec![], DiagnosticScope::Full);
+        let s =
+            DiagnosticScheduler::new_for_test(vec![id(1), id(2)], vec![], DiagnosticScope::Full);
         s.schedule_changed(id(1), false);
         tokio::time::sleep(Duration::from_millis(50)).await;
         s.schedule_changed(id(2), false);

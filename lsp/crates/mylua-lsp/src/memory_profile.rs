@@ -109,7 +109,9 @@ fn log_top_documents(documents: &HashMap<UriId, Document>) {
         .map(|(uri_id, doc)| {
             let scope_stats = doc.scope_tree.stats();
             (
-                doc.root_node().map(|root| root.descendant_count()).unwrap_or(0),
+                doc.root_node()
+                    .map(|root| root.descendant_count())
+                    .unwrap_or(0),
                 doc.source().len(),
                 scope_stats.declaration_count,
                 scope_stats.scope_count,

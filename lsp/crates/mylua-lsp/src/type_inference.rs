@@ -12,7 +12,7 @@ use crate::resolver;
 use crate::scope::ScopeTree;
 use crate::type_system::TypeFact;
 use crate::uri_id::UriId;
-use crate::util::{node_text, extract_string_literal};
+use crate::util::{extract_string_literal, node_text};
 
 /// Recursively infer the type of an AST expression node.
 ///
@@ -42,10 +42,14 @@ pub(crate) fn infer_node_type_in_file_id(
                 node.child_by_field_name("object"),
                 node.child_by_field_name("field"),
             ) {
-                let base_fact = infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
+                let base_fact =
+                    infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
                 let field_name = node_text(field, source).to_string();
                 let resolved = resolver::resolve_field_chain_in_file_id(
-                    uri_id, &base_fact, &[field_name], index,
+                    uri_id,
+                    &base_fact,
+                    &[field_name],
+                    index,
                 );
                 return resolved.type_fact;
             }
@@ -56,8 +60,10 @@ pub(crate) fn infer_node_type_in_file_id(
                 node.child_by_field_name("object"),
                 node.child_by_field_name("index"),
             ) {
-                let base_fact = infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
-                if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact {
+                let base_fact =
+                    infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
+                if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact
+                {
                     if let Some(summary) = index.summary_by_id(uri_id) {
                         if let Some(shape) = summary.table_shapes.get(shape_id) {
                             if let Some(elem) = &shape.array_element_type {
@@ -93,19 +99,16 @@ pub(crate) fn infer_node_type_in_file_id(
             // per-file `BuildContext`.
             infer_call_return_fact(node, source, uri_id, scope_tree, index)
         }
-        "parenthesized_expression" => {
-            node.named_child(0)
-                .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, scope_tree, index))
-                .unwrap_or(TypeFact::Unknown)
-        }
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, scope_tree, index))
+            .unwrap_or(TypeFact::Unknown),
         "identifier" => {
             let text = node_text(node, source);
             if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
                 return tf.clone();
             }
-            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                name: text.into(),
-            })
+            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: text.into() })
         }
         // Literal types — needed for function-level generic inference
         // so that `identity("abc")` can infer `T = string`.
@@ -125,16 +128,22 @@ pub(crate) fn infer_node_type_in_file_id(
 /// Infer the array element type of a table constructor for generic unification.
 /// Returns `__array<elem_type>` if the table has only positional (array) entries
 /// with a uniform literal type, otherwise returns `Unknown`.
-fn infer_table_array_element_type(
-    constructor: tree_sitter::Node,
-) -> TypeFact {
+fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {
     let mut elem_type: Option<TypeFact> = None;
     for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else { continue };
-        if field_list.kind() != "field_list" { continue; }
+        let Some(field_list) = constructor.named_child(i as u32) else {
+            continue;
+        };
+        if field_list.kind() != "field_list" {
+            continue;
+        }
         for j in 0..field_list.named_child_count() {
-            let Some(field_node) = field_list.named_child(j as u32) else { continue };
-            if field_node.kind() != "field" { continue; }
+            let Some(field_node) = field_list.named_child(j as u32) else {
+                continue;
+            };
+            if field_node.kind() != "field" {
+                continue;
+            }
             // Only handle positional entries (no key)
             if field_node.child_by_field_name("key").is_some() {
                 return TypeFact::Unknown; // has named keys, not a pure array
@@ -157,7 +166,8 @@ fn infer_table_array_element_type(
     }
     match elem_type {
         Some(t) => TypeFact::Known(crate::type_system::KnownType::EmmyGeneric(
-            "__array".into(), vec![t],
+            "__array".into(),
+            vec![t],
         )),
         None => TypeFact::Unknown,
     }
@@ -196,7 +206,7 @@ fn infer_call_return_fact(
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> TypeFact {
-    use crate::type_system::{SymbolicStub, KnownType};
+    use crate::type_system::{KnownType, SymbolicStub};
 
     let callee = match node.child_by_field_name("callee") {
         Some(c) => c,
@@ -208,7 +218,9 @@ fn infer_call_return_fact(
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_literal(first_arg, source) {
-                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path: module_path.into() });
+                    return TypeFact::Stub(SymbolicStub::RequireRef {
+                        module_path: module_path.into(),
+                    });
                 }
             }
         }
@@ -223,9 +235,13 @@ fn infer_call_return_fact(
         // When the base is a generic class instance (e.g. `Stack<string>`),
         // resolve the method's return type eagerly and substitute generic
         // parameters. A `CallReturn` stub would lose the actual type args.
-        if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_fact {
+        if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_fact
+        {
             let field_result = resolver::resolve_field_chain_in_file_id(
-                uri_id, &base_fact, std::slice::from_ref(&method_name), index,
+                uri_id,
+                &base_fact,
+                std::slice::from_ref(&method_name),
+                index,
             );
             // If the field resolved to a function, extract its first return
             // type (already substituted by resolve_field_chain_in_file's
@@ -252,7 +268,10 @@ fn infer_call_return_fact(
             // Fallback: look up the method in function_summaries and
             // substitute generics on the raw return type.
             let ret_fact = resolver::resolve_method_return_with_generics(
-                type_name, &method_name, actual_params, index,
+                type_name,
+                &method_name,
+                actual_params,
+                index,
             );
             if ret_fact != TypeFact::Unknown {
                 return ret_fact;
@@ -262,7 +281,9 @@ fn infer_call_return_fact(
         let generic_args = generic_args_from_call_base(&base_fact);
         let mut call_arg_types = Vec::with_capacity(1);
         call_arg_types.push(base_fact.clone());
-        call_arg_types.extend(collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index));
+        call_arg_types.extend(collect_call_arg_types_in_file_id(
+            node, source, uri_id, scope_tree, index,
+        ));
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_fact),
             func_name: method_name.into(),
@@ -279,9 +300,11 @@ fn infer_call_return_fact(
             callee.child_by_field_name("field"),
         ) {
             let func_name = node_text(field_node, source).to_string();
-            let base_fact = infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
+            let base_fact =
+                infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
             let generic_args = generic_args_from_call_base(&base_fact);
-            let call_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
+            let call_arg_types =
+                collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             return TypeFact::Stub(SymbolicStub::CallReturn {
                 base: Box::new(base_fact),
                 func_name: func_name.into(),
@@ -305,7 +328,8 @@ fn infer_call_return_fact(
         // Local function via scope tree → FunctionRef(id)
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),
-        )) = scope_tree.resolve_type(callee.start_byte(), callee_text) {
+        )) = scope_tree.resolve_type(callee.start_byte(), callee_text)
+        {
             if let Some(fs) = summary.function_summaries.get(fid) {
                 return Some((
                     fs.generic_params.clone(),
@@ -328,7 +352,8 @@ fn infer_call_return_fact(
         // Function-level generic inference: if the callee has @generic params,
         // try to unify them from the actual argument types at the call site.
         if !generic_params.is_empty() {
-            let actual_arg_types = collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
+            let actual_arg_types =
+                collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index);
             if let Some(substituted_returns) = resolver::unify_function_generics(
                 &generic_params,
                 &formal_params,
@@ -357,9 +382,7 @@ fn infer_call_return_fact(
     })
 }
 
-fn generic_args_from_call_base(
-    base_fact: &TypeFact,
-) -> Vec<TypeFact> {
+fn generic_args_from_call_base(base_fact: &TypeFact) -> Vec<TypeFact> {
     use crate::type_system::KnownType;
     match base_fact {
         TypeFact::Known(KnownType::EmmyGeneric(_, params)) => params.clone(),

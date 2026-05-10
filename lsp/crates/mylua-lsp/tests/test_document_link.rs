@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::document_link;
 use mylua_lsp::uri_id::intern_uri;
+use test_helpers::*;
 
 #[test]
 fn document_link_resolves_require_paren_form() {
@@ -24,7 +24,8 @@ fn document_link_resolves_require_paren_form() {
     let target = link.target.as_ref().unwrap().to_string();
     assert!(
         target.ends_with("util.lua"),
-        "target should point at util.lua, got: {}", target,
+        "target should point at util.lua, got: {}",
+        target,
     );
     // Link range should span the string content (inside quotes).
     // Source: `local u = require("util")` — "util" starts after the
@@ -32,7 +33,8 @@ fn document_link_resolves_require_paren_form() {
     assert_eq!(
         link.range.end.character - link.range.start.character,
         4,
-        "link range should span 'util' (4 chars), got: {:?}", link.range,
+        "link range should span 'util' (4 chars), got: {:?}",
+        link.range,
     );
 }
 
@@ -52,7 +54,11 @@ fn document_link_resolves_from_module_map_before_summary_exists() {
         doc.line_index(),
     );
 
-    assert_eq!(links.len(), 1, "module-map-only require should yield a link");
+    assert_eq!(
+        links.len(),
+        1,
+        "module-map-only require should yield a link"
+    );
     assert_eq!(links[0].target.as_ref(), Some(&util_uri));
 }
 
@@ -73,8 +79,10 @@ fn document_link_resolves_require_short_call() {
         doc.line_index(),
     );
     assert_eq!(
-        links.len(), 1,
-        "short-call `require \"util\"` should still yield a link, got: {:?}", links,
+        links.len(),
+        1,
+        "short-call `require \"util\"` should still yield a link, got: {:?}",
+        links,
     );
 }
 
@@ -82,9 +90,7 @@ fn document_link_resolves_require_short_call() {
 fn document_link_ignores_unresolved_module() {
     // `require("no_such_module")` has no workspace target — suppress
     // the link rather than emit a dangling one.
-    let (docs, agg, _parser) = setup_workspace(&[
-        ("main.lua", "require(\"no_such_module\")\n"),
-    ]);
+    let (docs, agg, _parser) = setup_workspace(&[("main.lua", "require(\"no_such_module\")\n")]);
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
     let links = document_link::document_links(
@@ -95,7 +101,8 @@ fn document_link_ignores_unresolved_module() {
     );
     assert!(
         links.is_empty(),
-        "unresolved modules must not produce links, got: {:?}", links,
+        "unresolved modules must not produce links, got: {:?}",
+        links,
     );
 }
 
@@ -116,7 +123,8 @@ fn document_link_ignores_non_require_calls() {
     );
     assert!(
         links.is_empty(),
-        "only `require(...)` calls should produce links, got: {:?}", links,
+        "only `require(...)` calls should produce links, got: {:?}",
+        links,
     );
 }
 
@@ -140,7 +148,8 @@ fn document_link_rejects_aliased_require() {
     );
     assert!(
         links.is_empty(),
-        "aliased require calls are not followed, got: {:?}", links,
+        "aliased require calls are not followed, got: {:?}",
+        links,
     );
 }
 
@@ -162,5 +171,10 @@ fn document_link_multi_require_each_get_link() {
         &agg,
         doc.line_index(),
     );
-    assert_eq!(links.len(), 2, "two distinct require calls → two links, got: {:?}", links);
+    assert_eq!(
+        links.len(),
+        2,
+        "two distinct require calls → two links, got: {:?}",
+        links
+    );
 }

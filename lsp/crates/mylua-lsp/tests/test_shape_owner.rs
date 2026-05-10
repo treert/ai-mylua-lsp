@@ -5,8 +5,8 @@
 
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::type_system::{KnownType, TypeFact};
+use test_helpers::*;
 
 #[test]
 fn local_table_field_return_infers_field_type() {
@@ -18,12 +18,17 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "local_table_field_return.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
+    let fs = summary
+        .function_summaries
+        .values()
         .find(|fs| fs.name == "get_a")
         .expect("get_a function");
 
     assert!(
-        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        matches!(
+            fs.signature.returns.first(),
+            Some(TypeFact::Known(KnownType::Number))
+        ),
         "local table field return should infer number, got: {:?}",
         fs.signature.returns
     );
@@ -46,12 +51,17 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "local_table_field_arg.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
+    let fs = summary
+        .function_summaries
+        .values()
         .find(|fs| fs.name == "get_a")
         .expect("get_a function");
 
     assert!(
-        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        matches!(
+            fs.signature.returns.first(),
+            Some(TypeFact::Known(KnownType::Number))
+        ),
         "local table field call arg should unify generic return to number, got: {:?}",
         fs.signature.returns
     );
@@ -67,12 +77,17 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "nested_local_table_field_return.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
+    let fs = summary
+        .function_summaries
+        .values()
         .find(|fs| fs.name == "get_b")
         .expect("get_b function");
 
     assert!(
-        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        matches!(
+            fs.signature.returns.first(),
+            Some(TypeFact::Known(KnownType::Number))
+        ),
         "nested local table field return should infer number, got: {:?}",
         fs.signature.returns
     );
@@ -95,12 +110,17 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "nested_local_table_field_arg.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
+    let fs = summary
+        .function_summaries
+        .values()
         .find(|fs| fs.name == "get_b")
         .expect("get_b function");
 
     assert!(
-        matches!(fs.signature.returns.first(), Some(TypeFact::Known(KnownType::Number))),
+        matches!(
+            fs.signature.returns.first(),
+            Some(TypeFact::Known(KnownType::Number))
+        ),
         "nested local table field call arg should unify generic return to number, got: {:?}",
         fs.signature.returns
     );
@@ -114,11 +134,18 @@ local t = { name = "hello" }
     let (doc, uri, agg) = setup_single_file(src, "owner_local.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
     let end_offset = src.len();
-    let tf = doc.scope_tree.resolve_type(end_offset, "t").expect("t type");
+    let tf = doc
+        .scope_tree
+        .resolve_type(end_offset, "t")
+        .expect("t type");
     match tf {
         TypeFact::Known(KnownType::Table(id)) => {
             let shape = summary.table_shapes.get(id).expect("shape");
-            assert_eq!(shape.owner_name.as_deref(), Some("t"), "owner should be `t`");
+            assert_eq!(
+                shape.owner_name.as_deref(),
+                Some("t"),
+                "owner should be `t`"
+            );
         }
         other => panic!("expected Table shape, got: {:?}", other),
     }
@@ -173,8 +200,18 @@ local t2 = { m = function() return "s" end }
     };
     assert_ne!(id1, id2, "shapes must have distinct ids");
 
-    let o1 = summary.table_shapes.get(&id1).unwrap().owner_name.as_deref();
-    let o2 = summary.table_shapes.get(&id2).unwrap().owner_name.as_deref();
+    let o1 = summary
+        .table_shapes
+        .get(&id1)
+        .unwrap()
+        .owner_name
+        .as_deref();
+    let o2 = summary
+        .table_shapes
+        .get(&id2)
+        .unwrap()
+        .owner_name
+        .as_deref();
     assert_eq!(o1, Some("t1"));
     assert_eq!(o2, Some("t2"));
 }
@@ -191,6 +228,7 @@ fn non_table_rhs_leaves_shape_untouched() {
     let tf = doc.scope_tree.resolve_type(end_offset, "s");
     assert!(
         !matches!(tf, Some(TypeFact::Known(KnownType::Table(_)))),
-        "local string must not be a Table, got: {:?}", tf,
+        "local string must not be a Table, got: {:?}",
+        tf,
     );
 }

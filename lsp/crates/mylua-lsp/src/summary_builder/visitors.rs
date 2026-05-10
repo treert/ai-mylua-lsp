@@ -428,7 +428,8 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 let params = fs.signature.params.clone();
                 let should_infer_returns = should_infer_body_returns(&fs);
                 ctx.function_name_to_id.insert(name.clone(), func_id);
-                ctx.function_node_to_id.insert((val.start_byte(), val.end_byte()), func_id);
+                ctx.function_node_to_id
+                    .insert((val.start_byte(), val.end_byte()), func_id);
                 ctx.function_summaries.insert(func_id, fs);
                 (
                     TypeFact::Known(KnownType::FunctionRef(func_id)),
@@ -711,7 +712,8 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let params = fs.signature.params.clone();
     let should_infer_returns = should_infer_body_returns(&fs);
     ctx.function_name_to_id.insert(name.clone(), func_id);
-    ctx.function_node_to_id.insert((node.start_byte(), node.end_byte()), func_id);
+    ctx.function_node_to_id
+        .insert((node.start_byte(), node.end_byte()), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
     ctx.add_scoped_decl(ScopeDecl {
@@ -756,7 +758,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let is_method = name.contains(':');
     let class_prefix = crate::type_system::class_prefix_of(&name).to_string();
     ctx.function_name_to_id.insert(name.clone(), func_id);
-    ctx.function_node_to_id.insert((node.start_byte(), node.end_byte()), func_id);
+    ctx.function_node_to_id
+        .insert((node.start_byte(), node.end_byte()), func_id);
     ctx.function_summaries.insert(func_id, fs);
 
     let local_bare_function = if !name.contains('.') && !name.contains(':') {
@@ -829,7 +832,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // bases, and the shape write still happens for local table shapes.
     if let Some((base_name, field_name)) = name.rsplit_once(':').or_else(|| name.rsplit_once('.')) {
         if !base_name.contains('.') && !base_name.contains(':') {
-            if let Some(class_name) = ctx.resolve_bound_class_for_at(base_name, name_node.start_byte()) {
+            if let Some(class_name) =
+                ctx.resolve_bound_class_for_at(base_name, name_node.start_byte())
+            {
                 let def_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
                 let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
                 add_field_to_class(ctx, class_name, field_name, type_fact, def_range);
@@ -872,7 +877,8 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     // Global function: colon→dot normalization for both index and contribution.
     let normalized = name.replace(':', ".");
-    ctx.function_name_index.insert(intern_lua_symbol(&normalized), func_id);
+    ctx.function_name_index
+        .insert(intern_lua_symbol(&normalized), func_id);
 
     // Base is not a local (or bare name) → register as global contribution
     // (e.g. `function Player.new()` where Player is a global).
@@ -1050,7 +1056,10 @@ fn build_function_summary(
         signature_fingerprint: fingerprint,
         emmy_annotated,
         overloads,
-        generic_params: func_generic_params.iter().map(|param| intern_lua_symbol(param)).collect(),
+        generic_params: func_generic_params
+            .iter()
+            .map(|param| intern_lua_symbol(param))
+            .collect(),
     }
 }
 
@@ -1255,8 +1264,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // Phase 2: bind the first simple-identifier LHS to the class
                 if i == 0 {
                     if let Some(class_name) = pending_class {
-                        ctx.global_class_bindings
-                            .insert(name.clone(), class_name);
+                        ctx.global_class_bindings.insert(name.clone(), class_name);
                     }
                 }
 
@@ -1635,8 +1643,7 @@ fn visit_function_body(
         // use the class name as self's type and record bound_class. Plain
         // local table methods use the table shape so `self.field` can resolve.
         let (self_type, self_bound_class) = if !class_prefix.is_empty() {
-            let bound = ctx
-                .resolve_bound_class_for_at(class_prefix, func_body.start_byte());
+            let bound = ctx.resolve_bound_class_for_at(class_prefix, func_body.start_byte());
             if let Some(class_name) = bound {
                 (
                     Some(TypeFact::Known(KnownType::EmmyType(class_name))),

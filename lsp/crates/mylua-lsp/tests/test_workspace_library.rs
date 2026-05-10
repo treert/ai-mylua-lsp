@@ -40,8 +40,7 @@ fn library_contributes_stdlib_globals() {
         lib.display()
     );
 
-    let (_docs, agg, _parser, library_uris) =
-        setup_workspace_with_library(&[], &[lib.clone()]);
+    let (_docs, agg, _parser, library_uris) = setup_workspace_with_library(&[], &[lib.clone()]);
 
     // Every .lua in the lib directory should be counted as library.
     assert!(
@@ -57,7 +56,12 @@ fn library_contributes_stdlib_globals() {
         agg.global_shard.contains_key("print"),
         "print must appear in global_shard after library scan; \
          global_shard keys = {:?}",
-        agg.global_shard.iter_all_entries().into_iter().map(|(k, _)| k).take(20).collect::<Vec<_>>()
+        agg.global_shard
+            .iter_all_entries()
+            .into_iter()
+            .map(|(k, _)| k)
+            .take(20)
+            .collect::<Vec<_>>()
     );
 }
 
@@ -68,8 +72,7 @@ fn library_contributes_stdlib_globals() {
 #[test]
 fn library_stdlib_modules_present_in_global_shard() {
     let lib = bundled_lua54_library_path();
-    let (_docs, agg, _parser, _library_uris) =
-        setup_workspace_with_library(&[], &[lib]);
+    let (_docs, agg, _parser, _library_uris) = setup_workspace_with_library(&[], &[lib]);
 
     for name in &["string", "table", "math", "io", "os"] {
         assert!(
@@ -122,8 +125,7 @@ fn library_modules_are_requirable() {
 #[test]
 fn library_files_are_forced_meta() {
     let lib = bundled_lua54_library_path();
-    let (_docs, agg, _parser, library_uris) =
-        setup_workspace_with_library(&[], &[lib]);
+    let (_docs, agg, _parser, library_uris) = setup_workspace_with_library(&[], &[lib]);
 
     assert!(
         !library_uris.is_empty(),
@@ -151,8 +153,7 @@ fn user_files_remain_non_meta_when_library_is_configured() {
     let lib = bundled_lua54_library_path();
     let user_file = ("app.lua", "local x = 1\n");
 
-    let (_docs, agg, _parser, library_uris) =
-        setup_workspace_with_library(&[user_file], &[lib]);
+    let (_docs, agg, _parser, library_uris) = setup_workspace_with_library(&[user_file], &[lib]);
 
     let user_uri = make_uri("app.lua");
     assert!(

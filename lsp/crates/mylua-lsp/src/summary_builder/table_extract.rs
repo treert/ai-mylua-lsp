@@ -1,10 +1,10 @@
 use crate::table_shape::{FieldInfo, TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
-use crate::util::{node_text, extract_string_literal};
+use crate::util::{extract_string_literal, node_text};
 
-use super::BuildContext;
-use super::type_infer::infer_expression_type;
 use super::fingerprint::merge_types;
+use super::type_infer::infer_expression_type;
+use super::BuildContext;
 
 // ---------------------------------------------------------------------------
 // Table shape extraction
@@ -49,12 +49,16 @@ pub(super) fn extract_table_shape(
     }
 
     for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        let Some(field_list) = constructor.named_child(i as u32) else {
+            continue;
+        };
         if field_list.kind() != "field_list" {
             continue;
         }
         for j in 0..field_list.named_child_count() {
-            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            let Some(field_node) = field_list.named_child(j as u32) else {
+                continue;
+            };
             if field_node.kind() != "field" {
                 continue;
             }
@@ -81,7 +85,9 @@ fn extract_bracket_key_table_types(
     let mut value_type: Option<TypeFact> = None;
 
     'outer: for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        let Some(field_list) = constructor.named_child(i as u32) else {
+            continue;
+        };
         if field_list.kind() != "field_list" {
             continue;
         }
@@ -89,7 +95,9 @@ fn extract_bracket_key_table_types(
             if sampled >= SAMPLE_COUNT {
                 break 'outer;
             }
-            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            let Some(field_node) = field_list.named_child(j as u32) else {
+                continue;
+            };
             if field_node.kind() != "field" {
                 continue;
             }
@@ -130,12 +138,17 @@ fn extract_single_field(
             let key = node_text(k, ctx.source).to_string();
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.set_field(&key, FieldInfo {
-                    name: key.as_str().into(),
-                    type_fact,
-                    def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
-                    assignment_count: 1,
-                });
+                shape.set_field(
+                    &key,
+                    FieldInfo {
+                        name: key.as_str().into(),
+                        type_fact,
+                        def_range: Some(
+                            ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
+                        ),
+                        assignment_count: 1,
+                    },
+                );
             }
         }
         // `[literal] = value` — static bracket key (string / number).
@@ -158,12 +171,17 @@ fn extract_single_field(
             };
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.set_field(&key_text, FieldInfo {
-                    name: key_text.as_str().into(),
-                    type_fact,
-                    def_range: Some(ctx.line_index.ts_node_to_byte_range(field_node, ctx.source)),
-                    assignment_count: 1,
-                });
+                shape.set_field(
+                    &key_text,
+                    FieldInfo {
+                        name: key_text.as_str().into(),
+                        type_fact,
+                        def_range: Some(
+                            ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
+                        ),
+                        assignment_count: 1,
+                    },
+                );
             }
         }
         // `[expr] = value` with a non-literal key — dynamic bracket
@@ -174,24 +192,20 @@ fn extract_single_field(
             shape.mark_open();
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.array_element_type = Some(
-                    match shape.array_element_type.take() {
-                        Some(existing) => merge_types(existing, type_fact),
-                        None => type_fact,
-                    }
-                );
+                shape.array_element_type = Some(match shape.array_element_type.take() {
+                    Some(existing) => merge_types(existing, type_fact),
+                    None => type_fact,
+                });
             }
         }
         // No key at all — array-style entry (`{ 1, 2, 3 }`).
         None => {
             if let Some(val) = value_node {
                 let type_fact = infer_expression_type(ctx, val, depth);
-                shape.array_element_type = Some(
-                    match shape.array_element_type.take() {
-                        Some(existing) => merge_types(existing, type_fact),
-                        None => type_fact,
-                    }
-                );
+                shape.array_element_type = Some(match shape.array_element_type.take() {
+                    Some(existing) => merge_types(existing, type_fact),
+                    None => type_fact,
+                });
             }
         }
     }
@@ -199,7 +213,10 @@ fn extract_single_field(
 
 /// Thin wrapper: unwrap `expression_list` then delegate to the shared
 /// `util::extract_string_literal`.
-pub(super) fn extract_string_from_node(ctx: &BuildContext, node: tree_sitter::Node) -> Option<String> {
+pub(super) fn extract_string_from_node(
+    ctx: &BuildContext,
+    node: tree_sitter::Node,
+) -> Option<String> {
     let inner = if node.kind() == "expression_list" {
         node.named_child(0)?
     } else {

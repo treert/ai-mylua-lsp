@@ -78,10 +78,7 @@ fn collect_recursive(
     }
 }
 
-fn resolve_module_target(
-    index: &WorkspaceAggregation,
-    module_path: &str,
-) -> Option<Uri> {
+fn resolve_module_target(index: &WorkspaceAggregation, module_path: &str) -> Option<Uri> {
     index.resolve_module_to_id(module_path).map(resolve_uri)
 }
 
@@ -177,7 +174,11 @@ fn parse_module_path_from_string(string_node: tree_sitter::Node, source: &[u8]) 
 /// of a short-quoted string node. Keeps the client's underline
 /// visually tight on the module path. Returns `None` when the node
 /// range is degenerate (zero or one byte wide).
-fn content_range_inside_quotes(string_node: tree_sitter::Node, source: &[u8], line_index: &LineIndex) -> Option<Range> {
+fn content_range_inside_quotes(
+    string_node: tree_sitter::Node,
+    source: &[u8],
+    line_index: &LineIndex,
+) -> Option<Range> {
     let full = line_index.ts_node_to_range(string_node, source);
     let start_byte = string_node.start_byte();
     let end_byte = string_node.end_byte();

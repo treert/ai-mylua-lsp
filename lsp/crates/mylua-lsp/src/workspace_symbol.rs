@@ -155,7 +155,8 @@ pub fn search_workspace_symbols(
     results.sort_by(|a, b| {
         let a_exact = a.name.to_lowercase() == query_lower;
         let b_exact = b.name.to_lowercase() == query_lower;
-        b_exact.cmp(&a_exact)
+        b_exact
+            .cmp(&a_exact)
             .then_with(|| a.name.cmp(&b.name))
             .then_with(|| a.container_name.cmp(&b.container_name))
             // Final tiebreaker on URI so ordering is deterministic

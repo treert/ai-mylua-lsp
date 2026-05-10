@@ -1,13 +1,18 @@
-use std::fmt::Write;
-use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
-use crate::emmy::{collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text, parse_emmy_comments, format_annotations_markdown};
+use crate::emmy::{
+    collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text,
+    format_annotations_markdown, parse_emmy_comments,
+};
 use crate::resolver;
 use crate::type_system::TypeFact;
 use crate::types::DefKind;
 use crate::uri_id::{resolve_uri, UriId};
-use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_field_chain, LineIndex};
-use crate::aggregation::WorkspaceAggregation;
+use crate::util::{
+    extract_field_chain, find_node_at_position, node_text, walk_ancestors, LineIndex,
+};
+use std::fmt::Write;
+use tower_lsp_server::ls_types::*;
 
 pub fn hover(
     doc: &Document,
@@ -16,7 +21,9 @@ pub fn hover(
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
-    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let byte_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
         return hover_type_name(&type_name, index, all_docs);
     }
@@ -118,7 +125,8 @@ pub fn hover(
     }
 
     if let Some(def) = doc.scope_tree.resolve_id(byte_offset, ident_text, uri_id) {
-        let type_info = resolve_local_type_info(uri_id, ident_text, byte_offset, &doc.scope_tree, index);
+        let type_info =
+            resolve_local_type_info(uri_id, ident_text, byte_offset, &doc.scope_tree, index);
         lsp_log!(
             "[hover] scope resolved '{}', type_info={:?}",
             ident_text,
@@ -137,7 +145,9 @@ pub fn hover(
                             let mut parts = Vec::new();
                             let class_header = match td.kind {
                                 crate::summary::TypeDefinitionKind::Alias => {
-                                    let alias_display = td.alias_type.as_ref()
+                                    let alias_display = td
+                                        .alias_type
+                                        .as_ref()
                                         .map(|t| format!("{}", t))
                                         .unwrap_or_else(|| "unknown".to_string());
                                     format!("---@alias {} {}", td.name, alias_display)
@@ -149,7 +159,9 @@ pub fn hover(
                                     if td.parents.is_empty() {
                                         format!("---@class {}", td.name)
                                     } else {
-                                        let parents = td.parents.iter()
+                                        let parents = td
+                                            .parents
+                                            .iter()
                                             .map(|parent| parent.as_str())
                                             .collect::<Vec<_>>()
                                             .join(", ");
@@ -165,13 +177,17 @@ pub fn hover(
                             };
                             parts.push(format!("*{}*", kind_label));
                             if !td.fields.is_empty() {
-                                let fields_md: Vec<String> = td.fields.iter()
+                                let fields_md: Vec<String> = td
+                                    .fields
+                                    .iter()
                                     .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
                                     .collect();
                                 parts.push(fields_md.join("\n"));
                             }
                             // Include doc comments from the definition site
-                            if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
+                            if let Some(def_doc) =
+                                all_docs.get_document_by_id(candidate.source_uri_id())
+                            {
                                 let def_byte = Some(td.range.start_byte);
                                 if let Some(db) = def_byte {
                                     let doc_text = definition_doc_text_at_byte(def_doc, db);
@@ -203,17 +219,24 @@ pub fn hover(
         let candidate = candidates.first()?;
         let source_uri = resolve_uri(candidate.source_uri_id());
         let def_kind = match candidate.kind {
-            crate::summary::GlobalContributionKind::Function => crate::types::DefKind::GlobalFunction,
+            crate::summary::GlobalContributionKind::Function => {
+                crate::types::DefKind::GlobalFunction
+            }
             _ => crate::types::DefKind::GlobalVariable,
         };
-        Some((crate::types::Definition {
-            name: candidate.name.to_string(),
-            kind: def_kind,
-            range: candidate.range,
-            selection_range: candidate.selection_range,
-            uri_id: candidate.source_uri_id(),
-            uri: source_uri.clone(),
-        }, candidates.len(), source_uri, candidate.source_uri_id()))
+        Some((
+            crate::types::Definition {
+                name: candidate.name.to_string(),
+                kind: def_kind,
+                range: candidate.range,
+                selection_range: candidate.selection_range,
+                uri_id: candidate.source_uri_id(),
+                uri: source_uri.clone(),
+            },
+            candidates.len(),
+            source_uri,
+            candidate.source_uri_id(),
+        ))
     });
     if let Some((synth_def, entry_count, _source_uri, source_uri_id)) = global_info {
         let resolved = resolver::resolve_type(
@@ -261,7 +284,9 @@ fn hover_type_name(
         let mut parts = Vec::new();
         let class_header = match td.kind {
             crate::summary::TypeDefinitionKind::Alias => {
-                let alias_display = td.alias_type.as_ref()
+                let alias_display = td
+                    .alias_type
+                    .as_ref()
                     .map(|t| format!("{}", t))
                     .unwrap_or_else(|| "unknown".to_string());
                 format!("---@alias {} {}", td.name, alias_display)
@@ -273,7 +298,9 @@ fn hover_type_name(
                 if td.parents.is_empty() {
                     format!("---@class {}", td.name)
                 } else {
-                    let parents = td.parents.iter()
+                    let parents = td
+                        .parents
+                        .iter()
                         .map(|parent| parent.as_str())
                         .collect::<Vec<_>>()
                         .join(", ");
@@ -289,7 +316,9 @@ fn hover_type_name(
         };
         parts.push(format!("*{}*", kind_label));
         if !td.fields.is_empty() {
-            let fields_md: Vec<String> = td.fields.iter()
+            let fields_md: Vec<String> = td
+                .fields
+                .iter()
                 .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
                 .collect();
             parts.push(fields_md.join("\n"));
@@ -323,10 +352,7 @@ fn hover_type_name(
 /// to ordinary variable resolution so `A1213:f()` with unknown
 /// `A1213` surfaces as undefined instead of masquerading as a
 /// function signature.
-fn is_function_name_tail(
-    function_name: tree_sitter::Node,
-    ident: tree_sitter::Node,
-) -> bool {
+fn is_function_name_tail(function_name: tree_sitter::Node, ident: tree_sitter::Node) -> bool {
     // Grammar: function_name = identifier ( '.' identifier )* ( ':' identifier )?
     // The method form exposes the trailing identifier via the
     // `method` field.
@@ -354,10 +380,7 @@ fn is_function_name_tail(
 /// through to the scope / type_shard paths. If this function gains
 /// a real failure path, update the walker's closure contract comment
 /// too.
-fn hover_at_declaration(
-    decl_node: tree_sitter::Node,
-    doc: &Document,
-) -> Option<Hover> {
+fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<Hover> {
     let source = doc.source();
 
     let comment_lines = collect_preceding_comments(decl_node, source);
@@ -423,7 +446,17 @@ fn hover_method_call(
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
-    build_field_hover(base_node, name_node, "method", source, uri_id, &doc.scope_tree, index, all_docs, doc.line_index())
+    build_field_hover(
+        base_node,
+        name_node,
+        "method",
+        source,
+        uri_id,
+        &doc.scope_tree,
+        index,
+        all_docs,
+        doc.line_index(),
+    )
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
@@ -456,7 +489,17 @@ fn hover_variable_field(
 
     let base_node = var_node.child_by_field_name("object")?;
     let name_node = var_node.child_by_field_name("field")?;
-    build_field_hover(base_node, name_node, "field", source, uri_id, &doc.scope_tree, index, all_docs, doc.line_index())
+    build_field_hover(
+        base_node,
+        name_node,
+        "field",
+        source,
+        uri_id,
+        &doc.scope_tree,
+        index,
+        all_docs,
+        doc.line_index(),
+    )
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -516,10 +559,12 @@ fn build_field_chain_hover(
         fields,
         kind = kind_label,
     );
-    let resolved = resolver::resolve_field_chain_in_file_id(
-        uri_id, &base_fact, &fields, index,
+    let resolved = resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &fields, index);
+    lsp_log!(
+        "[hover_{kind}] resolved={:?}",
+        resolved.type_fact,
+        kind = kind_label
     );
-    lsp_log!("[hover_{kind}] resolved={:?}", resolved.type_fact, kind = kind_label);
 
     let type_display = format_resolved_type(&resolved.type_fact);
 
@@ -544,7 +589,14 @@ fn build_field_chain_hover(
         return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
     }
 
-    fallback_field_hover(kind_label, &field_name, &type_display, name_node, source, line_index)
+    fallback_field_hover(
+        kind_label,
+        &field_name,
+        &type_display,
+        name_node,
+        source,
+        line_index,
+    )
 }
 
 fn fallback_field_hover(
@@ -822,8 +874,11 @@ fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
     let mut current = node;
     loop {
         match current.kind() {
-            "function_declaration" | "local_function_declaration" | "local_declaration"
-            | "assignment_statement" | "function_call_statement" => return current,
+            "function_declaration"
+            | "local_function_declaration"
+            | "local_declaration"
+            | "assignment_statement"
+            | "function_call_statement" => return current,
             _ => {
                 if let Some(parent) = current.parent() {
                     current = parent;
@@ -840,8 +895,11 @@ fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::No
     loop {
         match current.kind() {
             "field" => return Some(current),
-            "function_declaration" | "local_function_declaration" | "local_declaration"
-            | "assignment_statement" | "function_call_statement" => return None,
+            "function_declaration"
+            | "local_function_declaration"
+            | "local_declaration"
+            | "assignment_statement"
+            | "function_call_statement" => return None,
             _ => {
                 if let Some(parent) = current.parent() {
                     current = parent;

@@ -1,6 +1,6 @@
-use tower_lsp_server::ls_types::Uri;
 use crate::uri_id::UriId;
 use crate::util::ByteRange;
+use tower_lsp_server::ls_types::Uri;
 
 #[derive(Debug, Clone)]
 pub struct Definition {

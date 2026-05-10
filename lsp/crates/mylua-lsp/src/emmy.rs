@@ -13,11 +13,17 @@ use std::fmt::{self, Write as _};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum EmmyType {
-    Named { name: String, generics: Vec<EmmyType> },
+    Named {
+        name: String,
+        generics: Vec<EmmyType>,
+    },
     Union(Vec<EmmyType>),
     Optional(Box<EmmyType>),
     Array(Box<EmmyType>),
-    Function { params: Vec<EmmyFunParam>, returns: Vec<EmmyType> },
+    Function {
+        params: Vec<EmmyFunParam>,
+        returns: Vec<EmmyType>,
+    },
     Table(Vec<EmmyTableField>),
     Literal(String),
     Variadic(Box<EmmyType>),
@@ -60,7 +66,9 @@ impl fmt::Display for EmmyType {
                 if !generics.is_empty() {
                     write!(f, "<")?;
                     for (i, g) in generics.iter().enumerate() {
-                        if i > 0 { write!(f, ", ")?; }
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
                         write!(f, "{}", g)?;
                     }
                     write!(f, ">")?;
@@ -69,29 +77,33 @@ impl fmt::Display for EmmyType {
             }
             Self::Union(types) => {
                 for (i, t) in types.iter().enumerate() {
-                    if i > 0 { write!(f, "|")?; }
+                    if i > 0 {
+                        write!(f, "|")?;
+                    }
                     write!(f, "{}", t)?;
                 }
                 Ok(())
             }
             Self::Optional(inner) => write!(f, "{}?", inner),
-            Self::Array(inner) => {
-                match inner.as_ref() {
-                    EmmyType::Union(_) | EmmyType::Optional(_) => write!(f, "({})[]", inner),
-                    _ => write!(f, "{}[]", inner),
-                }
-            }
+            Self::Array(inner) => match inner.as_ref() {
+                EmmyType::Union(_) | EmmyType::Optional(_) => write!(f, "({})[]", inner),
+                _ => write!(f, "{}[]", inner),
+            },
             Self::Function { params, returns } => {
                 write!(f, "fun(")?;
                 for (i, p) in params.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     write!(f, "{}", p)?;
                 }
                 write!(f, ")")?;
                 if !returns.is_empty() {
                     write!(f, ":")?;
                     for (i, r) in returns.iter().enumerate() {
-                        if i > 0 { write!(f, ", ")?; }
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
                         write!(f, "{}", r)?;
                     }
                 }
@@ -100,7 +112,9 @@ impl fmt::Display for EmmyType {
             Self::Table(fields) => {
                 write!(f, "{{")?;
                 for (i, field) in fields.iter().enumerate() {
-                    if i > 0 { write!(f, ", ")?; }
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
                     match &field.key {
                         EmmyTableFieldKey::Name(n) => write!(f, "{}: {}", n, field.value)?,
                         EmmyTableFieldKey::IndexType(k) => write!(f, "[{}]: {}", k, field.value)?,
@@ -131,26 +145,69 @@ impl fmt::Display for EmmyFunParam {
 
 #[derive(Debug, Clone)]
 pub enum EmmyAnnotation {
-    Class { name: String, parents: Vec<String>, desc: String },
-    Field { visibility: Option<String>, name: String, type_expr: EmmyType, desc: String },
-    Param { name: String, optional: bool, type_expr: EmmyType, desc: String },
-    Return { return_types: Vec<EmmyType>, name: Option<String>, desc: String },
-    Type { type_expr: EmmyType, desc: String },
-    Alias { name: String, type_expr: EmmyType },
-    Generic { params: Vec<GenericParam> },
-    Overload { fun_type: EmmyType },
-    Vararg { type_expr: EmmyType },
-    Deprecated { desc: String },
+    Class {
+        name: String,
+        parents: Vec<String>,
+        desc: String,
+    },
+    Field {
+        visibility: Option<String>,
+        name: String,
+        type_expr: EmmyType,
+        desc: String,
+    },
+    Param {
+        name: String,
+        optional: bool,
+        type_expr: EmmyType,
+        desc: String,
+    },
+    Return {
+        return_types: Vec<EmmyType>,
+        name: Option<String>,
+        desc: String,
+    },
+    Type {
+        type_expr: EmmyType,
+        desc: String,
+    },
+    Alias {
+        name: String,
+        type_expr: EmmyType,
+    },
+    Generic {
+        params: Vec<GenericParam>,
+    },
+    Overload {
+        fun_type: EmmyType,
+    },
+    Vararg {
+        type_expr: EmmyType,
+    },
+    Deprecated {
+        desc: String,
+    },
     Async,
     Nodiscard,
-    Enum { name: String },
-    See { path: String },
-    Diagnostic { text: String },
+    Enum {
+        name: String,
+    },
+    See {
+        path: String,
+    },
+    Diagnostic {
+        text: String,
+    },
     /// `---@meta [name]` — marks the file as a stub/definition file
     /// per Lua-LS convention. The optional `name` is the logical
     /// module the stub represents.
-    Meta { name: Option<String> },
-    Other { tag: String, text: String },
+    Meta {
+        name: Option<String>,
+    },
+    Other {
+        tag: String,
+        text: String,
+    },
 }
 
 /// Return the EmmyLua type/definition name under `byte_offset` when the cursor
@@ -201,7 +258,10 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
     let rel = full_rel - emmy_start;
 
     let at = line.iter().position(|&b| b == b'@')?;
-    if !line[..at].iter().all(|&b| b == b'-' || b == b' ' || b == b'\t') {
+    if !line[..at]
+        .iter()
+        .all(|&b| b == b'-' || b == b' ' || b == b'\t')
+    {
         return None;
     }
 
@@ -239,7 +299,8 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
             }
             let type_start = skip_ws(line, name_end);
             let type_end = type_expr_end(line, type_start, content_end);
-            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+            type_word_in_expr(line, type_start, type_end, word_start, word_end)
+                .then(|| word.to_string())
         }
         "enum" => {
             let (name_start, name_end) = read_qualified_ident_span(line, content_start)?;
@@ -247,7 +308,8 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
         }
         "type" | "return" | "vararg" | "overload" => {
             let type_end = type_expr_end(line, content_start, content_end);
-            type_word_in_expr(line, content_start, type_end, word_start, word_end).then(|| word.to_string())
+            type_word_in_expr(line, content_start, type_end, word_start, word_end)
+                .then(|| word.to_string())
         }
         "param" => {
             let (_, param_end) = read_ident_span(line, content_start)?;
@@ -256,7 +318,8 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
                 type_start = skip_ws(line, type_start + 1);
             }
             let type_end = type_expr_end(line, type_start, content_end);
-            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+            type_word_in_expr(line, type_start, type_end, word_start, word_end)
+                .then(|| word.to_string())
         }
         "field" => {
             let mut field_start = content_start;
@@ -290,7 +353,8 @@ pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<Strin
             }
             let type_start = skip_ws(line, field_end);
             let type_end = type_expr_end(line, type_start, content_end);
-            type_word_in_expr(line, type_start, type_end, word_start, word_end).then(|| word.to_string())
+            type_word_in_expr(line, type_start, type_end, word_start, word_end)
+                .then(|| word.to_string())
         }
         _ => None,
     }
@@ -398,7 +462,10 @@ fn type_expr_end(line: &[u8], start: usize, limit: usize) -> usize {
         if b.is_ascii_whitespace() {
             let next = next_non_ws(line, i, limit);
             let keep_space = depth > 0
-                || matches!(prev_sig, Some(b'|' | b',' | b'<' | b'(' | b'{' | b'[' | b':'))
+                || matches!(
+                    prev_sig,
+                    Some(b'|' | b',' | b'<' | b'(' | b'{' | b'[' | b':')
+                )
                 || matches!(next, Some(b'|' | b',' | b'>' | b')' | b'}' | b']' | b'?'));
             if keep_space {
                 i += 1;
@@ -585,19 +652,69 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
         }
         let b = bytes[i];
         match b {
-            b' ' | b'\t' | b'\r' | b'\n' => { i += 1; }
-            b'@' => { tokens.push(Token::At); spans.push((i, i + 1)); i += 1; }
-            b'|' => { tokens.push(Token::Pipe); spans.push((i, i + 1)); i += 1; }
-            b'?' => { tokens.push(Token::Question); spans.push((i, i + 1)); i += 1; }
-            b':' => { tokens.push(Token::Colon); spans.push((i, i + 1)); i += 1; }
-            b',' => { tokens.push(Token::Comma); spans.push((i, i + 1)); i += 1; }
-            b'(' => { tokens.push(Token::LParen); spans.push((i, i + 1)); i += 1; }
-            b')' => { tokens.push(Token::RParen); spans.push((i, i + 1)); i += 1; }
-            b'{' => { tokens.push(Token::LBrace); spans.push((i, i + 1)); i += 1; }
-            b'}' => { tokens.push(Token::RBrace); spans.push((i, i + 1)); i += 1; }
-            b'<' => { tokens.push(Token::LAngle); spans.push((i, i + 1)); i += 1; }
-            b'>' => { tokens.push(Token::RAngle); spans.push((i, i + 1)); i += 1; }
-            b'#' => { tokens.push(Token::Hash); spans.push((i, i + 1)); i += 1; }
+            b' ' | b'\t' | b'\r' | b'\n' => {
+                i += 1;
+            }
+            b'@' => {
+                tokens.push(Token::At);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'|' => {
+                tokens.push(Token::Pipe);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'?' => {
+                tokens.push(Token::Question);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b':' => {
+                tokens.push(Token::Colon);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b',' => {
+                tokens.push(Token::Comma);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'(' => {
+                tokens.push(Token::LParen);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b')' => {
+                tokens.push(Token::RParen);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'{' => {
+                tokens.push(Token::LBrace);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'}' => {
+                tokens.push(Token::RBrace);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'<' => {
+                tokens.push(Token::LAngle);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'>' => {
+                tokens.push(Token::RAngle);
+                spans.push((i, i + 1));
+                i += 1;
+            }
+            b'#' => {
+                tokens.push(Token::Hash);
+                spans.push((i, i + 1));
+                i += 1;
+            }
             b'[' => {
                 if i + 1 < len && bytes[i + 1] == b']' {
                     tokens.push(Token::ArraySuffix);
@@ -609,7 +726,11 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
                     i += 1;
                 }
             }
-            b']' => { tokens.push(Token::RBracket); spans.push((i, i + 1)); i += 1; }
+            b']' => {
+                tokens.push(Token::RBracket);
+                spans.push((i, i + 1));
+                i += 1;
+            }
             b'.' => {
                 if i + 2 < len && bytes[i + 1] == b'.' && bytes[i + 2] == b'.' {
                     tokens.push(Token::Ellipsis);
@@ -626,11 +747,17 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
                 let start = i;
                 i += 1;
                 while i < len && bytes[i] != quote {
-                    if bytes[i] == b'\\' && i + 1 < len { i += 1; }
+                    if bytes[i] == b'\\' && i + 1 < len {
+                        i += 1;
+                    }
                     i += 1;
                 }
-                if i < len { i += 1; } // closing quote
-                let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
+                if i < len {
+                    i += 1;
+                } // closing quote
+                let s = std::str::from_utf8(&bytes[start..i])
+                    .unwrap_or("")
+                    .to_string();
                 tokens.push(Token::StringLit(s));
                 spans.push((start, i));
             }
@@ -643,10 +770,18 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
             }
             b'0'..=b'9' => {
                 let start = i;
-                while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'.' || bytes[i] == b'+' || bytes[i] == b'-' || bytes[i] == b'_') {
+                while i < len
+                    && (bytes[i].is_ascii_alphanumeric()
+                        || bytes[i] == b'.'
+                        || bytes[i] == b'+'
+                        || bytes[i] == b'-'
+                        || bytes[i] == b'_')
+                {
                     i += 1;
                 }
-                let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
+                let s = std::str::from_utf8(&bytes[start..i])
+                    .unwrap_or("")
+                    .to_string();
                 tokens.push(Token::Number(s));
                 spans.push((start, i));
             }
@@ -655,11 +790,15 @@ fn tokenize(input: &str) -> (Vec<Token>, Vec<(usize, usize)>, usize) {
                 while i < len && (bytes[i].is_ascii_alphanumeric() || bytes[i] == b'_') {
                     i += 1;
                 }
-                let s = std::str::from_utf8(&bytes[start..i]).unwrap_or("").to_string();
+                let s = std::str::from_utf8(&bytes[start..i])
+                    .unwrap_or("")
+                    .to_string();
                 tokens.push(Token::Name(s));
                 spans.push((start, i));
             }
-            _ => { i += 1; } // skip unknown bytes (e.g. UTF-8 continuation of CJK chars)
+            _ => {
+                i += 1;
+            } // skip unknown bytes (e.g. UTF-8 continuation of CJK chars)
         }
     }
 
@@ -711,7 +850,11 @@ impl Tokenizer {
 
     fn eat_name(&mut self) -> Option<String> {
         if let Token::Name(_) = self.peek() {
-            if let Token::Name(s) = self.advance() { Some(s) } else { None }
+            if let Token::Name(s) = self.advance() {
+                Some(s)
+            } else {
+                None
+            }
         } else {
             None
         }
@@ -807,25 +950,27 @@ fn parse_array_type(tz: &mut Tokenizer) -> EmmyType {
 fn parse_atom_type(tz: &mut Tokenizer) -> EmmyType {
     match tz.peek() {
         Token::StringLit(_) => {
-            if let Token::StringLit(s) = tz.advance() { EmmyType::Literal(s) } else { EmmyType::Unknown }
+            if let Token::StringLit(s) = tz.advance() {
+                EmmyType::Literal(s)
+            } else {
+                EmmyType::Unknown
+            }
         }
         Token::Number(_) => {
-            if let Token::Number(s) = tz.advance() { EmmyType::Literal(s) } else { EmmyType::Unknown }
+            if let Token::Number(s) = tz.advance() {
+                EmmyType::Literal(s)
+            } else {
+                EmmyType::Unknown
+            }
         }
-        Token::Name(s) if s == "fun" => {
-            parse_fun_type(tz)
-        }
+        Token::Name(s) if s == "fun" => parse_fun_type(tz),
         Token::Name(s) if s == "true" || s == "false" || s == "nil" => {
             let lit = s.clone();
             tz.advance();
             EmmyType::Literal(lit)
         }
-        Token::Name(_) => {
-            parse_name_type(tz)
-        }
-        Token::LBrace => {
-            parse_table_type(tz)
-        }
+        Token::Name(_) => parse_name_type(tz),
+        Token::LBrace => parse_table_type(tz),
         Token::LParen => {
             tz.advance();
             let inner = parse_type_expr(tz);
@@ -835,7 +980,10 @@ fn parse_atom_type(tz: &mut Tokenizer) -> EmmyType {
         Token::Ellipsis => {
             tz.advance();
             if tz.at_eof() || matches!(tz.peek(), Token::RParen | Token::Comma | Token::Pipe) {
-                EmmyType::Variadic(Box::new(EmmyType::Named { name: "any".to_string(), generics: vec![] }))
+                EmmyType::Variadic(Box::new(EmmyType::Named {
+                    name: "any".to_string(),
+                    generics: vec![],
+                }))
             } else {
                 let inner = parse_type_expr(tz);
                 EmmyType::Variadic(Box::new(inner))
@@ -868,7 +1016,10 @@ fn parse_name_type(tz: &mut Tokenizer) -> EmmyType {
 fn parse_fun_type(tz: &mut Tokenizer) -> EmmyType {
     tz.advance(); // consume 'fun'
     if !tz.eat(&Token::LParen) {
-        return EmmyType::Function { params: vec![], returns: vec![] };
+        return EmmyType::Function {
+            params: vec![],
+            returns: vec![],
+        };
     }
     let mut params = Vec::new();
     if !matches!(tz.peek(), Token::RParen) {
@@ -897,7 +1048,10 @@ fn parse_fun_param(tz: &mut Tokenizer) -> EmmyFunParam {
         let type_expr = if tz.eat(&Token::Colon) {
             parse_type_expr(tz)
         } else {
-            EmmyType::Named { name: "any".to_string(), generics: vec![] }
+            EmmyType::Named {
+                name: "any".to_string(),
+                generics: vec![],
+            }
         };
         return EmmyFunParam {
             name: Some("...".to_string()),
@@ -910,12 +1064,18 @@ fn parse_fun_param(tz: &mut Tokenizer) -> EmmyFunParam {
             let name = tz.eat_name().unwrap();
             tz.advance(); // colon
             let type_expr = parse_type_expr(tz);
-            return EmmyFunParam { name: Some(name), type_expr };
+            return EmmyFunParam {
+                name: Some(name),
+                type_expr,
+            };
         }
     }
     // Positional: just a type_expr
     let type_expr = parse_type_expr(tz);
-    EmmyFunParam { name: None, type_expr }
+    EmmyFunParam {
+        name: None,
+        type_expr,
+    }
 }
 
 /// `emmy_table_type ::= '{' [ field_list ] '}'`
@@ -947,7 +1107,10 @@ fn parse_table_field(tz: &mut Tokenizer) -> Option<EmmyTableField> {
             tz.eat(&Token::RBracket);
             tz.eat(&Token::Colon);
             let value = parse_type_expr(tz);
-            Some(EmmyTableField { key: EmmyTableFieldKey::IndexType(key_type), value })
+            Some(EmmyTableField {
+                key: EmmyTableFieldKey::IndexType(key_type),
+                value,
+            })
         }
         Token::Name(_) => {
             // Need lookahead to distinguish `Name ':'` from a type expression
@@ -955,7 +1118,10 @@ fn parse_table_field(tz: &mut Tokenizer) -> Option<EmmyTableField> {
                 let name = tz.eat_name().unwrap();
                 tz.advance(); // colon
                 let value = parse_type_expr(tz);
-                Some(EmmyTableField { key: EmmyTableFieldKey::Name(name), value })
+                Some(EmmyTableField {
+                    key: EmmyTableFieldKey::Name(name),
+                    value,
+                })
             } else {
                 None // not a valid table field
             }
@@ -1016,22 +1182,31 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
             let type_expr = parse_type_expr(&mut tz);
             Some(EmmyAnnotation::Vararg { type_expr })
         }
-        "deprecated" => Some(EmmyAnnotation::Deprecated { desc: tz.rest_as_string() }),
+        "deprecated" => Some(EmmyAnnotation::Deprecated {
+            desc: tz.rest_as_string(),
+        }),
         "async" => Some(EmmyAnnotation::Async),
         "nodiscard" => Some(EmmyAnnotation::Nodiscard),
         "enum" => {
             let name = tz.eat_qualified_name()?;
             Some(EmmyAnnotation::Enum { name })
         }
-        "see" => Some(EmmyAnnotation::See { path: tz.rest_as_string() }),
-        "diagnostic" => Some(EmmyAnnotation::Diagnostic { text: tz.rest_as_string() }),
+        "see" => Some(EmmyAnnotation::See {
+            path: tz.rest_as_string(),
+        }),
+        "diagnostic" => Some(EmmyAnnotation::Diagnostic {
+            text: tz.rest_as_string(),
+        }),
         "meta" => {
             // `---@meta` or `---@meta <module_name>`. Anything after
             // the first name token is ignored (no semantic role).
             let name = tz.eat_qualified_name();
             Some(EmmyAnnotation::Meta { name })
         }
-        _ => Some(EmmyAnnotation::Other { tag, text: tz.rest_as_string() }),
+        _ => Some(EmmyAnnotation::Other {
+            tag,
+            text: tz.rest_as_string(),
+        }),
     }
 }
 
@@ -1040,16 +1215,24 @@ fn parse_ann_class(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     let name = tz.eat_qualified_name()?;
     let parents = if tz.eat(&Token::Colon) {
         let mut ps = Vec::new();
-        if let Some(p) = tz.eat_qualified_name() { ps.push(p); }
+        if let Some(p) = tz.eat_qualified_name() {
+            ps.push(p);
+        }
         while tz.eat(&Token::Comma) {
-            if let Some(p) = tz.eat_qualified_name() { ps.push(p); }
+            if let Some(p) = tz.eat_qualified_name() {
+                ps.push(p);
+            }
         }
         ps
     } else {
         vec![]
     };
     let desc = tz.rest_as_string();
-    Some(EmmyAnnotation::Class { name, parents, desc })
+    Some(EmmyAnnotation::Class {
+        name,
+        parents,
+        desc,
+    })
 }
 
 /// `@field [visibility] field_key type_expr [desc]`
@@ -1077,7 +1260,12 @@ fn parse_ann_field(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
 
     let type_expr = parse_type_expr(tz);
     let desc = tz.rest_as_string();
-    Some(EmmyAnnotation::Field { visibility, name, type_expr, desc })
+    Some(EmmyAnnotation::Field {
+        visibility,
+        name,
+        type_expr,
+        desc,
+    })
 }
 
 /// `@param param_name ['?'] type_expr [desc]`
@@ -1091,7 +1279,12 @@ fn parse_ann_param(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     let optional = tz.eat(&Token::Question);
     let type_expr = parse_type_expr(tz);
     let desc = tz.rest_as_string();
-    Some(EmmyAnnotation::Param { name, optional, type_expr, desc })
+    Some(EmmyAnnotation::Param {
+        name,
+        optional,
+        type_expr,
+        desc,
+    })
 }
 
 /// `@return type_list [Name] [desc]`
@@ -1113,7 +1306,11 @@ fn parse_ann_return(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     };
 
     let desc = tz.rest_as_string();
-    Some(EmmyAnnotation::Return { return_types, name, desc })
+    Some(EmmyAnnotation::Return {
+        return_types,
+        name,
+        desc,
+    })
 }
 
 /// `@type type_expr [desc]`
@@ -1161,8 +1358,22 @@ fn parse_ann_overload(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
 }
 
 fn is_type_start_keyword(s: &str) -> bool {
-    matches!(s, "fun" | "nil" | "true" | "false" | "string" | "number"
-        | "boolean" | "integer" | "table" | "function" | "any" | "thread" | "userdata")
+    matches!(
+        s,
+        "fun"
+            | "nil"
+            | "true"
+            | "false"
+            | "string"
+            | "number"
+            | "boolean"
+            | "integer"
+            | "table"
+            | "function"
+            | "any"
+            | "thread"
+            | "userdata"
+    )
 }
 
 // ===========================================================================
@@ -1374,7 +1585,12 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
 
     for ann in annotations {
         match ann {
-            EmmyAnnotation::Param { name, type_expr, desc, optional } => {
+            EmmyAnnotation::Param {
+                name,
+                type_expr,
+                desc,
+                optional,
+            } => {
                 let opt = if *optional { "?" } else { "" };
                 let mut s = format!("@param `{}{}` `{}`", name, opt, type_expr);
                 if !desc.is_empty() {
@@ -1382,8 +1598,13 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
                 }
                 parts.push(s);
             }
-            EmmyAnnotation::Return { return_types, name, desc } => {
-                let types_str = return_types.iter()
+            EmmyAnnotation::Return {
+                return_types,
+                name,
+                desc,
+            } => {
+                let types_str = return_types
+                    .iter()
                     .map(|t| format!("{}", t))
                     .collect::<Vec<_>>()
                     .join(", ");
@@ -1403,7 +1624,11 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
                 }
                 parts.push(s);
             }
-            EmmyAnnotation::Class { name, parents, desc } => {
+            EmmyAnnotation::Class {
+                name,
+                parents,
+                desc,
+            } => {
                 let mut s = format!("@class `{}`", name);
                 if !parents.is_empty() {
                     let _ = write!(s, " : {}", parents.join(", "));
@@ -1413,7 +1638,12 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
                 }
                 parts.push(s);
             }
-            EmmyAnnotation::Field { name, type_expr, desc, .. } => {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                desc,
+                ..
+            } => {
                 let mut s = format!("@field `{}` `{}`", name, type_expr);
                 if !desc.is_empty() {
                     let _ = write!(s, " — {}", desc);
@@ -1481,12 +1711,10 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
                 TypeFact::Union(parts)
             }
         }
-        EmmyType::Optional(inner) => {
-            TypeFact::Union(vec![
-                emmy_type_to_fact(inner),
-                TypeFact::Known(KnownType::Nil),
-            ])
-        }
+        EmmyType::Optional(inner) => TypeFact::Union(vec![
+            emmy_type_to_fact(inner),
+            TypeFact::Known(KnownType::Nil),
+        ]),
         EmmyType::Array(inner) => {
             // Preserve element type information so that generic unification
             // can match `T[]` against an actual array argument and infer `T`.
@@ -1495,25 +1723,28 @@ pub fn emmy_type_to_fact(ty: &EmmyType) -> TypeFact {
             TypeFact::Known(KnownType::EmmyGeneric("__array".into(), vec![elem_fact]))
         }
         EmmyType::Function { params, returns } => {
-            let param_infos: Vec<ParamInfo> = params.iter().map(|p| ParamInfo {
-                name: p.name.clone().unwrap_or_default().into(),
-                type_fact: emmy_type_to_fact(&p.type_expr),
-                optional: false,
-            }).collect();
+            let param_infos: Vec<ParamInfo> = params
+                .iter()
+                .map(|p| ParamInfo {
+                    name: p.name.clone().unwrap_or_default().into(),
+                    type_fact: emmy_type_to_fact(&p.type_expr),
+                    optional: false,
+                })
+                .collect();
             let ret_facts: Vec<TypeFact> = returns.iter().map(emmy_type_to_fact).collect();
             TypeFact::Known(KnownType::Function(FunctionSignature {
                 params: param_infos,
                 returns: ret_facts,
             }))
         }
-        EmmyType::Table(_) => {
-            TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX)))
-        }
+        EmmyType::Table(_) => TypeFact::Known(KnownType::Table(TableShapeId(u32::MAX))),
         EmmyType::Literal(s) => match s.as_str() {
             "nil" => TypeFact::Known(KnownType::Nil),
             "true" | "false" => TypeFact::Known(KnownType::Boolean),
             _ if s.starts_with('"') || s.starts_with('\'') => TypeFact::Known(KnownType::String),
-            _ if s.as_bytes().first().is_some_and(|b| b.is_ascii_digit()) => TypeFact::Known(KnownType::Number),
+            _ if s.as_bytes().first().is_some_and(|b| b.is_ascii_digit()) => {
+                TypeFact::Known(KnownType::Number)
+            }
             _ => TypeFact::Unknown,
         },
         EmmyType::Variadic(inner) => emmy_type_to_fact(inner),
@@ -1541,7 +1772,10 @@ mod tests {
     fn parse_simple_named() {
         assert_eq!(
             parse_type_from_str("string"),
-            EmmyType::Named { name: "string".into(), generics: vec![] }
+            EmmyType::Named {
+                name: "string".into(),
+                generics: vec![]
+            }
         );
     }
 
@@ -1549,17 +1783,29 @@ mod tests {
     fn parse_qualified_named() {
         assert_eq!(
             parse_type_from_str("XMod.ClassX1"),
-            EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] }
+            EmmyType::Named {
+                name: "XMod.ClassX1".into(),
+                generics: vec![]
+            }
         );
     }
 
     #[test]
     fn parse_union() {
         let ty = parse_type_from_str("string|number");
-        assert_eq!(ty, EmmyType::Union(vec![
-            EmmyType::Named { name: "string".into(), generics: vec![] },
-            EmmyType::Named { name: "number".into(), generics: vec![] },
-        ]));
+        assert_eq!(
+            ty,
+            EmmyType::Union(vec![
+                EmmyType::Named {
+                    name: "string".into(),
+                    generics: vec![]
+                },
+                EmmyType::Named {
+                    name: "number".into(),
+                    generics: vec![]
+                },
+            ])
+        );
     }
 
     #[test]
@@ -1574,54 +1820,85 @@ mod tests {
     #[test]
     fn parse_optional() {
         let ty = parse_type_from_str("string?");
-        assert_eq!(ty, EmmyType::Optional(Box::new(
-            EmmyType::Named { name: "string".into(), generics: vec![] }
-        )));
+        assert_eq!(
+            ty,
+            EmmyType::Optional(Box::new(EmmyType::Named {
+                name: "string".into(),
+                generics: vec![]
+            }))
+        );
     }
 
     #[test]
     fn parse_array() {
         let ty = parse_type_from_str("string[]");
-        assert_eq!(ty, EmmyType::Array(Box::new(
-            EmmyType::Named { name: "string".into(), generics: vec![] }
-        )));
+        assert_eq!(
+            ty,
+            EmmyType::Array(Box::new(EmmyType::Named {
+                name: "string".into(),
+                generics: vec![]
+            }))
+        );
     }
 
     #[test]
     fn parse_array_of_array() {
         let ty = parse_type_from_str("string[][]");
-        assert_eq!(ty, EmmyType::Array(Box::new(EmmyType::Array(Box::new(
-            EmmyType::Named { name: "string".into(), generics: vec![] }
-        )))));
+        assert_eq!(
+            ty,
+            EmmyType::Array(Box::new(EmmyType::Array(Box::new(EmmyType::Named {
+                name: "string".into(),
+                generics: vec![]
+            }))))
+        );
     }
 
     #[test]
     fn parse_generic() {
         let ty = parse_type_from_str("table<string, number>");
-        assert_eq!(ty, EmmyType::Named {
-            name: "table".into(),
-            generics: vec![
-                EmmyType::Named { name: "string".into(), generics: vec![] },
-                EmmyType::Named { name: "number".into(), generics: vec![] },
-            ],
-        });
+        assert_eq!(
+            ty,
+            EmmyType::Named {
+                name: "table".into(),
+                generics: vec![
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    },
+                    EmmyType::Named {
+                        name: "number".into(),
+                        generics: vec![]
+                    },
+                ],
+            }
+        );
     }
 
     #[test]
     fn parse_qualified_generic() {
         let ty = parse_type_from_str("Pkg.Box<XMod.ClassX1>");
-        assert_eq!(ty, EmmyType::Named {
-            name: "Pkg.Box".into(),
-            generics: vec![
-                EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] },
-            ],
-        });
+        assert_eq!(
+            ty,
+            EmmyType::Named {
+                name: "Pkg.Box".into(),
+                generics: vec![EmmyType::Named {
+                    name: "XMod.ClassX1".into(),
+                    generics: vec![]
+                },],
+            }
+        );
     }
 
     #[test]
     fn parse_fun_empty() {
         let ty = parse_type_from_str("fun()");
-        assert_eq!(ty, EmmyType::Function { params: vec![], returns: vec![] });
+        assert_eq!(
+            ty,
+            EmmyType::Function {
+                params: vec![],
+                returns: vec![]
+            }
+        );
     }
 
     #[test]
@@ -1689,16 +1966,26 @@ mod tests {
     #[test]
     fn parse_variadic() {
         let ty = parse_type_from_str("...string");
-        assert_eq!(ty, EmmyType::Variadic(Box::new(
-            EmmyType::Named { name: "string".into(), generics: vec![] }
-        )));
+        assert_eq!(
+            ty,
+            EmmyType::Variadic(Box::new(EmmyType::Named {
+                name: "string".into(),
+                generics: vec![]
+            }))
+        );
     }
 
     #[test]
     fn parse_literal_types() {
         assert_eq!(parse_type_from_str("nil"), EmmyType::Literal("nil".into()));
-        assert_eq!(parse_type_from_str("true"), EmmyType::Literal("true".into()));
-        assert_eq!(parse_type_from_str("false"), EmmyType::Literal("false".into()));
+        assert_eq!(
+            parse_type_from_str("true"),
+            EmmyType::Literal("true".into())
+        );
+        assert_eq!(
+            parse_type_from_str("false"),
+            EmmyType::Literal("false".into())
+        );
     }
 
     #[test]
@@ -1721,12 +2008,18 @@ mod tests {
 
     #[test]
     fn display_generic() {
-        assert_eq!(format!("{}", parse_type_from_str("table<string, number>")), "table<string, number>");
+        assert_eq!(
+            format!("{}", parse_type_from_str("table<string, number>")),
+            "table<string, number>"
+        );
     }
 
     #[test]
     fn display_union() {
-        assert_eq!(format!("{}", parse_type_from_str("string|number")), "string|number");
+        assert_eq!(
+            format!("{}", parse_type_from_str("string|number")),
+            "string|number"
+        );
     }
 
     #[test]
@@ -1762,7 +2055,12 @@ mod tests {
         let anns = parse_emmy_comments("---@param name string|number some desc");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Param { name, type_expr, desc, .. } => {
+            EmmyAnnotation::Param {
+                name,
+                type_expr,
+                desc,
+                ..
+            } => {
                 assert_eq!(name, "name");
                 assert!(matches!(type_expr, EmmyType::Union(_)));
                 assert_eq!(desc, "some desc");
@@ -1815,9 +2113,20 @@ mod tests {
         let anns = parse_emmy_comments("---@field name string some desc");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Field { name, type_expr, desc, .. } => {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                desc,
+                ..
+            } => {
                 assert_eq!(name, "name");
-                assert_eq!(*type_expr, EmmyType::Named { name: "string".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    }
+                );
                 assert_eq!(desc, "some desc");
             }
             _ => panic!("expected Field"),
@@ -1830,7 +2139,9 @@ mod tests {
         assert_eq!(anns.len(), 1);
         match &anns[0] {
             EmmyAnnotation::Type { type_expr, .. } => {
-                assert!(matches!(type_expr, EmmyType::Named { name, generics } if name == "table" && generics.len() == 2));
+                assert!(
+                    matches!(type_expr, EmmyType::Named { name, generics } if name == "table" && generics.len() == 2)
+                );
             }
             _ => panic!("expected Type"),
         }
@@ -1842,7 +2153,13 @@ mod tests {
         assert_eq!(anns.len(), 1);
         match &anns[0] {
             EmmyAnnotation::Type { type_expr, .. } => {
-                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "XMod.ClassX1".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Type"),
         }
@@ -1854,7 +2171,13 @@ mod tests {
         assert_eq!(anns.len(), 1);
         match &anns[0] {
             EmmyAnnotation::Field { type_expr, .. } => {
-                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "XMod.ClassX1".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Field"),
         }
@@ -1902,9 +2225,17 @@ mod tests {
         let anns = parse_emmy_comments("---@param ... number");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Param { name, type_expr, .. } => {
+            EmmyAnnotation::Param {
+                name, type_expr, ..
+            } => {
                 assert_eq!(name, "...");
-                assert_eq!(*type_expr, EmmyType::Named { name: "number".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "number".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Param"),
         }
@@ -1917,9 +2248,17 @@ mod tests {
         let anns = parse_emmy_comments("---@field [string] number");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Field { name, type_expr, .. } => {
+            EmmyAnnotation::Field {
+                name, type_expr, ..
+            } => {
                 assert_eq!(name, "[string]");
-                assert_eq!(*type_expr, EmmyType::Named { name: "number".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "number".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Field"),
         }
@@ -1932,10 +2271,21 @@ mod tests {
         let anns = parse_emmy_comments("---@field public name string");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Field { visibility, name, type_expr, .. } => {
+            EmmyAnnotation::Field {
+                visibility,
+                name,
+                type_expr,
+                ..
+            } => {
                 assert_eq!(visibility.as_deref(), Some("public"));
                 assert_eq!(name, "name");
-                assert_eq!(*type_expr, EmmyType::Named { name: "string".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Field"),
         }
@@ -1948,15 +2298,13 @@ mod tests {
         let anns = parse_emmy_comments("---@overload fun(x: string): number");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Overload { fun_type } => {
-                match fun_type {
-                    EmmyType::Function { params, returns } => {
-                        assert_eq!(params.len(), 1);
-                        assert_eq!(returns.len(), 1);
-                    }
-                    _ => panic!("expected function type in overload"),
+            EmmyAnnotation::Overload { fun_type } => match fun_type {
+                EmmyType::Function { params, returns } => {
+                    assert_eq!(params.len(), 1);
+                    assert_eq!(returns.len(), 1);
                 }
-            }
+                _ => panic!("expected function type in overload"),
+            },
             _ => panic!("expected Overload"),
         }
     }
@@ -1970,8 +2318,20 @@ mod tests {
         match &anns[0] {
             EmmyAnnotation::Return { return_types, .. } => {
                 assert_eq!(return_types.len(), 2);
-                assert_eq!(return_types[0], EmmyType::Named { name: "string".into(), generics: vec![] });
-                assert_eq!(return_types[1], EmmyType::Named { name: "number".into(), generics: vec![] });
+                assert_eq!(
+                    return_types[0],
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    }
+                );
+                assert_eq!(
+                    return_types[1],
+                    EmmyType::Named {
+                        name: "number".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Return"),
         }
@@ -1984,10 +2344,21 @@ mod tests {
         let anns = parse_emmy_comments("---@param name? string");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
-            EmmyAnnotation::Param { name, optional, type_expr, .. } => {
+            EmmyAnnotation::Param {
+                name,
+                optional,
+                type_expr,
+                ..
+            } => {
                 assert_eq!(name, "name");
                 assert!(*optional);
-                assert_eq!(*type_expr, EmmyType::Named { name: "string".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Param"),
         }
@@ -2015,7 +2386,13 @@ mod tests {
         match &anns[0] {
             EmmyAnnotation::Alias { name, type_expr } => {
                 assert_eq!(name, "Pkg.MyType");
-                assert_eq!(*type_expr, EmmyType::Named { name: "XMod.ClassX1".into(), generics: vec![] });
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "XMod.ClassX1".into(),
+                        generics: vec![]
+                    }
+                );
             }
             _ => panic!("expected Alias"),
         }
@@ -2175,20 +2552,26 @@ mod tests {
     fn type_to_fact_union() {
         let ty = parse_type_from_str("string|number");
         let fact = emmy_type_to_fact(&ty);
-        assert_eq!(fact, TypeFact::Union(vec![
-            TypeFact::Known(KnownType::String),
-            TypeFact::Known(KnownType::Number),
-        ]));
+        assert_eq!(
+            fact,
+            TypeFact::Union(vec![
+                TypeFact::Known(KnownType::String),
+                TypeFact::Known(KnownType::Number),
+            ])
+        );
     }
 
     #[test]
     fn type_to_fact_optional() {
         let ty = parse_type_from_str("string?");
         let fact = emmy_type_to_fact(&ty);
-        assert_eq!(fact, TypeFact::Union(vec![
-            TypeFact::Known(KnownType::String),
-            TypeFact::Known(KnownType::Nil),
-        ]));
+        assert_eq!(
+            fact,
+            TypeFact::Union(vec![
+                TypeFact::Known(KnownType::String),
+                TypeFact::Known(KnownType::Nil),
+            ])
+        );
     }
 
     #[test]
@@ -2209,7 +2592,10 @@ mod tests {
     fn type_to_fact_qualified_emmy_named() {
         let ty = parse_type_from_str("XMod.ClassX1");
         let fact = emmy_type_to_fact(&ty);
-        assert_eq!(fact, TypeFact::Known(KnownType::EmmyType("XMod.ClassX1".into())));
+        assert_eq!(
+            fact,
+            TypeFact::Known(KnownType::EmmyType("XMod.ClassX1".into()))
+        );
     }
 
     #[test]
@@ -2237,7 +2623,11 @@ mod tests {
     fn extract_block_comment_multiline() {
         let text = "--[[\nMisc System Library\n]]";
         let content = extract_block_comment_content(text).unwrap();
-        let lines: Vec<&str> = content.lines().map(|l| l.trim()).filter(|l| !l.is_empty()).collect();
+        let lines: Vec<&str> = content
+            .lines()
+            .map(|l| l.trim())
+            .filter(|l| !l.is_empty())
+            .collect();
         assert_eq!(lines, vec!["Misc System Library"]);
     }
 

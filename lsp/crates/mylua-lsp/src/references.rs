@@ -1,11 +1,11 @@
-use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
-use crate::util::{node_text, find_node_at_position, LineIndex};
-use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
 use crate::uri_id::{resolve_uri, UriId};
+use crate::util::{find_node_at_position, node_text, LineIndex};
+use tower_lsp_server::ls_types::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReferenceLocation {
@@ -23,14 +23,9 @@ pub struct ReferenceLocation {
 enum Identity {
     /// Local variable: uniquely identified by its declaration byte offset
     /// within a file.
-    Local {
-        name: String,
-        decl_byte: usize,
-    },
+    Local { name: String, decl_byte: usize },
     /// Global variable: identified by name + not shadowed by a local.
-    Global {
-        name: String,
-    },
+    Global { name: String },
     /// Field/method on a type: identified by the declaration location
     /// (UriId + range). Naturally handles inheritance: `Bar:Foo`
     /// accessing an inherited field resolves to the same declaration in Foo.
@@ -39,9 +34,7 @@ enum Identity {
         location: ResolvedLocation,
     },
     /// An Emmy type name (e.g. `Foo` in `---@class Foo` or `---@type Foo`).
-    TypeName {
-        name: String,
-    },
+    TypeName { name: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -57,15 +50,23 @@ pub fn find_references(
     all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<Location>> {
-    find_references_by_uri_id(doc, uri_id, position, include_declaration, index, all_docs, strategy)
-        .map(|hits| {
-            hits.into_iter()
-                .map(|hit| Location {
-                    uri: resolve_uri(hit.uri_id),
-                    range: hit.range,
-                })
-                .collect()
-        })
+    find_references_by_uri_id(
+        doc,
+        uri_id,
+        position,
+        include_declaration,
+        index,
+        all_docs,
+        strategy,
+    )
+    .map(|hits| {
+        hits.into_iter()
+            .map(|hit| Location {
+                uri: resolve_uri(hit.uri_id),
+                range: hit.range,
+            })
+            .collect()
+    })
 }
 
 pub fn find_references_by_uri_id(
@@ -77,7 +78,9 @@ pub fn find_references_by_uri_id(
     all_docs: &impl DocumentLookup,
     strategy: &ReferencesStrategy,
 ) -> Option<Vec<ReferenceLocation>> {
-    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let byte_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
 
     let identity = identify_at_cursor(doc, uri_id, byte_offset, index, all_docs)?;
 
@@ -97,7 +100,10 @@ pub fn find_references_by_uri_id(
             // Scan only this file
             let source = doc.source();
             for offset in find_word_occurrences(source, name) {
-                let Some(node) = doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
+                let Some(node) = doc
+                    .root_node()
+                    .and_then(|root| find_identifier_at(root, offset, name.len()))
+                else {
                     continue;
                 };
                 // Skip the declaration itself
@@ -121,7 +127,10 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
-                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
+                    let Some(node) = file_doc
+                        .root_node()
+                        .and_then(|root| find_identifier_at(root, offset, name.len()))
+                    else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
@@ -138,7 +147,10 @@ pub fn find_references_by_uri_id(
                 collect_emmy_type_references(name, all_docs, &mut locations);
             }
         }
-        Identity::Field { field_name, location } => {
+        Identity::Field {
+            field_name,
+            location,
+        } => {
             let identity_def_range = location.range;
             // Declaration: the def_range itself
             if include_declaration {
@@ -151,7 +163,10 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, field_name) {
-                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, field_name.len())) else {
+                    let Some(node) = file_doc
+                        .root_node()
+                        .and_then(|root| find_identifier_at(root, offset, field_name.len()))
+                    else {
                         continue;
                     };
                     // Skip the declaration position itself
@@ -160,7 +175,15 @@ pub fn find_references_by_uri_id(
                     {
                         continue;
                     }
-                    if verify_field(node, *location, field_name, source, doc_uri_id, &file_doc.scope_tree, index) {
+                    if verify_field(
+                        node,
+                        *location,
+                        field_name,
+                        source,
+                        doc_uri_id,
+                        &file_doc.scope_tree,
+                        index,
+                    ) {
                         locations.push(ReferenceLocation {
                             uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
@@ -211,7 +234,10 @@ pub fn find_references_by_uri_id(
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
                 let source = file_doc.source();
                 for offset in find_word_occurrences(source, name) {
-                    let Some(node) = file_doc.root_node().and_then(|root| find_identifier_at(root, offset, name.len())) else {
+                    let Some(node) = file_doc
+                        .root_node()
+                        .and_then(|root| find_identifier_at(root, offset, name.len()))
+                    else {
                         continue;
                     };
                     if verify_global(node, name, &file_doc.scope_tree) {
@@ -229,7 +255,8 @@ pub fn find_references_by_uri_id(
 
     // Deduplicate
     locations.sort_by(|a, b| {
-        a.uri_id.cmp(&b.uri_id)
+        a.uri_id
+            .cmp(&b.uri_id)
             .then(a.range.start.line.cmp(&b.range.start.line))
             .then(a.range.start.character.cmp(&b.range.start.character))
             .then(a.range.end.line.cmp(&b.range.end.line))
@@ -257,7 +284,9 @@ fn identify_at_cursor(
     }
 
     // 2. Find the identifier AST node at cursor
-    let ident_node = doc.root_node().and_then(|root| find_node_at_position(root, byte_offset));
+    let ident_node = doc
+        .root_node()
+        .and_then(|root| find_node_at_position(root, byte_offset));
     let name_owned: String;
     let name: &str;
 
@@ -269,11 +298,15 @@ fn identify_at_cursor(
         name = name_owned.as_str();
         // If it's a word in an emmy annotation and a known type, treat as TypeName
         if index.contains_type(name) {
-            return Some(Identity::TypeName { name: name.to_string() });
+            return Some(Identity::TypeName {
+                name: name.to_string(),
+            });
         }
         // Otherwise try as global
         if index.global_shard.contains_key(name) {
-            return Some(Identity::Global { name: name.to_string() });
+            return Some(Identity::Global {
+                name: name.to_string(),
+            });
         }
         return None;
     }
@@ -295,11 +328,15 @@ fn identify_at_cursor(
 
     // 5. Type name in type_shard?
     if index.contains_type(name) {
-        return Some(Identity::TypeName { name: name.to_string() });
+        return Some(Identity::TypeName {
+            name: name.to_string(),
+        });
     }
 
     // 6. Global
-    Some(Identity::Global { name: name.to_string() })
+    Some(Identity::Global {
+        name: name.to_string(),
+    })
 }
 
 /// Try to identify a field/method access. Returns `Some(Identity::Field)` if
@@ -347,7 +384,9 @@ fn try_identify_field(
             let mut first_segment_byte = 0usize;
             let child_count = parent.child_count();
             for i in 0..child_count {
-                let Some(child) = parent.child(i as u32) else { continue };
+                let Some(child) = parent.child(i as u32) else {
+                    continue;
+                };
                 if child.id() == ident_node.id() {
                     break;
                 }
@@ -363,7 +402,13 @@ fn try_identify_field(
             }
             // Resolve the owner type through the segments chain
             let resolved = resolve_segments_to_field(
-                &segments, &field_name, source, uri_id, &doc.scope_tree, index, first_segment_byte,
+                &segments,
+                &field_name,
+                source,
+                uri_id,
+                &doc.scope_tree,
+                index,
+                first_segment_byte,
             )?;
             return Some(Identity::Field {
                 field_name,
@@ -375,11 +420,14 @@ fn try_identify_field(
 
     // Infer base type and resolve the field
     let base_fact = crate::type_inference::infer_node_type_in_file_id(
-        base_node, source, uri_id, &doc.scope_tree, index,
+        base_node,
+        source,
+        uri_id,
+        &doc.scope_tree,
+        index,
     );
-    let resolved = resolver::resolve_field_chain_in_file_id(
-        uri_id, &base_fact, &[field_name.clone()], index,
-    );
+    let resolved =
+        resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &[field_name.clone()], index);
 
     let location = resolved.def_location?;
 
@@ -411,8 +459,11 @@ fn resolve_segments_to_field(
     // `---@class Foo` and a type_fact from its initializer (e.g. a function
     // call whose return is unknown), bound_class is authoritative.
     let root_name = &segments[0];
-    let root_fact = if let Some(class_name) = scope_tree.resolve_bound_class(lookup_byte, root_name) {
-        crate::type_system::TypeFact::Known(crate::type_system::KnownType::EmmyType(class_name.to_string().into()))
+    let root_fact = if let Some(class_name) = scope_tree.resolve_bound_class(lookup_byte, root_name)
+    {
+        crate::type_system::TypeFact::Known(crate::type_system::KnownType::EmmyType(
+            class_name.to_string().into(),
+        ))
     } else if let Some(tf) = scope_tree.resolve_type(lookup_byte, root_name) {
         tf.clone()
     } else {
@@ -427,14 +478,20 @@ fn resolve_segments_to_field(
         root_fact
     } else {
         let resolved = resolver::resolve_field_chain_in_file_id(
-            uri_id, &root_fact, &intermediate_fields, index,
+            uri_id,
+            &root_fact,
+            &intermediate_fields,
+            index,
         );
         resolved.type_fact
     };
 
     // Now resolve the final field
     let resolved = resolver::resolve_field_chain_in_file_id(
-        uri_id, &base_fact, &[field_name.to_string()], index,
+        uri_id,
+        &base_fact,
+        &[field_name.to_string()],
+        index,
     );
     resolved.def_location
 }
@@ -463,8 +520,7 @@ fn verify_global(
     name: &str,
     scope_tree: &crate::scope::ScopeTree,
 ) -> bool {
-    !is_non_reference_position(node)
-        && scope_tree.resolve_decl(node.start_byte(), name).is_none()
+    !is_non_reference_position(node) && scope_tree.resolve_decl(node.start_byte(), name).is_none()
 }
 
 /// Verify that a candidate identifier node is a field access that resolves
@@ -478,20 +534,30 @@ fn verify_field(
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.parent() else {
+        return false;
+    };
 
     let base_node = match parent.kind() {
         "variable" | "field_expression" => {
-            let Some(field_child) = parent.child_by_field_name("field") else { return false };
-            if field_child.id() != node.id() { return false; }
+            let Some(field_child) = parent.child_by_field_name("field") else {
+                return false;
+            };
+            if field_child.id() != node.id() {
+                return false;
+            }
             match parent.child_by_field_name("object") {
                 Some(obj) => obj,
                 None => return false,
             }
         }
         "function_call" => {
-            let Some(method_child) = parent.child_by_field_name("method") else { return false };
-            if method_child.id() != node.id() { return false; }
+            let Some(method_child) = parent.child_by_field_name("method") else {
+                return false;
+            };
+            if method_child.id() != node.id() {
+                return false;
+            }
             match parent.child_by_field_name("callee") {
                 Some(c) => c,
                 None => return false,
@@ -503,13 +569,19 @@ fn verify_field(
                 Some(c) => c,
                 None => return false,
             };
-            if first_child.id() == node.id() { return false; }
+            if first_child.id() == node.id() {
+                return false;
+            }
             let mut segments = Vec::new();
             let mut first_segment_byte = 0usize;
             let child_count = parent.child_count();
             for i in 0..child_count {
-                let Some(child) = parent.child(i as u32) else { continue };
-                if child.id() == node.id() { break; }
+                let Some(child) = parent.child(i as u32) else {
+                    continue;
+                };
+                if child.id() == node.id() {
+                    break;
+                }
                 if child.kind() == "identifier" {
                     if segments.is_empty() {
                         first_segment_byte = child.start_byte();
@@ -517,10 +589,18 @@ fn verify_field(
                     segments.push(node_text(child, source).to_string());
                 }
             }
-            if segments.is_empty() { return false; }
+            if segments.is_empty() {
+                return false;
+            }
             // Resolve through segments
             if let Some(location) = resolve_segments_to_field(
-                &segments, field_name, source, doc_uri_id, scope_tree, index, first_segment_byte,
+                &segments,
+                field_name,
+                source,
+                doc_uri_id,
+                scope_tree,
+                index,
+                first_segment_byte,
             ) {
                 return location == target_location;
             }
@@ -534,7 +614,10 @@ fn verify_field(
         base_node, source, doc_uri_id, scope_tree, index,
     );
     let resolved = resolver::resolve_field_chain_in_file_id(
-        doc_uri_id, &base_fact, &[field_name.to_string()], index,
+        doc_uri_id,
+        &base_fact,
+        &[field_name.to_string()],
+        index,
     );
 
     resolved.def_location == Some(target_location)
@@ -557,8 +640,8 @@ fn find_word_occurrences(source: &[u8], name: &str) -> Vec<usize> {
     while i + pattern.len() <= source.len() {
         if &source[i..i + pattern.len()] == pattern {
             let before_ok = i == 0 || !is_ident_byte(source[i - 1]);
-            let after_ok = i + pattern.len() == source.len()
-                || !is_ident_byte(source[i + pattern.len()]);
+            let after_ok =
+                i + pattern.len() == source.len() || !is_ident_byte(source[i + pattern.len()]);
             if before_ok && after_ok {
                 results.push(i);
                 i += pattern.len();
@@ -578,7 +661,8 @@ fn find_identifier_at<'a>(
     byte_offset: usize,
     name_len: usize,
 ) -> Option<tree_sitter::Node<'a>> {
-    let node = root.descendant_for_byte_range(byte_offset, byte_offset + name_len.saturating_sub(1))?;
+    let node =
+        root.descendant_for_byte_range(byte_offset, byte_offset + name_len.saturating_sub(1))?;
     if node.kind() == "identifier"
         && node.start_byte() == byte_offset
         && node.end_byte() == byte_offset + name_len
@@ -653,30 +737,28 @@ fn collect_global_declarations(
 /// - Local declaration names (`local foo = ...`'s `foo`)
 /// - For-loop variable names, parameter names in `attribute_name_list`/`name_list`
 fn is_non_reference_position(node: tree_sitter::Node) -> bool {
-    let Some(parent) = node.parent() else { return false };
+    let Some(parent) = node.parent() else {
+        return false;
+    };
     match parent.kind() {
-        "variable" | "field_expression" => {
-            parent.child_by_field_name("field")
-                .is_some_and(|f| f.id() == node.id())
-        }
-        "function_call" => {
-            parent.child_by_field_name("method")
-                .is_some_and(|m| m.id() == node.id())
-        }
+        "variable" | "field_expression" => parent
+            .child_by_field_name("field")
+            .is_some_and(|f| f.id() == node.id()),
+        "function_call" => parent
+            .child_by_field_name("method")
+            .is_some_and(|m| m.id() == node.id()),
         "function_name" => {
             let first_child = parent.child(0);
             first_child.map(|fc| fc.id() != node.id()).unwrap_or(false)
         }
-        "field" => {
-            parent.child_by_field_name("key")
-                .is_some_and(|k| k.id() == node.id())
-        }
+        "field" => parent
+            .child_by_field_name("key")
+            .is_some_and(|k| k.id() == node.id()),
         "label_statement" | "goto_statement" => true,
         "attribute_name_list" | "name_list" => true,
-        "local_function_declaration" => {
-            parent.child_by_field_name("name")
-                .is_some_and(|n| n.id() == node.id())
-        }
+        "local_function_declaration" => parent
+            .child_by_field_name("name")
+            .is_some_and(|n| n.id() == node.id()),
         "attribute" => true,
         _ => false,
     }
@@ -700,7 +782,14 @@ fn collect_emmy_type_references(
             return;
         };
         let mut cursor = root.walk();
-        scan_type_in_comments(&mut cursor, type_name, source, doc_uri_id, locations, doc.line_index());
+        scan_type_in_comments(
+            &mut cursor,
+            type_name,
+            source,
+            doc_uri_id,
+            locations,
+            doc.line_index(),
+        );
     });
 }
 
@@ -805,5 +894,7 @@ pub fn extract_word_at(text: &str, byte_offset: usize) -> Option<String> {
     if bytes[start].is_ascii_digit() {
         return None;
     }
-    std::str::from_utf8(&bytes[start..end]).ok().map(String::from)
+    std::str::from_utf8(&bytes[start..end])
+        .ok()
+        .map(String::from)
 }

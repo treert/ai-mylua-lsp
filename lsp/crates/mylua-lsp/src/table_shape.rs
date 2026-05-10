@@ -1,7 +1,7 @@
-use std::collections::HashMap;
-use serde::{Deserialize, Serialize};
 use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol, LuaSymbol};
 use crate::util::ByteRange;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 /// Stable identity for a table literal or constructed table within a file.
 /// The inner `u32` is a per-file unique id assigned during summary generation.

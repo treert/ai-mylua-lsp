@@ -211,7 +211,6 @@ pub enum DiagnosticScope {
     OpenOnly,
 }
 
-
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum DiagnosticSeverityOption {

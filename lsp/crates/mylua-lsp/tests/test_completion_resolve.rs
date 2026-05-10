@@ -1,9 +1,9 @@
 mod test_helpers;
 
-use std::collections::HashMap;
 use mylua_lsp::completion;
 use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::uri_id::intern_uri;
+use std::collections::HashMap;
 use test_helpers::*;
 use tower_lsp_server::ls_types::{CompletionItem, CompletionItemKind};
 
@@ -26,12 +26,18 @@ fn completion_items_carry_resolve_data() {
     // Probe 1: cursor after `f` on line 2
     let items_f = completion::complete(&doc, uri_id, pos(2, 0), &mut agg);
     let foo = find_item(&items_f, "foo").expect("foo local in empty-prefix completion");
-    assert!(foo.data.is_some(), "local completion should have data for resolve");
+    assert!(
+        foo.data.is_some(),
+        "local completion should have data for resolve"
+    );
     assert_eq!(foo.data.as_ref().unwrap()["kind"], "local");
 
     // Probe 2: global `bar` also shows up in empty-prefix completion.
     let bar = find_item(&items_f, "bar").expect("bar global in empty-prefix completion");
-    assert!(bar.data.is_some(), "global completion should have data for resolve");
+    assert!(
+        bar.data.is_some(),
+        "global completion should have data for resolve"
+    );
     assert_eq!(bar.data.as_ref().unwrap()["kind"], "global");
 }
 
@@ -50,12 +56,14 @@ fn completion_resolve_enriches_global_with_detail() {
     let resolved = completion::resolve_completion(bar, &agg, &view, None);
     assert!(
         resolved.detail.is_some(),
-        "resolve should attach detail, got: {:?}", resolved,
+        "resolve should attach detail, got: {:?}",
+        resolved,
     );
     let detail = resolved.detail.as_deref().unwrap();
     assert!(
         detail.contains("function") || detail.contains("fun"),
-        "detail should mention function type, got: {}", detail,
+        "detail should mention function type, got: {}",
+        detail,
     );
 }
 
@@ -75,10 +83,15 @@ fn completion_resolve_enriches_local_with_type() {
         .detail
         .as_deref()
         .expect("resolve should attach detail for local");
-    assert!(detail.contains("foo"), "detail includes name, got: {}", detail);
+    assert!(
+        detail.contains("foo"),
+        "detail includes name, got: {}",
+        detail
+    );
     assert!(
         detail.contains("number") || detail.contains("integer"),
-        "detail should include inferred type, got: {}", detail,
+        "detail should include inferred type, got: {}",
+        detail,
     );
 }
 
@@ -119,7 +132,8 @@ fn completion_resolve_function_adds_markdown_signature() {
         Some(tower_lsp_server::ls_types::Documentation::MarkupContent(m)) => {
             assert!(
                 m.value.contains("doWork") && m.value.contains("a") && m.value.contains("b"),
-                "markdown should show signature, got: {}", m.value,
+                "markdown should show signature, got: {}",
+                m.value,
             );
         }
         other => panic!("expected MarkupContent documentation, got: {:?}", other),

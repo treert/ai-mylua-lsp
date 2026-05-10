@@ -1,11 +1,13 @@
-use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::{resolve_uri, UriId};
-use crate::util::{node_text, find_node_at_position, walk_ancestors, extract_string_literal, extract_field_chain};
+use crate::util::{
+    extract_field_chain, extract_string_literal, find_node_at_position, node_text, walk_ancestors,
+};
+use tower_lsp_server::ls_types::*;
 
 pub fn goto_definition(
     doc: &Document,
@@ -24,14 +26,21 @@ fn goto_definition_inner(
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let byte_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
         return type_definition_for_name(&type_name, index, strategy);
     }
 
     let ident_node = find_node_at_position(doc.root_node()?, byte_offset)?;
     let name = node_text(ident_node, doc.source());
-    lsp_log!("[goto] ident='{}' kind='{}' parent='{}'", name, ident_node.kind(), ident_node.parent().map_or("none", |p| p.kind()));
+    lsp_log!(
+        "[goto] ident='{}' kind='{}' parent='{}'",
+        name,
+        ident_node.kind(),
+        ident_node.parent().map_or("none", |p| p.kind())
+    );
 
     // If clicking on the LHS name of `local x = require("mod")`, prefer
     // jumping to the required module's `return` statement over resolving
@@ -148,7 +157,9 @@ pub fn goto_type_definition(
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
 ) -> Option<GotoDefinitionResponse> {
-    let byte_offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let byte_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
 
     // Identifier AST path — click on a Lua identifier. Resolve to a
     // local declaration, then walk its stored `TypeFact` to an Emmy
@@ -158,7 +169,14 @@ pub fn goto_type_definition(
     if let Some(ident_node) = find_node_at_position(doc.root_node()?, byte_offset) {
         let name = node_text(ident_node, doc.source());
         if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
-            if let Some(target) = type_definition_for_local(uri_id, &def.name, byte_offset, &doc.scope_tree, index, strategy) {
+            if let Some(target) = type_definition_for_local(
+                uri_id,
+                &def.name,
+                byte_offset,
+                &doc.scope_tree,
+                index,
+                strategy,
+            ) {
                 return Some(target);
             }
         }
@@ -220,7 +238,9 @@ fn type_definition_for_local(
 /// extra resolution step through the resolver).
 fn type_name_of(fact: &TypeFact) -> Option<String> {
     match fact {
-        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.to_string()),
+        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => {
+            Some(n.to_string())
+        }
         TypeFact::Stub(SymbolicStub::TypeRef { name }) => Some(name.to_string()),
         _ => None,
     }
@@ -262,10 +282,14 @@ fn goto_variable_field(
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
-        let base_fact =
-            crate::type_inference::infer_node_type_in_file_id(base_node, source, uri_id, &doc.scope_tree, index);
-        let resolved =
-            resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &fields, index);
+        let base_fact = crate::type_inference::infer_node_type_in_file_id(
+            base_node,
+            source,
+            uri_id,
+            &doc.scope_tree,
+            index,
+        );
+        let resolved = resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &fields, index);
         return resolved_to_goto(resolved);
     }
 
@@ -303,11 +327,11 @@ fn goto_field_or_method(
 ) -> Option<GotoDefinitionResponse> {
     let field_name = node_text(name_node, source).to_string();
 
-    let base_fact =
-        crate::type_inference::infer_node_type_in_file_id(base_node, source, uri_id, scope_tree, index);
-    let resolved = resolver::resolve_field_chain_in_file_id(
-        uri_id, &base_fact, &[field_name], index,
+    let base_fact = crate::type_inference::infer_node_type_in_file_id(
+        base_node, source, uri_id, scope_tree, index,
     );
+    let resolved =
+        resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &[field_name], index);
 
     resolved_to_goto(resolved)
 }
@@ -338,10 +362,14 @@ fn try_label_goto(
         return None;
     }
 
-    let label_name = find_visible_label_for_goto(goto_stmt, doc.source(), node_text(ident_node, doc.source()))?;
+    let label_name =
+        find_visible_label_for_goto(goto_stmt, doc.source(), node_text(ident_node, doc.source()))?;
     Some(GotoDefinitionResponse::Scalar(Location {
         uri: resolve_uri(uri_id),
-        range: doc.line_index().ts_node_to_byte_range(label_name, doc.source()).into(),
+        range: doc
+            .line_index()
+            .ts_node_to_byte_range(label_name, doc.source())
+            .into(),
     }))
 }
 
@@ -468,7 +496,8 @@ fn try_require_goto(
     // Prefer the file-level `return` statement's range (what the require
     // expression actually evaluates to). Fall back to the first global
     // contribution's selection range, then to file start.
-    let target_range = index.summary_by_id(target_uri_id)
+    let target_range = index
+        .summary_by_id(target_uri_id)
         .and_then(|s| {
             s.module_return_range
                 .or_else(|| s.global_contributions.first().map(|gc| gc.selection_range))
@@ -486,10 +515,7 @@ fn try_require_goto(
 /// (`name_list` or `attribute_name_list`), ignoring non-identifier children
 /// like `<const>` / `<close>` attribute nodes so that downstream index
 /// lookups into `values` stay aligned.
-fn identifier_index_in_list(
-    list: tree_sitter::Node,
-    target: tree_sitter::Node,
-) -> Option<u32> {
+fn identifier_index_in_list(list: tree_sitter::Node, target: tree_sitter::Node) -> Option<u32> {
     let mut id_idx: u32 = 0;
     for i in 0..list.named_child_count() {
         if let Some(c) = list.named_child(i as u32) {
@@ -512,9 +538,7 @@ fn apply_goto_strategy(
         GotoStrategy::Single => {
             GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
         }
-        GotoStrategy::List => {
-            GotoDefinitionResponse::Array(locations)
-        }
+        GotoStrategy::List => GotoDefinitionResponse::Array(locations),
         GotoStrategy::Auto => {
             if locations.len() == 1 {
                 GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())

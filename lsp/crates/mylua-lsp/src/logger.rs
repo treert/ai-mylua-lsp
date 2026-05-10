@@ -65,7 +65,11 @@ pub fn init(workspace_root: &Path, enable_file_log: bool) {
     ));
 
     // Build configuration info
-    let profile = if cfg!(debug_assertions) { "debug" } else { "release" };
+    let profile = if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    };
     let rust_version = option_env!("RUSTC_VERSION")
         .or(option_env!("CARGO_PKG_RUST_VERSION"))
         .filter(|s| !s.is_empty())

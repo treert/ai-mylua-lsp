@@ -64,10 +64,7 @@ pub fn make_uri(name: &str) -> Uri {
         .expect("invalid URI")
 }
 
-pub fn summary_by_uri<'a>(
-    agg: &'a WorkspaceAggregation,
-    uri: &Uri,
-) -> Option<&'a DocumentSummary> {
+pub fn summary_by_uri<'a>(agg: &'a WorkspaceAggregation, uri: &Uri) -> Option<&'a DocumentSummary> {
     agg.summary_by_id(intern_uri(&uri))
 }
 
@@ -101,8 +98,13 @@ pub fn setup_single_file(source: &str, filename: &str) -> (Document, Uri, Worksp
     let uri = make_uri(filename);
     let uri_id = intern_uri(&uri);
     let mut agg = WorkspaceAggregation::new();
-    let summary =
-        summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
+    let summary = summary_builder::build_file_analysis(
+        &uri,
+        doc.tree().unwrap(),
+        doc.source(),
+        doc.line_index(),
+    )
+    .0;
     // Register module mapping so resolve_module_to_id works.
     if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
         agg.set_require_mapping(module_name, uri_id);
@@ -128,8 +130,13 @@ pub fn setup_workspace(
         let uri = make_uri(filename);
         let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
-        let summary =
-            summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
+        let summary = summary_builder::build_file_analysis(
+            &uri,
+            doc.tree().unwrap(),
+            doc.source(),
+            doc.line_index(),
+        )
+        .0;
         // Register module mapping so resolve_module_to_id works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri_id);
@@ -164,8 +171,13 @@ pub fn setup_workspace_with_library(
         let uri = make_uri(filename);
         let uri_id = intern_uri(&uri);
         let doc = parse_doc(&mut parser, source);
-        let summary =
-            summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
+        let summary = summary_builder::build_file_analysis(
+            &uri,
+            doc.tree().unwrap(),
+            doc.source(),
+            doc.line_index(),
+        )
+        .0;
         // Register module mapping so resolve_module_to_id works.
         if let Some(module_name) = workspace_scanner::uri_to_module_name(&uri) {
             agg.set_require_mapping(module_name, uri_id);

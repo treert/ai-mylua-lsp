@@ -1,8 +1,8 @@
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::summary_builder;
 use mylua_lsp::symbols;
+use test_helpers::*;
 use tower_lsp_server::ls_types::SymbolKind;
 
 /// Helper: parse + build summary + call collect_document_symbols.
@@ -10,7 +10,13 @@ fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let uri = make_uri("test.lua");
-    let summary = summary_builder::build_file_analysis(&uri, doc.tree().unwrap(), doc.source(), doc.line_index()).0;
+    let summary = summary_builder::build_file_analysis(
+        &uri,
+        doc.tree().unwrap(),
+        doc.source(),
+        doc.line_index(),
+    )
+    .0;
     symbols::collect_document_symbols(
         doc.root_node().unwrap(),
         doc.source(),
@@ -44,8 +50,16 @@ end
 "#;
     let syms = collect(src);
     let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"hello"), "should contain function `hello`, got: {:?}", names);
-    assert!(names.contains(&"world"), "should contain function `world`, got: {:?}", names);
+    assert!(
+        names.contains(&"hello"),
+        "should contain function `hello`, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"world"),
+        "should contain function `world`, got: {:?}",
+        names
+    );
 }
 
 #[test]
@@ -57,7 +71,11 @@ end
 "#;
     let syms = collect(src);
     let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
-    assert!(names.contains(&"myHelper"), "should contain `myHelper`, got: {:?}", names);
+    assert!(
+        names.contains(&"myHelper"),
+        "should contain `myHelper`, got: {:?}",
+        names
+    );
 }
 
 #[test]
@@ -72,13 +90,25 @@ Foo = {}
 function Foo:m() end
 "#;
     let syms = collect(src);
-    let foo = syms.iter().find(|s| s.name == "Foo")
-        .unwrap_or_else(|| panic!("Foo class missing, got: {:?}", syms.iter().map(|s| &s.name).collect::<Vec<_>>()));
+    let foo = syms.iter().find(|s| s.name == "Foo").unwrap_or_else(|| {
+        panic!(
+            "Foo class missing, got: {:?}",
+            syms.iter().map(|s| &s.name).collect::<Vec<_>>()
+        )
+    });
     assert_eq!(foo.kind, SymbolKind::CLASS);
     let children = foo.children.as_ref().expect("children");
     let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
-    assert!(names.contains(&"x"), "Foo.x as Field child, got: {:?}", names);
-    assert!(names.contains(&"m"), "Foo:m as Method child, got: {:?}", names);
+    assert!(
+        names.contains(&"x"),
+        "Foo.x as Field child, got: {:?}",
+        names
+    );
+    assert!(
+        names.contains(&"m"),
+        "Foo:m as Method child, got: {:?}",
+        names
+    );
 
     // Method must be a METHOD kind (since accessed via `:`)
     let m = children.iter().find(|c| c.name == "m").unwrap();
@@ -118,13 +148,17 @@ x.foo = 1
     let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"x"), "local x should be in outline");
     assert!(
-        !names.iter().any(|n| *n == "x" && syms.iter().filter(|s| s.name == "x").count() > 1),
-        "x must appear only once, got: {:?}", names,
+        !names
+            .iter()
+            .any(|n| *n == "x" && syms.iter().filter(|s| s.name == "x").count() > 1),
+        "x must appear only once, got: {:?}",
+        names,
     );
     // Critically: no "foo" or "x.foo" entry.
     assert!(
         !names.iter().any(|n| *n == "foo" || *n == "x.foo"),
-        "dotted LHS must not generate an outline symbol, got: {:?}", names,
+        "dotted LHS must not generate an outline symbol, got: {:?}",
+        names,
     );
 }
 
@@ -148,13 +182,28 @@ end
 "#;
     let syms = collect(src);
     // uiButton is a CLASS at the top level; methods are children.
-    let ui = syms.iter().find(|s| s.name == "uiButton").expect("uiButton class");
+    let ui = syms
+        .iter()
+        .find(|s| s.name == "uiButton")
+        .expect("uiButton class");
     assert_eq!(ui.kind, SymbolKind::CLASS);
     let child_names: Vec<&str> = ui
-        .children.as_ref().expect("children")
-        .iter().map(|c| c.name.as_str()).collect();
-    assert!(child_names.contains(&"setX"), "setX as child, got: {:?}", child_names);
-    assert!(child_names.contains(&"setY"), "setY as child, got: {:?}", child_names);
+        .children
+        .as_ref()
+        .expect("children")
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert!(
+        child_names.contains(&"setX"),
+        "setX as child, got: {:?}",
+        child_names
+    );
+    assert!(
+        child_names.contains(&"setY"),
+        "setY as child, got: {:?}",
+        child_names
+    );
 }
 
 #[test]
@@ -242,14 +291,21 @@ end
     // hover1.lua defines uiButton (class) + setX/setY/setY1/new as its
     // children.
     let ui = syms.iter().find(|s| s.name == "uiButton");
-    assert!(ui.is_some(), "should find uiButton class, got: {:?}",
-        syms.iter().map(|s| &s.name).collect::<Vec<_>>());
+    assert!(
+        ui.is_some(),
+        "should find uiButton class, got: {:?}",
+        syms.iter().map(|s| &s.name).collect::<Vec<_>>()
+    );
     if let Some(ui) = ui {
         let child_names: Vec<&str> = ui
-            .children.as_ref().map(|v| v.iter().map(|c| c.name.as_str()).collect()).unwrap_or_default();
+            .children
+            .as_ref()
+            .map(|v| v.iter().map(|c| c.name.as_str()).collect())
+            .unwrap_or_default();
         assert!(
             child_names.iter().any(|n| *n == "new" || n.contains("new")),
-            "uiButton should have `new` child, got: {:?}", child_names,
+            "uiButton should have `new` child, got: {:?}",
+            child_names,
         );
     }
 }
@@ -264,7 +320,10 @@ fn symbols_class_name_range_is_precise() {
 Foo = {}
 "#;
     let syms = collect(src);
-    let class = syms.iter().find(|s| s.name == "Foo").expect("Foo class present");
+    let class = syms
+        .iter()
+        .find(|s| s.name == "Foo")
+        .expect("Foo class present");
     let sel = class.selection_range;
     let range = class.range;
     // The selection_range should be narrower than the full anchor
@@ -278,12 +337,14 @@ Foo = {}
     assert_eq!(
         sel.end.character - sel.start.character,
         3,
-        "selection_range should span exactly `Foo`, got {:?}", sel,
+        "selection_range should span exactly `Foo`, got {:?}",
+        sel,
     );
     // Meanwhile, `range` covers the anchor statement on line 1.
     assert!(
         range.end.line >= 1,
-        "full range spans anchor statement, got: {:?}", range,
+        "full range spans anchor statement, got: {:?}",
+        range,
     );
 }
 
@@ -296,15 +357,22 @@ fn symbols_field_name_range_is_precise() {
 Foo = {}
 "#;
     let syms = collect(src);
-    let class = syms.iter().find(|s| s.name == "Foo").expect("Foo class present");
+    let class = syms
+        .iter()
+        .find(|s| s.name == "Foo")
+        .expect("Foo class present");
     let children = class.children.as_ref().expect("has children");
-    let bar = children.iter().find(|c| c.name == "bar").expect("bar field present");
+    let bar = children
+        .iter()
+        .find(|c| c.name == "bar")
+        .expect("bar field present");
     let sel = bar.selection_range;
     // `bar` is 3 UTF-16 units wide.
     assert_eq!(
         sel.end.character - sel.start.character,
         3,
-        "field selection_range spans just `bar`, got: {:?}", sel,
+        "field selection_range spans just `bar`, got: {:?}",
+        sel,
     );
     // And its start line is the `---@field bar integer` line (line 1).
     assert_eq!(sel.start.line, 1, "field on line 1, got: {:?}", sel);
@@ -315,12 +383,16 @@ fn symbols_alias_name_range_is_precise() {
     let src = r#"---@alias MyString string
 "#;
     let syms = collect(src);
-    let alias = syms.iter().find(|s| s.name == "MyString").expect("alias present");
+    let alias = syms
+        .iter()
+        .find(|s| s.name == "MyString")
+        .expect("alias present");
     let sel = alias.selection_range;
     assert_eq!(
         sel.end.character - sel.start.character,
         8, // "MyString" is 8 chars
-        "alias selection_range spans just `MyString`, got: {:?}", sel,
+        "alias selection_range spans just `MyString`, got: {:?}",
+        sel,
     );
 }
 
@@ -330,12 +402,16 @@ fn symbols_enum_name_range_is_precise() {
 local Color = { R = 1, G = 2 }
 "#;
     let syms = collect(src);
-    let enum_sym = syms.iter().find(|s| s.name == "Color").expect("enum present");
+    let enum_sym = syms
+        .iter()
+        .find(|s| s.name == "Color")
+        .expect("enum present");
     let sel = enum_sym.selection_range;
     assert_eq!(
         sel.end.character - sel.start.character,
         5, // "Color" is 5 chars
-        "enum selection_range spans just `Color`, got: {:?}", sel,
+        "enum selection_range spans just `Color`, got: {:?}",
+        sel,
     );
 }
 
@@ -378,14 +454,16 @@ Global = 2
         for s in syms {
             let r = s.range;
             let sel = s.selection_range;
-            let start_ok = (r.start.line, r.start.character)
-                <= (sel.start.line, sel.start.character);
-            let end_ok = (r.end.line, r.end.character)
-                >= (sel.end.line, sel.end.character);
+            let start_ok =
+                (r.start.line, r.start.character) <= (sel.start.line, sel.start.character);
+            let end_ok = (r.end.line, r.end.character) >= (sel.end.line, sel.end.character);
             assert!(
                 start_ok && end_ok,
                 "`{}{}` violates LSP invariant: range={:?} selection_range={:?}",
-                path, s.name, r, sel,
+                path,
+                s.name,
+                r,
+                sel,
             );
             if let Some(children) = s.children.as_ref() {
                 let child_path = format!("{}{}.", path, s.name);
@@ -398,7 +476,10 @@ Global = 2
     // Also sanity-check the original broken case specifically: the
     // Audit class must exist and its `range` starts on or before the
     // `---@class` annotation line.
-    let audit = syms.iter().find(|s| s.name == "Audit").expect("Audit class present");
+    let audit = syms
+        .iter()
+        .find(|s| s.name == "Audit")
+        .expect("Audit class present");
     assert_eq!(
         audit.range.start.line, 0,
         "Audit.range should start at `---@class Audit` (line 0), got: {:?}",
@@ -417,11 +498,15 @@ Foo = {}
     let syms = collect(src);
     let class = syms.iter().find(|s| s.name == "Foo").expect("Foo present");
     let children = class.children.as_ref().expect("has children");
-    let bar = children.iter().find(|c| c.name == "bar").expect("bar field");
+    let bar = children
+        .iter()
+        .find(|c| c.name == "bar")
+        .expect("bar field");
     let sel = bar.selection_range;
     assert_eq!(
         sel.end.character - sel.start.character,
         3, // "bar"
-        "visibility skipped; selection spans just `bar`, got: {:?}", sel,
+        "visibility skipped; selection spans just `bar`, got: {:?}",
+        sel,
     );
 }

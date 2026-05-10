@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use tower_lsp_server::ls_types::Uri;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use jwalk::WalkDir;
+use std::path::{Path, PathBuf};
+use tower_lsp_server::ls_types::Uri;
 
 use crate::config::{RequireConfig, WorkspaceConfig};
 
@@ -298,10 +298,7 @@ fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
 ///
 /// Returned paths are suitable to pass as additional roots to
 /// `scan_and_collect_lua_files` / `collect_lua_files`.
-pub fn resolve_library_roots(
-    library: &[String],
-    workspace_roots: &[PathBuf],
-) -> Vec<PathBuf> {
+pub fn resolve_library_roots(library: &[String], workspace_roots: &[PathBuf]) -> Vec<PathBuf> {
     let first_root = workspace_roots.first();
     let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     let mut out: Vec<PathBuf> = Vec::new();
