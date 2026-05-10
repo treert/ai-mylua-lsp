@@ -33,6 +33,8 @@ module.exports = grammar({
     $.shebang,
     $.short_string_content_double,
     $.short_string_content_single,
+    $.dollar_string_content_double,
+    $.dollar_string_content_single,
     $.comment,
     $.emmy_line,
     // top-level keywords (column 0 only)
@@ -396,6 +398,7 @@ module.exports = grammar({
       $.true,
       $.number,
       $.string,
+      $.dollar_string,
       $.vararg_expression,
       $.function_definition,
       $.dollar_function,
@@ -454,6 +457,7 @@ module.exports = grammar({
       seq('(', optional(alias($._argument_expression_list, $.expression_list)), ')'),
       $.table_constructor,
       $.string,
+      $.dollar_string,
       $.dollar_function,
     ),
 
@@ -581,6 +585,38 @@ module.exports = grammar({
     short_string: $ => choice(
       seq('"', optional($.short_string_content_double), '"'),
       seq("'", optional($.short_string_content_single), "'"),
+    ),
+
+    dollar_string: $ => choice(
+      seq('$"', repeat($._dollar_string_item_double), '"'),
+      seq("$'", repeat($._dollar_string_item_single), "'"),
+    ),
+
+    _dollar_string_item_double: $ => choice(
+      alias($.dollar_string_content_double, $.dollar_string_content),
+      $.dollar_escape,
+      $.dollar_name_interpolation,
+      $.dollar_interpolation,
+    ),
+
+    _dollar_string_item_single: $ => choice(
+      alias($.dollar_string_content_single, $.dollar_string_content),
+      $.dollar_escape,
+      $.dollar_name_interpolation,
+      $.dollar_interpolation,
+    ),
+
+    dollar_escape: _ => '$$',
+
+    dollar_name_interpolation: $ => seq(
+      '$',
+      field('name', $.identifier),
+    ),
+
+    dollar_interpolation: $ => seq(
+      '${',
+      field('value', $._expression),
+      '}',
     ),
 
     long_string: $ => seq(

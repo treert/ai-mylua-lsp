@@ -561,8 +561,15 @@ pub fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter
 /// contains one (the recursive walk handles both). If `node` is an
 /// `expression_list`, callers should unwrap it first.
 pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
+    if node.kind() == "dollar_string" {
+        return None;
+    }
+
     // Strategy 1: recursive search for `short_string_content` child.
     fn find_string_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
+        if n.kind() == "dollar_string" {
+            return None;
+        }
         if n.kind().starts_with("short_string_content") {
             return Some(node_text(n, source).to_string());
         }
@@ -864,6 +871,33 @@ mod tests {
             .set_language(&tree_sitter_mylua::LANGUAGE.into())
             .expect("mylua grammar");
         parser.parse(src, None).expect("parse")
+    }
+
+    fn find_descendant_kind<'tree>(
+        node: tree_sitter::Node<'tree>,
+        kind: &str,
+    ) -> Option<tree_sitter::Node<'tree>> {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        for i in 0..node.named_child_count() {
+            if let Some(child) = node.named_child(i as u32) {
+                if let Some(found) = find_descendant_kind(child, kind) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn extract_string_literal_ignores_dollar_string() {
+        let src = r#"local m = require($"prefix ${"inner"}")"#;
+        let tree = parse_source(src);
+        let root = tree.root_node();
+        assert!(!root.has_error(), "source should parse: {}", root.to_sexp());
+        let dollar = find_descendant_kind(root, "dollar_string").expect("dollar_string node");
+        assert_eq!(extract_string_literal(dollar, src.as_bytes()), None);
     }
 
     #[test]

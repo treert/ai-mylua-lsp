@@ -373,3 +373,64 @@ consume $(x, y,){ return x + y }
                     (identifier))
                   right: (variable
                     (identifier)))))))))))
+
+================================================================================
+MyLua dollar string
+================================================================================
+
+local name = "world"
+local s1 = $"hello $name $$ ${format("world")} if local end"
+local s2 = $'1+2=${1+2}'
+print $"short-call $name"
+
+---
+
+(source_file
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (string
+        (short_string
+          (short_string_content_double)))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (dollar_string
+        (dollar_string_content)
+        (dollar_name_interpolation
+          name: (identifier))
+        (dollar_escape)
+        (dollar_interpolation
+          value: (function_call
+            callee: (variable
+              (identifier))
+            arguments: (arguments
+              (expression_list
+                (string
+                  (short_string
+                    (short_string_content_double)))))))
+        (dollar_string_content))))
+  (local_declaration
+    (word_local)
+    names: (attribute_name_list
+      (identifier))
+    values: (expression_list
+      (dollar_string
+        (dollar_string_content)
+        (dollar_interpolation
+          value: (binary_expression
+            left: (number)
+            right: (number))))))
+  (function_call_statement
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments
+        (dollar_string
+          (dollar_string_content)
+          (dollar_name_interpolation
+            name: (identifier)))))))

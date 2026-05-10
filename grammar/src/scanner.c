@@ -9,6 +9,8 @@ enum TokenType {
   SHEBANG,
   SHORT_STRING_CONTENT_DOUBLE,
   SHORT_STRING_CONTENT_SINGLE,
+  DOLLAR_STRING_CONTENT_DOUBLE,
+  DOLLAR_STRING_CONTENT_SINGLE,
   COMMENT,
   EMMY_LINE,
   // top-level keywords (column 0 only)
@@ -278,6 +280,71 @@ static bool scan_long_string_external(TSLexer *lexer) {
   }
 }
 
+static void scan_short_string_escape(TSLexer *lexer) {
+  advance(lexer);
+  if (lexer->eof(lexer)) return;
+  int32_t c = lexer->lookahead;
+  switch (c) {
+    case 'a': case 'b': case 'f': case 'n': case 'r':
+    case 't': case 'v': case '\\': case '\'': case '"':
+      advance(lexer);
+      break;
+    case '\r':
+      advance(lexer);
+      if (lexer->lookahead == '\n') advance(lexer);
+      break;
+    case '\n':
+      advance(lexer);
+      break;
+    case 'x':
+      advance(lexer);
+      for (int i = 0; i < 2; i++) {
+        if (!lexer->eof(lexer) && (
+            (lexer->lookahead >= '0' && lexer->lookahead <= '9') ||
+            (lexer->lookahead >= 'a' && lexer->lookahead <= 'f') ||
+            (lexer->lookahead >= 'A' && lexer->lookahead <= 'F'))) {
+          advance(lexer);
+        } else {
+          break;
+        }
+      }
+      break;
+    case 'u':
+      advance(lexer);
+      if (lexer->lookahead == '{') {
+        advance(lexer);
+        while (!lexer->eof(lexer) && lexer->lookahead != '}') {
+          advance(lexer);
+        }
+        if (lexer->lookahead == '}') advance(lexer);
+      }
+      break;
+    case 'z':
+      advance(lexer);
+      while (!lexer->eof(lexer) &&
+             (lexer->lookahead == ' ' || lexer->lookahead == '\t' ||
+              lexer->lookahead == '\n' || lexer->lookahead == '\r' ||
+              lexer->lookahead == '\f' || lexer->lookahead == '\v')) {
+        advance(lexer);
+      }
+      break;
+    default:
+      if (c >= '0' && c <= '9') {
+        advance(lexer);
+        for (int i = 0; i < 2; i++) {
+          if (!lexer->eof(lexer) && lexer->lookahead >= '0' && lexer->lookahead <= '9') {
+            advance(lexer);
+          } else {
+            break;
+          }
+        }
+      } else {
+        advance(lexer);
+      }
+      break;
+  }
+}
+
 static bool scan_short_string_content(TSLexer *lexer, char quote) {
   bool has_content = false;
   for (;;) {
@@ -296,68 +363,33 @@ static bool scan_short_string_content(TSLexer *lexer, char quote) {
     }
     if (c == '\\') {
       has_content = true;
+      scan_short_string_escape(lexer);
+    } else {
+      has_content = true;
       advance(lexer);
-      if (lexer->eof(lexer)) return true;
-      c = lexer->lookahead;
-      switch (c) {
-        case 'a': case 'b': case 'f': case 'n': case 'r':
-        case 't': case 'v': case '\\': case '\'': case '"':
-          advance(lexer);
-          break;
-        case '\r':
-          advance(lexer);
-          if (lexer->lookahead == '\n') advance(lexer);
-          break;
-        case '\n':
-          advance(lexer);
-          break;
-        case 'x':
-          advance(lexer);
-          for (int i = 0; i < 2; i++) {
-            if (!lexer->eof(lexer) && (
-                (lexer->lookahead >= '0' && lexer->lookahead <= '9') ||
-                (lexer->lookahead >= 'a' && lexer->lookahead <= 'f') ||
-                (lexer->lookahead >= 'A' && lexer->lookahead <= 'F'))) {
-              advance(lexer);
-            } else {
-              break;
-            }
-          }
-          break;
-        case 'u':
-          advance(lexer);
-          if (lexer->lookahead == '{') {
-            advance(lexer);
-            while (!lexer->eof(lexer) && lexer->lookahead != '}') {
-              advance(lexer);
-            }
-            if (lexer->lookahead == '}') advance(lexer);
-          }
-          break;
-        case 'z':
-          advance(lexer);
-          while (!lexer->eof(lexer) &&
-                 (lexer->lookahead == ' ' || lexer->lookahead == '\t' ||
-                  lexer->lookahead == '\n' || lexer->lookahead == '\r' ||
-                  lexer->lookahead == '\f' || lexer->lookahead == '\v')) {
-            advance(lexer);
-          }
-          break;
-        default:
-          if (c >= '0' && c <= '9') {
-            advance(lexer);
-            for (int i = 0; i < 2; i++) {
-              if (!lexer->eof(lexer) && lexer->lookahead >= '0' && lexer->lookahead <= '9') {
-                advance(lexer);
-              } else {
-                break;
-              }
-            }
-          } else {
-            advance(lexer);
-          }
-          break;
-      }
+    }
+  }
+}
+
+static bool scan_dollar_string_content(TSLexer *lexer, char quote) {
+  bool has_content = false;
+  for (;;) {
+    if (lexer->eof(lexer)) {
+      lexer->result_symbol = (quote == '"')
+        ? DOLLAR_STRING_CONTENT_DOUBLE
+        : DOLLAR_STRING_CONTENT_SINGLE;
+      return has_content;
+    }
+    int32_t c = lexer->lookahead;
+    if (c == quote || c == '$' || c == '\n' || c == '\r') {
+      lexer->result_symbol = (quote == '"')
+        ? DOLLAR_STRING_CONTENT_DOUBLE
+        : DOLLAR_STRING_CONTENT_SINGLE;
+      return has_content;
+    }
+    if (c == '\\') {
+      has_content = true;
+      scan_short_string_escape(lexer);
     } else {
       has_content = true;
       advance(lexer);
@@ -518,6 +550,12 @@ bool tree_sitter_lua_external_scanner_scan(
   }
   if (valid_symbols[SHORT_STRING_CONTENT_SINGLE] && lexer->lookahead != '\'') {
     return scan_short_string_content(lexer, '\'');
+  }
+  if (valid_symbols[DOLLAR_STRING_CONTENT_DOUBLE] && lexer->lookahead != '"') {
+    return scan_dollar_string_content(lexer, '"');
+  }
+  if (valid_symbols[DOLLAR_STRING_CONTENT_SINGLE] && lexer->lookahead != '\'') {
+    return scan_dollar_string_content(lexer, '\'');
   }
 
   /* Word scanning (keywords + identifiers, unconditional).

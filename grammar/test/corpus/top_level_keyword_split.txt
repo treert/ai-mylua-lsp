@@ -253,17 +253,15 @@ end
 (source_file
   (emmy_comment
     (emmy_line))
-  (if_statement
+  (ERROR
     (top_word_if)
-    condition: (variable
+    (variable
       (identifier))
     (word_then)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments)))
-    (MISSING word_end))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (if_statement
     (top_word_if)
     condition: (variable
@@ -287,17 +285,15 @@ end
 (source_file
   (emmy_comment
     (emmy_line))
-  (if_statement
+  (ERROR
     (top_word_if)
-    condition: (variable
+    (variable
       (identifier))
     (word_then)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments)))
-    (MISSING word_end))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (do_statement
     (top_word_do)
     (function_call_statement
@@ -322,17 +318,15 @@ end
 (source_file
   (emmy_comment
     (emmy_line))
-  (while_statement
+  (ERROR
     (top_word_while)
-    condition: (true
+    (true
       (word_true))
     (word_do)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments)))
-    (MISSING word_end))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (function_declaration
     (top_word_function)
     name: (function_name
@@ -355,18 +349,16 @@ local y = 2
 (source_file
   (emmy_comment
     (emmy_line))
-  (for_numeric_statement
+  (ERROR
     (top_word_for)
-    name: (identifier)
-    start: (number)
-    stop: (number)
+    (identifier)
+    (number)
+    (number)
     (word_do)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments)))
-    (MISSING word_end))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (local_declaration
     (top_word_local)
     names: (attribute_name_list
@@ -391,11 +383,10 @@ goto done
     (emmy_line))
   (ERROR
     (top_word_repeat)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments))))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (goto_statement
     (top_word_goto)
     name: (identifier))
@@ -417,14 +408,12 @@ end
 (source_file
   (emmy_comment
     (emmy_line))
-  (do_statement
+  (ERROR
     (top_word_do)
-    (function_call_statement
-      (function_call
-        callee: (variable
-          (identifier))
-        arguments: (arguments)))
-    (MISSING word_end))
+    (function_call
+      callee: (variable
+        (identifier))
+      arguments: (arguments)))
   (if_statement
     (top_word_if)
     condition: (variable

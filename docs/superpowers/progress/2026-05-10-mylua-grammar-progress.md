@@ -1,7 +1,7 @@
 # MyLua 语法支持 — 进度记录
 
 **日期**: 2026-05-10  
-**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；下一步处理 `$string`
+**状态**: P0/P1/P2 完成；P3 safe access/call 已收尾（含 standalone safe call statement 与链式 safe field access）；P3 named/spread args 第一阶段已收尾；P3 keyword-as-name 完整范围已收尾；top_keyword corpus/default 差异已收尾；P4 `$function` 已收尾；P5 `$string` parser/scanner 第一阶段已收尾；下一步进入 P6 LSP 基础能力稳定
 
 ## 入口文档
 
@@ -13,10 +13,10 @@
 ### P0：测试闭环
 
 - 新增 `grammar/test/corpus/mylua.txt`
-  - 当前覆盖并通过：`continue`、`array_constructor`、`t[] = value`、safe access/call、链式 safe access、named/spread call arguments、keyword-as-name contexts（含 method/safe method call）
+  - 当前覆盖并通过：`continue`、`array_constructor`、`t[] = value`、safe access/call、链式 safe access、named/spread call arguments、keyword-as-name contexts（含 method/safe method call）、`$function`、`$string`
 - 新增 `lsp/crates/mylua-lsp/tests/test_mylua_parse.rs`
-  - 已启用：低风险语法、`continue.mylua`、`array.mylua`、safe access/call、safe access/call 作为 prefix expression 的组合、named/spread inline smoke test、keyword-as-name inline smoke test、keyword 在有歧义 name 位置的负向回归测试
-  - 已保留但 `#[ignore]`：`func-named-args.mylua` fixture（仍包含 P5 `$string`）、`$string` / `$function` fixture
+  - 已启用：低风险语法、`continue.mylua`、`array.mylua`、`func-named-args.mylua`、`dollarext.mylua`、safe access/call、safe access/call 作为 prefix expression 的组合、named/spread inline smoke test、keyword-as-name inline smoke test、`$function` / `$string` inline smoke test、keyword 在有歧义 name 位置的负向回归测试
+  - 当前无 `#[ignore]` 的 MyLua parser fixture 测试
 
 ### P1：`.mylua` 后缀接入
 
@@ -112,7 +112,6 @@
   - 新增 `MyLua dollar function` corpus，覆盖 `${...}`、`$(params){...}`、`$(...){...}`、尾逗号参数与无括号调用参数
 - `lsp/crates/mylua-lsp/tests/test_mylua_parse.rs`
   - 新增 `parse_mylua_dollar_function_syntax`
-  - `parse_mylua_dollar_extensions_fixture` 的 ignore 原因收窄为 P5 `$string`
 - `lsp/crates/mylua-lsp/src/summary_builder/type_infer.rs`
 - `lsp/crates/mylua-lsp/src/summary_builder/visitors.rs`
 - `lsp/crates/mylua-lsp/src/summary_builder/call_sites.rs`
@@ -122,9 +121,39 @@
 - `lsp/crates/mylua-lsp/src/folding_range.rs`
   - 将 `dollar_function` 按普通匿名 `function_definition` 等价纳入类型推断、函数 summary、调用层级、参数/返回诊断锚点与折叠范围
 
+### P5：`$string`
+
+已改：
+
+- `grammar/grammar.js`
+  - 新增 `dollar_string` / `dollar_string_content` / `dollar_escape` / `dollar_name_interpolation` / `dollar_interpolation`
+  - `$"..."` / `$'...'` 可作为 primary expression
+  - 支持 `$$`、`$name`、`${expr}`，其中 `${expr}` 复用普通 expression AST
+  - 支持无括号调用参数：`print $"hello $name"`
+- `grammar/src/scanner.c`
+  - 新增 `$string` 内容 token 扫描，在引号、裸 `$`、裸换行处停下
+  - 复用短字符串转义扫描，避免 `$"if local end"` 内容被拆成 keyword/identifier
+- `grammar/test/corpus/mylua.txt`
+  - 新增 `MyLua dollar string` corpus，覆盖内容、`$name`、`$$`、`${format("world")}` 和无括号调用参数
+- `grammar/test/corpus/col0_error_recovery.txt`
+- `grammar/test/corpus/top_level_keyword_split.txt`
+  - 同步 `$string` 引入后 error-recovery 快照中 ERROR 内 function call 的形态变化；顶层关键字前置恢复仍保留
+- `lsp/crates/mylua-lsp/tests/test_mylua_parse.rs`
+  - 新增 `parse_mylua_dollar_string_syntax`
+  - 启用 `parse_mylua_named_args_fixture`
+  - 启用 `parse_mylua_dollar_extensions_fixture`
+- `lsp/crates/mylua-lsp/src/summary_builder/type_infer.rs`
+- `lsp/crates/mylua-lsp/src/type_inference.rs`
+- `lsp/crates/mylua-lsp/src/diagnostics/type_compat.rs`
+  - 将 `dollar_string` 第一阶段按 string 类型处理
+- `lsp/crates/mylua-lsp/src/util.rs`
+  - `extract_string_literal` 显式跳过 `dollar_string`，避免 require/document link/module path 静态提取误用插值字符串
+- `lsp/crates/mylua-lsp/tests/test_diagnostics.rs`
+  - 新增 `$string` 作为 string 参与参数类型诊断的回归测试
+
 本轮已继续：
 
-- `$function` 已完成，下一步进入 P5 `$string` scanner mode。
+- `$string` parser/scanner 第一阶段已完成，P0 中两个被 P5 阻塞的 fixture parser tests 已启用。
 
 ## 当前验证结果
 
@@ -136,34 +165,35 @@ npx tree-sitter generate
 npx tree-sitter test
 
 cd /Users/zhuguosen/MyGit/ai-mylua-lsp/lsp
-cargo test -p mylua-lsp parse_mylua_dollar_function_syntax
-cargo test -p mylua-lsp parse_mylua
+cargo test -p mylua-lsp --test test_mylua_parse parse_mylua -- --nocapture
+cargo test -p mylua-lsp --test test_diagnostics argument_type_mismatch_treats_dollar_string_as_string
+cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_string
 ```
 
 结果：
 
 - `npx tree-sitter generate`: passed
-- `npx tree-sitter test`: 54/54 passed
-- `cargo test -p mylua-lsp parse_mylua_dollar_function_syntax`: passed（1 passed）
-- `cargo test -p mylua-lsp parse_mylua`: passed（8 passed, 2 ignored）
-- `parse_mylua_dollar_extensions_fixture` 仍 ignored，原因已收窄为 P5 `$string` grammar
-- `read_lints`：本轮未重新执行；上一轮 `test_mylua_parse.rs` 无诊断，`grammar/grammar.js` 仅保留既有 TypeScript hint（`EMMY_PREC` 未使用、CommonJS 模块提示）
+- `npx tree-sitter test`: 55/55 passed
+- `cargo test -p mylua-lsp --test test_mylua_parse parse_mylua -- --nocapture`: passed（11 passed, 0 ignored）
+- `cargo test -p mylua-lsp --test test_diagnostics argument_type_mismatch_treats_dollar_string_as_string`: passed（1 passed）
+- `cargo test -p mylua-lsp util::tests::extract_string_literal_ignores_dollar_string`: passed（1 passed）
+- `parse_mylua_named_args_fixture` / `parse_mylua_dollar_extensions_fixture` 已启用并通过
+- `read_lints`：`test_mylua_parse.rs`、`test_diagnostics.rs`、`util.rs`、`summary_builder/type_infer.rs`、`type_inference.rs`、`diagnostics/type_compat.rs` 无诊断；`grammar/grammar.js` 仅保留既有 TypeScript hint（`EMMY_PREC` 未使用、CommonJS 模块提示）
 
 ## 当前工作区变更
 
 ```text
  M docs/superpowers/progress/2026-05-10-mylua-grammar-progress.md
  M grammar/grammar.js
+ M grammar/src/scanner.c
  M grammar/test/corpus/col0_error_recovery.txt
  M grammar/test/corpus/mylua.txt
  M grammar/test/corpus/top_level_keyword_split.txt
- M lsp/crates/mylua-lsp/src/diagnostics/param_annotation.rs
- M lsp/crates/mylua-lsp/src/diagnostics/return_mismatch.rs
  M lsp/crates/mylua-lsp/src/diagnostics/type_compat.rs
- M lsp/crates/mylua-lsp/src/folding_range.rs
- M lsp/crates/mylua-lsp/src/summary_builder/call_sites.rs
  M lsp/crates/mylua-lsp/src/summary_builder/type_infer.rs
- M lsp/crates/mylua-lsp/src/summary_builder/visitors.rs
+ M lsp/crates/mylua-lsp/src/type_inference.rs
+ M lsp/crates/mylua-lsp/src/util.rs
+ M lsp/crates/mylua-lsp/tests/test_diagnostics.rs
  M lsp/crates/mylua-lsp/tests/test_mylua_parse.rs
 ```
 
@@ -171,19 +201,25 @@ cargo test -p mylua-lsp parse_mylua
 
 ## 下次继续建议
 
-优先继续 P5 中尚未完成的 parser 子任务：
+优先继续 P6 / 后续语义稳定子任务：
 
-1. `$string` scanner mode
-   - 完成后可启用 `parse_mylua_named_args_fixture`（该 fixture 当前仍包含 `$"..."`）
-   - 完成后可启用 `parse_mylua_dollar_extensions_fixture`（`$function` 已完成，当前仍被 `$string` 阻塞）
-2. named/spread 后续语义增强
+1. P6 LSP 基础能力稳定
+   - hover / goto / references / semantic tokens / completion 对 `dollar_string`、`dollar_interpolation` 不崩溃
+   - signature help 在 `print $"..."` / `${expr}` 附近定位可接受
+   - document link / require / module completion 继续确认只基于普通静态 `string`
+2. `$string` 专属 diagnostics（P7/P8 前置）
+   - `${expr}` 不允许跨物理行
+   - `${expr}` 内不支持嵌套 `dollar_string`
+   - `$` 后只允许 `$`、Name 或 `{`
+3. named/spread 后续语义增强
    - argument count/type diagnostics 按 named 参数名匹配
    - signature help / inlay hints 对 named/spread 做精确定位
 
 ## 重要注意事项
 
-- `parse_mylua_named_args_fixture` 当前仍是 `#[ignore]`，原因是 fixture 包含 P5 `$string`；`parse_mylua_dollar_extensions_fixture` 也保持 `#[ignore]`，当前仅剩 P5 `$string` 阻塞。
+- `parse_mylua_named_args_fixture` 与 `parse_mylua_dollar_extensions_fixture` 已启用；后续如果新增 MyLua fixture，应默认纳入 parser smoke test。
 - `t[]` 当前 AST 没有显式 `empty_index` 节点，只是 `variable` 缺少 `index` field；Rust analyzer 后续读取 index 时必须允许 `None`。
-- `dollar_string` 第一阶段不要接入 `extract_string_literal` / require / document link。
+- `dollar_string` 第一阶段已显式跳过 `extract_string_literal`；后续除非做 P8 常量折叠，否则不要接入 require / document link / module completion 静态路径解析。
+- `$name` 插值当前复用外部 `identifier` token；scanner 会在裸 `$` 处停下，非法 `$` 形态留给后续 diagnostics。
 - named/spread 第一阶段只做 parser + 保守 diagnostics；后续如要精确语义，需按参数名重做 call args/signature help/inlay hints 匹配。
 - 不要运行全仓库 `cargo fmt`，会产生大量无关格式化 diff；如需格式化，限制在本次修改文件。

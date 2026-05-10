@@ -148,6 +148,19 @@ consume $(x, y,){ return x + y }
 }
 
 #[test]
+fn parse_mylua_dollar_string_syntax() {
+    assert_source_parses(
+        "dollar string MyLua syntax",
+        r##"
+local name = "world"
+local s1 = $"hello $name $$ ${format("world")} if local end"
+local s2 = $'1+2=${1+2}'
+print $"short-call $name"
+"##,
+    );
+}
+
+#[test]
 fn parse_mylua_rejects_keywords_in_ambiguous_name_positions() {
     for (name, source) in [
         ("local declaration name", "local end = 1"),
@@ -160,13 +173,11 @@ fn parse_mylua_rejects_keywords_in_ambiguous_name_positions() {
 }
 
 #[test]
-#[ignore = "fixture still contains P5 dollar string/function syntax"]
 fn parse_mylua_named_args_fixture() {
     assert_fixture_parses("tests/lua-root/mylua/func-named-args.mylua");
 }
 
 #[test]
-#[ignore = "requires P5 dollar string grammar"]
 fn parse_mylua_dollar_extensions_fixture() {
     assert_fixture_parses("tests/lua-root/mylua/dollarext.mylua");
 }

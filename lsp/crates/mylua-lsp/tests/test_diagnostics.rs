@@ -2205,6 +2205,38 @@ f("str", 42)
 }
 
 #[test]
+fn argument_type_mismatch_treats_dollar_string_as_string() {
+    let src = r#"
+---@param n number
+local function takes_number(n) return n end
+local name = "world"
+takes_number($"hello $name")
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argtype_dollar_string.mylua");
+    assert!(
+        !doc.root_node().unwrap().has_error(),
+        "dollar string source should parse before diagnostics: {}",
+        doc.root_node().unwrap().to_sexp()
+    );
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_type_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().any(|d| d.message.contains("declared 'number', got 'string'")),
+        "dollar_string argument should be inferred as string, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn argument_type_union_order_does_not_mismatch() {
     let src = r#"
 ---@param e string|number

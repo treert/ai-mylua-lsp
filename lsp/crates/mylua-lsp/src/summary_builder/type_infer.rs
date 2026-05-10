@@ -26,7 +26,7 @@ pub(super) fn infer_expression_type(
     }
     match node.kind() {
         "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
+        "string" | "dollar_string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
 
@@ -177,7 +177,7 @@ fn function_return_with_call_args(
 fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
     match node.kind() {
         "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
+        "string" | "dollar_string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
         "variable" | "field_expression"

@@ -8,7 +8,7 @@ pub(crate) fn infer_literal_type(
 ) -> TypeFact {
     match node.kind() {
         "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
+        "string" | "dollar_string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
         "table_constructor" => {
@@ -184,7 +184,7 @@ pub(crate) fn infer_argument_type(
 pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
     match node.kind() {
         "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
+        "string" | "dollar_string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
         "nil" => TypeFact::Known(KnownType::Nil),
         "table_constructor" => {

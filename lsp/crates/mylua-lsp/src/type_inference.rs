@@ -113,7 +113,7 @@ pub(crate) fn infer_node_type_in_file_id(
         // Literal types — needed for function-level generic inference
         // so that `identity("abc")` can infer `T = string`.
         "number" => TypeFact::Known(crate::type_system::KnownType::Number),
-        "string" => TypeFact::Known(crate::type_system::KnownType::String),
+        "string" | "dollar_string" => TypeFact::Known(crate::type_system::KnownType::String),
         "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
         "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
         "table_constructor" => {
@@ -151,7 +151,9 @@ fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {
             if let Some(val) = field_node.child_by_field_name("value") {
                 let val_type = match val.kind() {
                     "number" => TypeFact::Known(crate::type_system::KnownType::Number),
-                    "string" => TypeFact::Known(crate::type_system::KnownType::String),
+                    "string" | "dollar_string" => {
+                        TypeFact::Known(crate::type_system::KnownType::String)
+                    }
                     "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
                     "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
                     _ => continue,
