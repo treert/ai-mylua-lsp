@@ -45,8 +45,8 @@
       },
       {
         "language": "mylua",
-        "scopeName": "source.lua",
-        "path": "./syntaxes/lua.tmLanguage.json"
+        "scopeName": "source.mylua",
+        "path": "./syntaxes/mylua.tmLanguage.json"
       }
     ],
     "semanticTokenScopes": [
@@ -60,8 +60,8 @@
       {
         "language": "mylua",
         "scopes": {
-          "variable.defaultLibrary": ["support.variable.lua"],
-          "variable.global": ["variable.other.global.lua"]
+          "variable.defaultLibrary": ["support.variable.mylua"],
+          "variable.global": ["variable.other.global.mylua"]
         }
       }
     ],
