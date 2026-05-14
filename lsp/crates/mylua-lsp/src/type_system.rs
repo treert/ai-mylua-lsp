@@ -204,11 +204,20 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
             TypeFact::Known(KnownType::EmmyType(intern_lua_symbol(class_name)))
         }
         TypeFact::Known(KnownType::EmmyGeneric(name, args)) if name.as_str() == "self" => {
-            let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
-            TypeFact::Known(KnownType::EmmyGeneric(intern_lua_symbol(class_name), new_args))
+            let new_args: Vec<TypeFact> = args
+                .iter()
+                .map(|a| substitute_self(a, class_name))
+                .collect();
+            TypeFact::Known(KnownType::EmmyGeneric(
+                intern_lua_symbol(class_name),
+                new_args,
+            ))
         }
         TypeFact::Known(KnownType::EmmyGeneric(name, args)) => {
-            let new_args: Vec<TypeFact> = args.iter().map(|a| substitute_self(a, class_name)).collect();
+            let new_args: Vec<TypeFact> = args
+                .iter()
+                .map(|a| substitute_self(a, class_name))
+                .collect();
             TypeFact::Known(KnownType::EmmyGeneric(*name, new_args))
         }
         TypeFact::Known(KnownType::Function(sig)) => {
@@ -221,13 +230,20 @@ pub fn substitute_self(fact: &TypeFact, class_name: &str) -> TypeFact {
                     optional: p.optional,
                 })
                 .collect();
-            let returns = sig.returns.iter().map(|r| substitute_self(r, class_name)).collect();
+            let returns = sig
+                .returns
+                .iter()
+                .map(|r| substitute_self(r, class_name))
+                .collect();
             TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
         }
         TypeFact::Known(KnownType::FunctionRef(_)) => fact.clone(),
-        TypeFact::Union(parts) => {
-            TypeFact::Union(parts.iter().map(|p| substitute_self(p, class_name)).collect())
-        }
+        TypeFact::Union(parts) => TypeFact::Union(
+            parts
+                .iter()
+                .map(|p| substitute_self(p, class_name))
+                .collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -290,7 +306,16 @@ impl fmt::Display for KnownType {
                 if name.as_str() == "__array" && params.len() == 1 {
                     write!(f, "{}[]", params[0])
                 } else {
-                    write!(f, "{}<{}>", name, params.iter().map(|p| format!("{}", p)).collect::<Vec<_>>().join(", "))
+                    write!(
+                        f,
+                        "{}<{}>",
+                        name,
+                        params
+                            .iter()
+                            .map(|p| format!("{}", p))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
                 }
             }
         }
@@ -301,7 +326,9 @@ impl fmt::Display for SymbolicStub {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::RequireRef { module_path } => write!(f, "require(\"{}\")", module_path),
-            Self::CallReturn { base, func_name, .. } => write!(f, "{}.{}()", base, func_name),
+            Self::CallReturn {
+                base, func_name, ..
+            } => write!(f, "{}.{}()", base, func_name),
             Self::FunctionCallReturn { func_name, .. } => write!(f, "{}()", func_name),
             Self::GlobalRef { name } => write!(f, "global:{}", name),
             Self::TypeRef { name } => write!(f, "type:{}", name),
@@ -345,8 +372,14 @@ mod tests {
         let signature_json = serde_json::to_value(&signature).unwrap();
 
         assert_eq!(fact_json["Union"][0]["Known"]["EmmyGeneric"][0], "Player");
-        assert_eq!(fact_json["Union"][1]["Stub"]["RequireRef"]["module_path"], "game.player");
+        assert_eq!(
+            fact_json["Union"][1]["Stub"]["RequireRef"]["module_path"],
+            "game.player"
+        );
         assert_eq!(signature_json["params"][0]["name"], "self");
-        assert_eq!(signature_json["returns"][0]["Stub"]["FieldOf"]["field"], "name");
+        assert_eq!(
+            signature_json["returns"][0]["Stub"]["FieldOf"]["field"],
+            "name"
+        );
     }
 }

@@ -8,8 +8,8 @@
 
 mod test_helpers;
 
+use mylua_lsp::type_system::{class_prefix_of, substitute_self, KnownType, TypeFact};
 use test_helpers::*;
-use mylua_lsp::type_system::{substitute_self, class_prefix_of, KnownType, TypeFact};
 
 #[test]
 fn class_prefix_extraction() {
@@ -26,7 +26,8 @@ fn substitute_self_replaces_emmy_type() {
     let out = substitute_self(&fact, "Foo");
     assert!(
         matches!(&out, TypeFact::Known(KnownType::EmmyType(n)) if n == "Foo"),
-        "self must become Foo, got: {:?}", out,
+        "self must become Foo, got: {:?}",
+        out,
     );
 }
 
@@ -42,7 +43,8 @@ fn substitute_self_nested_inside_union() {
             assert_eq!(parts.len(), 2);
             assert!(
                 matches!(&parts[0], TypeFact::Known(KnownType::EmmyType(n)) if n == "Bar"),
-                "first part replaced, got: {:?}", parts,
+                "first part replaced, got: {:?}",
+                parts,
             );
         }
         _ => panic!("expected union, got: {:?}", out),
@@ -69,8 +71,11 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
-        .find(|fs| fs.name == "Builder:chain").expect("method");
+    let fs = summary
+        .function_summaries
+        .values()
+        .find(|fs| fs.name == "Builder:chain")
+        .expect("method");
     assert_eq!(fs.signature.returns.len(), 1);
     match &fs.signature.returns[0] {
         TypeFact::Known(KnownType::EmmyType(n)) => {
@@ -93,9 +98,17 @@ end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "builder_param.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
-        .find(|fs| fs.name == "Builder:merge").expect("method");
-    let other = fs.signature.params.iter().find(|p| p.name == "other").expect("other param");
+    let fs = summary
+        .function_summaries
+        .values()
+        .find(|fs| fs.name == "Builder:merge")
+        .expect("method");
+    let other = fs
+        .signature
+        .params
+        .iter()
+        .find(|p| p.name == "other")
+        .expect("other param");
     match &other.type_fact {
         TypeFact::Known(KnownType::EmmyType(n)) => {
             assert_eq!(n, "Builder", "param `self` must resolve to Builder");
@@ -115,8 +128,11 @@ local function free() return nil end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "free.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
-        .find(|fs| fs.name == "free").expect("func");
+    let fs = summary
+        .function_summaries
+        .values()
+        .find(|fs| fs.name == "free")
+        .expect("func");
     match &fs.signature.returns[0] {
         TypeFact::Known(KnownType::EmmyType(n)) => {
             assert_eq!(n, "self", "free function keeps `self` literal");
@@ -140,14 +156,24 @@ local function takes(cb) end
 "#;
     let (_doc, uri, agg) = setup_single_file(src, "multi_ret_param.lua");
     let summary = summary_by_uri(&agg, &uri).expect("summary");
-    let fs = summary.function_summaries.values()
-        .find(|fs| fs.name == "takes").expect("takes");
-    let cb = fs.signature.params.iter().find(|p| p.name == "cb").expect("cb");
+    let fs = summary
+        .function_summaries
+        .values()
+        .find(|fs| fs.name == "takes")
+        .expect("takes");
+    let cb = fs
+        .signature
+        .params
+        .iter()
+        .find(|p| p.name == "cb")
+        .expect("cb");
     match &cb.type_fact {
         TypeFact::Known(KnownType::Function(sig)) => {
             assert_eq!(
-                sig.returns.len(), 2,
-                "fun(): A, B must yield 2 returns, got: {:?}", sig.returns,
+                sig.returns.len(),
+                2,
+                "fun(): A, B must yield 2 returns, got: {:?}",
+                sig.returns,
             );
         }
         other => panic!("expected Function fact, got: {:?}", other),

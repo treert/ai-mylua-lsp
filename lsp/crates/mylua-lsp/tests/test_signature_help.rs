@@ -1,7 +1,7 @@
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::signature_help;
+use test_helpers::*;
 use tower_lsp_server::ls_types::ParameterLabel;
 
 #[test]
@@ -21,11 +21,17 @@ foo(1, "x")"#;
     assert_eq!(help.signatures.len(), 1, "one signature");
     let sig = &help.signatures[0];
     assert!(
-        sig.label.contains("foo(") && sig.label.contains("a: number") && sig.label.contains("b: string"),
+        sig.label.contains("foo(")
+            && sig.label.contains("a: number")
+            && sig.label.contains("b: string"),
         "label should include typed params, got: {:?}",
         sig.label,
     );
-    assert_eq!(help.active_parameter, Some(1), "cursor after comma → second param active");
+    assert_eq!(
+        help.active_parameter,
+        Some(1),
+        "cursor after comma → second param active"
+    );
     // Parameter offsets should point inside the label.
     assert_eq!(sig.parameters.as_ref().unwrap().len(), 2);
     for p in sig.parameters.as_ref().unwrap() {
@@ -46,10 +52,7 @@ local function make(amount, label) end
 return make"#;
     let main_src = r#"local make = require("maker")
 make(1, "x")"#;
-    let (docs, mut agg, _) = setup_workspace(&[
-        ("maker.lua", module_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _) = setup_workspace(&[("maker.lua", module_src), ("main.lua", main_src)]);
     let uri = make_uri("main.lua");
     let doc = docs.get(&intern_uri(&uri)).expect("main.lua document");
 
@@ -123,11 +126,13 @@ work("hi")"#;
     let overload = &h.signatures[1].label;
     assert!(
         primary.contains("n: number") && primary.contains(": number"),
-        "primary label: {}", primary,
+        "primary label: {}",
+        primary,
     );
     assert!(
         overload.contains("s: string") && overload.contains(": boolean"),
-        "overload label: {}", overload,
+        "overload label: {}",
+        overload,
     );
 }
 
@@ -181,12 +186,16 @@ f:init()"#;
 
     // Must include Foo's overload (string), not Bar's (number).
     assert!(
-        labels.iter().any(|l| l.contains("name: string") && l.contains(": Foo")),
+        labels
+            .iter()
+            .any(|l| l.contains("name: string") && l.contains(": Foo")),
         "should include Foo:init's overload `(name: string): Foo`, got: {:?}",
         labels,
     );
     assert!(
-        !labels.iter().any(|l| l.contains("n: number") && l.contains(": Bar")),
+        !labels
+            .iter()
+            .any(|l| l.contains("n: number") && l.contains(": Bar")),
         "must not include Bar:init's overload when calling on Foo, got: {:?}",
         labels,
     );
@@ -230,11 +239,18 @@ f:init()
     );
     let (docs, mut agg, _parser) = setup_workspace(&[decl, impl_file, caller]);
     let caller_uri = make_uri("caller.lua");
-    let doc = docs.get(&intern_uri(&caller_uri)).expect("caller doc present");
+    let doc = docs
+        .get(&intern_uri(&caller_uri))
+        .expect("caller doc present");
 
     // Cursor inside `f:init(|)` on line 2, col 7.
-    let h = mylua_lsp::signature_help::signature_help(doc, intern_uri(&caller_uri), pos(2, 7), &mut agg)
-        .expect("signatureHelp should resolve for f:init()");
+    let h = mylua_lsp::signature_help::signature_help(
+        doc,
+        intern_uri(&caller_uri),
+        pos(2, 7),
+        &mut agg,
+    )
+    .expect("signatureHelp should resolve for f:init()");
     let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
 
     // Exactly 2 signatures: `@field` primary + impl `@overload`. The impl
@@ -299,8 +315,9 @@ handler:shout("hi")"#;
     let (doc, uri, mut agg) = setup_single_file(src, "handler.lua");
 
     // Cursor inside `handler:shout(|"hi")` — line 10, column 14
-    let h = mylua_lsp::signature_help::signature_help(&doc, intern_uri(&uri), pos(10, 14), &mut agg)
-        .expect("signatureHelp should resolve for handler:shout()");
+    let h =
+        mylua_lsp::signature_help::signature_help(&doc, intern_uri(&uri), pos(10, 14), &mut agg)
+            .expect("signatureHelp should resolve for handler:shout()");
     let labels: Vec<String> = h.signatures.iter().map(|s| s.label.clone()).collect();
 
     // Exactly one signature: the `@field`-declared `(msg: string)`.
@@ -410,7 +427,8 @@ fn signature_help_global_anonymous_assignment() {
     let label = &h.signatures[0].label;
     assert!(
         label.contains("x") && label.contains("y"),
-        "global anon assignment should surface params, got: {}", label,
+        "global anon assignment should surface params, got: {}",
+        label,
     );
 }
 
@@ -429,12 +447,16 @@ o:move(10)"#;
 
     let h = signature_help::signature_help(&doc, intern_uri(&uri), pos(8, 7), &mut agg);
     if let Some(h) = h {
-        assert!(!h.signatures.is_empty(), "method call should return a signature");
+        assert!(
+            !h.signatures.is_empty(),
+            "method call should return a signature"
+        );
         let label = &h.signatures[0].label;
         // `self` must not appear in the visible parameter list for `:` call.
         assert!(
             !label.contains("self:"),
-            "method call signature must hide self, got: {}", label,
+            "method call signature must hide self, got: {}",
+            label,
         );
     }
 }

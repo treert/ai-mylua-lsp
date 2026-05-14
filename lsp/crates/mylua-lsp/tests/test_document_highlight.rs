@@ -38,7 +38,8 @@ fn document_highlight_local_read_and_write() {
             (1, 0, DocumentHighlightKind::WRITE),
             (2, 6, DocumentHighlightKind::READ),
         ],
-        "local decl + assignment + usage, got: {:?}", t,
+        "local decl + assignment + usage, got: {:?}",
+        t,
     );
 }
 
@@ -57,7 +58,8 @@ fn document_highlight_parameter_is_write() {
             (0, 11, DocumentHighlightKind::WRITE),
             (0, 21, DocumentHighlightKind::READ),
         ],
-        "parameter decl is Write, usage is Read, got: {:?}", t,
+        "parameter decl is Write, usage is Read, got: {:?}",
+        t,
     );
 }
 
@@ -124,7 +126,8 @@ fn document_highlight_shadowing_respects_scope() {
             (0, 6, DocumentHighlightKind::WRITE),
             (5, 6, DocumentHighlightKind::READ),
         ],
-        "shadowed inner `x` must not appear, got: {:?}", t,
+        "shadowed inner `x` must not appear, got: {:?}",
+        t,
     );
 
     // Click on INNER `x` at line 2, col 8. Expected: inner decl +
@@ -137,7 +140,8 @@ fn document_highlight_shadowing_respects_scope() {
             (2, 8, DocumentHighlightKind::WRITE),
             (3, 8, DocumentHighlightKind::READ),
         ],
-        "outer `x` must not appear when clicking inner, got: {:?}", t,
+        "outer `x` must not appear when clicking inner, got: {:?}",
+        t,
     );
 }
 
@@ -177,7 +181,8 @@ fn document_highlight_local_x_equals_x_rhs_not_new_local() {
             (1, 6, DocumentHighlightKind::WRITE),
             (2, 6, DocumentHighlightKind::READ),
         ],
-        "RHS `x` refers to outer, must not be highlighted, got: {:?}", t,
+        "RHS `x` refers to outer, must not be highlighted, got: {:?}",
+        t,
     );
 
     // Click on the OUTER `x` at line 0 col 6
@@ -189,7 +194,8 @@ fn document_highlight_local_x_equals_x_rhs_not_new_local() {
             (0, 6, DocumentHighlightKind::WRITE),
             (1, 10, DocumentHighlightKind::READ),
         ],
-        "outer `x` has decl + RHS reference; inner shadows rest, got: {:?}", t,
+        "outer `x` has decl + RHS reference; inner shadows rest, got: {:?}",
+        t,
     );
 }
 
@@ -211,7 +217,8 @@ fn document_highlight_indexed_assignment_base_is_read() {
             (2, 0, DocumentHighlightKind::READ),  // t[42] = 2 — base is read
             (3, 6, DocumentHighlightKind::READ),  // print(t)
         ],
-        "indexed-assignment base must classify as READ, got: {:?}", t,
+        "indexed-assignment base must classify as READ, got: {:?}",
+        t,
     );
 }
 

@@ -1,13 +1,13 @@
+use crate::aggregation::WorkspaceAggregation;
+use crate::document::{Document, DocumentLookup};
+use crate::lua_builtins::LUA_KEYWORDS;
+use crate::resolver;
+use crate::type_inference;
+use crate::uri_id::{resolve_uri, UriId};
+use crate::util::{node_text, walk_ancestors};
 use std::collections::HashSet;
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
-use crate::document::{Document, DocumentLookup};
-use crate::type_inference;
-use crate::resolver;
-use crate::uri_id::{resolve_uri, UriId};
-use crate::util::{node_text, walk_ancestors};
-use crate::aggregation::WorkspaceAggregation;
-use crate::lua_builtins::LUA_KEYWORDS;
 
 /// Build the resolve-payload attached to a completion item so that
 /// `completion_resolve` can re-locate the symbol on demand.
@@ -16,17 +16,40 @@ fn resolve_data(kind: &str, uri_id: Option<UriId>, name: &str) -> serde_json::Va
     obj.insert("kind".into(), serde_json::Value::String(kind.to_string()));
     obj.insert("name".into(), serde_json::Value::String(name.to_string()));
     if let Some(id) = uri_id {
-        obj.insert("uri".into(), serde_json::Value::String(resolve_uri(id).to_string()));
+        obj.insert(
+            "uri".into(),
+            serde_json::Value::String(resolve_uri(id).to_string()),
+        );
     }
     serde_json::Value::Object(obj)
 }
 
 /// EmmyLua annotation tags that can appear after `---@`.
 const EMMY_TAGS: &[&str] = &[
-    "class", "field", "param", "return", "type", "alias", "enum",
-    "generic", "overload", "vararg", "deprecated", "async", "nodiscard",
-    "see", "meta", "diagnostic", "cast", "operator", "private", "protected",
-    "package", "public", "readonly", "version",
+    "class",
+    "field",
+    "param",
+    "return",
+    "type",
+    "alias",
+    "enum",
+    "generic",
+    "overload",
+    "vararg",
+    "deprecated",
+    "async",
+    "nodiscard",
+    "see",
+    "meta",
+    "diagnostic",
+    "cast",
+    "operator",
+    "private",
+    "protected",
+    "package",
+    "public",
+    "readonly",
+    "version",
 ];
 
 pub fn complete(
@@ -70,7 +93,9 @@ pub fn complete(
 /// right after `---@` (with optional partial tag text). Triggered both via
 /// the `@` trigger character and manual invocation.
 fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     let bytes = doc.source();
     // EmmyLua tags are lowercase ASCII letters only (`class`, `param`, …).
     // We deliberately do NOT skip digits / underscores here; doing so would
@@ -90,7 +115,9 @@ fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<Com
         .iter()
         .rposition(|&b| b == b'\n')
         .map_or(0, |p| p + 1);
-    let prefix_to_at = std::str::from_utf8(&bytes[line_start..at_pos]).ok()?.trim_start();
+    let prefix_to_at = std::str::from_utf8(&bytes[line_start..at_pos])
+        .ok()?
+        .trim_start();
     if !prefix_to_at.starts_with("--") {
         return None;
     }
@@ -122,10 +149,10 @@ fn try_require_path_completion(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
-    let node = doc
-        .root_node()?
-        .descendant_for_byte_range(offset, offset)?;
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
+    let node = doc.root_node()?.descendant_for_byte_range(offset, offset)?;
 
     // Walk up looking for a string node whose ancestor is `require("...")`.
     // `walk_ancestors` caps depth with a shared safety limit + logs on
@@ -192,7 +219,9 @@ fn try_dot_completion_ast(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<Vec<CompletionItem>> {
-    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     if offset == 0 {
         return None;
     }
@@ -200,8 +229,7 @@ fn try_dot_completion_ast(
     let bytes = doc.source();
     // Walk back past any partial identifier after the dot/colon.
     let mut dot_pos = offset;
-    while dot_pos > 0
-        && (bytes[dot_pos - 1].is_ascii_alphanumeric() || bytes[dot_pos - 1] == b'_')
+    while dot_pos > 0 && (bytes[dot_pos - 1].is_ascii_alphanumeric() || bytes[dot_pos - 1] == b'_')
     {
         dot_pos -= 1;
     }
@@ -210,12 +238,20 @@ fn try_dot_completion_ast(
     }
     let is_method = bytes[dot_pos - 1] == b':';
     let base_end = dot_pos - 1;
-    let prefix = std::str::from_utf8(&bytes[dot_pos..offset]).ok()?.to_string();
+    let prefix = std::str::from_utf8(&bytes[dot_pos..offset])
+        .ok()?
+        .to_string();
 
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
     let base_node = find_base_expression_node(doc.root_node()?, base_end)?;
-    let base_fact = type_inference::infer_node_type_in_file_id(base_node, bytes, uri_id, &doc.scope_tree, index);
+    let base_fact = type_inference::infer_node_type_in_file_id(
+        base_node,
+        bytes,
+        uri_id,
+        &doc.scope_tree,
+        index,
+    );
 
     let fields = resolver::get_fields_for_type_id(uri_id, &base_fact, index);
     if fields.is_empty() {
@@ -297,7 +333,10 @@ fn is_base_expr_kind(kind: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn get_prefix(doc: &Document, position: Position) -> String {
-    let Some(offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
+    let Some(offset) = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)
+    else {
         return String::new();
     };
     let bytes = doc.source();
@@ -321,7 +360,10 @@ fn collect_scope_completions(
     items: &mut Vec<CompletionItem>,
     seen: &mut HashSet<String>,
 ) {
-    let Some(offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
+    let Some(offset) = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)
+    else {
         return;
     };
     for decl in doc.scope_tree.visible_locals(offset) {
@@ -350,9 +392,10 @@ fn collect_global_completions(
     for (name, candidates) in index.global_shard.iter_roots_with_prefix(prefix) {
         if !seen.contains(&name) {
             seen.insert(name.clone());
-            let kind = if candidates.iter().any(|c| {
-                matches!(c.kind, crate::summary::GlobalContributionKind::Function)
-            }) {
+            let kind = if candidates
+                .iter()
+                .any(|c| matches!(c.kind, crate::summary::GlobalContributionKind::Function))
+            {
                 CompletionItemKind::FUNCTION
             } else {
                 CompletionItemKind::VARIABLE
@@ -389,8 +432,14 @@ pub fn resolve_completion(
     // the borrow.
     let (kind, name) = match item.data.as_ref() {
         Some(data) => (
-            data.get("kind").and_then(|v| v.as_str()).unwrap_or("").to_string(),
-            data.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+            data.get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+            data.get("name")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
         ),
         None => return item,
     };
@@ -473,7 +522,9 @@ fn resolve_local_item(
     };
     // Without position context, find the last declaration matching the name
     // (best-effort — innermost scope wins in declaration order).
-    let type_display = doc.scope_tree.all_declarations()
+    let type_display = doc
+        .scope_tree
+        .all_declarations()
         .filter(|d| d.name == name)
         .last()
         .and_then(|d| d.type_fact.as_ref())
@@ -502,4 +553,3 @@ fn collect_keyword_completions(
         }
     }
 }
-

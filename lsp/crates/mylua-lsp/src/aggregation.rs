@@ -133,7 +133,8 @@ fn split_global_path(path: &str) -> (&str, Vec<&str>) {
     let mut pos = root_end;
     while pos < path.len() {
         pos += 1; // skip separator
-        let next = path[pos..].find(|c: char| c == '.' || c == ':')
+        let next = path[pos..]
+            .find(|c: char| c == '.' || c == ':')
             .map(|off| pos + off)
             .unwrap_or(path.len());
         segments.push(&path[pos..next]);
@@ -163,7 +164,11 @@ impl GlobalNode {
 
     /// DFS collect all entries with non-empty candidates.
     /// `prefix` is the full path up to (and including) this node.
-    fn collect_entries<'a>(&'a self, prefix: &str, out: &mut Vec<(String, &'a Vec<GlobalCandidate>)>) {
+    fn collect_entries<'a>(
+        &'a self,
+        prefix: &str,
+        out: &mut Vec<(String, &'a Vec<GlobalCandidate>)>,
+    ) {
         if !self.candidates.is_empty() {
             // Use the candidate's own `name` field to preserve the
             // original separator (`:` vs `.`). The trie merges both
@@ -256,11 +261,13 @@ impl GlobalShard {
 
         // Walk/create nodes.
         let (root, segments) = split_global_path(path);
-        let mut node = self.roots
+        let mut node = self
+            .roots
             .entry(intern_lua_symbol(root))
             .or_insert_with(GlobalNode::new);
         for seg in segments {
-            node = node.children
+            node = node
+                .children
                 .entry(intern_lua_symbol(seg))
                 .or_insert_with(GlobalNode::new);
         }
@@ -292,7 +299,9 @@ impl GlobalShard {
     /// Remove all candidates contributed by a given URI.
     /// Uses the reverse index for O(contributions-per-file) work.
     pub fn remove_by_uri(&mut self, uri_id: UriId) {
-        let Some(paths) = self.uri_to_paths.remove(&uri_id) else { return };
+        let Some(paths) = self.uri_to_paths.remove(&uri_id) else {
+            return;
+        };
         for path in &paths {
             if let Some(node) = self.get_node_mut(path) {
                 node.candidates.retain(|c| c.source_uri_id() != uri_id);
@@ -348,7 +357,6 @@ impl GlobalShard {
         }
         stats
     }
-
 }
 
 impl Default for GlobalShard {
@@ -397,7 +405,9 @@ impl WorkspaceAggregation {
     }
 
     pub fn summaries_iter_id(&self) -> impl Iterator<Item = (UriId, &DocumentSummary)> {
-        self.summaries.iter().map(|(uri_id, summary)| (*uri_id, summary))
+        self.summaries
+            .iter()
+            .map(|(uri_id, summary)| (*uri_id, summary))
     }
 
     pub fn summaries_values(&self) -> impl Iterator<Item = &DocumentSummary> {
@@ -489,20 +499,21 @@ impl WorkspaceAggregation {
             // 2. Build all shards in a single pass.
             for (uri_id, summary) in summaries {
                 for gc in &summary.global_contributions {
-                    global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
-                        name: gc.name,
-                        kind: gc.kind.clone(),
-                        type_fact: gc.type_fact.clone(),
-                        range: gc.range,
-                        selection_range: gc.selection_range,
-                        source_uri_id: *uri_id,
-                    });
+                    global_shard.push_candidate(
+                        gc.name.as_str(),
+                        GlobalCandidate {
+                            name: gc.name,
+                            kind: gc.kind.clone(),
+                            type_fact: gc.type_fact.clone(),
+                            range: gc.range,
+                            selection_range: gc.selection_range,
+                            source_uri_id: *uri_id,
+                        },
+                    );
                 }
 
                 for td in &summary.type_definitions {
-                    let candidates = type_shard
-                        .entry(td.name)
-                        .or_default();
+                    let candidates = type_shard.entry(td.name).or_default();
                     candidates.push(TypeCandidate {
                         name: td.name,
                         kind: td.kind.clone(),
@@ -516,18 +527,23 @@ impl WorkspaceAggregation {
         // 3. Sort candidate lists once (not per-insert like upsert_summary).
         //    Pre-compute URI priority so each URI is evaluated only once
         //    (avoids repeated String allocations inside sort comparisons).
-        let id_priority: HashMap<UriId, UriPriority> = self.summaries
+        let id_priority: HashMap<UriId, UriPriority> = self
+            .summaries
             .iter()
             .map(|(id, _)| (*id, uri_priority(*id)))
             .collect();
         let default_priority = UriPriority::worst();
 
         self.global_shard.sort_all(|c| {
-            *id_priority.get(&c.source_uri_id()).unwrap_or(&default_priority)
+            *id_priority
+                .get(&c.source_uri_id())
+                .unwrap_or(&default_priority)
         });
         for candidates in self.type_shard.values_mut() {
             candidates.sort_by_cached_key(|c| {
-                *id_priority.get(&c.source_uri_id()).unwrap_or(&default_priority)
+                *id_priority
+                    .get(&c.source_uri_id())
+                    .unwrap_or(&default_priority)
             });
         }
     }
@@ -538,21 +554,25 @@ impl WorkspaceAggregation {
     /// and inserts new ones.
     pub fn upsert_summary(&mut self, uri_id: UriId, summary: DocumentSummary) {
         self.remove_contributions(uri_id);
-        let summary_priorities: HashMap<UriId, UriPriority> = self.summaries
+        let summary_priorities: HashMap<UriId, UriPriority> = self
+            .summaries
             .iter()
             .map(|(id, _)| (*id, uri_priority(*id)))
             .collect();
         let current_priority = uri_priority(uri_id);
 
         for gc in &summary.global_contributions {
-            self.global_shard.push_candidate(gc.name.as_str(), GlobalCandidate {
-                name: gc.name,
-                kind: gc.kind.clone(),
-                type_fact: gc.type_fact.clone(),
-                range: gc.range,
-                selection_range: gc.selection_range,
-                source_uri_id: uri_id,
-            });
+            self.global_shard.push_candidate(
+                gc.name.as_str(),
+                GlobalCandidate {
+                    name: gc.name,
+                    kind: gc.kind.clone(),
+                    type_fact: gc.type_fact.clone(),
+                    range: gc.range,
+                    selection_range: gc.selection_range,
+                    source_uri_id: uri_id,
+                },
+            );
             self.global_shard.sort_at(gc.name.as_str(), |c| {
                 summary_priorities
                     .get(&c.source_uri_id())
@@ -562,9 +582,7 @@ impl WorkspaceAggregation {
         }
 
         for td in &summary.type_definitions {
-            let candidates = self.type_shard
-                .entry(td.name)
-                .or_default();
+            let candidates = self.type_shard.entry(td.name).or_default();
             candidates.push(TypeCandidate {
                 name: td.name,
                 kind: td.kind.clone(),
@@ -602,7 +620,10 @@ impl WorkspaceAggregation {
         let module_name = intern_lua_symbol(&module_name);
         let entries = self.module_index.entry(last_seg).or_default();
         // Avoid duplicates: if this exact (module_name, uri_id) pair exists, skip.
-        if !entries.iter().any(|(m, id)| *m == module_name && *id == uri_id) {
+        if !entries
+            .iter()
+            .any(|(m, id)| *m == module_name && *id == uri_id)
+        {
             entries.push((module_name, uri_id));
         }
     }

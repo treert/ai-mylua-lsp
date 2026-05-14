@@ -41,7 +41,8 @@ fn folding_range_function_with_body() {
 fn folding_range_nested_control_flow() {
     // function f() if x then for i=1,10 do end end end
     // expanded onto separate lines
-    let src = "function f()\n  if x then\n    for i = 1, 10 do\n      print(i)\n    end\n  end\nend\n";
+    let src =
+        "function f()\n  if x then\n    for i = 1, 10 do\n      print(i)\n    end\n  end\nend\n";
     let (doc, _uri, _agg) = setup_single_file(src, "nested.lua");
     let folds = folding_range(&doc);
     assert_eq!(
@@ -98,7 +99,12 @@ fn folding_range_for_numeric_and_generic() {
     let src = "for i = 1, 10 do\n  print(i)\nend\nfor k, v in pairs(t) do\n  print(k)\nend\n";
     let (doc, _uri, _agg) = setup_single_file(src, "for.lua");
     let folds = folding_range(&doc);
-    assert_eq!(folds.len(), 2, "both for-loops should fold, got: {:?}", folds);
+    assert_eq!(
+        folds.len(),
+        2,
+        "both for-loops should fold, got: {:?}",
+        folds
+    );
 }
 
 #[test]
@@ -141,7 +147,9 @@ fn folding_range_line_comment_not_folded() {
     let (doc, _uri, _agg) = setup_single_file(src, "line_comment.lua");
     let folds = folding_range(&doc);
     assert!(
-        folds.iter().all(|f| f.kind != Some(FoldingRangeKind::Comment)),
+        folds
+            .iter()
+            .all(|f| f.kind != Some(FoldingRangeKind::Comment)),
         "single-line `--` comment must not fold, got: {:?}",
         folds,
     );
@@ -209,31 +217,42 @@ end
         .collect();
     // 1 outer + 1 if-branch + 1 elseif-branch + 1 else-branch = 4 region folds.
     assert_eq!(
-        regions.len(), 4,
-        "expect 4 region folds (whole + 3 branches), got: {:?}", regions,
+        regions.len(),
+        4,
+        "expect 4 region folds (whole + 3 branches), got: {:?}",
+        regions,
     );
 
     // Whole if_statement: start=0; tree-sitter stops the node at the
     // `end` keyword row (9), so end_line = end_row-1 = 8.
-    let outer = regions.iter().find(|f| f.start_line == 0 && f.end_line == 8);
-    assert!(outer.is_some(), "outer if_statement fold missing: {:?}", regions);
+    let outer = regions
+        .iter()
+        .find(|f| f.start_line == 0 && f.end_line == 8);
+    assert!(
+        outer.is_some(),
+        "outer if_statement fold missing: {:?}",
+        regions
+    );
 
     // if-branch: start=0, end=2 (row before `elseif`).
     assert!(
         regions.iter().any(|f| f.start_line == 0 && f.end_line == 2),
-        "if-branch fold missing: {:?}", regions,
+        "if-branch fold missing: {:?}",
+        regions,
     );
 
     // elseif-branch: start=3, end=5 (row before `else`).
     assert!(
         regions.iter().any(|f| f.start_line == 3 && f.end_line == 5),
-        "elseif-branch fold missing: {:?}", regions,
+        "elseif-branch fold missing: {:?}",
+        regions,
     );
 
     // else-branch: start=6, end=8 (row before `end`).
     assert!(
         regions.iter().any(|f| f.start_line == 6 && f.end_line == 8),
-        "else-branch fold missing: {:?}", regions,
+        "else-branch fold missing: {:?}",
+        regions,
     );
 }
 
@@ -253,8 +272,10 @@ end
         .filter(|f| f.kind == Some(FoldingRangeKind::Region))
         .collect();
     assert_eq!(
-        regions.len(), 1,
-        "simple `if ... end` should yield only the outer fold, got: {:?}", regions,
+        regions.len(),
+        1,
+        "simple `if ... end` should yield only the outer fold, got: {:?}",
+        regions,
     );
 }
 
@@ -282,6 +303,7 @@ end
     // The elseif-branch is single-line → skipped.
     assert!(
         !regions.iter().any(|f| f.start_line == 2),
-        "single-line elseif body must not produce a fold, got: {:?}", regions,
+        "single-line elseif body must not produce a fold, got: {:?}",
+        regions,
     );
 }

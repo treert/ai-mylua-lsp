@@ -101,7 +101,9 @@ fn fold_for_if_branch(if_stmt: tree_sitter::Node) -> Option<FoldingRange> {
     // on the `if_statement` node.
     let mut first_clause_row: Option<u32> = None;
     for i in 0..if_stmt.named_child_count() {
-        let Some(child) = if_stmt.named_child(i as u32) else { continue };
+        let Some(child) = if_stmt.named_child(i as u32) else {
+            continue;
+        };
         if matches!(child.kind(), "elseif_clause" | "else_clause") {
             first_clause_row = Some(child.start_position().row as u32);
             break;

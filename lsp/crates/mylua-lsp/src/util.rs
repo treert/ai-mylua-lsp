@@ -1,6 +1,6 @@
+use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use serde::{Serialize, Deserialize};
 use tower_lsp_server::ls_types::*;
 
 pub fn hash_bytes(data: &[u8]) -> u64 {
@@ -29,8 +29,7 @@ pub fn percent_decode(s: &str) -> String {
         out.push(b);
         i += 1;
     }
-    String::from_utf8(out)
-        .unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
+    String::from_utf8(out).unwrap_or_else(|e| String::from_utf8_lossy(&e.into_bytes()).into_owned())
 }
 
 fn hex_val(b: u8) -> Option<u8> {
@@ -99,7 +98,10 @@ impl LineIndex {
         let col_bytes = byte_offset - line_start;
         let line_bytes = self.line_bytes_for_row(source, row);
         let character = encode_col(line_bytes, col_bytes);
-        Some(Position { line: row as u32, character })
+        Some(Position {
+            line: row as u32,
+            character,
+        })
     }
 
     /// Convert an LSP `Position` to a byte offset. O(1) line lookup +
@@ -127,8 +129,8 @@ impl LineIndex {
             .line_starts
             .get(row + 1)
             .map(|&next| next.saturating_sub(1)) // skip the '\n'
-            .unwrap_or(source.len());             // last line: no trailing '\n'
-        // Strip trailing '\r' for Windows-style \r\n line endings.
+            .unwrap_or(source.len()); // last line: no trailing '\n'
+                                      // Strip trailing '\r' for Windows-style \r\n line endings.
         if end > start && source.get(end.wrapping_sub(1)) == Some(&b'\r') {
             end -= 1;
         }
@@ -180,12 +182,16 @@ impl LineIndex {
     /// Column values from the LSP `Range` are stored directly (they are
     /// already in the negotiated encoding).
     pub fn lsp_range_to_byte_range(&self, range: Range, source: &[u8]) -> ByteRange {
-        let start_line_start = self.byte_offset_of_line(range.start.line as usize).unwrap_or(0);
+        let start_line_start = self
+            .byte_offset_of_line(range.start.line as usize)
+            .unwrap_or(0);
         let start_line_bytes = self.line_bytes_for_row(source, range.start.line as usize);
         let start_col_byte = decode_col(start_line_bytes, range.start.character);
         let start_byte = start_line_start + start_col_byte;
 
-        let end_line_start = self.byte_offset_of_line(range.end.line as usize).unwrap_or(0);
+        let end_line_start = self
+            .byte_offset_of_line(range.end.line as usize)
+            .unwrap_or(0);
         let end_line_bytes = self.line_bytes_for_row(source, range.end.line as usize);
         let end_col_byte = decode_col(end_line_bytes, range.end.character);
         let end_byte = end_line_start + end_col_byte;
@@ -268,8 +274,14 @@ pub struct ByteRange {
 impl From<ByteRange> for Range {
     fn from(br: ByteRange) -> Self {
         Range {
-            start: Position { line: br.start_row, character: br.start_col },
-            end: Position { line: br.end_row, character: br.end_col },
+            start: Position {
+                line: br.start_row,
+                character: br.start_col,
+            },
+            end: Position {
+                line: br.end_row,
+                character: br.end_col,
+            },
         }
     }
 }
@@ -289,7 +301,6 @@ pub fn truncate(s: &str, max: usize) -> String {
         format!("{}...", &s[..cut].replace('\n', "\\n"))
     }
 }
-
 
 /// Encode a byte column to the negotiated position encoding.
 /// In UTF-8 mode, returns the byte column as-is; in UTF-16 mode,
@@ -329,8 +340,6 @@ pub fn byte_col_to_utf16_col(line_bytes: &[u8], byte_col: usize) -> u32 {
     }
     units
 }
-
-
 
 /// Convert a UTF-16 code-unit column within `line_bytes` (UTF-8) back to a
 /// byte column. Values past end-of-line are clamped to the line length.
@@ -431,11 +440,7 @@ pub fn walk_ancestors<'a, T>(
 /// and emit the edit as an append at EOF. This is safer than silently
 /// inserting at byte 0, which would corrupt the document. A warning is
 /// logged so the mismatch is visible in the log file.
-pub fn apply_text_edit(
-    text: &mut String,
-    range: Range,
-    new_text: &str,
-) -> tree_sitter::InputEdit {
+pub fn apply_text_edit(text: &mut String, range: Range, new_text: &str) -> tree_sitter::InputEdit {
     // Build the line index once for the pre-edit text and reuse it for
     // all position lookups within this function.
     let idx = LineIndex::new(text.as_bytes());
@@ -447,35 +452,36 @@ pub fn apply_text_edit(
     // scan of `byte_offset_to_ts_point` when we clamp to EOF, so editing
     // near the end of a large file doesn't force an O(file_size) rescan
     // for every keystroke.
-    let (start_byte, start_point, old_end_byte, old_end_point) =
-        match (raw_start, raw_end) {
-            (Some(s), Some(e)) if s <= e => {
-                let s_line_start =
-                    idx.byte_offset_of_line(range.start.line as usize).unwrap_or(0);
-                let e_line_start =
-                    idx.byte_offset_of_line(range.end.line as usize).unwrap_or(s_line_start);
-                let s_point = tree_sitter::Point {
-                    row: range.start.line as usize,
-                    column: s.saturating_sub(s_line_start),
-                };
-                let e_point = tree_sitter::Point {
-                    row: range.end.line as usize,
-                    column: e.saturating_sub(e_line_start),
-                };
-                (s, s_point, e, e_point)
-            }
-            _ => {
-                crate::lsp_log!(
-                    "[apply_text_edit] out-of-range Range {:?}/{:?} (text len={}); \
+    let (start_byte, start_point, old_end_byte, old_end_point) = match (raw_start, raw_end) {
+        (Some(s), Some(e)) if s <= e => {
+            let s_line_start = idx
+                .byte_offset_of_line(range.start.line as usize)
+                .unwrap_or(0);
+            let e_line_start = idx
+                .byte_offset_of_line(range.end.line as usize)
+                .unwrap_or(s_line_start);
+            let s_point = tree_sitter::Point {
+                row: range.start.line as usize,
+                column: s.saturating_sub(s_line_start),
+            };
+            let e_point = tree_sitter::Point {
+                row: range.end.line as usize,
+                column: e.saturating_sub(e_line_start),
+            };
+            (s, s_point, e, e_point)
+        }
+        _ => {
+            crate::lsp_log!(
+                "[apply_text_edit] out-of-range Range {:?}/{:?} (text len={}); \
                      clamping to EOF",
-                    range.start,
-                    range.end,
-                    text.len(),
-                );
-                let p = byte_offset_to_ts_point(text.as_bytes(), text.len());
-                (text.len(), p, text.len(), p)
-            }
-        };
+                range.start,
+                range.end,
+                text.len(),
+            );
+            let p = byte_offset_to_ts_point(text.as_bytes(), text.len());
+            (text.len(), p, text.len(), p)
+        }
+    };
 
     text.replace_range(start_byte..old_end_byte, new_text);
 
@@ -643,12 +649,16 @@ pub fn extract_call_arg_nodes<'tree>(
 pub fn is_bracket_key_only_table(constructor: tree_sitter::Node) -> bool {
     let mut has_fields = false;
     for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else { continue };
+        let Some(field_list) = constructor.named_child(i as u32) else {
+            continue;
+        };
         if field_list.kind() != "field_list" {
             continue;
         }
         for j in 0..field_list.named_child_count() {
-            let Some(field_node) = field_list.named_child(j as u32) else { continue };
+            let Some(field_node) = field_list.named_child(j as u32) else {
+                continue;
+            };
             if field_node.kind() != "field" {
                 continue;
             }
@@ -730,8 +740,14 @@ mod tests {
         let edit = apply_text_edit(
             &mut text,
             Range {
-                start: Position { line: 0, character: 6 },
-                end: Position { line: 0, character: 6 },
+                start: Position {
+                    line: 0,
+                    character: 6,
+                },
+                end: Position {
+                    line: 0,
+                    character: 6,
+                },
             },
             "!",
         );
@@ -753,12 +769,22 @@ mod tests {
         let edit = apply_text_edit(
             &mut text,
             Range {
-                start: Position { line: 99, character: 99 },
-                end: Position { line: 99, character: 99 },
+                start: Position {
+                    line: 99,
+                    character: 99,
+                },
+                end: Position {
+                    line: 99,
+                    character: 99,
+                },
             },
             "!",
         );
-        assert_eq!(text, format!("{}{}", original, "!"), "must append, not prepend");
+        assert_eq!(
+            text,
+            format!("{}{}", original, "!"),
+            "must append, not prepend"
+        );
         assert_eq!(edit.start_byte, original.len());
         assert_eq!(edit.old_end_byte, original.len());
         assert_eq!(edit.new_end_byte, original.len() + 1);
@@ -771,8 +797,14 @@ mod tests {
         let edit = apply_text_edit(
             &mut text,
             Range {
-                start: Position { line: 1, character: 0 },
-                end: Position { line: 1, character: 1 },
+                start: Position {
+                    line: 1,
+                    character: 0,
+                },
+                end: Position {
+                    line: 1,
+                    character: 1,
+                },
             },
             "XX\nYY",
         );
@@ -787,7 +819,10 @@ mod tests {
         // LSP sends column as UTF-16 units. For line "中abc", column 3 (past
         // 中ab) should map to byte 5 (3 for 中 + 2 for ab).
         let src = "---\n中abc";
-        let pos = Position { line: 1, character: 3 };
+        let pos = Position {
+            line: 1,
+            character: 3,
+        };
         let byte = position_to_byte_offset(src, pos).unwrap();
         assert_eq!(&src.as_bytes()[byte..byte + 1], b"c");
     }
@@ -893,16 +928,26 @@ mod tests {
 
         // Prime cache with src_a and verify each line start.
         for (row, expected) in [(0u32, 0usize), (1, 4), (2, 8)] {
-            let pos = Position { line: row, character: 0 };
+            let pos = Position {
+                line: row,
+                character: 0,
+            };
             assert_eq!(
                 position_to_byte_offset(src_a, pos),
                 Some(expected),
-                "src_a row {}", row
+                "src_a row {}",
+                row
             );
         }
         // Out-of-range row yields None (past the last line).
         assert_eq!(
-            position_to_byte_offset(src_a, Position { line: 3, character: 0 }),
+            position_to_byte_offset(
+                src_a,
+                Position {
+                    line: 3,
+                    character: 0
+                }
+            ),
             None,
             "src_a row 3 should be None (out of range, no trailing newline)"
         );
@@ -911,17 +956,27 @@ mod tests {
         // If it didn't, row 4 would either return None (A had only 3
         // lines) or the stale offset from A.
         for (row, expected) in [(0u32, 0usize), (1, 2), (2, 4), (3, 6), (4, 8)] {
-            let pos = Position { line: row, character: 0 };
+            let pos = Position {
+                line: row,
+                character: 0,
+            };
             assert_eq!(
                 position_to_byte_offset(src_b, pos),
                 Some(expected),
-                "src_b row {}", row
+                "src_b row {}",
+                row
             );
         }
 
         // Switch back to src_a — must still produce A's offsets.
         assert_eq!(
-            position_to_byte_offset(src_a, Position { line: 1, character: 0 }),
+            position_to_byte_offset(
+                src_a,
+                Position {
+                    line: 1,
+                    character: 0
+                }
+            ),
             Some(4),
             "src_a row 1 after round-trip through src_b"
         );
@@ -957,7 +1012,10 @@ mod tests {
         let br = idx.ts_node_to_byte_range(number, src.as_bytes());
         let lsp_range: Range = br.into();
         let expected = idx.ts_node_to_range(number, src.as_bytes());
-        assert_eq!(lsp_range, expected, "ASCII: byte_range_to_lsp_range must match ts_node_to_range");
+        assert_eq!(
+            lsp_range, expected,
+            "ASCII: byte_range_to_lsp_range must match ts_node_to_range"
+        );
     }
 
     #[test]
@@ -972,7 +1030,10 @@ mod tests {
         let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
         let lsp_range: Range = br.into();
         let expected = idx.ts_node_to_range(string_node, src.as_bytes());
-        assert_eq!(lsp_range, expected, "Chinese: byte_range_to_lsp_range must match ts_node_to_range");
+        assert_eq!(
+            lsp_range, expected,
+            "Chinese: byte_range_to_lsp_range must match ts_node_to_range"
+        );
     }
 
     #[test]
@@ -985,7 +1046,10 @@ mod tests {
         let br = idx.ts_node_to_byte_range(string_node, src.as_bytes());
         let lsp_range: Range = br.into();
         let back = idx.lsp_range_to_byte_range(lsp_range, src.as_bytes());
-        assert_eq!(back, br, "roundtrip: lsp_range_to_byte_range(byte_range_to_lsp_range(br)) must equal br");
+        assert_eq!(
+            back, br,
+            "roundtrip: lsp_range_to_byte_range(byte_range_to_lsp_range(br)) must equal br"
+        );
     }
 
     #[test]

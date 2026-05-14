@@ -104,8 +104,12 @@ pub(crate) fn known_types_compatible(declared: &KnownType, actual: &KnownType) -
         (KnownType::Boolean, KnownType::Boolean) => true,
         (KnownType::Table(_), KnownType::Table(_)) => true,
         // __array<T> is compatible with table and vice versa
-        (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name.as_str() == "__array" => true,
-        (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name.as_str() == "__array" => true,
+        (KnownType::EmmyGeneric(name, _), KnownType::Table(_)) if name.as_str() == "__array" => {
+            true
+        }
+        (KnownType::Table(_), KnownType::EmmyGeneric(name, _)) if name.as_str() == "__array" => {
+            true
+        }
         (
             KnownType::Function(_) | KnownType::FunctionRef(_),
             KnownType::Function(_) | KnownType::FunctionRef(_),

@@ -59,7 +59,10 @@ async fn alternating_changes_share_one_global_debounce_window() {
     tokio::time::sleep(std::time::Duration::from_millis(120)).await;
     s.schedule_changed(id("a"), false);
 
-    tokio::time::sleep(std::time::Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS - 100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(
+        DIAGNOSTIC_DEBOUNCE_MS - 100,
+    ))
+    .await;
     assert_eq!(s.pop(), None);
 
     tokio::time::sleep(std::time::Duration::from_millis(150)).await;
@@ -77,7 +80,10 @@ async fn cascade_full_collects_all_files_after_debounce() {
     );
 
     s.schedule_changed(id("changed"), true);
-    tokio::time::sleep(std::time::Duration::from_millis(DIAGNOSTIC_DEBOUNCE_MS + 100)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(
+        DIAGNOSTIC_DEBOUNCE_MS + 100,
+    ))
+    .await;
 
     assert_eq!(s.pop(), Some(id("changed")));
     assert_eq!(s.pop(), Some(id("open1")));

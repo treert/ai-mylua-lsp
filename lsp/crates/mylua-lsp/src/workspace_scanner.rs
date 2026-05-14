@@ -1,7 +1,7 @@
-use std::path::{Path, PathBuf};
-use tower_lsp_server::ls_types::Uri;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use jwalk::WalkDir;
+use std::path::{Path, PathBuf};
+use tower_lsp_server::ls_types::Uri;
 
 use crate::config::{RequireConfig, WorkspaceConfig};
 
@@ -26,7 +26,6 @@ impl FileFilter {
         }
         !self.exclude.is_match(relative_path)
     }
-
 }
 
 fn build_globset(patterns: &[String]) -> GlobSet {
@@ -289,10 +288,7 @@ fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
 ///
 /// Returned paths are suitable to pass as additional roots to
 /// `scan_and_collect_lua_files` / `collect_lua_files`.
-pub fn resolve_library_roots(
-    library: &[String],
-    workspace_roots: &[PathBuf],
-) -> Vec<PathBuf> {
+pub fn resolve_library_roots(library: &[String], workspace_roots: &[PathBuf]) -> Vec<PathBuf> {
     let first_root = workspace_roots.first();
     let mut seen: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
     let mut out: Vec<PathBuf> = Vec::new();
@@ -458,7 +454,9 @@ fn lowercase_drive_in_uri(uri: Uri) -> Uri {
                 let mut owned = s.to_owned();
                 // SAFETY: replacing one ASCII byte with another ASCII byte
                 // preserves UTF-8 validity.
-                unsafe { owned.as_bytes_mut()[8] = lower; }
+                unsafe {
+                    owned.as_bytes_mut()[8] = lower;
+                }
                 if let Ok(new_uri) = owned.parse::<Uri>() {
                     return new_uri;
                 }
@@ -623,5 +621,4 @@ mod tests {
         let out = resolve_library_roots(&["stubs".to_string()], &[]);
         assert!(out.is_empty());
     }
-
 }

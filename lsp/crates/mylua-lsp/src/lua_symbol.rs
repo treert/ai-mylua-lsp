@@ -1,7 +1,7 @@
 use std::fmt;
+use std::num::NonZeroUsize;
 use std::ops::Deref;
 use std::sync::OnceLock;
-use std::num::NonZeroUsize;
 
 use lasso::{Capacity, Spur, ThreadedRodeo};
 use serde::{Serialize, Serializer};
@@ -113,9 +113,10 @@ impl Serialize for LuaSymbol {
 
 fn symbols() -> &'static ThreadedRodeo {
     LUA_SYMBOLS.get_or_init(|| {
-        ThreadedRodeo::with_capacity(
-            Capacity::new(128_0000, NonZeroUsize::new(32 * 1024 * 1024).unwrap())
-        )
+        ThreadedRodeo::with_capacity(Capacity::new(
+            128_0000,
+            NonZeroUsize::new(32 * 1024 * 1024).unwrap(),
+        ))
     })
 }
 

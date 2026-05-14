@@ -29,16 +29,14 @@ use crate::uri_id::intern_uri;
 use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{
-    indexing, semantic_tokens_legend, start_diagnostic_consumer, uri_to_path, Backend,
-    ColEncoding, POSITION_ENCODING,
+    indexing, semantic_tokens_legend, start_diagnostic_consumer, uri_to_path, Backend, ColEncoding,
+    POSITION_ENCODING,
 };
 use std::sync::atomic::Ordering;
 
 impl LanguageServer for Backend {
     async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
-        let incoming_cfg = params
-            .initialization_options
-            .map(LspConfig::from_value);
+        let incoming_cfg = params.initialization_options.map(LspConfig::from_value);
 
         let mut roots = Vec::new();
         if let Some(folders) = &params.workspace_folders {
@@ -100,7 +98,11 @@ impl LanguageServer for Backend {
             .unwrap_or(PositionEncodingKind::UTF16);
 
         let is_utf8 = negotiated_encoding == PositionEncodingKind::UTF8;
-        let enc = if is_utf8 { ColEncoding::Utf8 } else { ColEncoding::Utf16 };
+        let enc = if is_utf8 {
+            ColEncoding::Utf8
+        } else {
+            ColEncoding::Utf16
+        };
         POSITION_ENCODING.store(enc as u8, Ordering::Relaxed);
         lsp_log!(
             "[mylua-lsp] position encoding: {}",
@@ -466,11 +468,7 @@ impl LanguageServer for Backend {
                     return;
                 }
                 Err(e) => {
-                    lsp_log!(
-                        "[did_close] fallback-clear {:?}: read failed ({})",
-                        uri,
-                        e
-                    );
+                    lsp_log!("[did_close] fallback-clear {:?}: read failed ({})", uri, e);
                 }
             }
         } else {
@@ -511,12 +509,11 @@ impl LanguageServer for Backend {
                             let Some(uri_id) = self.index_file_from_disk(&path) else {
                                 continue;
                             };
-                            if let Some(module_name) = workspace_scanner::file_path_to_module_name(&path) {
+                            if let Some(module_name) =
+                                workspace_scanner::file_path_to_module_name(&path)
+                            {
                                 let mut idx = self.index.lock().unwrap();
-                                idx.set_require_mapping(
-                                    module_name,
-                                    uri_id,
-                                );
+                                idx.set_require_mapping(module_name, uri_id);
                             }
                         }
                     }
@@ -573,19 +570,11 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         let summary = idx.summary_by_id(uri_id);
-        let syms = symbols::collect_document_symbols(
-            root,
-            doc.source(),
-            summary,
-            doc.line_index(),
-        );
+        let syms = symbols::collect_document_symbols(root, doc.source(), summary, doc.line_index());
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
 
-    async fn folding_range(
-        &self,
-        params: FoldingRangeParams,
-    ) -> Result<Option<Vec<FoldingRange>>> {
+    async fn folding_range(&self, params: FoldingRangeParams) -> Result<Option<Vec<FoldingRange>>> {
         let mut docs = self.documents.lock().unwrap();
         let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
             return Ok(None);
@@ -596,10 +585,7 @@ impl LanguageServer for Backend {
         Ok(Some(folding_range::folding_range(doc)))
     }
 
-    async fn document_link(
-        &self,
-        params: DocumentLinkParams,
-    ) -> Result<Option<Vec<DocumentLink>>> {
+    async fn document_link(&self, params: DocumentLinkParams) -> Result<Option<Vec<DocumentLink>>> {
         let mut docs = self.documents.lock().unwrap();
         let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
             return Ok(None);
@@ -660,10 +646,7 @@ impl LanguageServer for Backend {
         Ok(Some(calls))
     }
 
-    async fn inlay_hint(
-        &self,
-        params: InlayHintParams,
-    ) -> Result<Option<Vec<InlayHint>>> {
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let uri = &params.text_document.uri;
         let mut docs = self.documents.lock().unwrap();
         let uri_id = intern_uri(uri);
@@ -675,7 +658,13 @@ impl LanguageServer for Backend {
         }
         let idx = self.index.lock().unwrap();
         let cfg = self.config.lock().unwrap().inlay_hint.clone();
-        Ok(Some(inlay_hint::inlay_hints(doc, uri_id, params.range, &idx, &cfg)))
+        Ok(Some(inlay_hint::inlay_hints(
+            doc,
+            uri_id,
+            params.range,
+            &idx,
+            &cfg,
+        )))
     }
 
     async fn selection_range(
@@ -689,7 +678,10 @@ impl LanguageServer for Backend {
         if doc.ensure_tree().is_none() {
             return Ok(None);
         }
-        Ok(Some(selection_range::selection_range(doc, &params.positions)))
+        Ok(Some(selection_range::selection_range(
+            doc,
+            &params.positions,
+        )))
     }
 
     async fn document_highlight(
@@ -724,20 +716,29 @@ impl LanguageServer for Backend {
         }
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        let result = goto::goto_definition(
-            doc,
-            uri_id,
-            position,
-            &idx,
-            &strategy,
-        );
+        let result = goto::goto_definition(doc, uri_id, position, &idx, &strategy);
         match &result {
             Some(GotoDefinitionResponse::Scalar(loc)) => {
-                lsp_log!("[goto] result: {:?} {}:{}-{}:{}", loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
+                lsp_log!(
+                    "[goto] result: {:?} {}:{}-{}:{}",
+                    loc.uri,
+                    loc.range.start.line,
+                    loc.range.start.character,
+                    loc.range.end.line,
+                    loc.range.end.character
+                );
             }
             Some(GotoDefinitionResponse::Array(locs)) => {
                 for (i, loc) in locs.iter().enumerate() {
-                    lsp_log!("[goto] result[{}]: {:?} {}:{}-{}:{}", i, loc.uri, loc.range.start.line, loc.range.start.character, loc.range.end.line, loc.range.end.character);
+                    lsp_log!(
+                        "[goto] result[{}]: {:?} {}:{}-{}:{}",
+                        i,
+                        loc.uri,
+                        loc.range.start.line,
+                        loc.range.start.character,
+                        loc.range.end.line,
+                        loc.range.end.character
+                    );
                 }
             }
             Some(GotoDefinitionResponse::Link(_)) => {
@@ -766,7 +767,9 @@ impl LanguageServer for Backend {
         }
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
-        Ok(goto::goto_type_definition(doc, uri_id, position, &idx, &strategy))
+        Ok(goto::goto_type_definition(
+            doc, uri_id, position, &idx, &strategy,
+        ))
     }
 
     /// Lua has no distinct forward-declaration concept: "declaration"
@@ -790,11 +793,7 @@ impl LanguageServer for Backend {
         let idx = self.index.lock().unwrap();
         let strategy = self.config.lock().unwrap().goto_definition.strategy.clone();
         Ok(goto::goto_definition(
-            doc,
-            uri_id,
-            position,
-            &idx,
-            &strategy,
+            doc, uri_id, position, &idx, &strategy,
         ))
     }
 
@@ -815,7 +814,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        Ok(hover::hover(doc, uri_id, position, &idx, &DocumentStoreView::new(&docs)))
+        Ok(hover::hover(
+            doc,
+            uri_id,
+            position,
+            &idx,
+            &DocumentStoreView::new(&docs),
+        ))
     }
 
     async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
@@ -834,10 +839,7 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
-    async fn completion_resolve(
-        &self,
-        item: CompletionItem,
-    ) -> Result<CompletionItem> {
+    async fn completion_resolve(&self, item: CompletionItem) -> Result<CompletionItem> {
         let local_uri_id = completion_resolve_local_uri_id(&item);
         let docs = self.documents.lock().unwrap();
         let idx = self.index.lock().unwrap();
@@ -856,7 +858,9 @@ impl LanguageServer for Backend {
         let mut docs = self.documents.lock().unwrap();
         {
             use rayon::prelude::*;
-            docs.par_iter_mut().for_each(|(_, doc)| { let _ = doc.ensure_tree(); });
+            docs.par_iter_mut().for_each(|(_, doc)| {
+                let _ = doc.ensure_tree();
+            });
         }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
@@ -894,13 +898,22 @@ impl LanguageServer for Backend {
         let mut docs = self.documents.lock().unwrap();
         {
             use rayon::prelude::*;
-            docs.par_iter_mut().for_each(|(_, doc)| { let _ = doc.ensure_tree(); });
+            docs.par_iter_mut().for_each(|(_, doc)| {
+                let _ = doc.ensure_tree();
+            });
         }
         let Some((uri_id, doc)) = find_document(&docs, uri) else {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        match rename::rename(doc, uri_id, position, &params.new_name, &idx, &DocumentStoreView::new(&docs)) {
+        match rename::rename(
+            doc,
+            uri_id,
+            position,
+            &params.new_name,
+            &idx,
+            &DocumentStoreView::new(&docs),
+        ) {
             Ok(edit) => Ok(edit),
             Err(msg) => Err(tower_lsp_server::jsonrpc::Error {
                 code: tower_lsp_server::jsonrpc::ErrorCode::InvalidParams,
@@ -1013,7 +1026,11 @@ impl LanguageServer for Backend {
             .map(|c| c.result_id == previous_result_id)
             .unwrap_or(false);
         if cached_matches {
-            let old = cache.get(&uri_id).expect("cached_matches guarded above").data.clone();
+            let old = cache
+                .get(&uri_id)
+                .expect("cached_matches guarded above")
+                .data
+                .clone();
             let edits = semantic_tokens::compute_semantic_token_delta(&old, &new_tokens);
             cache.insert(
                 uri_id,
@@ -1036,10 +1053,12 @@ impl LanguageServer for Backend {
                     data: new_tokens.clone(),
                 },
             );
-            Ok(Some(SemanticTokensFullDeltaResult::Tokens(SemanticTokens {
-                result_id: Some(new_result_id),
-                data: new_tokens,
-            })))
+            Ok(Some(SemanticTokensFullDeltaResult::Tokens(
+                SemanticTokens {
+                    result_id: Some(new_result_id),
+                    data: new_tokens,
+                },
+            )))
         }
     }
 

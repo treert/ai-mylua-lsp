@@ -6,8 +6,8 @@
 
 mod test_helpers;
 
-use test_helpers::*;
 use mylua_lsp::semantic_tokens;
+use test_helpers::*;
 
 #[test]
 fn delta_zero_edits_for_identical_document() {
@@ -22,7 +22,11 @@ fn delta_zero_edits_for_identical_document() {
     );
     let t2 = t1.clone();
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
-    assert!(edits.is_empty(), "identical token streams produce no edits, got: {:?}", edits);
+    assert!(
+        edits.is_empty(),
+        "identical token streams produce no edits, got: {:?}",
+        edits
+    );
 }
 
 #[test]
@@ -83,7 +87,10 @@ fn delta_reflects_deleted_line() {
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
     // A deletion might produce 1 edit with delete_count > 0.
     assert_eq!(edits.len(), 1, "single edit expected, got: {:?}", edits);
-    assert!(edits[0].delete_count > 0, "deletion must delete at least one token");
+    assert!(
+        edits[0].delete_count > 0,
+        "deletion must delete at least one token"
+    );
 }
 
 #[test]
@@ -107,7 +114,16 @@ fn delta_middle_edit_preserves_prefix_and_suffix() {
         doc2.line_index(),
     );
     let edits = semantic_tokens::compute_semantic_token_delta(&t1, &t2);
-    assert_eq!(edits.len(), 1, "single edit for middle change, got: {:?}", edits);
+    assert_eq!(
+        edits.len(),
+        1,
+        "single edit for middle change, got: {:?}",
+        edits
+    );
     // Prefix must skip at least the first token (local `a`).
-    assert!(edits[0].start >= 5, "prefix must cover at least one token, got start={}", edits[0].start);
+    assert!(
+        edits[0].start >= 5,
+        "prefix must cover at least one token, got start={}",
+        edits[0].start
+    );
 }

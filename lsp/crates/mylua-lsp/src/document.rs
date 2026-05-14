@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
 use crate::scope::ScopeTree;
@@ -60,8 +60,8 @@ impl Document {
     }
 
     pub(crate) fn diagnostic_signature(diagnostics: &[Diagnostic]) -> u64 {
-        let bytes = serde_json::to_vec(diagnostics)
-            .expect("LSP diagnostics should always serialize");
+        let bytes =
+            serde_json::to_vec(diagnostics).expect("LSP diagnostics should always serialize");
         let mut hasher = DefaultHasher::new();
         bytes.hash(&mut hasher);
         hasher.finish()
@@ -119,13 +119,12 @@ impl DocumentLookup for DocumentStoreView<'_> {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::{find_document, Document};
-    use crate::{new_parser, summary_builder};
     use crate::uri_id::UriId;
     use crate::util::LuaSource;
+    use crate::{new_parser, summary_builder};
     use std::collections::HashMap;
     use tower_lsp_server::ls_types::{Diagnostic, DiagnosticSeverity, Position, Range, Uri};
 
@@ -140,8 +139,14 @@ mod tests {
     fn diagnostic(message: &str) -> Diagnostic {
         Diagnostic {
             range: Range {
-                start: Position { line: 0, character: 0 },
-                end: Position { line: 0, character: 1 },
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: 1,
+                },
             },
             severity: Some(DiagnosticSeverity::ERROR),
             code: None,

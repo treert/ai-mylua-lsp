@@ -1,18 +1,26 @@
-use crate::emmy::{collect_preceding_comments, parse_emmy_comments, emmy_type_to_fact, EmmyAnnotation};
+use crate::emmy::{
+    collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation,
+};
 use crate::lua_symbol::get_lua_symbol;
 use crate::table_shape::{TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::node_text;
 
+use super::table_extract::{extract_string_from_node, extract_table_shape};
+use super::visitors::{
+    collect_return_types, enclosing_statement_for_function_expr, extract_ast_params,
+};
 use super::BuildContext;
-use super::table_extract::{extract_table_shape, extract_string_from_node};
-use super::visitors::{enclosing_statement_for_function_expr, extract_ast_params, collect_return_types};
 
 // ---------------------------------------------------------------------------
 // Expression type inference (single-file)
 // ---------------------------------------------------------------------------
 
-pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: usize) -> TypeFact {
+pub(super) fn infer_expression_type(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+    depth: usize,
+) -> TypeFact {
     if depth > MAX_TABLE_SHAPE_DEPTH {
         return TypeFact::Unknown;
     }
@@ -51,7 +59,12 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
                 let emmy_text = emmy_comments.join("\n");
                 for ann in parse_emmy_comments(&emmy_text) {
                     match ann {
-                        EmmyAnnotation::Param { name: pname, optional, type_expr, .. } => {
+                        EmmyAnnotation::Param {
+                            name: pname,
+                            optional,
+                            type_expr,
+                            ..
+                        } => {
                             emmy_annotated = true;
                             let fact = emmy_type_to_fact(&type_expr);
                             // Only overwrite an AST-declared param of the
@@ -89,9 +102,7 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
             TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
         }
 
-        "function_call" => {
-            infer_call_return_type(ctx, node, depth)
-        }
+        "function_call" => infer_call_return_type(ctx, node, depth),
 
         "variable" | "field_expression"
             if node.child_by_field_name("object").is_some()
@@ -109,14 +120,10 @@ pub(super) fn infer_expression_type(ctx: &mut BuildContext, node: tree_sitter::N
                 }
             }
             // Otherwise it's a global reference stub
-            TypeFact::Stub(SymbolicStub::GlobalRef {
-                name: text.into(),
-            })
+            TypeFact::Stub(SymbolicStub::GlobalRef { name: text.into() })
         }
 
-        "unary_expression" | "binary_expression" => {
-            infer_operator_type(ctx, node, depth)
-        }
+        "unary_expression" | "binary_expression" => infer_operator_type(ctx, node, depth),
 
         "parenthesized_expression" => {
             if let Some(inner) = node.named_child(0) {
@@ -200,14 +207,25 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
 /// Infer the array element type of a table constructor for generic unification.
 /// Returns `__array<elem_type>` if the table has only positional (array) entries,
 /// otherwise returns `Unknown`.
-fn infer_table_array_element_type_lightweight(ctx: &BuildContext, constructor: tree_sitter::Node) -> TypeFact {
+fn infer_table_array_element_type_lightweight(
+    ctx: &BuildContext,
+    constructor: tree_sitter::Node,
+) -> TypeFact {
     let mut elem_type: Option<TypeFact> = None;
     for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else { continue };
-        if field_list.kind() != "field_list" { continue; }
+        let Some(field_list) = constructor.named_child(i as u32) else {
+            continue;
+        };
+        if field_list.kind() != "field_list" {
+            continue;
+        }
         for j in 0..field_list.named_child_count() {
-            let Some(field_node) = field_list.named_child(j as u32) else { continue };
-            if field_node.kind() != "field" { continue; }
+            let Some(field_node) = field_list.named_child(j as u32) else {
+                continue;
+            };
+            if field_node.kind() != "field" {
+                continue;
+            }
             // Only handle positional entries (no key)
             if field_node.child_by_field_name("key").is_some() {
                 return TypeFact::Unknown; // has named keys, not a pure array
@@ -231,16 +249,18 @@ fn infer_table_array_element_type_lightweight(ctx: &BuildContext, constructor: t
     }
 }
 
-fn call_base_generic_args(
-    fact: &TypeFact,
-) -> Vec<TypeFact> {
+fn call_base_generic_args(fact: &TypeFact) -> Vec<TypeFact> {
     match fact {
         TypeFact::Known(KnownType::EmmyGeneric(_, params)) => params.clone(),
         _ => vec![],
     }
 }
 
-fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: usize) -> TypeFact {
+fn infer_call_return_type(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+    depth: usize,
+) -> TypeFact {
     let callee = match node.child_by_field_name("callee") {
         Some(c) => c,
         None => return TypeFact::Unknown,
@@ -253,7 +273,9 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_from_node(ctx, first_arg) {
-                    return TypeFact::Stub(SymbolicStub::RequireRef { module_path: module_path.into() });
+                    return TypeFact::Stub(SymbolicStub::RequireRef {
+                        module_path: module_path.into(),
+                    });
                 }
             }
         }
@@ -280,7 +302,9 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
                         }
                         TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
                             if let Some(fs) = ctx.function_summaries.get(fid) {
-                                if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
+                                if let Some(ret) =
+                                    function_return_with_call_args(fs, &call_arg_types)
+                                {
                                     return ret.clone();
                                 }
                             }
@@ -339,7 +363,9 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
                                 }
                                 TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
                                     if let Some(fs) = ctx.function_summaries.get(fid) {
-                                        if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
+                                        if let Some(ret) =
+                                            function_return_with_call_args(fs, &explicit_arg_types)
+                                        {
                                             return ret.clone();
                                         }
                                     }
@@ -352,7 +378,9 @@ fn infer_call_return_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth
                     let qualified = format!("{}.{}", base_text, func_name);
                     if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
                         if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                            if let Some(ret) = function_return_with_call_args(fs, &explicit_arg_types) {
+                            if let Some(ret) =
+                                function_return_with_call_args(fs, &explicit_arg_types)
+                            {
                                 return ret.clone();
                             }
                         }
@@ -458,11 +486,7 @@ fn infer_field_expression_type(
     })
 }
 
-fn infer_field_base_type(
-    ctx: &BuildContext,
-    base: tree_sitter::Node,
-    depth: usize,
-) -> TypeFact {
+fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usize) -> TypeFact {
     if depth > MAX_TABLE_SHAPE_DEPTH {
         return TypeFact::Unknown;
     }
@@ -488,11 +512,7 @@ fn infer_field_base_type(
     })
 }
 
-fn infer_operator_type(
-    ctx: &mut BuildContext,
-    node: tree_sitter::Node,
-    _depth: usize,
-) -> TypeFact {
+fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, _depth: usize) -> TypeFact {
     if let Some(op_node) = node.child_by_field_name("operator") {
         let op = node_text(op_node, ctx.source);
         match op {

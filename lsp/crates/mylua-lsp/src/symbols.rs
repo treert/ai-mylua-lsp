@@ -68,10 +68,9 @@ fn normalize_ranges(symbols: &mut [DocumentSymbol]) {
 }
 
 fn range_contains(outer: &Range, inner: &Range) -> bool {
-    let start_ok = (outer.start.line, outer.start.character)
-        <= (inner.start.line, inner.start.character);
-    let end_ok = (outer.end.line, outer.end.character)
-        >= (inner.end.line, inner.end.character);
+    let start_ok =
+        (outer.start.line, outer.start.character) <= (inner.start.line, inner.start.character);
+    let end_ok = (outer.end.line, outer.end.character) >= (inner.end.line, inner.end.character);
     start_ok && end_ok
 }
 
@@ -204,7 +203,9 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_function_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let Some(name_node) = node.child_by_field_name("name") else { return };
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return;
+        };
         let full_name = node_text(name_node, source).to_string();
         if full_name.is_empty() {
             return;
@@ -244,7 +245,9 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_local_function(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let Some(name_node) = node.child_by_field_name("name") else { return };
+        let Some(name_node) = node.child_by_field_name("name") else {
+            return;
+        };
         let name = node_text(name_node, source).to_string();
         if name.is_empty() {
             return;
@@ -263,9 +266,13 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_local_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let Some(names_node) = node.child_by_field_name("names") else { return };
+        let Some(names_node) = node.child_by_field_name("names") else {
+            return;
+        };
         for i in 0..names_node.named_child_count() {
-            let Some(id_node) = names_node.named_child(i as u32) else { continue };
+            let Some(id_node) = names_node.named_child(i as u32) else {
+                continue;
+            };
             if id_node.kind() != "identifier" {
                 continue;
             }
@@ -295,8 +302,12 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_assignment(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let Some(left) = node.child_by_field_name("left") else { return };
-        let Some(first_var) = left.named_child(0) else { return };
+        let Some(left) = node.child_by_field_name("left") else {
+            return;
+        };
+        let Some(first_var) = left.named_child(0) else {
+            return;
+        };
 
         // Skip dotted / subscripted LHS — those are field writes on
         // an existing variable, not new top-level symbols.
@@ -372,9 +383,7 @@ impl<'a> OutlineBuilder<'a> {
         // outline is stable regardless of @field / function ordering.
         for node in self.class_nodes.iter_mut() {
             if let Some(children) = node.children.as_mut() {
-                children.sort_by_key(|c| {
-                    (c.range.start.line, c.range.start.character)
-                });
+                children.sort_by_key(|c| (c.range.start.line, c.range.start.character));
             }
         }
 

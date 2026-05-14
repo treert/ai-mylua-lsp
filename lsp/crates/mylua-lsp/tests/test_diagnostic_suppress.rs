@@ -18,8 +18,11 @@ fn collect_all(
     cfg: DiagnosticsConfig,
 ) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, name);
-    let mut all =
-        diagnostics::collect_diagnostics(doc.root_node().unwrap(), src.as_bytes(), doc.line_index());
+    let mut all = diagnostics::collect_diagnostics(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        doc.line_index(),
+    );
     let semantic = diagnostics::collect_semantic_diagnostics_id(
         doc.root_node().unwrap(),
         src.as_bytes(),

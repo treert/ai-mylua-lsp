@@ -33,7 +33,11 @@ fn has_undefined(diags: &[tower_lsp_server::ls_types::Diagnostic], name: &str) -
 fn runtime_53_treats_utf8_as_builtin() {
     let src = "print(utf8.char(65))\n";
     let diags = run_diagnostics(src, "5.3");
-    assert!(!has_undefined(&diags, "utf8"), "utf8 is a Lua 5.3+ builtin, got diags: {:?}", diags);
+    assert!(
+        !has_undefined(&diags, "utf8"),
+        "utf8 is a Lua 5.3+ builtin, got diags: {:?}",
+        diags
+    );
 }
 
 #[test]
@@ -73,7 +77,10 @@ fn runtime_luajit_treats_jit_and_bit_as_builtins() {
 fn runtime_51_treats_unpack_as_builtin() {
     let src = "local a, b = unpack({1, 2})\n";
     let diags_51 = run_diagnostics(src, "5.1");
-    assert!(!has_undefined(&diags_51, "unpack"), "unpack is a 5.1 builtin");
+    assert!(
+        !has_undefined(&diags_51, "unpack"),
+        "unpack is a 5.1 builtin"
+    );
 
     let diags_53 = run_diagnostics(src, "5.3");
     assert!(

@@ -11,12 +11,14 @@ pub mod document_highlight;
 pub mod document_link;
 pub mod emmy;
 pub mod folding_range;
+pub mod goto;
+mod handlers;
+pub mod hover;
+pub(crate) mod indexing;
 pub mod inlay_hint;
 pub mod lua_builtins;
 pub mod lua_symbol;
 pub mod memory_profile;
-pub mod goto;
-pub mod hover;
 pub mod references;
 pub mod rename;
 pub mod resolver;
@@ -35,8 +37,6 @@ pub mod uri_id;
 pub mod util;
 pub mod workspace_scanner;
 pub mod workspace_symbol;
-mod handlers;
-pub(crate) mod indexing;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -246,8 +246,7 @@ impl Backend {
             let cfg = self.config.lock().unwrap();
             (cfg.workspace.library.clone(), cfg.workspace.clone())
         };
-        let library_roots =
-            workspace_scanner::resolve_library_roots(&library_cfg, workspace_roots);
+        let library_roots = workspace_scanner::resolve_library_roots(&library_cfg, workspace_roots);
         if !library_roots.is_empty() {
             lsp_log!(
                 "[mylua-lsp] library roots: {:?}",
@@ -266,10 +265,7 @@ impl Backend {
                 .collect()
         };
         if !library_file_uris.is_empty() {
-            *self.library_uris.lock().unwrap() = library_file_uris
-                .iter()
-                .map(intern_uri)
-                .collect();
+            *self.library_uris.lock().unwrap() = library_file_uris.iter().map(intern_uri).collect();
             lsp_log!(
                 "[mylua-lsp] library files to index: {}",
                 library_file_uris.len()
@@ -291,7 +287,8 @@ impl Backend {
 
     pub(crate) fn parse_and_store(&self, uri: Uri, text: String) {
         let uri_id = intern_uri(&uri);
-        let last_diagnostic_signature = self.documents
+        let last_diagnostic_signature = self
+            .documents
             .lock()
             .unwrap()
             .get(&uri_id)
@@ -334,11 +331,21 @@ impl Backend {
             None => {
                 if let Some(old) = old_tree {
                     let lua_source = util::LuaSource::new(text);
-                    let (_, scope_tree) = summary_builder::build_file_analysis(&uri, &old, lua_source.source(), lua_source.line_index());
+                    let (_, scope_tree) = summary_builder::build_file_analysis(
+                        &uri,
+                        &old,
+                        lua_source.source(),
+                        lua_source.line_index(),
+                    );
                     let uri_id = intern_uri(&uri);
                     self.documents.lock().unwrap().insert(
                         uri_id,
-                        Document { lua_source, tree: Some(old), scope_tree, last_diagnostic_signature },
+                        Document {
+                            lua_source,
+                            tree: Some(old),
+                            scope_tree,
+                            last_diagnostic_signature,
+                        },
                     );
                 }
                 return;
@@ -347,7 +354,12 @@ impl Backend {
 
         {
             let lua_source = util::LuaSource::new(text);
-            let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (mut summary, scope_tree) = summary_builder::build_file_analysis(
+                &uri,
+                &tree,
+                lua_source.source(),
+                lua_source.line_index(),
+            );
             let uri_id = intern_uri(&uri);
             // Library stubs retain their meta treatment across edits.
             // `summary_builder::build_file_analysis` infers `is_meta` from
@@ -368,10 +380,15 @@ impl Backend {
                 old_fp.is_some_and(|old| old != new_fp)
             };
 
-            self.documents
-                .lock()
-                .unwrap()
-                .insert(uri_id, Document { lua_source, tree: Some(tree), scope_tree, last_diagnostic_signature });
+            self.documents.lock().unwrap().insert(
+                uri_id,
+                Document {
+                    lua_source,
+                    tree: Some(tree),
+                    scope_tree,
+                    last_diagnostic_signature,
+                },
+            );
 
             // All diagnostics (both syntax and semantic) flow through
             // the unified scheduler → consumer_loop, which recomputes
@@ -406,7 +423,12 @@ impl Backend {
         };
         if let Some(tree) = tree {
             let lua_source = util::LuaSource::new(text);
-            let (mut summary, scope_tree) = summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+            let (mut summary, scope_tree) = summary_builder::build_file_analysis(
+                &uri,
+                &tree,
+                lua_source.source(),
+                lua_source.line_index(),
+            );
             // Keep library files flagged `is_meta=true` across
             // watcher-driven re-indexes. `summary_builder` infers
             // `is_meta` from an explicit `---@meta` header which
@@ -420,16 +442,22 @@ impl Backend {
             if self.library_uris.lock().unwrap().contains(&uri_id) {
                 summary.is_meta = true;
             }
-            let last_diagnostic_signature = self.documents
+            let last_diagnostic_signature = self
+                .documents
                 .lock()
                 .unwrap()
                 .get(&uri_id)
                 .and_then(|doc| doc.last_diagnostic_signature);
             self.index.lock().unwrap().upsert_summary(uri_id, summary);
-            self.documents
-                .lock()
-                .unwrap()
-                .insert(uri_id, Document { lua_source, tree: Some(tree), scope_tree, last_diagnostic_signature });
+            self.documents.lock().unwrap().insert(
+                uri_id,
+                Document {
+                    lua_source,
+                    tree: Some(tree),
+                    scope_tree,
+                    last_diagnostic_signature,
+                },
+            );
             Some(uri_id)
         } else {
             None
@@ -494,16 +522,8 @@ impl Backend {
             let Some(root) = doc.root_node() else {
                 return;
             };
-            let syntax = diagnostics::collect_diagnostics(
-                root,
-                doc.source(),
-                doc.line_index(),
-            );
-            let diags = diagnostics::apply_diagnostic_suppressions(
-                root,
-                doc.source(),
-                syntax,
-            );
+            let syntax = diagnostics::collect_diagnostics(root, doc.source(), doc.line_index());
+            let diags = diagnostics::apply_diagnostic_suppressions(root, doc.source(), syntax);
             let should_publish = doc.remember_diagnostic_signature(&diags);
             (diags, should_publish)
         };
@@ -515,14 +535,15 @@ impl Backend {
             uri,
             diags.len()
         );
-        self.client.publish_diagnostics(uri.clone(), diags, None).await;
+        self.client
+            .publish_diagnostics(uri.clone(), diags, None)
+            .await;
     }
 }
 
 // Re-export `start_diagnostic_consumer` so `handlers.rs` can call it
 // without reaching into `indexing::` directly.
 pub(crate) use indexing::start_diagnostic_consumer;
-
 
 pub(crate) fn uri_to_path(uri: &Uri) -> Option<PathBuf> {
     let s = uri.to_string();
@@ -625,4 +646,3 @@ mod uri_id_tests {
         assert!(priority_uri(annotation_id) < priority_uri(regular_id));
     }
 }
-

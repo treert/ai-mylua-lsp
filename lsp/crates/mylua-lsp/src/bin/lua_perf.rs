@@ -230,7 +230,8 @@ fn write_summary_if_requested(
             match serde_json::to_string_pretty(summary) {
                 Ok(json) => match std::fs::write(&output_path, json) {
                     Ok(()) => {
-                        let display_path = output_path.canonicalize().unwrap_or(output_path.clone());
+                        let display_path =
+                            output_path.canonicalize().unwrap_or(output_path.clone());
                         eprintln!("  summary: {}", display_path.display());
                     }
                     Err(e) => eprintln!(
@@ -307,7 +308,8 @@ mod tests {
 
     #[test]
     fn file_uri_for_path_handles_special_characters() {
-        let uri = file_uri_for_path(Path::new("lua perf #?.lua")).expect("path should convert to URI");
+        let uri =
+            file_uri_for_path(Path::new("lua perf #?.lua")).expect("path should convert to URI");
 
         assert!(!uri.to_string().contains('#'));
         assert!(!uri.to_string().contains('?'));

@@ -7,9 +7,7 @@ fn main() {
     let scanner_c = grammar_src.join("scanner.c");
 
     if !parser_c.exists() {
-        panic!(
-            "grammar/src/parser.c not found — run `npx tree-sitter generate` in grammar/ first"
-        );
+        panic!("grammar/src/parser.c not found — run `npx tree-sitter generate` in grammar/ first");
     }
 
     cc::Build::new()

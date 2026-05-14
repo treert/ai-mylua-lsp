@@ -11,9 +11,9 @@ use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
-use crate::type_inference;
 use crate::resolver;
 use crate::summary::FunctionSummary;
+use crate::type_inference;
 use crate::type_system::{FunctionSignature, KnownType, TypeFact};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::node_text;
@@ -24,7 +24,9 @@ pub fn signature_help(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Option<SignatureHelp> {
-    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     let source = doc.source();
 
     // Find the enclosing function call whose argument list contains the cursor.
@@ -86,7 +88,8 @@ pub(crate) fn resolve_call_signatures(
     // `obj:method(...)`
     if let Some(m) = method {
         let method_name = node_text(m, source).to_string();
-        let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
+        let base_fact =
+            type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
         let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &method_name, index);
         let display = format!("{}:{}", node_text(callee, source), method_name);
         return Some((sigs, true, display));
@@ -99,7 +102,9 @@ pub(crate) fn resolve_call_signatures(
             callee.child_by_field_name("field"),
         ) {
             let field_name = node_text(field, source).to_string();
-            let base_fact = type_inference::infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
+            let base_fact = type_inference::infer_node_type_in_file_id(
+                object, source, uri_id, scope_tree, index,
+            );
             let sigs = lookup_function_signatures_by_field(uri_id, &base_fact, &field_name, index);
             let display = node_text(callee, source).to_string();
             return Some((sigs, false, display));
@@ -114,7 +119,8 @@ pub(crate) fn resolve_call_signatures(
         // a local `f` shadows any global `f`.
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),
-        )) = scope_tree.resolve_type(callee.start_byte(), &name) {
+        )) = scope_tree.resolve_type(callee.start_byte(), &name)
+        {
             if let Some(fs) = summary.function_summaries.get(fid) {
                 let sigs = primary_plus_overloads(fs);
                 return Some((sigs, false, name));
@@ -130,7 +136,8 @@ pub(crate) fn resolve_call_signatures(
     // function(a, b) ... end` or cross-file `require` returning a
     // callable). Resolve via the type system so inferred / Emmy-
     // enriched signatures from `infer_expression_type` are picked up.
-    let base_fact = type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
+    let base_fact =
+        type_inference::infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
     let resolved = resolver::resolve_type(uri_id, &base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {
@@ -197,18 +204,21 @@ fn lookup_function_signatures_by_field(
 ) -> Vec<FunctionSignature> {
     let resolved_base = resolver::resolve_type(caller_uri_id, base_fact, index);
     let owner_class = match &resolved_base.type_fact {
-        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => Some(n.to_string()),
+        TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => {
+            Some(n.to_string())
+        }
         _ => None,
     };
     // URI-aware chain resolve so `a.b.c` style callers whose base is a
     // per-file Table shape can still find the signature.
     let resolved = resolver::resolve_field_chain_in_file_id(
-        caller_uri_id, base_fact, &[field_name.to_string()], index,
+        caller_uri_id,
+        base_fact,
+        &[field_name.to_string()],
+        index,
     );
     if let TypeFact::Known(KnownType::Function(sig)) = &resolved.type_fact {
-        let def_uri_id = resolved
-            .def_location
-            .map(|location| location.uri_id);
+        let def_uri_id = resolved.def_location.map(|location| location.uri_id);
         if let Some(def_uri_id) = def_uri_id {
             if let Some(summary) = index.summary_by_id(def_uri_id) {
                 // Try exact `{class}:{field}` / `{class}.{field}` lookup
@@ -539,10 +549,7 @@ mod tests {
         // Companion case: slice where the unterminated `--[[` sits at
         // the very end with no comma; still must not panic and must
         // return only the commas counted before the `--[[`.
-        assert_eq!(
-            count_top_level_commas(b"1, 2, --[[unclosed"),
-            2,
-        );
+        assert_eq!(count_top_level_commas(b"1, 2, --[[unclosed"), 2,);
 
         // Properly-terminated block comment should not drop the
         // top-level `,` that follows it.

@@ -122,7 +122,9 @@ struct DiagnosticProgressTracker {
 
 impl DiagnosticProgressTracker {
     fn new() -> Self {
-        Self { last_remaining: None }
+        Self {
+            last_remaining: None,
+        }
     }
 
     fn next_status(
@@ -235,8 +237,11 @@ pub async fn run_workspace_scan(
         }
     }
 
-    let (module_entries, files) =
-        workspace_scanner::scan_and_collect_lua_files(&all_roots, &require_config, &workspace_config);
+    let (module_entries, files) = workspace_scanner::scan_and_collect_lua_files(
+        &all_roots,
+        &require_config,
+        &workspace_config,
+    );
     let file_entries: Vec<(PathBuf, Uri, UriId)> = files
         .into_iter()
         .filter_map(|path| {
@@ -279,7 +284,10 @@ pub async fn run_workspace_scan(
     send_index_phase(
         &client,
         "module_map_ready",
-        &format!("Module map ready ({} entries), parsing…", module_entries.len()),
+        &format!(
+            "Module map ready ({} entries), parsing…",
+            module_entries.len()
+        ),
         0,
         total as u64,
     )
@@ -287,7 +295,10 @@ pub async fn run_workspace_scan(
 
     // ── Phase 2: Parse (parallel) ──────────────────────────────────
     let phase2_started = std::time::Instant::now();
-    lsp_log!("[scan] phase 2 (parse): parsing {} files in parallel...", total);
+    lsp_log!(
+        "[scan] phase 2 (parse): parsing {} files in parallel...",
+        total
+    );
 
     let token = NumberOrString::String("mylua-indexing".to_string());
     let progress = client
@@ -338,7 +349,13 @@ pub async fn run_workspace_scan(
             // we send a raw notification. The percentage is capped
             // at 79% — the remaining 20% is reserved for the merge
             // phase, and 1% for the final ready transition.
-            send_index_status(&progress_client, "indexing", done as u64, progress_total as u64).await;
+            send_index_status(
+                &progress_client,
+                "indexing",
+                done as u64,
+                progress_total as u64,
+            )
+            .await;
             let _ = pct; // used conceptually for the progress bar
         }
     });
@@ -359,8 +376,12 @@ pub async fn run_workspace_scan(
                     let lua_source = util::LuaSource::new(text);
                     let mut parser = new_parser();
                     let tree = parser.parse(lua_source.source(), None)?;
-                    let (mut summary, scope_tree) =
-                        summary_builder::build_file_analysis(&uri, &tree, lua_source.source(), lua_source.line_index());
+                    let (mut summary, scope_tree) = summary_builder::build_file_analysis(
+                        &uri,
+                        &tree,
+                        lua_source.source(),
+                        lua_source.line_index(),
+                    );
                     if is_library {
                         summary.is_meta = true;
                     }
@@ -374,14 +395,21 @@ pub async fn run_workspace_scan(
                             path.display()
                         );
                     }
-                    let tree = if should_keep_parse_tree(elapsed_ms, slow_parse_keep_tree_threshold_ms) {
-                        Some(tree)
-                    } else {
-                        None
-                    };
+                    let tree =
+                        if should_keep_parse_tree(elapsed_ms, slow_parse_keep_tree_threshold_ms) {
+                            Some(tree)
+                        } else {
+                            None
+                        };
 
                     counter.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                    Some(ParsedFile { uri_id: *uri_id, lua_source, tree, summary, scope_tree })
+                    Some(ParsedFile {
+                        uri_id: *uri_id,
+                        lua_source,
+                        tree,
+                        summary,
+                        scope_tree,
+                    })
                 })
                 .collect()
         })
@@ -404,7 +432,10 @@ pub async fn run_workspace_scan(
 
     // ── Phase 3: Merge (atomic) ────────────────────────────────────
     let phase3_started = std::time::Instant::now();
-    lsp_log!("[scan] phase 3 (merge): building global index from {} summaries...", parsed.len());
+    lsp_log!(
+        "[scan] phase 3 (merge): building global index from {} summaries...",
+        parsed.len()
+    );
     send_index_phase(
         &client,
         "merging",
@@ -435,7 +466,8 @@ pub async fn run_workspace_scan(
 
         // Separate parsed files into two sets: those already open in
         // the editor (skip — buffer version wins) and the rest.
-        let mut summaries_to_merge: Vec<(UriId, summary::DocumentSummary)> = Vec::with_capacity(parsed.len());
+        let mut summaries_to_merge: Vec<(UriId, summary::DocumentSummary)> =
+            Vec::with_capacity(parsed.len());
         for pf in parsed {
             if open_held.contains(&pf.uri_id) {
                 skipped_open += 1;
@@ -511,7 +543,6 @@ pub async fn run_workspace_scan(
     client
         .log_message(MessageType::INFO, "mylua-lsp workspace scan complete")
         .await;
-
 }
 
 // ── Diagnostic consumer ────────────────────────────────────────────
@@ -549,7 +580,8 @@ pub(crate) fn start_diagnostic_consumer(
                     0
                 };
                 if let Some(status) = tracker.next_status(index_state, remaining, total) {
-                    cl.send_notification::<IndexStatusNotification>(status).await;
+                    cl.send_notification::<IndexStatusNotification>(status)
+                        .await;
                 }
             }
         });
@@ -572,10 +604,7 @@ pub(crate) fn start_diagnostic_consumer(
             match handle.await {
                 Ok(()) => break,
                 Err(e) if e.is_panic() => {
-                    lsp_log!(
-                        "[sched] consumer panicked: {:?}, restarting in 100ms...",
-                        e
-                    );
+                    lsp_log!("[sched] consumer panicked: {:?}, restarting in 100ms...", e);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }
@@ -663,8 +692,7 @@ async fn consumer_loop(
                 };
                 tree.root_node()
             };
-            let mut syntax =
-                diagnostics::collect_diagnostics(root, doc.source(), doc.line_index());
+            let mut syntax = diagnostics::collect_diagnostics(root, doc.source(), doc.line_index());
             let idx = index.lock().unwrap();
             let cfg = config.lock().unwrap();
             let semantic = diagnostics::collect_semantic_diagnostics_with_version_id(
@@ -678,11 +706,7 @@ async fn consumer_loop(
                 doc.line_index(),
             );
             syntax.extend(semantic);
-            diagnostics::apply_diagnostic_suppressions(
-                root,
-                doc.source(),
-                syntax,
-            )
+            diagnostics::apply_diagnostic_suppressions(root, doc.source(), syntax)
         };
 
         // Consistency check: if the document's text changed while we
@@ -770,7 +794,9 @@ mod tests {
     fn diagnostic_progress_tracker_reports_only_sampled_changes() {
         let mut tracker = DiagnosticProgressTracker::new();
 
-        assert!(tracker.next_status(IndexState::Initializing, 3, 2).is_none());
+        assert!(tracker
+            .next_status(IndexState::Initializing, 3, 2)
+            .is_none());
 
         let first = tracker
             .next_status(IndexState::Ready, 3, 2)
@@ -801,4 +827,3 @@ mod tests {
         assert_eq!(second_batch.remaining, Some(2));
     }
 }
-

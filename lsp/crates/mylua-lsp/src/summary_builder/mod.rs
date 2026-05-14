@@ -11,11 +11,11 @@ use tower_lsp_server::ls_types::Uri;
 
 use crate::emmy::{parse_emmy_comments, EmmyAnnotation, EmmyType};
 use crate::lua_symbol::{intern_lua_symbol, LuaSymbol};
+use crate::scope::{Scope, ScopeDecl, ScopeKind, ScopeTree};
 use crate::summary::*;
 use crate::table_shape::{TableShape, TableShapeId};
 use crate::type_system::*;
 use crate::util::{node_text, LineIndex};
-use crate::scope::{Scope, ScopeKind, ScopeDecl, ScopeTree};
 
 use call_sites::collect_call_sites;
 use fingerprint::compute_signature_fingerprint;
@@ -104,7 +104,9 @@ pub fn build_file_analysis(
 fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
     // Collect class name → shape_id from local declarations that were
     // explicitly bound by the immediately preceding `---@class`.
-    let shape_map: HashMap<LuaSymbol, TableShapeId> = ctx.scopes.iter()
+    let shape_map: HashMap<LuaSymbol, TableShapeId> = ctx
+        .scopes
+        .iter()
         .flat_map(|s| s.declarations.iter())
         .filter_map(|decl| {
             let class_name = decl.bound_class.as_ref()?;
@@ -134,11 +136,15 @@ fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
 /// runtime code is almost certainly an authoring mistake.
 fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Option<String>) {
     for i in 0..root.named_child_count() {
-        let Some(child) = root.named_child(i as u32) else { continue };
+        let Some(child) = root.named_child(i as u32) else {
+            continue;
+        };
         match child.kind() {
             "emmy_comment" => {
                 for j in 0..child.named_child_count() {
-                    let Some(line) = child.named_child(j as u32) else { continue };
+                    let Some(line) = child.named_child(j as u32) else {
+                        continue;
+                    };
                     if line.kind() != "emmy_line" {
                         continue;
                     }
@@ -311,7 +317,11 @@ impl<'a> BuildContext<'a> {
     /// Resolve the `bound_class` for a variable name. Checks locals first
     /// (via scope stack), then falls back to `global_class_bindings`.
     /// Implements the strictly-layered lookup from Phase 2 §4.2.
-    pub(crate) fn resolve_bound_class_for_at(&self, name: &str, byte_offset: usize) -> Option<LuaSymbol> {
+    pub(crate) fn resolve_bound_class_for_at(
+        &self,
+        name: &str,
+        byte_offset: usize,
+    ) -> Option<LuaSymbol> {
         if let Some(decl) = self.resolve_visible_in_build_scopes(name, byte_offset) {
             return decl.bound_class;
         }
@@ -325,7 +335,7 @@ impl<'a> BuildContext<'a> {
 }
 
 fn is_decl_visible_at(decl: &ScopeDecl, byte_offset: usize) -> bool {
-    let on_decl_name = byte_offset >= decl.decl_byte
-        && byte_offset < decl.decl_byte + decl.name.len();
+    let on_decl_name =
+        byte_offset >= decl.decl_byte && byte_offset < decl.decl_byte + decl.name.len();
     on_decl_name || decl.visible_after_byte <= byte_offset
 }

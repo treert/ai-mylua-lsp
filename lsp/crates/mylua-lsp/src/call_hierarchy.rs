@@ -45,7 +45,10 @@ pub fn prepare_call_hierarchy(
     position: Position,
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyItem> {
-    let Some(byte_offset) = doc.line_index().position_to_byte_offset(doc.source(), position) else {
+    let Some(byte_offset) = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)
+    else {
         return Vec::new();
     };
     let source = doc.source();
@@ -73,7 +76,8 @@ pub fn prepare_call_hierarchy(
         // Local function via scope tree → FunctionRef(id)
         if let Some(crate::type_system::TypeFact::Known(
             crate::type_system::KnownType::FunctionRef(fid),
-        )) = doc.scope_tree.resolve_type(byte_offset, &name) {
+        )) = doc.scope_tree.resolve_type(byte_offset, &name)
+        {
             if let Some(fs) = summary.function_summaries.get(fid) {
                 return vec![build_item(
                     fs.name.to_string(),
@@ -105,13 +109,7 @@ pub fn prepare_call_hierarchy(
             };
             let r: Range = c.range.into();
             let sr: Range = c.selection_range.into();
-            return vec![build_item(
-                name,
-                kind,
-                candidate_uri,
-                r,
-                sr,
-            )];
+            return vec![build_item(name, kind, candidate_uri, r, sr)];
         }
     }
 
@@ -135,7 +133,9 @@ fn item_from_enclosing_declaration(
     // `function_declaration`.
     let decl = match parent.kind() {
         "function_declaration" | "local_function_declaration" => parent,
-        "function_name" => parent.parent().filter(|p| p.kind() == "function_declaration")?,
+        "function_name" => parent
+            .parent()
+            .filter(|p| p.kind() == "function_declaration")?,
         _ => return None,
     };
     let name_node = decl.child_by_field_name("name")?;
@@ -215,7 +215,10 @@ pub fn incoming_calls(
     let target = last_segment(&item.name);
     // Include caller_id when available so shadowed same-name local function
     // expressions do not merge into one incoming caller.
-    let mut groups: HashMap<(Uri, String, Option<FunctionSummaryId>), (CallHierarchyItem, Vec<Range>)> = HashMap::new();
+    let mut groups: HashMap<
+        (Uri, String, Option<FunctionSummaryId>),
+        (CallHierarchyItem, Vec<Range>),
+    > = HashMap::new();
 
     for (uri_id, summary) in index.summaries_iter_id() {
         let uri = resolve_uri(uri_id);
@@ -236,25 +239,29 @@ pub fn incoming_calls(
 
     groups
         .into_iter()
-        .map(|((_uri, _name, _id), (from, ranges))| CallHierarchyIncomingCall {
-            from,
-            from_ranges: ranges,
-        })
+        .map(
+            |((_uri, _name, _id), (from, ranges))| CallHierarchyIncomingCall {
+                from,
+                from_ranges: ranges,
+            },
+        )
         .collect()
 }
 
 /// Build a `CallHierarchyItem` for the caller of a call site. When
 /// `caller_name` is empty (the call lives at file top level), we
 /// return a "module-scope" item using the file URI as the handle.
-fn resolve_caller_item(
-    uri: &Uri,
-    cs: &CallSite,
-    summary: &DocumentSummary,
-) -> CallHierarchyItem {
+fn resolve_caller_item(uri: &Uri, cs: &CallSite, summary: &DocumentSummary) -> CallHierarchyItem {
     if cs.caller_name.is_empty() {
         let range = Range {
-            start: Position { line: 0, character: 0 },
-            end: Position { line: 0, character: 0 },
+            start: Position {
+                line: 0,
+                character: 0,
+            },
+            end: Position {
+                line: 0,
+                character: 0,
+            },
         };
         return build_item(
             file_name_hint(uri),
@@ -302,10 +309,22 @@ fn resolve_caller_item(
     // Last resort: unknown caller (shouldn't happen for a well-formed
     // summary, but stay robust).
     let range = Range {
-        start: Position { line: 0, character: 0 },
-        end: Position { line: 0, character: 0 },
+        start: Position {
+            line: 0,
+            character: 0,
+        },
+        end: Position {
+            line: 0,
+            character: 0,
+        },
     };
-    build_item(cs.caller_name.to_string(), SymbolKind::FUNCTION, uri.clone(), range, range)
+    build_item(
+        cs.caller_name.to_string(),
+        SymbolKind::FUNCTION,
+        uri.clone(),
+        range,
+        range,
+    )
 }
 
 fn file_name_hint(uri: &Uri) -> String {
@@ -322,7 +341,9 @@ pub fn outgoing_calls(
     index: &WorkspaceAggregation,
 ) -> Vec<CallHierarchyOutgoingCall> {
     let item_uri_id = intern_uri(&item.uri);
-    let Some(summary) = index.summary_by_id(item_uri_id) else { return Vec::new() };
+    let Some(summary) = index.summary_by_id(item_uri_id) else {
+        return Vec::new();
+    };
 
     // Find all call sites for this item. Prefer FunctionSummaryId when the
     // item can be tied back to one; otherwise fall back to name matching.
@@ -360,12 +381,10 @@ fn function_id_for_item(
     summary: &DocumentSummary,
     item: &CallHierarchyItem,
 ) -> Option<FunctionSummaryId> {
-    summary.function_summaries
-        .iter()
-        .find_map(|(id, fs)| {
-            let range: Range = fs.range.into();
-            (fs.name.as_str() == item.name && range == item.range).then_some(*id)
-        })
+    summary.function_summaries.iter().find_map(|(id, fs)| {
+        let range: Range = fs.range.into();
+        (fs.name.as_str() == item.name && range == item.range).then_some(*id)
+    })
 }
 
 /// Build a `CallHierarchyItem` for an outgoing-call target. Tries
@@ -403,13 +422,7 @@ fn resolve_outgoing_target(
             };
             let r: Range = c.range.into();
             let sr: Range = c.selection_range.into();
-            return build_item(
-                name.to_string(),
-                kind,
-                candidate_uri,
-                r,
-                sr,
-            );
+            return build_item(name.to_string(), kind, candidate_uri, r, sr);
         }
     }
     // Unknown callee — anchor at the call site itself.
@@ -456,7 +469,10 @@ pub fn extract_call_site(
         let name = node_text(m, source).to_string();
         (name, line_index.ts_node_to_byte_range(m, source))
     } else if callee.kind() == "identifier" {
-        (node_text(callee, source).to_string(), line_index.ts_node_to_byte_range(callee, source))
+        (
+            node_text(callee, source).to_string(),
+            line_index.ts_node_to_byte_range(callee, source),
+        )
     } else if matches!(callee.kind(), "variable" | "field_expression") {
         // Dotted: `a.b.c()` or field expression — take the rightmost
         // field's range and the whole dotted chain as the callee_name

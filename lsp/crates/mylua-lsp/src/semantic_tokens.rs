@@ -1,7 +1,7 @@
-use std::collections::HashSet;
-use tower_lsp_server::ls_types::*;
 use crate::scope::ScopeTree;
 use crate::util::{node_text, LineIndex};
+use std::collections::HashSet;
+use tower_lsp_server::ls_types::*;
 
 const TT_VARIABLE: u32 = 0;
 const TM_DEFAULT_LIBRARY: u32 = 1 << 0; // bit 0
@@ -16,8 +16,8 @@ pub fn semantic_tokens_legend() -> SemanticTokensLegend {
     SemanticTokensLegend {
         token_types: vec![SemanticTokenType::VARIABLE],
         token_modifiers: vec![
-            SemanticTokenModifier::DEFAULT_LIBRARY,       // bit 0
-            SemanticTokenModifier::new("global"),          // bit 1
+            SemanticTokenModifier::DEFAULT_LIBRARY, // bit 0
+            SemanticTokenModifier::new("global"),   // bit 1
         ],
     }
 }
@@ -63,7 +63,14 @@ pub fn collect_semantic_tokens_range_with_version(
     runtime_version: &str,
     line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, Some(range), runtime_version, line_index)
+    collect_tokens_filtered(
+        root,
+        source,
+        scope_tree,
+        Some(range),
+        runtime_version,
+        line_index,
+    )
 }
 
 fn collect_tokens_filtered(
@@ -79,16 +86,21 @@ fn collect_tokens_filtered(
         .collect();
     let mut raw: Vec<(u32, u32, u32, u32)> = Vec::new();
     let mut cursor = root.walk();
-    collect_variable_tokens(&mut cursor, source, scope_tree, &builtins, &mut raw, line_index);
+    collect_variable_tokens(
+        &mut cursor,
+        source,
+        scope_tree,
+        &builtins,
+        &mut raw,
+        line_index,
+    );
 
     // Line-based range filtering: keep tokens whose start line is
     // inside `range.start.line..=range.end.line` inclusive. Column
     // precision isn't necessary for semantic tokens — clients always
     // request full-line viewports in practice.
     if let Some(r) = range {
-        raw.retain(|&(line, _col, _len, _mod)| {
-            line >= r.start.line && line <= r.end.line
-        });
+        raw.retain(|&(line, _col, _len, _mod)| line >= r.start.line && line <= r.end.line);
     }
 
     raw.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -98,7 +110,11 @@ fn collect_tokens_filtered(
     let mut prev_start: u32 = 0;
     for &(line, col, length, modifiers) in &raw {
         let delta_line = line - prev_line;
-        let delta_start = if delta_line == 0 { col - prev_start } else { col };
+        let delta_start = if delta_line == 0 {
+            col - prev_start
+        } else {
+            col
+        };
         result.push(SemanticToken {
             delta_line,
             delta_start,
@@ -155,8 +171,7 @@ fn collect_variable_tokens(
             // literal key-value pairs. Avoids O(N) traversal on large
             // data-mapping tables.
             let child = cursor.node();
-            if child.kind() == "table_constructor"
-                && crate::util::is_bracket_key_only_table(child)
+            if child.kind() == "table_constructor" && crate::util::is_bracket_key_only_table(child)
             {
                 if !cursor.goto_next_sibling() {
                     break;
@@ -175,15 +190,11 @@ fn collect_variable_tokens(
 fn is_field_or_method(node: tree_sitter::Node) -> bool {
     if let Some(parent) = node.parent() {
         match parent.kind() {
-            "variable" => {
-                parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id())
-            }
+            "variable" => parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id()),
             "function_call" => {
                 parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id())
             }
-            "function_name" => {
-                parent.child(0).map(|n| n.id()) != Some(node.id())
-            }
+            "function_name" => parent.child(0).map(|n| n.id()) != Some(node.id()),
             _ => false,
         }
     } else {
@@ -232,10 +243,7 @@ pub fn compute_semantic_token_delta(
     let mut suffix = 0usize;
     let max_suffix = (old.len() - prefix).min(new.len() - prefix);
     while suffix < max_suffix
-        && tokens_equal(
-            &old[old.len() - 1 - suffix],
-            &new[new.len() - 1 - suffix],
-        )
+        && tokens_equal(&old[old.len() - 1 - suffix], &new[new.len() - 1 - suffix])
     {
         suffix += 1;
     }
@@ -252,7 +260,11 @@ pub fn compute_semantic_token_delta(
         // tower-lsp-server's typed `SemanticTokensEdit.data` accepts
         // an optional `Vec<SemanticToken>` which serializes as 5×N
         // uints. `None` vs `Some(empty)` both mean "delete only".
-        data: if insert.is_empty() { None } else { Some(insert) },
+        data: if insert.is_empty() {
+            None
+        } else {
+            Some(insert)
+        },
     }]
 }
 
@@ -291,7 +303,10 @@ mod delta_tests {
         let b = vec![tok(0, 0, 3, 0), tok(1, 0, 4, 1)];
         let edits = compute_semantic_token_delta(&a, &b);
         assert_eq!(edits.len(), 1);
-        assert_eq!(edits[0].start, 5, "appending after 1 token starts at u32 index 5");
+        assert_eq!(
+            edits[0].start, 5,
+            "appending after 1 token starts at u32 index 5"
+        );
         assert_eq!(edits[0].delete_count, 0);
         assert_eq!(edits[0].data.as_ref().map(|v| v.len()).unwrap_or(0), 1);
     }

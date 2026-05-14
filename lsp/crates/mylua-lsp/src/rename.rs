@@ -1,17 +1,16 @@
-use std::collections::HashMap;
-use tower_lsp_server::ls_types::*;
+use crate::aggregation::WorkspaceAggregation;
 use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
-use crate::references;
-use crate::aggregation::WorkspaceAggregation;
 use crate::lua_builtins::LUA_KEYWORDS;
+use crate::references;
 use crate::uri_id::UriId;
+use std::collections::HashMap;
+use tower_lsp_server::ls_types::*;
 
-pub fn prepare_rename(
-    doc: &Document,
-    position: Position,
-) -> Option<PrepareRenameResponse> {
-    let offset = doc.line_index().position_to_byte_offset(doc.source(), position)?;
+pub fn prepare_rename(doc: &Document, position: Position) -> Option<PrepareRenameResponse> {
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position)?;
     let node = crate::util::find_node_at_position(doc.root_node()?, offset)?;
     let text = crate::util::node_text(node, doc.source());
 

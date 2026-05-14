@@ -52,12 +52,26 @@ pub fn inlay_hints(
     }
 
     let source = doc.source();
-    let range_start = doc.line_index().position_to_byte_offset(doc.source(), range.start).unwrap_or(0);
-    let range_end = doc.line_index().position_to_byte_offset(doc.source(), range.end).unwrap_or(source.len());
+    let range_start = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), range.start)
+        .unwrap_or(0);
+    let range_end = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), range.end)
+        .unwrap_or(source.len());
 
     let mut out = Vec::new();
     let mut ctx = InlayCtx {
-        source, line_index: doc.line_index(), uri_id, scope_tree: &doc.scope_tree, index, cfg, range_start, range_end, out: &mut out,
+        source,
+        line_index: doc.line_index(),
+        uri_id,
+        scope_tree: &doc.scope_tree,
+        index,
+        cfg,
+        range_start,
+        range_end,
+        out: &mut out,
     };
     let Some(root) = doc.root_node() else {
         return out;
@@ -67,10 +81,7 @@ pub fn inlay_hints(
     out
 }
 
-fn walk(
-    cursor: &mut tree_sitter::TreeCursor,
-    ctx: &mut InlayCtx,
-) {
+fn walk(cursor: &mut tree_sitter::TreeCursor, ctx: &mut InlayCtx) {
     let node = cursor.node();
     // Early exit: whole subtree outside requested range.
     if node.end_byte() < ctx.range_start || node.start_byte() > ctx.range_end {
@@ -79,7 +90,15 @@ fn walk(
 
     match node.kind() {
         "function_call" if ctx.cfg.parameter_names => {
-            collect_parameter_name_hints(node, ctx.source, ctx.uri_id, ctx.scope_tree, ctx.index, ctx.out, ctx.line_index);
+            collect_parameter_name_hints(
+                node,
+                ctx.source,
+                ctx.uri_id,
+                ctx.scope_tree,
+                ctx.index,
+                ctx.out,
+                ctx.line_index,
+            );
         }
         "local_declaration" if ctx.cfg.variable_types => {
             collect_variable_type_hints(node, ctx.source, ctx.scope_tree, ctx.out, ctx.line_index);
@@ -107,7 +126,9 @@ fn collect_parameter_name_hints(
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
-    let Some(args) = call.child_by_field_name("arguments") else { return };
+    let Some(args) = call.child_by_field_name("arguments") else {
+        return;
+    };
 
     // Reuse the same resolution logic as signatureHelp so that
     // method calls, dot calls, and simple identifier calls are all
@@ -154,7 +175,9 @@ fn emit_param_hint(
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
-    let Some(param) = params.get(arg_index) else { return };
+    let Some(param) = params.get(arg_index) else {
+        return;
+    };
     if param.name == "..." {
         return;
     }
@@ -183,19 +206,25 @@ fn collect_variable_type_hints(
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
-    let Some(names) = decl.child_by_field_name("names") else { return };
+    let Some(names) = decl.child_by_field_name("names") else {
+        return;
+    };
     // Skip if user explicitly annotated with `---@type ...` above.
     if preceded_by_type_annotation(decl, source) {
         return;
     }
 
     for i in 0..names.named_child_count() {
-        let Some(id) = names.named_child(i as u32) else { continue };
+        let Some(id) = names.named_child(i as u32) else {
+            continue;
+        };
         if id.kind() != "identifier" {
             continue;
         }
         let name = node_text(id, source);
-        let Some(tf) = scope_tree.resolve_type(id.start_byte(), name).cloned() else { continue };
+        let Some(tf) = scope_tree.resolve_type(id.start_byte(), name).cloned() else {
+            continue;
+        };
         if !is_interesting_type(&tf) {
             continue;
         }
