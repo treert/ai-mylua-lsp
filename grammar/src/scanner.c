@@ -56,8 +56,9 @@ static void skip_ws(TSLexer *lexer) { lexer->advance(lexer, true); }
    created. Each scanner instance reads this value once in `create`
    and `deserialize(length==0)`. Individual files can still override
    with `---#enable top_keyword` / `---#disable top_keyword`.
-   Default: true (top-level keyword splitting OFF). */
-static bool g_top_keyword_default_disabled = true;
+   Default: false (top-level keyword splitting ON for standalone
+   tree-sitter CLI tests; the LSP host overrides this from config). */
+static bool g_top_keyword_default_disabled = false;
 
 /* Public setter — called from Rust via FFI. */
 void mylua_set_top_keyword_default_disabled(bool value) {

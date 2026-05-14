@@ -8,9 +8,9 @@ unsafe extern "C" {
 pub const LANGUAGE: LanguageFn = unsafe { LanguageFn::from_raw(tree_sitter_lua) };
 
 /// Set the global default for `top_keyword_disabled` in the external
-/// scanner. When `true` (the default), column-0 keywords emit normal
-/// `WORD_*` tokens; when `false`, they emit `TOP_WORD_*` for error
-/// front-loading.
+/// scanner. When `true`, column-0 keywords emit normal `WORD_*` tokens;
+/// when `false` (the standalone scanner default), they emit `TOP_WORD_*`
+/// for error front-loading.
 ///
 /// Must be called **before** creating any `Parser` instances (i.e.
 /// before `Parser::new()` + `set_language()`). Individual files can
