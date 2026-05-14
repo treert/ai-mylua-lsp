@@ -482,6 +482,43 @@ print(t.no_exist)
 }
 
 #[test]
+fn emmy_class_field_with_unknown_type_is_still_known() {
+    let src = r#"
+---@class ClassA1
+ClassA1 = {}
+
+function ClassA1:ctor()
+    self.m_a1 = 123
+    self.m_a2 = self.m_a1 and 123
+end
+
+function ClassA1:test_self_field()
+    print(self.m_a2)
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "class_unknown_field_type.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field") && d.message.contains("m_a2"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "a declared class field with unknown value type must not be reported as missing, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
 fn emmy_type_mismatch_string_vs_number() {
     let src = r#"
 ---@type string

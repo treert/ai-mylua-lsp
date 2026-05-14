@@ -104,7 +104,9 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
                         std::slice::from_ref(&field_name),
                         ctx.index,
                     );
-                    if field_resolved.type_fact == TypeFact::Unknown {
+                    if field_resolved.type_fact == TypeFact::Unknown
+                        && field_resolved.def_location.is_none()
+                    {
                         let qualified = format!("{}.{}", type_name, field_name);
                         if !ctx.index.global_shard.contains_key(&qualified) {
                             ctx.diagnostics.push(Diagnostic {
@@ -175,7 +177,9 @@ fn check_dotted_field(
                     std::slice::from_ref(field_name),
                     ctx.index,
                 );
-                if field_resolved.type_fact == TypeFact::Unknown {
+                if field_resolved.type_fact == TypeFact::Unknown
+                    && field_resolved.def_location.is_none()
+                {
                     let qualified = format!("{}.{}", type_name, field_name);
                     if !ctx.index.global_shard.contains_key(&qualified) {
                         ctx.diagnostics.push(Diagnostic {
