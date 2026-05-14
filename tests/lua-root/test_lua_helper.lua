@@ -41,7 +41,7 @@ local ClassB1 = class("ClassB1")
 ClassB1.s_bbb = 123
 
 --- bbb
----@param bb number
+---@param bb number @ param bb haha
 function ClassB1:bbb(bb)
     self.m_bbb = bb
     print(self.__class_name .. " bbb")

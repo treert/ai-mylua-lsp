@@ -642,7 +642,12 @@ fn build_hover_for_definition(
 
     let stmt_node = find_enclosing_statement(def_node);
 
+    if def.kind == DefKind::Parameter {
+        return build_hover_for_parameter(def, stmt_node, source, type_info);
+    }
+
     let comment_lines = collect_preceding_comments(stmt_node, source);
+
     let trailing = collect_trailing_comment(stmt_node, source);
     let comment_text = comment_lines.join("\n");
     let mut annotations = parse_emmy_comments(&comment_text);
@@ -698,7 +703,54 @@ fn build_hover_for_definition(
     })
 }
 
+fn build_hover_for_parameter(
+    def: &crate::types::Definition,
+    stmt_node: tree_sitter::Node,
+    source: &[u8],
+    type_info: Option<&str>,
+) -> Option<Hover> {
+    let comment_lines = collect_preceding_comments(stmt_node, source);
+    let comment_text = comment_lines.join("\n");
+    let mut annotations = parse_emmy_comments(&comment_text);
+    if let Some(trailing_emmy) = collect_trailing_emmy_text(stmt_node, source) {
+        annotations.extend(parse_emmy_comments(&trailing_emmy));
+    }
+    let parameter_annotations: Vec<_> = annotations
+        .into_iter()
+        .filter(|ann| {
+            matches!(
+                ann,
+                crate::emmy::EmmyAnnotation::Param { name, .. } if name == &def.name
+            )
+        })
+        .collect();
+    let emmy_md = format_annotations_markdown(&parameter_annotations);
+
+    let mut parts = Vec::new();
+    parts.push(format!("```lua\n{}\n```", def.name));
+    parts.push("*parameter*".to_string());
+
+    if let Some(ti) = type_info {
+        if ti != "unknown" {
+            parts.push(format!("Type: `{}`", ti));
+        }
+    }
+
+    if !emmy_md.is_empty() {
+        parts.push(format!("---\n{}", emmy_md));
+    }
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range: Some(def.selection_range.into()),
+    })
+}
+
 fn definition_doc_text_at_byte(doc: &Document, byte: usize) -> String {
+
     let temporary_tree;
     let root = if let Some(root) = doc.root_node() {
         root

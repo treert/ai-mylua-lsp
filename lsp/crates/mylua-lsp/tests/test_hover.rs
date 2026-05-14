@@ -918,8 +918,38 @@ print(ret2)"#;
     );
 }
 
+#[test]
+fn hover_function_parameter_focuses_parameter_type_not_function() {
+    let src = r#"---@param bb number
+---@return string
+function ClassB1:bbb(bb)
+    return tostring(bb)
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_param_decl.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // Hover on `bb` in the parameter list.
+    let h = hover::hover(doc, intern_uri(&uri), pos(2, 21), &mut agg, &mylua_lsp::document::DocumentStoreView::new(&docs))
+        .expect("hover on function parameter should resolve");
+    let text = hover_content_string(&h);
+
+    assert!(
+        text.contains("```lua\nbb\n```") && text.contains("*parameter*") && text.contains("Type: `number`"),
+        "parameter hover should focus the parameter and its type, got:\n{}",
+        text,
+    );
+    assert!(
+        !text.contains("function ClassB1:bbb(bb)") && !text.contains("@return"),
+        "parameter hover should not show whole-function hover details, got:\n{}",
+        text,
+    );
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
+
     use tower_lsp_server::ls_types::HoverContents;
     match &h.contents {
         HoverContents::Scalar(s) => match s {
