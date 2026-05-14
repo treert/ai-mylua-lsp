@@ -1,8 +1,21 @@
 -- 使用
 ---@class ClassA1:BaseCls
+---@field m_a number
 ClassA1 = class("ClassA1")
+
+function ClassA1:ctor()
+    print(self.__class_name .. " ctor")
+    self.m_a1 = 123
+    self.m_a2 = self.m_a1 and 123
+end
+
+function ClassA1:test_self_field()
+    print(self.m_a1)
+    print(self.m_a2)
+end
+
 function ClassA1:Say()
-    print(self.__class_name .. " say")
+    print(self.__class_name .. " say" .. self.m_a1)
 end
 
 ---@return string
