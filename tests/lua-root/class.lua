@@ -20,6 +20,7 @@ end
 
 ---@param class_name string
 ---@param super? BaseCls
+---@return BaseCls
 function class(class_name,super)
     local cls = {
         __class_name = class_name;
