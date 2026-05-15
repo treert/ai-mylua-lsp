@@ -531,6 +531,36 @@ end
 }
 
 #[test]
+fn emmy_field_on_local_table_bound_class_is_known() {
+    let src = r#"---@class Test.TypeB
+---@field m_bb number
+local TypeB = {}
+
+print(TypeB.m_bb)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_table_bound_class_field.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field") && d.message.contains("m_bb"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "---@field on a local table-bound class must be known, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
 fn emmy_type_mismatch_string_vs_number() {
     let src = r#"
 ---@type string

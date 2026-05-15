@@ -440,22 +440,17 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             };
 
             // If we have a pending class binding (from ---@class) and this is
-            // the first local with no explicit @type annotation, and the inferred
-            // type is a table, keep the table type so backfill can anchor the shape.
-            // The bound_class is sufficient for method resolution. Otherwise use the
-            // class type directly to make local classes consistent with global classes.
-            let final_type_fact = if i == 0 && var_bound_class.is_some() && pending_type.is_none() {
-                match &type_fact {
-                    TypeFact::Known(KnownType::Table(_)) => {
-                        // For table literals, keep the table type so backfill can anchor
-                        // the shape. The bound_class is sufficient for method resolution.
-                        type_fact.clone()
+            // the first local with no explicit @type annotation, the Emmy class
+            // is the public type. For table literals, record the shape separately
+            // so TypeDefinition.anchor_shape_id can still be backfilled.
+            let final_type_fact = if i == 0 && pending_type.is_none() {
+                if let Some(class_name) = var_bound_class {
+                    if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
+                        ctx.class_anchor_shapes.insert(class_name, *shape_id);
                     }
-                    _ => {
-                        // For non-table initializers, use the class type directly
-                        let class_name = var_bound_class.unwrap();
-                        TypeFact::Known(KnownType::EmmyType(class_name))
-                    }
+                    TypeFact::Known(KnownType::EmmyType(class_name))
+                } else {
+                    type_fact.clone()
                 }
             } else {
                 type_fact.clone()

@@ -1209,6 +1209,35 @@ fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
 }
 
 #[test]
+fn hover_local_table_bound_class_prefers_emmy_type() {
+    let src = r#"---@class Test.TypeB
+---@field m_bb number
+local TypeB = {}
+
+print(TypeB)
+print(TypeB.m_bb)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_local_table_bound_class.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on `TypeB` should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("Type: `Test.TypeB`"),
+        "local table bound to ---@class should hover as Emmy type, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_local_anonymous_function_shows_params() {
     // P1-8: `local f = function(a, b) end` — hover on `f` should show
     // the full `fun(a, b)` signature (previously was empty `fun()`).

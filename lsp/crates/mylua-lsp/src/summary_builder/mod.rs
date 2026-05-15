@@ -50,6 +50,7 @@ pub fn build_file_analysis(
         pending_class: None,
         pending_generic_params: Vec::new(),
         pending_class_name: None,
+        class_anchor_shapes: HashMap::new(),
         global_class_bindings: HashMap::new(),
         module_return_type: None,
         module_return_range: None,
@@ -104,18 +105,19 @@ pub fn build_file_analysis(
 fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
     // Collect class name → shape_id from local declarations that were
     // explicitly bound by the immediately preceding `---@class`.
-    let shape_map: HashMap<LuaSymbol, TableShapeId> = ctx
-        .scopes
-        .iter()
-        .flat_map(|s| s.declarations.iter())
-        .filter_map(|decl| {
-            let class_name = decl.bound_class.as_ref()?;
-            let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact else {
-                return None;
-            };
-            Some((*class_name, *sid))
-        })
-        .collect();
+    let mut shape_map: HashMap<LuaSymbol, TableShapeId> = ctx.class_anchor_shapes.clone();
+    shape_map.extend(
+        ctx.scopes
+            .iter()
+            .flat_map(|s| s.declarations.iter())
+            .filter_map(|decl| {
+                let class_name = decl.bound_class.as_ref()?;
+                let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact else {
+                    return None;
+                };
+                Some((*class_name, *sid))
+            }),
+    );
 
     for td in &mut ctx.type_definitions {
         if td.kind != TypeDefinitionKind::Class || td.anchor_shape_id.is_some() {
@@ -211,6 +213,10 @@ pub(crate) struct BuildContext<'a> {
     /// the immediately following `local` or assignment to bind the variable
     /// to its class definition (Phase 2: class anchor binding).
     pub(crate) pending_class_name: Option<LuaSymbol>,
+    /// Class name → table shape anchor for `---@class Foo` followed by
+    /// `local M = {}`. The local's public type is EmmyType, but the shape
+    /// remains available for class field fallback and existing anchor users.
+    pub(crate) class_anchor_shapes: HashMap<LuaSymbol, TableShapeId>,
     /// Global variable → class name binding. When `---@class Foo` is followed
     /// by `Foo = class()` (global assignment), record the binding here so
     /// `function Foo:method()` can resolve Foo's class and write fields back.
