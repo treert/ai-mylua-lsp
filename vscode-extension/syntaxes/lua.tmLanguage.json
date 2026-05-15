@@ -386,12 +386,12 @@
 
     "emmy-type-paren": {
       "begin": "\\(",
-      "end": "\\)",
+      "end": "(\\))|(?=$)",
       "beginCaptures": {
         "0": { "name": "punctuation.definition.group.begin.lua" }
       },
       "endCaptures": {
-        "0": { "name": "punctuation.definition.group.end.lua" }
+        "1": { "name": "punctuation.definition.group.end.lua" }
       },
       "patterns": [
         { "include": "#emmy-type-expr" }
