@@ -2,6 +2,8 @@ mod test_helpers;
 
 use mylua_lsp::config::{DiagnosticSeverityOption, DiagnosticsConfig};
 use mylua_lsp::diagnostics;
+use mylua_lsp::summary::TypeDefinitionKind;
+use mylua_lsp::type_system::{KnownType, TypeFact};
 use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 
@@ -700,6 +702,95 @@ print(t.age)
     assert!(
         unknown.is_empty(),
         "fields declared in the literal `{{ name=..., age=... }}` must not be flagged, got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn no_unknown_field_on_required_module_nested_table_fields() {
+    let module_src = r#"
+---@class TestModule1
+local M = {}
+
+M.Config_Id = 123
+
+function M.test()
+end
+
+M.internat = {}
+M.internat.Config_Internat_Id = 456
+
+function M.internat.test_internat()
+end
+
+return M
+"#;
+    let main_src = r#"
+local module1 = require("test_module1")
+
+module1.test()
+print(module1.Config_Id)
+print(module1.internat)
+module1.internat.test_internat()
+print(module1.internat.Config_Internat_Id)
+"#;
+    let (docs, mut agg, _) = setup_workspace(&[
+        ("test_module1.lua", module_src),
+        ("main.lua", main_src),
+    ]);
+    let module_uri = make_uri("test_module1.lua");
+    let module_summary = summary_by_uri(&agg, &module_uri).expect("module summary");
+    let test_module_type = module_summary
+        .type_definitions
+        .iter()
+        .find(|td| td.kind == TypeDefinitionKind::Class && td.name == "TestModule1")
+        .expect("TestModule1 type");
+    assert!(
+        test_module_type
+            .fields
+            .iter()
+            .any(|field| field.name == "Config_Id"),
+        "top-level runtime fields should stay on the class type"
+    );
+    let internat_shape_id = test_module_type
+        .fields
+        .iter()
+        .find(|field| field.name == "internat")
+        .and_then(|field| match &field.type_fact {
+            TypeFact::Known(KnownType::Table(shape_id)) => Some(*shape_id),
+            _ => None,
+        })
+        .expect("internat class field should point at its table shape");
+    let internat_shape = module_summary
+        .table_shapes
+        .get(&internat_shape_id)
+        .expect("internat shape");
+    assert!(
+        internat_shape.get_field("Config_Internat_Id").is_some()
+            && internat_shape.get_field("test_internat").is_some(),
+        "nested writes should populate the table shape owned by the internat class field"
+    );
+
+    let main_uri = make_uri("main.lua");
+    let main_uri_id = intern_uri(&main_uri);
+    let doc = docs.get(&main_uri_id).expect("main document");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        main_src.as_bytes(),
+        summary_id_by_uri(&agg, &main_uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "nested table fields exported through require must not be flagged, got: {:?}",
         unknown,
     );
 }

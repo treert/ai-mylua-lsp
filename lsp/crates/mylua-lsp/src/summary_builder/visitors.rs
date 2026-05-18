@@ -775,38 +775,15 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     //      → write field to class TypeDefinition (supplemental — does NOT replace
     //        existing shape write or global contribution)
     //   3. Global contribution (fallback for non-local bases)
-    let wrote_to_shape = 'shape: {
-        let (base_name, field_name) = if let Some((b, f)) = name.rsplit_once(':') {
-            (b, f)
-        } else if let Some((b, f)) = name.rsplit_once('.') {
-            (b, f)
-        } else {
-            break 'shape false;
-        };
-
-        if base_name.contains('.') || base_name.contains(':') {
-            break 'shape false;
-        }
-
-        if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_name, name_node.start_byte()) {
-            if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
-                let sid = *shape_id;
-                if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
-                    shape.set_field(
-                        field_name,
-                        FieldInfo {
-                            name: field_name.into(),
-                            type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
-                            def_range: Some(
-                                ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
-                            ),
-                            assignment_count: 1,
-                        },
-                    );
-                    break 'shape true;
-                }
-            }
-        }
+    let wrote_to_shape = if let Some(chain) = function_name_dotted_chain(&name) {
+        register_nested_field_write(
+            ctx,
+            &chain.base_name,
+            &chain.fields,
+            TypeFact::Known(KnownType::FunctionRef(func_id)),
+            ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+        )
+    } else {
         false
     };
 
@@ -1496,14 +1473,15 @@ fn register_nested_field_write(
     type_fact: TypeFact,
     assign_range: crate::util::ByteRange,
 ) -> bool {
-    let base_shape_id =
-        match ctx.resolve_visible_in_build_scopes(base_name, assign_range.start_byte) {
-            Some(decl) => match &decl.type_fact {
-                Some(TypeFact::Known(KnownType::Table(sid))) => *sid,
-                _ => return false,
-            },
-            None => return false,
-        };
+    let (base_shape_id, remaining_fields) = match table_shape_write_target(
+        ctx,
+        base_name,
+        fields,
+        assign_range.start_byte,
+    ) {
+        Some(target) => target,
+        None => return false,
+    };
 
     // Walk the intermediate shapes. Three cases per step:
     //   (a) field exists as `Known(Table(sid))` → reuse existing shape.
@@ -1522,8 +1500,8 @@ fn register_nested_field_write(
     // this call — guaranteeing we never leave an unreferenced shape
     // behind when we return `false`.
     let mut current_shape = base_shape_id;
-    let last_idx = fields.len().saturating_sub(1);
-    for (i, field_name) in fields.iter().enumerate() {
+    let last_idx = remaining_fields.len().saturating_sub(1);
+    for (i, field_name) in remaining_fields.iter().enumerate() {
         if i == last_idx {
             break;
         }
@@ -1555,7 +1533,7 @@ fn register_nested_field_write(
         current_shape = next_shape;
     }
 
-    let final_field = match fields.last() {
+    let final_field = match remaining_fields.last() {
         Some(f) => f.clone(),
         None => return false,
     };
@@ -1573,6 +1551,75 @@ fn register_nested_field_write(
     } else {
         false
     }
+}
+
+fn table_shape_write_target<'fields>(
+    ctx: &BuildContext,
+    base_name: &str,
+    fields: &'fields [String],
+    byte_offset: usize,
+) -> Option<(crate::table_shape::TableShapeId, &'fields [String])> {
+    let decl = ctx.resolve_visible_in_build_scopes(base_name, byte_offset)?;
+    if let Some(TypeFact::Known(KnownType::Table(sid))) = &decl.type_fact {
+        return Some((*sid, fields));
+    }
+
+    let class_name = decl.bound_class.as_ref()?;
+    let (first_field, rest) = fields.split_first()?;
+    if rest.is_empty() {
+        // Direct writes (`M.field = ...`) on an @class-bound local should keep
+        // flowing through `add_field_to_class`; only nested writes need to enter
+        // the already-known field table shape.
+        return None;
+    }
+    class_field_table_shape_id(ctx, *class_name, first_field).map(|sid| (sid, rest))
+}
+
+fn class_field_table_shape_id(
+    ctx: &BuildContext,
+    class_name: crate::lua_symbol::LuaSymbol,
+    field_name: &str,
+) -> Option<crate::table_shape::TableShapeId> {
+    ctx.type_definitions
+        .iter()
+        .find(|td| td.kind == TypeDefinitionKind::Class && td.name == class_name)
+        .and_then(|td| {
+            td.fields
+                .iter()
+                .find(|field| field.name.as_str() == field_name)
+                .and_then(|field| match &field.type_fact {
+                    TypeFact::Known(KnownType::Table(sid)) => Some(*sid),
+                    _ => None,
+                })
+        })
+        .or_else(|| {
+            let root_sid = *ctx.class_anchor_shapes.get(&class_name)?;
+            ctx.table_shapes
+                .get(&root_sid)
+                .and_then(|shape| shape.get_field(field_name))
+                .and_then(|field| match &field.type_fact {
+                    TypeFact::Known(KnownType::Table(sid)) => Some(*sid),
+                    _ => None,
+                })
+        })
+}
+
+fn function_name_dotted_chain(name: &str) -> Option<DottedChain> {
+    let mut parts = Vec::new();
+    for part in name.split(['.', ':']) {
+        if part.is_empty() {
+            return None;
+        }
+        parts.push(part.to_string());
+    }
+    if parts.len() < 2 {
+        return None;
+    }
+    let base_name = parts.remove(0);
+    Some(DottedChain {
+        base_name,
+        fields: parts,
+    })
 }
 
 fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tree_sitter::Node) {
