@@ -41,3 +41,12 @@ mm.hi()
 
 local tt = test_g()
 print(tt.a)
+
+local module1 = require('test_module1')
+
+module1.test()
+print(module1.Config_Id)
+print(module1.internat)
+module1.internat.test_internat()
+print(module1.internat.Config_Internat_Id)
+
