@@ -6,6 +6,8 @@
 //!   in `DocumentSummary.type_definitions`, with their `@field` entries
 //!   nested as Field children and any `function Class:method()` /
 //!   `function Class.method()` declarations nested as Method children.
+//!   Function fields synthesized from method declarations are left to
+//!   the method/function entry so the outline does not show duplicates.
 //! - **Function** nodes for top-level `function foo() end` and
 //!   `local function foo() end` whose names do not belong to a known
 //!   class.
@@ -25,6 +27,7 @@ use std::collections::{HashMap, HashSet};
 use tower_lsp_server::ls_types::*;
 
 use crate::summary::{DocumentSummary, TypeDefinitionKind};
+use crate::type_system::{KnownType, TypeFact};
 use crate::util::{node_text, LineIndex};
 
 pub fn collect_document_symbols(
@@ -125,6 +128,9 @@ impl<'a> OutlineBuilder<'a> {
                 let mut seen_keys: HashSet<String> = HashSet::new();
                 for fd in &td.fields {
                     if fd.name.is_empty() {
+                        continue;
+                    }
+                    if is_synthesized_function_field(fd) {
                         continue;
                     }
                     let key = format!("{}:field", fd.name);
@@ -398,6 +404,10 @@ impl<'a> OutlineBuilder<'a> {
         all.sort_by_key(|s| (s.range.start.line, s.range.start.character));
         all
     }
+}
+
+fn is_synthesized_function_field(fd: &crate::summary::TypeFieldDef) -> bool {
+    fd.name_range.is_none() && matches!(fd.type_fact, TypeFact::Known(KnownType::FunctionRef(_)))
 }
 
 /// Split a `function_name` like `Foo:method` / `Foo.method` /

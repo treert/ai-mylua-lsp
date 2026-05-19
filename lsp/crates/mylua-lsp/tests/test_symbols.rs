@@ -138,6 +138,34 @@ function Foo.bar() end
 }
 
 #[test]
+fn symbols_class_method_backfilled_field_not_duplicated() {
+    let src = r#"---@class Vector2
+---@field x number
+---@field y number
+local Vector2 = {}
+
+function Vector2:length()
+    return math.sqrt(self.x * self.x + self.y * self.y)
+end
+"#;
+    let syms = collect(src);
+    let vector = syms.iter().find(|s| s.name == "Vector2").expect("Vector2");
+    let children = vector.children.as_ref().expect("children");
+    let length_entries: Vec<_> = children.iter().filter(|c| c.name == "length").collect();
+
+    assert_eq!(
+        length_entries.len(),
+        1,
+        "length should appear once in class outline, got: {:?}",
+        children
+            .iter()
+            .map(|c| (c.name.as_str(), c.kind))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(length_entries[0].kind, SymbolKind::METHOD);
+}
+
+#[test]
 fn symbols_dotted_assignment_skipped() {
     // `x.foo = 1` is a field write on an existing variable, not a new
     // symbol — must not appear in the outline.
