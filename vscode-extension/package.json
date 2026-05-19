@@ -212,12 +212,13 @@
         },
         "mylua.documentSymbol.detailLevel": {
           "type": "string",
-          "enum": ["compact", "functions", "allDeclarations"],
+          "enum": ["compact", "functions", "allDeclarations", "anonymousFunctions"],
           "default": "compact",
           "enumDescriptions": [
             "Show the existing compact outline: file-level declarations plus class fields and methods.",
             "Also nest named functions declared inside other functions.",
-            "Also show local declarations inside function bodies. Shadowed locals are preserved as distinct symbols."
+            "Also show local declarations inside function bodies. Shadowed locals are preserved as distinct symbols.",
+            "Also show anonymous functions as nested Function symbols, including declarations inside their bodies."
           ],
           "description": "Controls how much detail textDocument/documentSymbol returns for the Outline view."
         },

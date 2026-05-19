@@ -204,6 +204,112 @@ end
 }
 
 #[test]
+fn symbols_anonymous_functions_mode_nests_anonymous_function_declarations() {
+    let src = r#"
+function outer()
+    local cb = function(a)
+        local x = 1
+        local function hidden()
+        end
+    end
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AnonymousFunctions);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let cb = children.iter().find(|s| s.name == "cb").expect("cb");
+
+    assert_eq!(cb.kind, SymbolKind::FUNCTION);
+    let cb_children = cb.children.as_ref().expect("cb children");
+    let cb_child_names: Vec<&str> = cb_children.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(cb_child_names, vec!["a", "x", "hidden"]);
+    assert_eq!(cb_children[0].kind, SymbolKind::VARIABLE);
+    assert_eq!(cb_children[1].kind, SymbolKind::VARIABLE);
+    assert_eq!(cb_children[2].kind, SymbolKind::FUNCTION);
+}
+
+#[test]
+fn symbols_anonymous_functions_mode_names_nested_assignment_functions() {
+    let src = r#"
+function outer()
+    cb = function(a)
+        local x = 1
+    end
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AnonymousFunctions);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let cb = children.iter().find(|s| s.name == "cb").expect("cb");
+
+    assert_eq!(cb.kind, SymbolKind::FUNCTION);
+    let cb_child_names: Vec<&str> = cb
+        .children
+        .as_ref()
+        .expect("cb children")
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(cb_child_names, vec!["a", "x"]);
+}
+
+#[test]
+fn symbols_anonymous_functions_mode_includes_unbound_anonymous_functions() {
+    let src = r#"
+function outer()
+    register(function(a)
+        local x = 1
+    end)
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AnonymousFunctions);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let anon = children
+        .iter()
+        .find(|s| s.name == "<anonymous>")
+        .expect("<anonymous>");
+
+    assert_eq!(anon.kind, SymbolKind::FUNCTION);
+    let anon_child_names: Vec<&str> = anon
+        .children
+        .as_ref()
+        .expect("anonymous children")
+        .iter()
+        .map(|c| c.name.as_str())
+        .collect();
+    assert_eq!(anon_child_names, vec!["a", "x"]);
+}
+
+#[test]
+fn symbols_anonymous_functions_mode_includes_top_level_wrapped_anonymous_functions() {
+    let src = r#"
+cb = wrap(function(a)
+    local x = 1
+end)
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AnonymousFunctions);
+    let names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, vec!["cb", "<anonymous>"]);
+}
+
+#[test]
+fn symbols_anonymous_functions_mode_does_not_expose_top_level_block_locals() {
+    let src = r#"
+if ready then
+    local x = 1
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AnonymousFunctions);
+
+    assert!(
+        syms.is_empty(),
+        "top-level block locals should remain hidden, got: {:?}",
+        syms
+    );
+}
+
+#[test]
 fn symbols_detail_modes_apply_inside_class_methods() {
     let src = r#"---@class Foo
 Foo = {}

@@ -42,6 +42,7 @@ pub enum DocumentSymbolDetailLevel {
     Compact,
     Functions,
     AllDeclarations,
+    AnonymousFunctions,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -384,5 +385,13 @@ mod tests {
             cfg.document_symbol.detail_level,
             DocumentSymbolDetailLevel::AllDeclarations
         );
+    }
+
+    #[test]
+    fn document_symbol_detail_level_reads_anonymous_functions_from_json() {
+        let level: DocumentSymbolDetailLevel =
+            serde_json::from_value(serde_json::json!("anonymousFunctions")).unwrap();
+
+        assert_eq!(level, DocumentSymbolDetailLevel::AnonymousFunctions);
     }
 }

@@ -195,7 +195,9 @@ impl<'a> OutlineBuilder<'a> {
     fn visit_root(&mut self, root: tree_sitter::Node, source: &[u8]) {
         match self.detail_level {
             DocumentSymbolDetailLevel::Compact => self.visit_top_level(root, source),
-            DocumentSymbolDetailLevel::Functions | DocumentSymbolDetailLevel::AllDeclarations => {
+            DocumentSymbolDetailLevel::Functions
+            | DocumentSymbolDetailLevel::AllDeclarations
+            | DocumentSymbolDetailLevel::AnonymousFunctions => {
                 self.visit_top_level_detailed(root, source)
             }
         }
@@ -235,6 +237,11 @@ impl<'a> OutlineBuilder<'a> {
                 }
                 "local_declaration" => self.visit_local_declaration(node, source),
                 "assignment_statement" => self.visit_assignment(node, source),
+                _ if self.includes_anonymous_functions() => {
+                    let mut nested = Vec::new();
+                    self.collect_anonymous_function_symbols(node, source, &mut nested);
+                    self.top.extend(nested);
+                }
                 _ => {}
             }
             if !cursor.goto_next_sibling() {
@@ -340,8 +347,59 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_local_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let symbols = self.local_declaration_symbols(node, source);
+        let symbols = self.local_declaration_symbols_for_detail(node, source);
         self.top.extend(symbols);
+    }
+
+    fn local_declaration_symbols_for_detail(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Vec<DocumentSymbol> {
+        if !self.includes_anonymous_functions() {
+            return self.local_declaration_symbols(node, source);
+        }
+
+        let Some(names_node) = node.child_by_field_name("names") else {
+            return Vec::new();
+        };
+        let values_node = node.child_by_field_name("values");
+        let mut symbols = Vec::new();
+        for i in 0..names_node.named_child_count() {
+            let Some(id_node) = names_node.named_child(i as u32) else {
+                continue;
+            };
+            if id_node.kind() != "identifier" {
+                continue;
+            }
+            let name = node_text(id_node, source).to_string();
+            if name.is_empty() || self.class_index.contains_key(&name) {
+                continue;
+            }
+            let value_node = values_node.and_then(|v| v.named_child(i as u32));
+            if let Some(value) = value_node.filter(|n| n.kind() == "function_definition") {
+                symbols.push(self.anonymous_function_symbol(
+                    name,
+                    Some("anonymous".to_string()),
+                    node,
+                    id_node,
+                    value,
+                    source,
+                ));
+            } else {
+                symbols.push(self.variable_symbol(
+                    name,
+                    Some("local".to_string()),
+                    node,
+                    id_node,
+                    source,
+                ));
+                if let Some(value) = value_node {
+                    self.collect_anonymous_function_symbols(value, source, &mut symbols);
+                }
+            }
+        }
+        symbols
     }
 
     fn local_declaration_symbols(
@@ -371,17 +429,13 @@ impl<'a> OutlineBuilder<'a> {
             if self.class_index.contains_key(&name) {
                 continue;
             }
-            #[allow(deprecated)]
-            symbols.push(DocumentSymbol {
+            symbols.push(self.variable_symbol(
                 name,
-                detail: Some("local".to_string()),
-                kind: SymbolKind::VARIABLE,
-                tags: None,
-                deprecated: None,
-                range: self.line_index.ts_node_to_range(node, source),
-                selection_range: self.line_index.ts_node_to_range(id_node, source),
-                children: None,
-            });
+                Some("local".to_string()),
+                node,
+                id_node,
+                source,
+            ));
         }
         symbols
     }
@@ -409,17 +463,97 @@ impl<'a> OutlineBuilder<'a> {
         if self.class_index.contains_key(&name) {
             return;
         }
-        #[allow(deprecated)]
-        self.top.push(DocumentSymbol {
+
+        if let Some(sym) = self.assignment_anonymous_function_symbol(node, source) {
+            self.top.push(sym);
+            return;
+        }
+
+        self.top
+            .push(self.variable_symbol(name, None, node, first_var, source));
+        if self.includes_anonymous_functions() {
+            if let Some(right) = node.child_by_field_name("right") {
+                let mut nested = Vec::new();
+                self.collect_anonymous_function_symbols(right, source, &mut nested);
+                self.top.extend(nested);
+            }
+        }
+    }
+
+    fn assignment_anonymous_function_symbol(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Option<DocumentSymbol> {
+        if !self.includes_anonymous_functions() {
+            return None;
+        }
+        let left = node.child_by_field_name("left")?;
+        let first_var = left.named_child(0)?;
+        if has_dotted_or_subscript_form(first_var) {
+            return None;
+        }
+        let name = node_text(first_var, source).to_string();
+        if name.is_empty() || self.class_index.contains_key(&name) {
+            return None;
+        }
+        let value = node
+            .child_by_field_name("right")
+            .and_then(|right| right.named_child(0))
+            .filter(|n| n.kind() == "function_definition")?;
+
+        Some(self.anonymous_function_symbol(
             name,
-            detail: None,
+            Some("anonymous".to_string()),
+            node,
+            first_var,
+            value,
+            source,
+        ))
+    }
+
+    fn variable_symbol(
+        &self,
+        name: String,
+        detail: Option<String>,
+        range_node: tree_sitter::Node,
+        selection_node: tree_sitter::Node,
+        source: &[u8],
+    ) -> DocumentSymbol {
+        #[allow(deprecated)]
+        DocumentSymbol {
+            name,
+            detail,
             kind: SymbolKind::VARIABLE,
             tags: None,
             deprecated: None,
-            range: self.line_index.ts_node_to_range(node, source),
-            selection_range: self.line_index.ts_node_to_range(first_var, source),
+            range: self.line_index.ts_node_to_range(range_node, source),
+            selection_range: self.line_index.ts_node_to_range(selection_node, source),
             children: None,
-        });
+        }
+    }
+
+    fn anonymous_function_symbol(
+        &mut self,
+        name: String,
+        detail: Option<String>,
+        range_node: tree_sitter::Node,
+        selection_node: tree_sitter::Node,
+        function_node: tree_sitter::Node,
+        source: &[u8],
+    ) -> DocumentSymbol {
+        let children = self.detail_children_for_function(function_node, source);
+        #[allow(deprecated)]
+        DocumentSymbol {
+            name,
+            detail,
+            kind: SymbolKind::FUNCTION,
+            tags: None,
+            deprecated: None,
+            range: self.line_index.ts_node_to_range(range_node, source),
+            selection_range: self.line_index.ts_node_to_range(selection_node, source),
+            children,
+        }
     }
 
     fn push_class_child(
@@ -471,9 +605,11 @@ impl<'a> OutlineBuilder<'a> {
     ) -> Option<Vec<DocumentSymbol>> {
         match self.detail_level {
             DocumentSymbolDetailLevel::Compact => None,
-            DocumentSymbolDetailLevel::Functions | DocumentSymbolDetailLevel::AllDeclarations => {
+            DocumentSymbolDetailLevel::Functions
+            | DocumentSymbolDetailLevel::AllDeclarations
+            | DocumentSymbolDetailLevel::AnonymousFunctions => {
                 let mut children = Vec::new();
-                if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations {
+                if self.includes_all_declarations() {
                     children.extend(self.parameter_symbols_for_function(node, source));
                 }
                 self.collect_nested_symbols(node, source, &mut children);
@@ -509,22 +645,117 @@ impl<'a> OutlineBuilder<'a> {
                         out.push(sym);
                     }
                 }
-                "local_declaration"
-                    if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations =>
-                {
-                    out.extend(self.local_declaration_symbols(child, source));
+                "local_declaration" if self.includes_all_declarations() => {
+                    out.extend(self.local_declaration_symbols_for_detail(child, source));
                 }
                 "for_numeric_statement" | "for_generic_statement"
-                    if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations =>
+                    if self.includes_all_declarations() =>
                 {
                     out.extend(self.for_variable_symbols(child, source));
                     self.collect_nested_symbols(child, source, out);
+                }
+                "assignment_statement" if self.includes_anonymous_functions() => {
+                    if let Some(sym) = self.assignment_anonymous_function_symbol(child, source) {
+                        out.push(sym);
+                    } else {
+                        self.collect_anonymous_function_symbols(child, source, out);
+                    }
+                }
+                "function_definition" if self.includes_anonymous_functions() => {
+                    out.push(self.anonymous_function_symbol(
+                        "<anonymous>".to_string(),
+                        Some("anonymous".to_string()),
+                        child,
+                        child,
+                        child,
+                        source,
+                    ));
                 }
                 "function_definition" => {}
                 _ => self.collect_nested_symbols(child, source, out),
             }
             if !cursor.goto_next_sibling() {
                 break;
+            }
+        }
+    }
+
+    fn collect_anonymous_function_symbols(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        out: &mut Vec<DocumentSymbol>,
+    ) {
+        let mut cursor = node.walk();
+        if !cursor.goto_first_child() {
+            return;
+        }
+        loop {
+            let child = cursor.node();
+            match child.kind() {
+                "function_definition" => {
+                    out.push(self.anonymous_function_symbol(
+                        "<anonymous>".to_string(),
+                        Some("anonymous".to_string()),
+                        child,
+                        child,
+                        child,
+                        source,
+                    ));
+                }
+                "assignment_statement" => {
+                    if let Some(sym) = self.assignment_anonymous_function_symbol(child, source) {
+                        out.push(sym);
+                    } else {
+                        self.collect_anonymous_function_symbols(child, source, out);
+                    }
+                }
+                "local_declaration" => {
+                    self.collect_local_anonymous_function_symbols(child, source, out);
+                }
+                _ => self.collect_anonymous_function_symbols(child, source, out),
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    fn collect_local_anonymous_function_symbols(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        out: &mut Vec<DocumentSymbol>,
+    ) {
+        let Some(names_node) = node.child_by_field_name("names") else {
+            return;
+        };
+        let values_node = node.child_by_field_name("values");
+        for i in 0..names_node.named_child_count() {
+            let Some(id_node) = names_node.named_child(i as u32) else {
+                continue;
+            };
+            if id_node.kind() != "identifier" {
+                continue;
+            }
+            let name = node_text(id_node, source).to_string();
+            if name.is_empty() || self.class_index.contains_key(&name) {
+                continue;
+            }
+            let Some(value) = values_node.and_then(|v| v.named_child(i as u32)) else {
+                continue;
+            };
+            if value.kind() == "function_definition" {
+                out.push(self.anonymous_function_symbol(
+                    name,
+                    Some("anonymous".to_string()),
+                    node,
+                    id_node,
+                    value,
+                    source,
+                ));
+            } else {
+                self.collect_anonymous_function_symbols(value, source, out);
             }
         }
     }
@@ -629,6 +860,18 @@ impl<'a> OutlineBuilder<'a> {
             selection_range: self.line_index.ts_node_to_range(selection_node, source),
             children: None,
         });
+    }
+
+    fn includes_all_declarations(&self) -> bool {
+        matches!(
+            self.detail_level,
+            DocumentSymbolDetailLevel::AllDeclarations
+                | DocumentSymbolDetailLevel::AnonymousFunctions
+        )
+    }
+
+    fn includes_anonymous_functions(&self) -> bool {
+        self.detail_level == DocumentSymbolDetailLevel::AnonymousFunctions
     }
 
     fn finalize(mut self) -> Vec<DocumentSymbol> {

@@ -86,6 +86,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 可配置更细粒度：
 - `"functions"`：在 compact 基础上递归展示函数体内的具名函数，并挂到外层函数子节点下。
 - `"allDeclarations"`：在 functions 基础上展示函数体内的参数、普通 local、for 变量；Lua shadowing 产生的同名 local 会保留为多个独立 symbol。
+- `"anonymousFunctions"`：在 allDeclarations 基础上把匿名函数也展示为 Function 节点；`local cb = function() ... end` / `cb = function() ... end` 使用绑定名，无法推导绑定名时显示为 `<anonymous>`。
 
 ### workspace/symbol
 - 全局函数/变量 + Emmy class/alias/enum 模糊搜索
