@@ -210,6 +210,17 @@
           ],
           "description": "Scope of semantic diagnostics publishing."
         },
+        "mylua.documentSymbol.detailLevel": {
+          "type": "string",
+          "enum": ["compact", "functions", "allDeclarations"],
+          "default": "compact",
+          "enumDescriptions": [
+            "Show the existing compact outline: file-level declarations plus class fields and methods.",
+            "Also nest named functions declared inside other functions.",
+            "Also show local declarations inside function bodies. Shadowed locals are preserved as distinct symbols."
+          ],
+          "description": "Controls how much detail textDocument/documentSymbol returns for the Outline view."
+        },
         "mylua.gotoDefinition.strategy": {
           "type": "string",
           "enum": ["auto", "single", "list"],

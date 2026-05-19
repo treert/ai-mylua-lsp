@@ -570,7 +570,14 @@ impl LanguageServer for Backend {
         };
         let idx = self.index.lock().unwrap();
         let summary = idx.summary_by_id(uri_id);
-        let syms = symbols::collect_document_symbols(root, doc.source(), summary, doc.line_index());
+        let detail_level = self.config.lock().unwrap().document_symbol.detail_level;
+        let syms = symbols::collect_document_symbols(
+            root,
+            doc.source(),
+            summary,
+            doc.line_index(),
+            detail_level,
+        );
         Ok(Some(DocumentSymbolResponse::Nested(syms)))
     }
 

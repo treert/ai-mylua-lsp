@@ -103,6 +103,9 @@ function collectLspConfig(
       returnMismatch: cfg.get('diagnostics.returnMismatch'),
       scope: cfg.get('diagnostics.scope'),
     },
+    documentSymbol: {
+      detailLevel: cfg.get('documentSymbol.detailLevel'),
+    },
     gotoDefinition: {
       strategy: cfg.get('gotoDefinition.strategy'),
     },

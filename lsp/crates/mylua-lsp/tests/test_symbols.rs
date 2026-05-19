@@ -1,12 +1,19 @@
 mod test_helpers;
 
 use mylua_lsp::summary_builder;
-use mylua_lsp::symbols;
+use mylua_lsp::symbols::{self, DocumentSymbolDetailLevel};
 use test_helpers::*;
 use tower_lsp_server::ls_types::SymbolKind;
 
 /// Helper: parse + build summary + call collect_document_symbols.
 fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
+    collect_with_detail(src, DocumentSymbolDetailLevel::Compact)
+}
+
+fn collect_with_detail(
+    src: &str,
+    detail_level: DocumentSymbolDetailLevel,
+) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let uri = make_uri("test.lua");
@@ -22,6 +29,7 @@ fn collect(src: &str) -> Vec<tower_lsp_server::ls_types::DocumentSymbol> {
         doc.source(),
         Some(&summary),
         doc.line_index(),
+        detail_level,
     )
 }
 
@@ -76,6 +84,197 @@ end
         "should contain `myHelper`, got: {:?}",
         names
     );
+}
+
+#[test]
+fn symbols_compact_skips_nested_declarations() {
+    let src = r#"
+function outer()
+    local function inner()
+    end
+    local x = 1
+end
+"#;
+    let syms = collect(src);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    assert!(
+        outer.children.as_ref().map(|c| c.is_empty()).unwrap_or(true),
+        "compact outline should keep nested declarations hidden, got: {:?}",
+        outer.children
+    );
+}
+
+#[test]
+fn symbols_functions_mode_nests_named_functions_only() {
+    let src = r#"
+function outer()
+    local x = 1
+    local function inner()
+    end
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::Functions);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["inner"]);
+    assert_eq!(children[0].kind, SymbolKind::FUNCTION);
+}
+
+#[test]
+fn symbols_all_declarations_preserves_shadowed_locals() {
+    let src = r#"
+function outer()
+    local x = 1
+    do
+        local x = 2
+    end
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AllDeclarations);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let local_x_count = children
+        .iter()
+        .filter(|c| c.name == "x" && c.kind == SymbolKind::VARIABLE)
+        .count();
+    assert_eq!(
+        local_x_count, 2,
+        "allDeclarations should keep both shadowed local declarations, got: {:?}",
+        children
+            .iter()
+            .map(|c| (c.name.as_str(), c.kind))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn symbols_all_declarations_includes_parameters_and_for_variables() {
+    let src = r#"
+function outer(a)
+    for i = 1, 2 do
+    end
+    for k, v in pairs({}) do
+    end
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AllDeclarations);
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = outer.children.as_ref().expect("outer children");
+    let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, vec!["a", "i", "k", "v"]);
+    assert!(children.iter().all(|c| c.kind == SymbolKind::VARIABLE));
+}
+
+#[test]
+fn symbols_detail_modes_do_not_cross_anonymous_function_boundaries() {
+    let src = r#"
+function outer()
+    local cb = function()
+        local function hidden()
+        end
+        local x = 1
+    end
+end
+"#;
+    let function_syms = collect_with_detail(src, DocumentSymbolDetailLevel::Functions);
+    let function_outer = function_syms
+        .iter()
+        .find(|s| s.name == "outer")
+        .expect("outer");
+    assert!(
+        function_outer
+            .children
+            .as_ref()
+            .map(|c| c.is_empty())
+            .unwrap_or(true),
+        "functions mode should not show declarations from anonymous function bodies, got: {:?}",
+        function_outer.children
+    );
+
+    let all_syms = collect_with_detail(src, DocumentSymbolDetailLevel::AllDeclarations);
+    let all_outer = all_syms.iter().find(|s| s.name == "outer").expect("outer");
+    let children = all_outer.children.as_ref().expect("outer children");
+    let names: Vec<&str> = children.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(
+        names,
+        vec!["cb"],
+        "allDeclarations should keep the anonymous function body's locals scoped away"
+    );
+}
+
+#[test]
+fn symbols_detail_modes_apply_inside_class_methods() {
+    let src = r#"---@class Foo
+Foo = {}
+
+function Foo:m(a)
+    local x = 1
+    local function inner()
+    end
+end
+"#;
+    let function_syms = collect_with_detail(src, DocumentSymbolDetailLevel::Functions);
+    let foo = function_syms.iter().find(|s| s.name == "Foo").expect("Foo");
+    let method = foo
+        .children
+        .as_ref()
+        .expect("Foo children")
+        .iter()
+        .find(|s| s.name == "m")
+        .expect("m");
+    let function_child_names: Vec<&str> = method
+        .children
+        .as_ref()
+        .expect("method children")
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(function_child_names, vec!["inner"]);
+
+    let all_syms = collect_with_detail(src, DocumentSymbolDetailLevel::AllDeclarations);
+    let foo = all_syms.iter().find(|s| s.name == "Foo").expect("Foo");
+    let method = foo
+        .children
+        .as_ref()
+        .expect("Foo children")
+        .iter()
+        .find(|s| s.name == "m")
+        .expect("m");
+    let all_child_names: Vec<&str> = method
+        .children
+        .as_ref()
+        .expect("method children")
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(all_child_names, vec!["a", "x", "inner"]);
+}
+
+#[test]
+fn symbols_detail_modes_still_skip_dotted_assignments() {
+    let src = r#"
+t = {}
+t.foo = 1
+
+function outer()
+    local x = 1
+    x.y = 2
+end
+"#;
+    let syms = collect_with_detail(src, DocumentSymbolDetailLevel::AllDeclarations);
+    let top_names: Vec<&str> = syms.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(top_names, vec!["t", "outer"]);
+
+    let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
+    let child_names: Vec<&str> = outer
+        .children
+        .as_ref()
+        .expect("outer children")
+        .iter()
+        .map(|s| s.name.as_str())
+        .collect();
+    assert_eq!(child_names, vec!["x"]);
 }
 
 #[test]

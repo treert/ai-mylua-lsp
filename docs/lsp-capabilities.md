@@ -77,11 +77,15 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 ## 符号与大纲
 
 ### documentSymbol
-层级化 outline：
+层级化 outline，默认使用 `mylua.documentSymbol.detailLevel = "compact"`：
 - `@class`/`@enum`/`@alias` → 顶层节点，`@field` / `function Class:m()` → 子节点
 - `function`/`local function` → Function，`local x` / 全局赋值 → Variable
 - 点号/下标 LHS（`t.foo = 1`）静默跳过避免噪声
 - `selection_range` 精确指向标识符本身（非整行）
+
+可配置更细粒度：
+- `"functions"`：在 compact 基础上递归展示函数体内的具名函数，并挂到外层函数子节点下。
+- `"allDeclarations"`：在 functions 基础上展示函数体内的参数、普通 local、for 变量；Lua shadowing 产生的同名 local 会保留为多个独立 symbol。
 
 ### workspace/symbol
 - 全局函数/变量 + Emmy class/alias/enum 模糊搜索

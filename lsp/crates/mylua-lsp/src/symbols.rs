@@ -26,6 +26,7 @@ use std::collections::{HashMap, HashSet};
 
 use tower_lsp_server::ls_types::*;
 
+pub use crate::config::DocumentSymbolDetailLevel;
 use crate::summary::{DocumentSummary, TypeDefinitionKind};
 use crate::type_system::{KnownType, TypeFact};
 use crate::util::{node_text, LineIndex};
@@ -35,9 +36,10 @@ pub fn collect_document_symbols(
     source: &[u8],
     summary: Option<&DocumentSummary>,
     line_index: &LineIndex,
+    detail_level: DocumentSymbolDetailLevel,
 ) -> Vec<DocumentSymbol> {
-    let mut builder = OutlineBuilder::new(summary, line_index);
-    builder.visit_top_level(root, source);
+    let mut builder = OutlineBuilder::new(summary, line_index, detail_level);
+    builder.visit_root(root, source);
     let mut symbols = builder.finalize();
     normalize_ranges(&mut symbols);
     symbols
@@ -103,10 +105,15 @@ struct OutlineBuilder<'a> {
     /// `@field m` plus a `function Class:m()` for the same method
     /// shouldn't both appear as children).
     class_child_keys: HashMap<String, HashSet<String>>,
+    detail_level: DocumentSymbolDetailLevel,
 }
 
 impl<'a> OutlineBuilder<'a> {
-    fn new(summary: Option<&DocumentSummary>, line_index: &'a LineIndex) -> Self {
+    fn new(
+        summary: Option<&DocumentSummary>,
+        line_index: &'a LineIndex,
+        detail_level: DocumentSymbolDetailLevel,
+    ) -> Self {
         let mut class_index = HashMap::new();
         let mut class_nodes: Vec<DocumentSymbol> = Vec::new();
         let mut class_child_keys: HashMap<String, HashSet<String>> = HashMap::new();
@@ -180,7 +187,17 @@ impl<'a> OutlineBuilder<'a> {
             class_nodes,
             top: Vec::new(),
             class_child_keys,
+            detail_level,
             line_index,
+        }
+    }
+
+    fn visit_root(&mut self, root: tree_sitter::Node, source: &[u8]) {
+        match self.detail_level {
+            DocumentSymbolDetailLevel::Compact => self.visit_top_level(root, source),
+            DocumentSymbolDetailLevel::Functions | DocumentSymbolDetailLevel::AllDeclarations => {
+                self.visit_top_level_detailed(root, source)
+            }
         }
     }
 
@@ -198,6 +215,34 @@ impl<'a> OutlineBuilder<'a> {
         }
     }
 
+    fn visit_top_level_detailed(&mut self, root: tree_sitter::Node, source: &[u8]) {
+        let mut cursor = root.walk();
+        if !cursor.goto_first_child() {
+            return;
+        }
+        loop {
+            let node = cursor.node();
+            match node.kind() {
+                "function_declaration" => {
+                    if let Some(sym) = self.function_declaration_symbol(node, source) {
+                        self.top.push(sym);
+                    }
+                }
+                "local_function_declaration" => {
+                    if let Some(sym) = self.local_function_symbol(node, source) {
+                        self.top.push(sym);
+                    }
+                }
+                "local_declaration" => self.visit_local_declaration(node, source),
+                "assignment_statement" => self.visit_assignment(node, source),
+                _ => {}
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
     fn visit_statement(&mut self, node: tree_sitter::Node, source: &[u8]) {
         match node.kind() {
             "function_declaration" => self.visit_function_declaration(node, source),
@@ -209,12 +254,22 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_function_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
+        if let Some(sym) = self.function_declaration_symbol(node, source) {
+            self.top.push(sym);
+        }
+    }
+
+    fn function_declaration_symbol(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Option<DocumentSymbol> {
         let Some(name_node) = node.child_by_field_name("name") else {
-            return;
+            return None;
         };
         let full_name = node_text(name_node, source).to_string();
         if full_name.is_empty() {
-            return;
+            return None;
         }
 
         // Parse `Class:method` / `Class.method` / `a.b.c` out of the
@@ -232,13 +287,15 @@ impl<'a> OutlineBuilder<'a> {
                 } else {
                     SymbolKind::FUNCTION
                 };
-                self.push_class_child(cls, member, kind, node, name_node, source);
-                return;
+                let children = self.detail_children_for_function(node, source);
+                self.push_class_child(cls, member, kind, node, name_node, source, children);
+                return None;
             }
         }
 
+        let children = self.detail_children_for_function(node, source);
         #[allow(deprecated)]
-        self.top.push(DocumentSymbol {
+        Some(DocumentSymbol {
             name: full_name,
             detail: None,
             kind: SymbolKind::FUNCTION,
@@ -246,20 +303,31 @@ impl<'a> OutlineBuilder<'a> {
             deprecated: None,
             range: self.line_index.ts_node_to_range(node, source),
             selection_range: self.line_index.ts_node_to_range(name_node, source),
-            children: None,
-        });
+            children,
+        })
     }
 
     fn visit_local_function(&mut self, node: tree_sitter::Node, source: &[u8]) {
+        if let Some(sym) = self.local_function_symbol(node, source) {
+            self.top.push(sym);
+        }
+    }
+
+    fn local_function_symbol(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Option<DocumentSymbol> {
         let Some(name_node) = node.child_by_field_name("name") else {
-            return;
+            return None;
         };
         let name = node_text(name_node, source).to_string();
         if name.is_empty() {
-            return;
+            return None;
         }
+        let children = self.detail_children_for_function(node, source);
         #[allow(deprecated)]
-        self.top.push(DocumentSymbol {
+        Some(DocumentSymbol {
             name,
             detail: Some("local".to_string()),
             kind: SymbolKind::FUNCTION,
@@ -267,14 +335,24 @@ impl<'a> OutlineBuilder<'a> {
             deprecated: None,
             range: self.line_index.ts_node_to_range(node, source),
             selection_range: self.line_index.ts_node_to_range(name_node, source),
-            children: None,
-        });
+            children,
+        })
     }
 
     fn visit_local_declaration(&mut self, node: tree_sitter::Node, source: &[u8]) {
+        let symbols = self.local_declaration_symbols(node, source);
+        self.top.extend(symbols);
+    }
+
+    fn local_declaration_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Vec<DocumentSymbol> {
         let Some(names_node) = node.child_by_field_name("names") else {
-            return;
+            return Vec::new();
         };
+        let mut symbols = Vec::new();
         for i in 0..names_node.named_child_count() {
             let Some(id_node) = names_node.named_child(i as u32) else {
                 continue;
@@ -294,7 +372,7 @@ impl<'a> OutlineBuilder<'a> {
                 continue;
             }
             #[allow(deprecated)]
-            self.top.push(DocumentSymbol {
+            symbols.push(DocumentSymbol {
                 name,
                 detail: Some("local".to_string()),
                 kind: SymbolKind::VARIABLE,
@@ -305,6 +383,7 @@ impl<'a> OutlineBuilder<'a> {
                 children: None,
             });
         }
+        symbols
     }
 
     fn visit_assignment(&mut self, node: tree_sitter::Node, source: &[u8]) {
@@ -351,6 +430,7 @@ impl<'a> OutlineBuilder<'a> {
         range_node: tree_sitter::Node,
         selection_node: tree_sitter::Node,
         source: &[u8],
+        detail_children: Option<Vec<DocumentSymbol>>,
     ) {
         if member.is_empty() {
             return;
@@ -370,12 +450,179 @@ impl<'a> OutlineBuilder<'a> {
         }
 
         let class_node = &mut self.class_nodes[idx];
-        let children = class_node.children.get_or_insert_with(Vec::new);
+        let class_children = class_node.children.get_or_insert_with(Vec::new);
         #[allow(deprecated)]
-        children.push(DocumentSymbol {
+        class_children.push(DocumentSymbol {
             name: member.to_string(),
             detail: None,
             kind,
+            tags: None,
+            deprecated: None,
+            range: self.line_index.ts_node_to_range(range_node, source),
+            selection_range: self.line_index.ts_node_to_range(selection_node, source),
+            children: detail_children,
+        });
+    }
+
+    fn detail_children_for_function(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Option<Vec<DocumentSymbol>> {
+        match self.detail_level {
+            DocumentSymbolDetailLevel::Compact => None,
+            DocumentSymbolDetailLevel::Functions | DocumentSymbolDetailLevel::AllDeclarations => {
+                let mut children = Vec::new();
+                if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations {
+                    children.extend(self.parameter_symbols_for_function(node, source));
+                }
+                self.collect_nested_symbols(node, source, &mut children);
+                if children.is_empty() {
+                    None
+                } else {
+                    Some(children)
+                }
+            }
+        }
+    }
+
+    fn collect_nested_symbols(
+        &mut self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        out: &mut Vec<DocumentSymbol>,
+    ) {
+        let mut cursor = node.walk();
+        if !cursor.goto_first_child() {
+            return;
+        }
+        loop {
+            let child = cursor.node();
+            match child.kind() {
+                "function_declaration" => {
+                    if let Some(sym) = self.function_declaration_symbol(child, source) {
+                        out.push(sym);
+                    }
+                }
+                "local_function_declaration" => {
+                    if let Some(sym) = self.local_function_symbol(child, source) {
+                        out.push(sym);
+                    }
+                }
+                "local_declaration"
+                    if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations =>
+                {
+                    out.extend(self.local_declaration_symbols(child, source));
+                }
+                "for_numeric_statement" | "for_generic_statement"
+                    if self.detail_level == DocumentSymbolDetailLevel::AllDeclarations =>
+                {
+                    out.extend(self.for_variable_symbols(child, source));
+                    self.collect_nested_symbols(child, source, out);
+                }
+                "function_definition" => {}
+                _ => self.collect_nested_symbols(child, source, out),
+            }
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    fn parameter_symbols_for_function(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Vec<DocumentSymbol> {
+        let Some(body) = find_named_child_kind(node, "function_body") else {
+            return Vec::new();
+        };
+        let Some(params) = body.child_by_field_name("parameters") else {
+            return Vec::new();
+        };
+        let mut symbols = Vec::new();
+        self.collect_parameter_symbols(params, source, &mut symbols);
+        symbols
+    }
+
+    fn collect_parameter_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+        out: &mut Vec<DocumentSymbol>,
+    ) {
+        match node.kind() {
+            "identifier" | "varargs" => {
+                let name = node_text(node, source).to_string();
+                if name.is_empty() {
+                    return;
+                }
+                #[allow(deprecated)]
+                out.push(DocumentSymbol {
+                    name,
+                    detail: Some("param".to_string()),
+                    kind: SymbolKind::VARIABLE,
+                    tags: None,
+                    deprecated: None,
+                    range: self.line_index.ts_node_to_range(node, source),
+                    selection_range: self.line_index.ts_node_to_range(node, source),
+                    children: None,
+                });
+            }
+            _ => {
+                for i in 0..node.named_child_count() {
+                    if let Some(child) = node.named_child(i as u32) {
+                        self.collect_parameter_symbols(child, source, out);
+                    }
+                }
+            }
+        }
+    }
+
+    fn for_variable_symbols(
+        &self,
+        node: tree_sitter::Node,
+        source: &[u8],
+    ) -> Vec<DocumentSymbol> {
+        let mut symbols = Vec::new();
+        match node.kind() {
+            "for_numeric_statement" => {
+                if let Some(name_node) = node.child_by_field_name("name") {
+                    self.push_for_variable_symbol(node, name_node, source, &mut symbols);
+                }
+            }
+            "for_generic_statement" => {
+                if let Some(names_node) = node.child_by_field_name("names") {
+                    for i in 0..names_node.named_child_count() {
+                        if let Some(id_node) = names_node.named_child(i as u32) {
+                            if id_node.kind() == "identifier" {
+                                self.push_for_variable_symbol(node, id_node, source, &mut symbols);
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+        symbols
+    }
+
+    fn push_for_variable_symbol(
+        &self,
+        range_node: tree_sitter::Node,
+        selection_node: tree_sitter::Node,
+        source: &[u8],
+        out: &mut Vec<DocumentSymbol>,
+    ) {
+        let name = node_text(selection_node, source).to_string();
+        if name.is_empty() {
+            return;
+        }
+        #[allow(deprecated)]
+        out.push(DocumentSymbol {
+            name,
+            detail: Some("for".to_string()),
+            kind: SymbolKind::VARIABLE,
             tags: None,
             deprecated: None,
             range: self.line_index.ts_node_to_range(range_node, source),
@@ -429,4 +676,17 @@ fn has_dotted_or_subscript_form(node: tree_sitter::Node) -> bool {
     node.child_by_field_name("object").is_some()
         || node.child_by_field_name("field").is_some()
         || node.child_by_field_name("index").is_some()
+}
+
+fn find_named_child_kind<'tree>(
+    node: tree_sitter::Node<'tree>,
+    kind: &str,
+) -> Option<tree_sitter::Node<'tree>> {
+    for i in 0..node.named_child_count() {
+        let child = node.named_child(i as u32)?;
+        if child.kind() == kind {
+            return Some(child);
+        }
+    }
+    None
 }

@@ -9,12 +9,39 @@ pub struct LspConfig {
     pub workspace: WorkspaceConfig,
     pub performance: PerformanceConfig,
     pub diagnostics: DiagnosticsConfig,
+    #[serde(rename = "documentSymbol")]
+    pub document_symbol: DocumentSymbolConfig,
     #[serde(rename = "gotoDefinition")]
     pub goto_definition: GotoDefinitionConfig,
     pub references: ReferencesConfig,
     #[serde(rename = "inlayHint")]
     pub inlay_hint: InlayHintConfig,
     pub debug: DebugConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct DocumentSymbolConfig {
+    #[serde(rename = "detailLevel")]
+    pub detail_level: DocumentSymbolDetailLevel,
+}
+
+impl Default for DocumentSymbolConfig {
+    fn default() -> Self {
+        Self {
+            detail_level: DocumentSymbolDetailLevel::Compact,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+#[derive(Default)]
+pub enum DocumentSymbolDetailLevel {
+    #[default]
+    Compact,
+    Functions,
+    AllDeclarations,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -333,5 +360,29 @@ mod tests {
         }));
 
         assert_eq!(cfg.performance.slow_parse_keep_tree_threshold_ms, 42);
+    }
+
+    #[test]
+    fn document_symbol_detail_level_defaults_to_compact() {
+        let cfg = LspConfig::default();
+
+        assert_eq!(
+            cfg.document_symbol.detail_level,
+            DocumentSymbolDetailLevel::Compact
+        );
+    }
+
+    #[test]
+    fn document_symbol_detail_level_reads_all_declarations_from_json() {
+        let cfg = LspConfig::from_value(serde_json::json!({
+            "documentSymbol": {
+                "detailLevel": "allDeclarations"
+            }
+        }));
+
+        assert_eq!(
+            cfg.document_symbol.detail_level,
+            DocumentSymbolDetailLevel::AllDeclarations
+        );
     }
 }
