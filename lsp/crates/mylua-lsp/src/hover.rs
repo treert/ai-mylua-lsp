@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
 use crate::emmy::{
     collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text,
-    format_annotations_markdown, parse_emmy_comments,
+    parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
 use crate::type_system::TypeFact;
@@ -135,79 +135,9 @@ pub fn hover(
         return build_hover_for_definition(&def, all_docs, type_info.as_deref());
     }
 
-    // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`)
-    if let Some(candidates) = index.type_candidates(ident_text) {
-        if let Some(candidate) = candidates.first() {
-            if index.summary_by_id(candidate.source_uri_id()).is_some() {
-                if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
-                    for td in &summary.type_definitions {
-                        if td.name == ident_text {
-                            let mut parts = Vec::new();
-                            let class_header = match td.kind {
-                                crate::summary::TypeDefinitionKind::Alias => {
-                                    let alias_display = td
-                                        .alias_type
-                                        .as_ref()
-                                        .map(|t| format!("{}", t))
-                                        .unwrap_or_else(|| "unknown".to_string());
-                                    format!("---@alias {} {}", td.name, alias_display)
-                                }
-                                crate::summary::TypeDefinitionKind::Enum => {
-                                    format!("---@enum {}", td.name)
-                                }
-                                _ => {
-                                    if td.parents.is_empty() {
-                                        format!("---@class {}", td.name)
-                                    } else {
-                                        let parents = td
-                                            .parents
-                                            .iter()
-                                            .map(|parent| parent.as_str())
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        format!("---@class {} : {}", td.name, parents)
-                                    }
-                                }
-                            };
-                            parts.push(format!("```lua\n{}\n```", class_header));
-                            let kind_label = match td.kind {
-                                crate::summary::TypeDefinitionKind::Class => "class",
-                                crate::summary::TypeDefinitionKind::Alias => "alias",
-                                crate::summary::TypeDefinitionKind::Enum => "enum",
-                            };
-                            parts.push(format!("*{}*", kind_label));
-                            if !td.fields.is_empty() {
-                                let fields_md: Vec<String> = td
-                                    .fields
-                                    .iter()
-                                    .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
-                                    .collect();
-                                parts.push(fields_md.join("\n"));
-                            }
-                            // Include doc comments from the definition site
-                            if let Some(def_doc) =
-                                all_docs.get_document_by_id(candidate.source_uri_id())
-                            {
-                                let def_byte = Some(td.range.start_byte);
-                                if let Some(db) = def_byte {
-                                    let doc_text = definition_doc_text_at_byte(def_doc, db);
-                                    if !doc_text.is_empty() {
-                                        parts.push(doc_text);
-                                    }
-                                }
-                            }
-                            return Some(Hover {
-                                contents: HoverContents::Markup(MarkupContent {
-                                    kind: MarkupKind::Markdown,
-                                    value: parts.join("\n\n"),
-                                }),
-                                range: None,
-                            });
-                        }
-                    }
-                }
-            }
-        }
+    // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`).
+    if let Some(hover) = hover_type_name(ident_text, index, all_docs) {
+        return Some(hover);
     }
 
     // Synthesize a `Definition` from the best global candidate so the
@@ -281,65 +211,70 @@ fn hover_type_name(
             continue;
         }
 
-        let mut parts = Vec::new();
-        let class_header = match td.kind {
-            crate::summary::TypeDefinitionKind::Alias => {
-                let alias_display = td
-                    .alias_type
-                    .as_ref()
-                    .map(|t| format!("{}", t))
-                    .unwrap_or_else(|| "unknown".to_string());
-                format!("---@alias {} {}", td.name, alias_display)
-            }
-            crate::summary::TypeDefinitionKind::Enum => {
-                format!("---@enum {}", td.name)
-            }
-            _ => {
-                if td.parents.is_empty() {
-                    format!("---@class {}", td.name)
-                } else {
-                    let parents = td
-                        .parents
-                        .iter()
-                        .map(|parent| parent.as_str())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    format!("---@class {} : {}", td.name, parents)
-                }
-            }
-        };
-        parts.push(format!("```lua\n{}\n```", class_header));
-        let kind_label = match td.kind {
-            crate::summary::TypeDefinitionKind::Class => "class",
-            crate::summary::TypeDefinitionKind::Alias => "alias",
-            crate::summary::TypeDefinitionKind::Enum => "enum",
-        };
-        parts.push(format!("*{}*", kind_label));
-        if !td.fields.is_empty() {
-            let fields_md: Vec<String> = td
-                .fields
-                .iter()
-                .map(|f| format!("- `{}`: `{}`", f.name, f.type_fact))
-                .collect();
-            parts.push(fields_md.join("\n"));
-        }
-        // Include doc comments from the definition site.
-        if let Some(def_doc) = all_docs.get_document_by_id(candidate.source_uri_id()) {
-            let doc_text = definition_doc_text_at_byte(def_doc, td.range.start_byte);
-            if !doc_text.is_empty() {
-                parts.push(doc_text);
-            }
-        }
-        return Some(Hover {
-            contents: HoverContents::Markup(MarkupContent {
-                kind: MarkupKind::Markdown,
-                value: parts.join("\n\n"),
-            }),
-            range: None,
-        });
+        return build_hover_for_type_definition(td, candidate.source_uri_id(), all_docs);
     }
 
     None
+}
+
+fn build_hover_for_type_definition(
+    td: &crate::summary::TypeDefinition,
+    source_uri_id: UriId,
+    all_docs: &impl DocumentLookup,
+) -> Option<Hover> {
+    let mut code_lines = Vec::new();
+    match td.kind {
+        crate::summary::TypeDefinitionKind::Alias => {
+            let alias_display = td
+                .alias_type
+                .as_ref()
+                .map(|t| format!("{}", t))
+                .unwrap_or_else(|| "unknown".to_string());
+            code_lines.push(format!("---@alias {} {}", td.name, alias_display));
+        }
+        crate::summary::TypeDefinitionKind::Enum => {
+            code_lines.push(format!("---@enum {}", td.name));
+        }
+        crate::summary::TypeDefinitionKind::Class => {
+            if td.parents.is_empty() {
+                code_lines.push(format!("---@class {}", td.name));
+            } else {
+                let parents = td
+                    .parents
+                    .iter()
+                    .map(|parent| parent.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                code_lines.push(format!("---@class {} : {}", td.name, parents));
+            }
+        }
+    }
+    for field in &td.fields {
+        code_lines.push(format!("---@field {} {}", field.name, field.type_fact));
+    }
+
+    let mut parts = vec![lua_code_block(&code_lines)];
+    let kind_label = match td.kind {
+        crate::summary::TypeDefinitionKind::Class => "class",
+        crate::summary::TypeDefinitionKind::Alias => "alias",
+        crate::summary::TypeDefinitionKind::Enum => "enum",
+    };
+    parts.push(format!("*{}*", kind_label));
+
+    if let Some(def_doc) = all_docs.get_document_by_id(source_uri_id) {
+        let doc_text = definition_doc_text_at_byte(def_doc, td.range.start_byte);
+        if !doc_text.is_empty() {
+            parts.push(doc_text);
+        }
+    }
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range: None,
+    })
 }
 
 /// Returns true when `ident` is the tail identifier of `function_name`,
@@ -390,7 +325,6 @@ fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<
     if let Some(trailing_emmy) = collect_trailing_emmy_text(decl_node, source) {
         annotations.extend(parse_emmy_comments(&trailing_emmy));
     }
-    let emmy_md = format_annotations_markdown(&annotations);
 
     let def_line = node_text(decl_node, source)
         .lines()
@@ -404,12 +338,12 @@ fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<
     };
 
     let mut parts = Vec::new();
-    parts.push(format!("```lua\n{}\n```", def_line));
+    parts.push(lua_code_block(&code_lines_for_definition(
+        &annotations,
+        def_line,
+        None,
+    )));
     parts.push(format!("*{}*", kind_label));
-
-    if !emmy_md.is_empty() {
-        parts.push(format!("---\n{}", emmy_md));
-    }
 
     let doc_text = extract_doc_lines(&comment_lines);
     if !doc_text.is_empty() {
@@ -607,11 +541,15 @@ fn fallback_field_hover(
     source: &[u8],
     line_index: &LineIndex,
 ) -> Option<Hover> {
-    let mut parts = Vec::new();
-    parts.push(format!("```lua\n({}) {}\n```", kind_label, field_name));
+    let mut code_lines = Vec::new();
     if type_display != "unknown" {
-        parts.push(format!("Type: `{}`", type_display));
+        code_lines.push(format!("---@type {}", type_display));
     }
+    code_lines.push(field_name.to_string());
+
+    let mut parts = Vec::new();
+    parts.push(lua_code_block(&code_lines));
+    parts.push(format!("*{}*", kind_label));
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -670,6 +608,157 @@ fn format_signature(sig: &crate::type_system::FunctionSignature) -> String {
     sig.display_label(None, false)
 }
 
+fn lua_code_block(lines: &[String]) -> String {
+    format!("```lua\n{}\n```", lines.join("\n"))
+}
+
+fn simple_type_info(type_info: Option<&str>) -> Option<&str> {
+    type_info.filter(|ti| *ti != "unknown" && !ti.contains('\n'))
+}
+
+fn emmy_desc_suffix(desc: &str) -> String {
+    if desc.is_empty() {
+        String::new()
+    } else {
+        format!(" @ {}", desc)
+    }
+}
+
+fn format_annotations_lua(annotations: &[EmmyAnnotation]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for ann in annotations {
+        match ann {
+            EmmyAnnotation::Param {
+                name,
+                type_expr,
+                optional,
+                desc,
+            } => {
+                let opt = if *optional { "?" } else { "" };
+                let suffix = emmy_desc_suffix(desc);
+                lines.push(format!("---@param {}{} {}{}", name, opt, type_expr, suffix));
+            }
+            EmmyAnnotation::Return {
+                return_types,
+                name,
+                desc,
+            } => {
+                let types_str = return_types
+                    .iter()
+                    .map(|t| format!("{}", t))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let suffix = name
+                    .as_ref()
+                    .map(|n| format!(" {}", n))
+                    .unwrap_or_default();
+                let desc_suffix = emmy_desc_suffix(desc);
+                lines.push(format!("---@return {}{}{}", types_str, suffix, desc_suffix));
+            }
+            EmmyAnnotation::Type { type_expr, desc } => {
+                let suffix = emmy_desc_suffix(desc);
+                lines.push(format!("---@type {}{}", type_expr, suffix));
+            }
+            EmmyAnnotation::Class {
+                name,
+                parents,
+                desc,
+            } => {
+                let suffix = emmy_desc_suffix(desc);
+                if parents.is_empty() {
+                    lines.push(format!("---@class {}{}", name, suffix));
+                } else {
+                    lines.push(format!(
+                        "---@class {} : {}{}",
+                        name,
+                        parents.join(", "),
+                        suffix
+                    ));
+                }
+            }
+            EmmyAnnotation::Field {
+                visibility,
+                name,
+                type_expr,
+                desc,
+            } => {
+                let visibility = visibility
+                    .as_ref()
+                    .map(|v| format!("{} ", v))
+                    .unwrap_or_default();
+                let suffix = emmy_desc_suffix(desc);
+                lines.push(format!(
+                    "---@field {}{} {}{}",
+                    visibility, name, type_expr, suffix
+                ));
+            }
+            EmmyAnnotation::Alias { name, type_expr } => {
+                lines.push(format!("---@alias {} {}", name, type_expr));
+            }
+            EmmyAnnotation::Generic { params } => {
+                let params = params
+                    .iter()
+                    .map(|p| {
+                        if let Some(constraint) = &p.constraint {
+                            format!("{}: {}", p.name, constraint)
+                        } else {
+                            p.name.clone()
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.push(format!("---@generic {}", params));
+            }
+            EmmyAnnotation::Overload { fun_type } => {
+                lines.push(format!("---@overload {}", fun_type));
+            }
+            EmmyAnnotation::Vararg { type_expr } => {
+                lines.push(format!("---@vararg {}", type_expr));
+            }
+            EmmyAnnotation::Deprecated { desc } => {
+                if desc.is_empty() {
+                    lines.push("---@deprecated".to_string());
+                } else {
+                    lines.push(format!("---@deprecated {}", desc));
+                }
+            }
+            _ => {}
+        }
+    }
+    lines
+}
+
+fn annotations_have_type_info(annotations: &[EmmyAnnotation]) -> bool {
+    annotations.iter().any(|ann| {
+        matches!(
+            ann,
+            EmmyAnnotation::Param { .. }
+                | EmmyAnnotation::Return { .. }
+                | EmmyAnnotation::Type { .. }
+                | EmmyAnnotation::Class { .. }
+                | EmmyAnnotation::Field { .. }
+                | EmmyAnnotation::Alias { .. }
+                | EmmyAnnotation::Overload { .. }
+                | EmmyAnnotation::Vararg { .. }
+        )
+    })
+}
+
+fn code_lines_for_definition(
+    annotations: &[EmmyAnnotation],
+    def_line: String,
+    type_info: Option<&str>,
+) -> Vec<String> {
+    let mut code_lines = format_annotations_lua(annotations);
+    if !annotations_have_type_info(annotations) {
+        if let Some(ti) = simple_type_info(type_info) {
+            code_lines.push(format!("---@type {}", ti));
+        }
+    }
+    code_lines.push(def_line);
+    code_lines
+}
+
 fn build_hover_for_definition(
     def: &crate::types::Definition,
     all_docs: &impl DocumentLookup,
@@ -706,7 +795,6 @@ fn build_hover_for_definition(
     if let Some(trailing_emmy) = collect_trailing_emmy_text(stmt_node, source) {
         annotations.extend(parse_emmy_comments(&trailing_emmy));
     }
-    let emmy_md = format_annotations_markdown(&annotations);
 
     let def_line = node_text(stmt_node, source)
         .lines()
@@ -724,17 +812,17 @@ fn build_hover_for_definition(
     };
 
     let mut parts = Vec::new();
-    parts.push(format!("```lua\n{}\n```", def_line));
+    parts.push(lua_code_block(&code_lines_for_definition(
+        &annotations,
+        def_line,
+        type_info,
+    )));
     parts.push(format!("*{}*", kind_label));
 
     if let Some(ti) = type_info {
-        if ti != "unknown" {
+        if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
             parts.push(format!("Type: `{}`", ti));
         }
-    }
-
-    if !emmy_md.is_empty() {
-        parts.push(format!("---\n{}", emmy_md));
     }
 
     let doc_text = extract_doc_lines(&comment_lines);
@@ -776,20 +864,19 @@ fn build_hover_for_parameter(
             )
         })
         .collect();
-    let emmy_md = format_annotations_markdown(&parameter_annotations);
 
     let mut parts = Vec::new();
-    parts.push(format!("```lua\n{}\n```", def.name));
+    parts.push(lua_code_block(&code_lines_for_definition(
+        &parameter_annotations,
+        def.name.to_string(),
+        type_info,
+    )));
     parts.push("*parameter*".to_string());
 
     if let Some(ti) = type_info {
-        if ti != "unknown" {
+        if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
             parts.push(format!("Type: `{}`", ti));
         }
-    }
-
-    if !emmy_md.is_empty() {
-        parts.push(format!("---\n{}", emmy_md));
     }
 
     Some(Hover {
@@ -830,7 +917,6 @@ fn build_hover_for_table_field(
     let trailing = collect_table_field_trailing_comment(field_node, source);
     let comment_text = comment_lines.join("\n");
     let annotations = parse_emmy_comments(&comment_text);
-    let emmy_md = format_annotations_markdown(&annotations);
 
     let def_line = node_text(field_node, source)
         .lines()
@@ -839,17 +925,17 @@ fn build_hover_for_table_field(
         .to_string();
 
     let mut parts = Vec::new();
-    parts.push(format!("```lua\n{}\n```", def_line));
+    parts.push(lua_code_block(&code_lines_for_definition(
+        &annotations,
+        def_line,
+        type_info,
+    )));
     parts.push("*field*".to_string());
 
     if let Some(ti) = type_info {
-        if ti != "unknown" {
+        if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
             parts.push(format!("Type: `{}`", ti));
         }
-    }
-
-    if !emmy_md.is_empty() {
-        parts.push(format!("---\n{}", emmy_md));
     }
 
     let doc_text = extract_doc_lines(&comment_lines);

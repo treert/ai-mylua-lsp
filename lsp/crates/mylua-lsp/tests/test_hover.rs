@@ -202,7 +202,7 @@ local a1_test2 = test2()"#;
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
-            content.contains("Type: `string`"),
+            content.contains("---@type string"),
             "a1_test2 hover should show chained method return type string, got: {}",
             content
         );
@@ -236,7 +236,7 @@ local a1_test3 = test3()"#;
     if let Some(h) = &result {
         let content = hover_content_string(h);
         assert!(
-            content.contains("Type: `string`"),
+            content.contains("---@type string"),
             "a1_test3 hover should show chained dotted return type string, got: {}",
             content
         );
@@ -722,7 +722,7 @@ return test_const"#,
     .expect("hover on utils.test_const.B should resolve");
     let content = hover_content_string(&result);
     assert!(
-        content.contains("Type: `string`"),
+        content.contains("---@type string"),
         "hover should show returned table field B as string, got: {}",
         content,
     );
@@ -783,7 +783,7 @@ return settings"#,
     .expect("hover on settings.host should resolve");
     let content = hover_content_string(&result);
     assert!(
-        content.contains("Type: `string`"),
+        content.contains("---@type string"),
         "hover should keep the required table field type, got: {}",
         content,
     );
@@ -1013,9 +1013,9 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
     if let Some(h) = &result {
         let content = hover_content_string(h);
         // The hover must include type information — not just the variable name.
-        // When the bug is present, type_info is None so no "Type:" line appears.
+        // When the bug is present, type_info is None so no type annotation appears.
         assert!(
-            content.contains("Type:"),
+            content.contains("---@type"),
             "hover on local MiscManager (LHS) should include Type info, got: {}",
             content
         );
@@ -1175,9 +1175,9 @@ end
     let text = hover_content_string(&h);
 
     assert!(
-        text.contains("```lua\nbb\n```")
+        text.contains("```lua\n---@param bb number\nbb\n```")
             && text.contains("*parameter*")
-            && text.contains("Type: `number`"),
+            && !text.contains("Type: `number`"),
         "parameter hover should focus the parameter and its type, got:\n{}",
         text,
     );
@@ -1209,6 +1209,170 @@ fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
 }
 
 #[test]
+fn hover_local_variable_formats_inferred_type_as_lua_annotation() {
+    let src = r#"---@return string
+function get_name() end
+
+local name = get_name()
+print(name)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_lua_annotation.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(4, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on inferred local should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains("```lua\n---@type string\nlocal name = get_name()\n```"),
+        "hover should render inferred type as Lua annotation in the code block, got:\n{}",
+        text,
+    );
+    assert!(
+        !text.contains("Type: `string`"),
+        "hover should not duplicate the type outside the Lua code block, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_type_name_formats_fields_as_lua_annotations() {
+    let src = r#"--- User model
+---@class User
+---@field id number
+---@field name string
+local User = {}
+
+---@type User
+local current
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_type_lua_annotation.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on Emmy type name should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains(
+            "```lua\n---@class User\n---@field id number\n---@field name string\n```"
+        ),
+        "type hover should render fields as EmmyLua annotations, got:\n{}",
+        text,
+    );
+    assert!(
+        !text.contains("- `id`: `number`"),
+        "type hover should not duplicate fields as Markdown bullets, got:\n{}",
+        text,
+    );
+    assert!(
+        text.contains("User model"),
+        "type hover should keep doc comments, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_alias_type_name_formats_inline_table_fields() {
+    let src = r#"---@alias Vec2 { x: number, y: number }
+
+---@type Vec2
+local p
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_alias_type_fields.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on alias type name should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains("---@alias Vec2") && text.contains("---@field x number"),
+        "alias type hover should keep inline table fields as annotations, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_non_type_annotation_keeps_inferred_type_annotation() {
+    let src = r#"---@deprecated use other_name
+local name = "abc"
+print(name)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_deprecated_type.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on deprecated local should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains("---@deprecated use other_name") && text.contains("---@type string"),
+        "non-type annotations should not hide inferred type info, got:\n{}",
+        text,
+    );
+}
+
+#[test]
+fn hover_generic_annotation_keeps_constraint() {
+    let src = r#"---@generic T: table
+---@param x T
+---@return T
+local function identity(x)
+    return x
+end
+print(identity)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "hover_generic_constraint.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(6, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on constrained generic function should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains("---@generic T: table"),
+        "generic hover should keep constraints, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_local_table_bound_class_prefers_emmy_type() {
     let src = r#"---@class Test.TypeB
 ---@field m_bb number
@@ -1231,7 +1395,7 @@ print(TypeB.m_bb)
     .expect("hover on `TypeB` should succeed");
     let text = hover_content_string(&result);
     assert!(
-        text.contains("Type: `Test.TypeB`"),
+        text.contains("---@class Test.TypeB") && text.contains("---@field m_bb number"),
         "local table bound to ---@class should hover as Emmy type, got:\n{}",
         text,
     );
@@ -1474,14 +1638,13 @@ print(f)
     )
     .expect("hover on Emmy-annotated anon function should resolve");
     let text = hover_content_string(&result);
-    // The full Emmy-merged signature should appear in the "Type:"
-    // line — locking on `fun(a: number, b: string): boolean` ensures
-    // the new `format_resolved_type` specialization is actually being
-    // used (the substrings `number`, `string`, `boolean` would also
-    // come through the Emmy-comment markdown block regardless).
+    // The Emmy-merged parameter and return facts should be surfaced as
+    // syntax-highlighted EmmyLua annotations in the code block.
     assert!(
-        text.contains("fun(a: number, b: string): boolean"),
-        "hover Type should be fully formatted signature, got:\n{}",
+        text.contains("---@param a number")
+            && text.contains("---@param b string")
+            && text.contains("---@return boolean"),
+        "hover should show the anonymous function's Emmy signature, got:\n{}",
         text,
     );
 }
@@ -1512,9 +1675,9 @@ print(a.b.c)
     .expect("hover on final .c should produce a result");
     let text = hover_content_string(&h);
     // Summary builder infers `1` literal as `number` (not `integer`).
-    // Lock on the Type line to prove the nested shape write survived.
+    // Lock on the type annotation to prove the nested shape write survived.
     assert!(
-        text.contains("Type: `number`"),
+        text.contains("---@type number"),
         "final .c of chained write should resolve to number, got:\n{}",
         text,
     );
@@ -1545,7 +1708,7 @@ print(a.b.c.d)
     .expect("hover on final .d should produce a result");
     let text = hover_content_string(&h);
     assert!(
-        text.contains("Type: `number`"),
+        text.contains("---@type number"),
         "on-demand nested shape should carry number type for .d, got:\n{}",
         text,
     );
@@ -1875,13 +2038,11 @@ print(xyz)
     )
     .expect("hover on xyz should succeed");
     let text = hover_content_string(&result);
-    // The `---@type number` should be handled by preceding-comment logic
-    // (if it's a preceding sibling) or not at all — but NOT by trailing.
-    // We just verify the raw `---@type number` text doesn't appear as
-    // plain doc text in the hover.
+    // The `---@type number` should be rendered as syntax-highlighted
+    // annotation source, not as loose trailing prose.
     assert!(
-        !text.contains("---@type number"),
-        "hover should NOT show raw Emmy annotation as trailing doc, got:\n{}",
+        text.contains("```lua\n---@type number\nlocal xyz = 123\n```"),
+        "hover should render trailing Emmy annotation in the Lua code block, got:\n{}",
         text,
     );
 }
@@ -1987,7 +2148,7 @@ print(s)
     .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
-        text.contains("Type: `string`"),
+        text.contains("---@type string"),
         "dotted generic function should infer from explicit argument, not receiver, got:\n{}",
         text,
     );
@@ -2021,7 +2182,7 @@ print(s)
     .expect("hover on s should succeed");
     let text = hover_content_string(&result);
     assert!(
-        text.contains("Type: `string`"),
+        text.contains("---@type string"),
         "local table dotted generic function should infer from explicit argument, got:\n{}",
         text,
     );
@@ -2185,7 +2346,7 @@ print(tt.a)
     .expect("hover on field returned by cross-file global function should resolve");
     let text = hover_content_string(&result);
     assert!(
-        text.contains("Type: `number`"),
+        text.contains("---@type number"),
         "hover on `tt.a` should show number from provider table, got:\n{}",
         text,
     );
@@ -2244,7 +2405,7 @@ end
     .expect("hover on self.value should use obj's table shape");
     let text = hover_content_string(&result);
     assert!(
-        text.contains("Type: `number`"),
+        text.contains("---@type number"),
         "self.value should resolve through the local table shape, got:\n{}",
         text,
     );
@@ -2604,7 +2765,7 @@ local a1 = ClassA1:new()"#;
     assert!(result.is_some(), "hover on a1 should return a result");
     let text = hover_content_string(result.as_ref().unwrap());
     assert!(
-        text.contains("Type: `ClassA1`"),
+        text.contains("---@type ClassA1"),
         "ClassA1:new() should bind self generic T to ClassA1, got:\n{}",
         text
     );
