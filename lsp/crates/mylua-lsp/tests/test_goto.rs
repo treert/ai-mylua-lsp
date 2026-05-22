@@ -401,6 +401,36 @@ end"#;
 }
 
 #[test]
+fn goto_implicit_self_jumps_to_method_name() {
+    let src = r#"local obj = { value = 42 }
+function obj:inspect()
+    return self.value
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "implicit_self_goto.lua");
+
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(2, 13),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on implicit self should resolve to the method declaration");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = result {
+        assert_eq!(loc.range.start.line, 1, "should jump to method declaration");
+        assert_eq!(
+            loc.range.start.character, 13,
+            "should select the method name `inspect`, got {:?}",
+            loc.range
+        );
+        assert_eq!(loc.range.end.character, 20, "should select only `inspect`");
+    } else {
+        panic!("expected scalar goto response");
+    }
+}
+
+#[test]
 fn goto_for_variable() {
     let src = r#"for i = 1, 10 do
     print(i)

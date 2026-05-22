@@ -3,6 +3,7 @@ mod test_helpers;
 use mylua_lsp::hover;
 use std::collections::HashMap;
 use test_helpers::*;
+use tower_lsp_server::ls_types::Range;
 
 const HOVER1_SRC: &str = r#"---@class uiButton
 local uiButton = class('uiButton')
@@ -2408,6 +2409,36 @@ end
         text.contains("---@type number"),
         "self.value should resolve through the local table shape, got:\n{}",
         text,
+    );
+}
+
+#[test]
+fn hover_implicit_self_ranges_current_identifier() {
+    let src = r#"local obj = { value = 42 }
+function obj:inspect()
+    return self.value
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "implicit_self_hover_range.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 13),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on implicit self should return parameter hover");
+
+    assert_eq!(
+        result.range,
+        Some(Range {
+            start: pos(2, 11),
+            end: pos(2, 15),
+        }),
+        "hover range should select only the self occurrence under the cursor"
     );
 }
 

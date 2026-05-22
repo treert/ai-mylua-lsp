@@ -132,7 +132,8 @@ pub fn hover(
             ident_text,
             type_info
         );
-        return build_hover_for_definition(&def, all_docs, type_info.as_deref());
+        let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
+        return build_hover_for_definition(&def, all_docs, type_info.as_deref(), Some(hover_range));
     }
 
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`).
@@ -190,7 +191,8 @@ pub fn hover(
                 }
             }
         }
-        return build_hover_for_definition(&synth_def, all_docs, Some(&type_info));
+        let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
+        return build_hover_for_definition(&synth_def, all_docs, Some(&type_info), Some(hover_range));
     }
 
     None
@@ -520,7 +522,8 @@ fn build_field_chain_hover(
         })
     })();
     if let Some(synth_def) = synth_def {
-        return build_hover_for_definition(&synth_def, all_docs, Some(&type_display));
+        let hover_range = line_index.ts_node_to_range(name_node, source);
+        return build_hover_for_definition(&synth_def, all_docs, Some(&type_display), Some(hover_range));
     }
 
     fallback_field_hover(
@@ -763,6 +766,7 @@ fn build_hover_for_definition(
     def: &crate::types::Definition,
     all_docs: &impl DocumentLookup,
     type_info: Option<&str>,
+    hover_range: Option<Range>,
 ) -> Option<Hover> {
     let doc = all_docs.get_document_by_id(def.uri_id)?;
     let source = doc.source();
@@ -778,13 +782,13 @@ fn build_hover_for_definition(
     let def_node = root.descendant_for_byte_range(def_start_byte, def_start_byte)?;
 
     if let Some(field_node) = find_enclosing_table_field(def_node) {
-        return build_hover_for_table_field(def, field_node, source, type_info);
+        return build_hover_for_table_field(def, field_node, source, type_info, hover_range);
     }
 
     let stmt_node = find_enclosing_statement(def_node);
 
     if def.kind == DefKind::Parameter {
-        return build_hover_for_parameter(def, stmt_node, source, type_info);
+        return build_hover_for_parameter(def, stmt_node, source, type_info, hover_range);
     }
 
     let comment_lines = collect_preceding_comments(stmt_node, source);
@@ -839,7 +843,7 @@ fn build_hover_for_definition(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(def.selection_range.into()),
+        range: Some(hover_range.unwrap_or_else(|| def.selection_range.into())),
     })
 }
 
@@ -848,6 +852,7 @@ fn build_hover_for_parameter(
     stmt_node: tree_sitter::Node,
     source: &[u8],
     type_info: Option<&str>,
+    hover_range: Option<Range>,
 ) -> Option<Hover> {
     let comment_lines = collect_preceding_comments(stmt_node, source);
     let comment_text = comment_lines.join("\n");
@@ -884,7 +889,7 @@ fn build_hover_for_parameter(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(def.selection_range.into()),
+        range: Some(hover_range.unwrap_or_else(|| def.selection_range.into())),
     })
 }
 
@@ -912,6 +917,7 @@ fn build_hover_for_table_field(
     field_node: tree_sitter::Node,
     source: &[u8],
     type_info: Option<&str>,
+    hover_range: Option<Range>,
 ) -> Option<Hover> {
     let comment_lines = collect_preceding_comments(field_node, source);
     let trailing = collect_table_field_trailing_comment(field_node, source);
@@ -952,7 +958,7 @@ fn build_hover_for_table_field(
             kind: MarkupKind::Markdown,
             value: parts.join("\n\n"),
         }),
-        range: Some(def.selection_range.into()),
+        range: Some(hover_range.unwrap_or_else(|| def.selection_range.into())),
     })
 }
 

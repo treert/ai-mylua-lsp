@@ -486,7 +486,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 } else {
                     None
                 };
-                visit_function_body(ctx, body, &params, false, "", return_target);
+                visit_function_body(ctx, body, &params, false, "", None, return_target);
                 if should_infer_returns {
                     update_function_returns(ctx, func_id, returns);
                 }
@@ -731,7 +731,7 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
         } else {
             None
         };
-        visit_function_body(ctx, b, &params, false, "", return_target);
+        visit_function_body(ctx, b, &params, false, "", None, return_target);
         if should_infer_returns {
             update_function_returns(ctx, func_id, returns);
         }
@@ -823,7 +823,21 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         } else {
             None
         };
-        visit_function_body(ctx, b, &params, is_method, &class_prefix, return_target);
+        let implicit_self_range = if is_method {
+            function_name_tail_identifier(name_node)
+                .map(|n| ctx.line_index.ts_node_to_byte_range(n, ctx.source))
+        } else {
+            None
+        };
+        visit_function_body(
+            ctx,
+            b,
+            &params,
+            is_method,
+            &class_prefix,
+            implicit_self_range,
+            return_target,
+        );
         if should_infer_returns {
             update_function_returns(ctx, func_id, returns);
         }
@@ -1622,6 +1636,18 @@ fn function_name_dotted_chain(name: &str) -> Option<DottedChain> {
     })
 }
 
+fn function_name_tail_identifier(function_name: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    let mut last_ident = None;
+    for i in 0..function_name.child_count() {
+        if let Some(child) = function_name.child(i as u32) {
+            if child.kind() == "identifier" {
+                last_ident = Some(child);
+            }
+        }
+    }
+    last_ident
+}
+
 fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tree_sitter::Node) {
     if node.kind() == "function_definition" {
         visit_anonymous_function_definition(ctx, node);
@@ -1651,7 +1677,7 @@ fn visit_anonymous_function_definition(ctx: &mut BuildContext, node: tree_sitter
         extract_ast_params(&mut params, param_list, ctx.source);
     }
 
-    visit_function_body(ctx, body, &params, false, "", None);
+    visit_function_body(ctx, body, &params, false, "", None, None);
 }
 
 // ---------------------------------------------------------------------------
@@ -1668,6 +1694,7 @@ fn visit_function_body(
     params: &[ParamInfo],
     is_method: bool,
     class_prefix: &str,
+    implicit_self_range: Option<crate::util::ByteRange>,
     mut return_types: Option<&mut Vec<TypeFact>>,
 ) {
     ctx.push_scope(
@@ -1712,8 +1739,12 @@ fn visit_function_body(
             kind: DefKind::Parameter,
             decl_byte: db,
             visible_after_byte: db,
-            range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
-            selection_range: ctx.line_index.ts_node_to_byte_range(func_body, ctx.source),
+            range: implicit_self_range.unwrap_or_else(|| {
+                ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)
+            }),
+            selection_range: implicit_self_range.unwrap_or_else(|| {
+                ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)
+            }),
             type_fact: self_type,
             bound_class: self_bound_class,
             is_emmy_annotated: false,
