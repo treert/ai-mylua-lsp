@@ -29,12 +29,30 @@ utils.test_const = require('test_const')
 ---@field m_misc_id number
 ---@field miscFunc fun():number
 
+local mgrs = {
+    --- 222 head
+    ---@type MiscManager @ 222 mid
+    MiscMgr2 = nil, -- 222 tail
+    MiscMgr3 = nil,---@type MiscManager @ 333 tail
+}
+
+local _ = mgrs.MiscMgr2.m_misc_id
+local _ = mgrs.MiscMgr2:miscFunc()
+
+local _ = mgrs.MiscMgr3.m_misc_id
+local _ = mgrs.MiscMgr3:miscFunc()
+
+
+
 ---@class UtilsLocals
 ---@field MiscManager MiscManager
 
 
 ---@type UtilsLocals
 utils.locals = {}
+
+
+
 
 
 local MiscManager = utils.locals.MiscManager

@@ -1094,6 +1094,322 @@ MiscManager:miscFunc(MiscManager.m_misc_id)"#;
 }
 
 #[test]
+fn hover_table_constructor_field_preceded_by_type_annotation() {
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+local mgrs = {
+    ---@type MiscManager
+    MiscMgr2 = nil,
+}
+
+local field_value = mgrs.MiscMgr2.m_misc_id
+local call_value = mgrs.MiscMgr2:miscFunc()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_preceded_type_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let field_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(11, 34),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on m_misc_id should resolve through table field @type");
+    let field_content = hover_content_string(&field_hover);
+    assert!(
+        field_content.contains("number"),
+        "hover on m_misc_id should show number, got: {}",
+        field_content
+    );
+
+    let method_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 33),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on miscFunc should resolve through table field @type");
+    let method_content = hover_content_string(&method_hover);
+    assert!(
+        method_content.contains("fun()") || method_content.contains("number"),
+        "hover on miscFunc should show function type info, got: {}",
+        method_content
+    );
+
+    let call_value_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on call_value should include inferred return type");
+    let call_value_content = hover_content_string(&call_value_hover);
+    assert!(
+        call_value_content.contains("number"),
+        "hover on call_value should show miscFunc return type, got: {}",
+        call_value_content
+    );
+}
+
+#[test]
+fn hover_table_constructor_field_trailing_type_annotation_and_docs() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+local mgrs = {
+    --- 222 head
+    ---@type MiscManager @ 222 mid
+    MiscMgr2 = nil, -- 222 tail
+    MiscMgr3 = nil,---@type MiscManager @ 333 tail
+}
+
+local field_value2 = mgrs.MiscMgr2.m_misc_id
+local field_value3 = mgrs.MiscMgr3.m_misc_id"#;
+    let (doc, uri, mut agg) =
+        setup_single_file(src, "table_field_trailing_type_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let misc_mgr2_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(11, 26),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on MiscMgr2 should resolve through preceding table field @type");
+    let misc_mgr2_content = hover_content_string(&misc_mgr2_hover);
+    assert!(
+        misc_mgr2_content.contains("MiscManager")
+            && misc_mgr2_content.contains("222 head")
+            && misc_mgr2_content.contains("222 mid")
+            && misc_mgr2_content.contains("222 tail"),
+        "hover on MiscMgr2 should show type and table-field docs, got: {}",
+        misc_mgr2_content
+    );
+
+    let field_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 36),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on m_misc_id should resolve through trailing table field @type");
+    let field_content = hover_content_string(&field_hover);
+    assert!(
+        field_content.contains("number"),
+        "hover on m_misc_id should show number through trailing @type, got: {}",
+        field_content
+    );
+
+    let misc_mgr3_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 26),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on MiscMgr3 should resolve through trailing table field @type");
+    let misc_mgr3_content = hover_content_string(&misc_mgr3_hover);
+    assert!(
+        misc_mgr3_content.contains("MiscManager") && misc_mgr3_content.contains("333 tail"),
+        "hover on MiscMgr3 should show trailing @type and desc, got: {}",
+        misc_mgr3_content
+    );
+}
+
+#[test]
+fn hover_table_constructor_trailing_type_binds_only_to_adjacent_field() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+
+local mgrs = {
+    MiscMgr2 = nil, MiscMgr3 = nil,---@type MiscManager
+}
+
+local field_value2 = mgrs.MiscMgr2.m_misc_id
+local field_value3 = mgrs.MiscMgr3.m_misc_id"#;
+    let (doc, uri, mut agg) =
+        setup_single_file(src, "table_field_trailing_type_adjacency_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let field2_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 36),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let field2_content = field2_hover
+        .as_ref()
+        .map(hover_content_string)
+        .unwrap_or_default();
+    assert!(
+        !field2_content.contains("---@type number"),
+        "trailing @type for MiscMgr3 must not bind to earlier same-line MiscMgr2, got: {}",
+        field2_content
+    );
+
+    let field3_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 36),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on MiscMgr3.m_misc_id should use adjacent trailing @type");
+    let field3_content = hover_content_string(&field3_hover);
+    assert!(
+        field3_content.contains("number"),
+        "adjacent trailing @type should bind to MiscMgr3, got: {}",
+        field3_content
+    );
+}
+
+#[test]
+fn hover_table_constructor_preceding_type_does_not_document_later_same_line_field() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+
+local mgrs = {
+    ---@type MiscManager
+    MiscMgr2 = nil, other = 1,
+}
+
+local other_value = mgrs.other"#;
+    let (doc, uri, mut agg) =
+        setup_single_file(src, "table_field_preceding_type_same_line_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let other_hover = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 25),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on other should resolve as its own table field");
+    let content = hover_content_string(&other_hover);
+    assert!(
+        !content.contains("MiscManager"),
+        "preceding @type for MiscMgr2 must not appear on later same-line field hover, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_table_constructor_plain_comment_containing_type_does_not_bind() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+
+local mgrs = {
+    MiscMgr3 = nil, -- ---@type MiscManager
+}
+
+local field_value3 = mgrs.MiscMgr3.m_misc_id"#;
+    let (doc, uri, mut agg) =
+        setup_single_file(src, "table_field_plain_comment_type_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(7, 36),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let content = result
+        .as_ref()
+        .map(hover_content_string)
+        .unwrap_or_default();
+    assert!(
+        !content.contains("---@type number"),
+        "plain trailing comment containing ---@type must not bind, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_table_constructor_field_type_annotation_does_not_cross_blank_line() {
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+
+local mgrs = {
+    ---@type MiscManager
+
+    MiscMgr2 = nil,
+}
+
+local field_value = mgrs.MiscMgr2.m_misc_id"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_type_blank_line_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(11, 34),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let content = result
+        .as_ref()
+        .map(hover_content_string)
+        .unwrap_or_default();
+    assert!(
+        !content.contains("number"),
+        "blank line should prevent @type from binding to the table field, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_bracket_key_table_field_preceded_by_type_annotation() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+
+local key = "MiscMgr2"
+local mgrs = {
+    ---@type MiscManager
+    [key] = nil,
+}
+
+local field_value = mgrs[key].m_misc_id"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "bracket_key_table_field_type_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 30),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on m_misc_id should resolve through bracket-key table field @type");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("number"),
+        "hover on m_misc_id should show number through bracket-key table field @type, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_call_return_from_emmy_fun_field_shows_return_type() {
     // `local ret2 = MiscManager:miscFunc(...)` — hover on `ret2` should
     // show `number` (the return type of `fun():number`).

@@ -952,6 +952,119 @@ return settings"#,
 }
 
 #[test]
+fn goto_table_constructor_field_preceded_by_type_annotation() {
+    let src = r#"utils = {}
+
+---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+local mgrs = {
+    ---@type MiscManager
+    MiscMgr2 = nil,
+}
+
+local field_value = mgrs.MiscMgr2.m_misc_id
+local call_value = mgrs.MiscMgr2:miscFunc()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_preceded_type_goto.lua");
+
+    let field_result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(11, 34),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on m_misc_id should resolve through table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &field_result {
+        assert_eq!(loc.uri, uri, "m_misc_id should resolve in the same file");
+        assert_eq!(
+            loc.range.start.line, 3,
+            "m_misc_id should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", field_result);
+    }
+
+    let method_result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(12, 33),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on miscFunc should resolve through table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &method_result {
+        assert_eq!(loc.uri, uri, "miscFunc should resolve in the same file");
+        assert_eq!(
+            loc.range.start.line, 4,
+            "miscFunc should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", method_result);
+    }
+}
+
+#[test]
+fn goto_table_constructor_field_trailing_type_annotation() {
+    let src = r#"---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+local mgrs = {
+    MiscMgr3 = nil,---@type MiscManager @ 333 tail
+}
+
+local field_value = mgrs.MiscMgr3.m_misc_id
+local call_value = mgrs.MiscMgr3:miscFunc()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_trailing_type_goto.lua");
+
+    let field_result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(8, 34),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on m_misc_id should resolve through trailing table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &field_result {
+        assert_eq!(loc.uri, uri, "m_misc_id should resolve in the same file");
+        assert_eq!(
+            loc.range.start.line, 1,
+            "m_misc_id should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", field_result);
+    }
+
+    let method_result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(9, 33),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on miscFunc should resolve through trailing table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &method_result {
+        assert_eq!(loc.uri, uri, "miscFunc should resolve in the same file");
+        assert_eq!(
+            loc.range.start.line, 2,
+            "miscFunc should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", method_result);
+    }
+}
+
+#[test]
 fn goto_emmy_comment_parent_type_name() {
     let src = r#"---@class BaseCls
 BaseCls = {}

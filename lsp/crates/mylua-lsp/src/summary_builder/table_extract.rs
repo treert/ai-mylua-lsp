@@ -1,3 +1,4 @@
+use crate::emmy::{emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation};
 use crate::table_shape::{FieldInfo, TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::{extract_string_literal, node_text};
@@ -109,7 +110,7 @@ fn extract_bracket_key_table_types(
                 });
             }
             if let Some(v) = field_node.child_by_field_name("value") {
-                let vt = infer_expression_type(ctx, v, depth);
+                let vt = infer_field_value_type(ctx, field_node, v, depth);
                 value_type = Some(match value_type.take() {
                     Some(existing) => merge_types(existing, vt),
                     None => vt,
@@ -137,7 +138,7 @@ fn extract_single_field(
         Some(k) if k.kind() == "identifier" => {
             let key = node_text(k, ctx.source).to_string();
             if let Some(val) = value_node {
-                let type_fact = infer_expression_type(ctx, val, depth);
+                let type_fact = infer_field_value_type(ctx, field_node, val, depth);
                 shape.set_field(
                     &key,
                     FieldInfo {
@@ -170,7 +171,7 @@ fn extract_single_field(
                 node_text(k, ctx.source).to_string()
             };
             if let Some(val) = value_node {
-                let type_fact = infer_expression_type(ctx, val, depth);
+                let type_fact = infer_field_value_type(ctx, field_node, val, depth);
                 shape.set_field(
                     &key_text,
                     FieldInfo {
@@ -191,7 +192,7 @@ fn extract_single_field(
         Some(_) => {
             shape.mark_open();
             if let Some(val) = value_node {
-                let type_fact = infer_expression_type(ctx, val, depth);
+                let type_fact = infer_field_value_type(ctx, field_node, val, depth);
                 shape.array_element_type = Some(match shape.array_element_type.take() {
                     Some(existing) => merge_types(existing, type_fact),
                     None => type_fact,
@@ -201,7 +202,7 @@ fn extract_single_field(
         // No key at all — array-style entry (`{ 1, 2, 3 }`).
         None => {
             if let Some(val) = value_node {
-                let type_fact = infer_expression_type(ctx, val, depth);
+                let type_fact = infer_field_value_type(ctx, field_node, val, depth);
                 shape.array_element_type = Some(match shape.array_element_type.take() {
                     Some(existing) => merge_types(existing, type_fact),
                     None => type_fact,
@@ -209,6 +210,102 @@ fn extract_single_field(
             }
         }
     }
+}
+
+fn infer_field_value_type(
+    ctx: &mut BuildContext,
+    field_node: tree_sitter::Node,
+    value_node: tree_sitter::Node,
+    depth: usize,
+) -> TypeFact {
+    extract_preceding_field_type_annotation(field_node, ctx.source)
+        .unwrap_or_else(|| infer_expression_type(ctx, value_node, depth))
+}
+
+fn extract_preceding_field_type_annotation(
+    field_node: tree_sitter::Node,
+    source: &[u8],
+) -> Option<TypeFact> {
+    if let Some(type_fact) = extract_trailing_field_type_annotation(field_node, source) {
+        return Some(type_fact);
+    }
+
+    let start = field_node.start_byte();
+    let current_line_start = source[..start]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    if !source[current_line_start..start]
+        .iter()
+        .all(|b| b.is_ascii_whitespace())
+    {
+        return None;
+    }
+
+    let previous_line_end = current_line_start.checked_sub(1)?;
+    let previous_line_start = source[..previous_line_end]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    let previous_line = std::str::from_utf8(&source[previous_line_start..previous_line_end]).ok()?;
+    if previous_line.trim().is_empty() {
+        return None;
+    }
+    parse_field_type_annotation(previous_line)
+}
+
+fn extract_trailing_field_type_annotation(
+    field_node: tree_sitter::Node,
+    source: &[u8],
+) -> Option<TypeFact> {
+    let trailing = trailing_field_segment(field_node, source)?;
+    let text = strip_leading_field_separator(trailing);
+    text.starts_with("---@type")
+        .then(|| parse_field_type_annotation(text))
+        .flatten()
+}
+
+fn trailing_field_segment<'a>(field_node: tree_sitter::Node, source: &'a [u8]) -> Option<&'a str> {
+    let field_row = field_node.end_position().row;
+    let line_end = source[field_node.end_byte()..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|offset| field_node.end_byte() + offset)
+        .unwrap_or(source.len());
+    let mut segment_end = line_end;
+    let mut next = field_node.next_sibling();
+    while let Some(node) = next {
+        if node.start_position().row != field_row {
+            break;
+        }
+        if node.kind() == "field" {
+            segment_end = segment_end.min(node.start_byte());
+            break;
+        }
+        next = node.next_sibling();
+    }
+    std::str::from_utf8(&source[field_node.end_byte()..segment_end]).ok()
+}
+
+fn strip_leading_field_separator(text: &str) -> &str {
+    let text = text.trim_start();
+    let text = text
+        .strip_prefix(',')
+        .or_else(|| text.strip_prefix(';'))
+        .unwrap_or(text);
+    text.trim_start()
+}
+
+fn parse_field_type_annotation(comment_text: &str) -> Option<TypeFact> {
+    parse_emmy_comments(comment_text)
+        .into_iter()
+        .rev()
+        .find_map(|ann| match ann {
+            EmmyAnnotation::Type { type_expr, .. } => Some(emmy_type_to_fact(&type_expr)),
+            _ => None,
+        })
 }
 
 /// Thin wrapper: unwrap `expression_list` then delegate to the shared

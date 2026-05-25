@@ -919,10 +919,13 @@ fn build_hover_for_table_field(
     type_info: Option<&str>,
     hover_range: Option<Range>,
 ) -> Option<Hover> {
-    let comment_lines = collect_preceding_comments(field_node, source);
+    let comment_lines = collect_table_field_preceding_comments(field_node, source);
     let trailing = collect_table_field_trailing_comment(field_node, source);
     let comment_text = comment_lines.join("\n");
-    let annotations = parse_emmy_comments(&comment_text);
+    let mut annotations = parse_emmy_comments(&comment_text);
+    if let Some(trailing_emmy) = collect_table_field_trailing_emmy_text(field_node, source) {
+        annotations.extend(parse_emmy_comments(&trailing_emmy));
+    }
 
     let def_line = node_text(field_node, source)
         .lines()
@@ -987,6 +990,92 @@ fn collect_table_field_trailing_comment(
         return None;
     }
     None
+}
+
+fn collect_table_field_preceding_comments(
+    field_node: tree_sitter::Node,
+    source: &[u8],
+) -> Vec<String> {
+    let current_line_start = source[..field_node.start_byte()]
+        .iter()
+        .rposition(|&b| b == b'\n')
+        .map(|idx| idx + 1)
+        .unwrap_or(0);
+    if !source[current_line_start..field_node.start_byte()]
+        .iter()
+        .all(|b| b.is_ascii_whitespace())
+    {
+        return Vec::new();
+    }
+
+    let mut comments = Vec::new();
+    let mut line_end = current_line_start.saturating_sub(1);
+
+    while line_end > 0 {
+        let line_start = source[..line_end]
+            .iter()
+            .rposition(|&b| b == b'\n')
+            .map(|idx| idx + 1)
+            .unwrap_or(0);
+        let Ok(line) = std::str::from_utf8(&source[line_start..line_end]) else {
+            break;
+        };
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            break;
+        }
+        if !trimmed.starts_with("--") {
+            break;
+        }
+        comments.push(trimmed.to_string());
+        line_end = line_start.saturating_sub(1);
+    }
+
+    comments.reverse();
+    comments
+}
+
+fn collect_table_field_trailing_emmy_text(
+    field_node: tree_sitter::Node,
+    source: &[u8],
+) -> Option<String> {
+    let trailing = trailing_table_field_segment(field_node, source)?;
+    let text = strip_leading_table_field_separator(trailing);
+    text.starts_with("---@").then(|| text.to_string())
+}
+
+fn trailing_table_field_segment<'a>(
+    field_node: tree_sitter::Node,
+    source: &'a [u8],
+) -> Option<&'a str> {
+    let field_row = field_node.end_position().row;
+    let line_end = source[field_node.end_byte()..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map(|offset| field_node.end_byte() + offset)
+        .unwrap_or(source.len());
+    let mut segment_end = line_end;
+    let mut next = field_node.next_sibling();
+    while let Some(node) = next {
+        if node.start_position().row != field_row {
+            break;
+        }
+        if node.kind() == "field" {
+            segment_end = segment_end.min(node.start_byte());
+            break;
+        }
+        next = node.next_sibling();
+    }
+    std::str::from_utf8(&source[field_node.end_byte()..segment_end]).ok()
+}
+
+fn strip_leading_table_field_separator(text: &str) -> &str {
+    let text = text.trim_start();
+    let text = text
+        .strip_prefix(',')
+        .or_else(|| text.strip_prefix(';'))
+        .unwrap_or(text);
+    text.trim_start()
 }
 
 /// Extract plain documentation text from collected comment lines.
