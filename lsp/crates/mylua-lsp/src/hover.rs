@@ -382,6 +382,21 @@ fn hover_method_call(
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
+    if let Some((root_node, mut fields)) = extract_field_chain(base_node, source) {
+        fields.push(node_text(name_node, source).to_string());
+        return build_field_chain_hover(
+            root_node,
+            fields,
+            name_node,
+            "method",
+            source,
+            uri_id,
+            &doc.scope_tree,
+            index,
+            all_docs,
+            doc.line_index(),
+        );
+    }
     build_field_hover(
         base_node,
         name_node,

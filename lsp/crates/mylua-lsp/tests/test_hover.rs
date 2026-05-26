@@ -1159,6 +1159,61 @@ local call_value = mgrs.MiscMgr2:miscFunc()"#;
 }
 
 #[test]
+fn hover_cross_file_table_constructor_field_method_preceded_by_type_annotation() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"local field_value = utils.mgrs.MiscMgr4.m_misc_id
+local call_value = utils.mgrs.MiscMgr4:miscFunc()"#,
+        ),
+        (
+            "utils.lua",
+            r#"---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+utils = {}
+utils.mgrs = {
+    ---@type MiscManager
+    MiscMgr4 = nil,
+}"#,
+        ),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main doc");
+
+    let field_hover = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(0, 40),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on m_misc_id should resolve through cross-file table field @type");
+    let field_content = hover_content_string(&field_hover);
+    assert!(
+        field_content.contains("number"),
+        "hover on m_misc_id should show number through cross-file @type, got: {}",
+        field_content
+    );
+
+    let method_hover = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 39),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on miscFunc should resolve through cross-file table field @type");
+    let method_content = hover_content_string(&method_hover);
+    assert!(
+        method_content.contains("fun()") || method_content.contains("number"),
+        "hover on miscFunc should show function type info through cross-file @type, got: {}",
+        method_content
+    );
+}
+
+#[test]
 fn hover_table_constructor_field_trailing_type_annotation_and_docs() {
     let src = r#"---@class MiscManager
 ---@field m_misc_id number

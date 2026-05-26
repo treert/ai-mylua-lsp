@@ -43,6 +43,17 @@ local _ = mgrs.MiscMgr3.m_misc_id
 local _ = mgrs.MiscMgr3:miscFunc()
 
 
+utils.mgrs = {
+    --- 444 head
+    ---@type MiscManager @ 444 mid
+    MiscMgr4 = nil, -- 444 tail
+    MiscMgr5 = nil,---@type MiscManager @ 555 tail
+}
+
+local _ = utils.mgrs.MiscMgr4.m_misc_id
+local _ = utils.mgrs.MiscMgr4:miscFunc()
+
+
 
 ---@class UtilsLocals
 ---@field MiscManager MiscManager

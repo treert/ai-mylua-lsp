@@ -1065,6 +1065,73 @@ local call_value = mgrs.MiscMgr3:miscFunc()"#;
 }
 
 #[test]
+fn goto_cross_file_table_constructor_field_method_preceded_by_type_annotation() {
+    let (docs, mut agg, _) = setup_workspace(&[
+        (
+            "main.lua",
+            r#"local field_value = utils.mgrs.MiscMgr4.m_misc_id
+local call_value = utils.mgrs.MiscMgr4:miscFunc()"#,
+        ),
+        (
+            "utils.lua",
+            r#"---@class MiscManager
+---@field m_misc_id number
+---@field miscFunc fun():number
+
+utils = {}
+utils.mgrs = {
+    ---@type MiscManager
+    MiscMgr4 = nil,
+}"#,
+        ),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main doc");
+    let utils_uri = make_uri("utils.lua");
+
+    let field_result = goto::goto_definition(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(0, 40),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on m_misc_id should resolve through cross-file table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &field_result {
+        assert_eq!(loc.uri, utils_uri, "m_misc_id should resolve in utils.lua");
+        assert_eq!(
+            loc.range.start.line, 1,
+            "m_misc_id should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", field_result);
+    }
+
+    let method_result = goto::goto_definition(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 39),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("goto on miscFunc should resolve through cross-file table field @type");
+
+    if let tower_lsp_server::ls_types::GotoDefinitionResponse::Scalar(loc) = &method_result {
+        assert_eq!(loc.uri, utils_uri, "miscFunc should resolve in utils.lua");
+        assert_eq!(
+            loc.range.start.line, 2,
+            "miscFunc should jump to the @field definition, got: {:?}",
+            loc.range
+        );
+    } else {
+        panic!("expected scalar goto response, got {:?}", method_result);
+    }
+}
+
+#[test]
 fn goto_emmy_comment_parent_type_name() {
     let src = r#"---@class BaseCls
 BaseCls = {}

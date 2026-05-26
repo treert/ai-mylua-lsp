@@ -50,3 +50,6 @@ print(module1.internat)
 module1.internat.test_internat()
 print(module1.internat.Config_Internat_Id)
 
+
+local _ = utils.mgrs.MiscMgr4.m_misc_id
+local _ = utils.mgrs.MiscMgr4:miscFunc()

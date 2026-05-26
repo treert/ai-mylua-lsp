@@ -311,6 +311,18 @@ fn goto_method_call(
     let source = doc.source();
     let base_node = call_node.child_by_field_name("callee")?;
     let name_node = call_node.child_by_field_name("method")?;
+    if let Some((root_node, mut fields)) = extract_field_chain(base_node, source) {
+        fields.push(node_text(name_node, source).to_string());
+        let root_fact = crate::type_inference::infer_node_type_in_file_id(
+            root_node,
+            source,
+            uri_id,
+            &doc.scope_tree,
+            index,
+        );
+        let resolved = resolver::resolve_field_chain_in_file_id(uri_id, &root_fact, &fields, index);
+        return resolved_to_goto(resolved);
+    }
     goto_field_or_method(base_node, name_node, source, uri_id, &doc.scope_tree, index)
 }
 
