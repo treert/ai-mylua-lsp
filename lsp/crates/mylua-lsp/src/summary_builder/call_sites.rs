@@ -122,11 +122,6 @@ fn collect_calls_in_scope(
         }
         _ => {}
     }
-    // Skip bracket-key-only table constructors — they contain only
-    // literal key-value pairs, never function calls.
-    if node.kind() == "table_constructor" && crate::util::is_bracket_key_only_table(node) {
-        return;
-    }
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
             collect_calls_in_scope(

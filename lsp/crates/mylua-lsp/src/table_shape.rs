@@ -27,10 +27,8 @@ pub struct TableShape {
     /// same file share a field name. Dotted / subscripted LHS
     /// (`M.field = { ... }`) preserves the full text form.
     pub owner_name: Option<LuaSymbol>,
-    /// Key type for bracket-key-only tables (e.g. `{ [string] = value, ... }`).
-    /// When set, `fields` is empty and the shape represents a map-like table
-    /// whose individual entries are not tracked. Consumers should use
-    /// `key_type` + `array_element_type` for type information.
+    /// Key type for map-like bracket entries whose individual keys are
+    /// not represented as named fields.
     pub key_type: Option<crate::type_system::TypeFact>,
 }
 

@@ -25,12 +25,6 @@ fn check_duplicate_keys_recursive(
 ) {
     let node = cursor.node();
     if node.kind() == "table_constructor" {
-        // Skip bracket-key-only tables — they are data-mapping tables
-        // where duplicate key checking is not useful and would be
-        // expensive for thousands of entries.
-        if crate::util::is_bracket_key_only_table(node) {
-            return;
-        }
         let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
         for i in 0..node.named_child_count() {
             let Some(field_list) = node.named_child(i as u32) else {

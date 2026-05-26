@@ -90,16 +90,6 @@ fn count_identifier_references(
     }
     if cursor.goto_first_child() {
         loop {
-            // Skip bracket-key-only table constructors — they contain
-            // no identifiers, only literal key-value pairs.
-            let child = cursor.node();
-            if child.kind() == "table_constructor" && crate::util::is_bracket_key_only_table(child)
-            {
-                if !cursor.goto_next_sibling() {
-                    break;
-                }
-                continue;
-            }
             count_identifier_references(cursor, source, scope_tree, ref_count);
             if !cursor.goto_next_sibling() {
                 break;

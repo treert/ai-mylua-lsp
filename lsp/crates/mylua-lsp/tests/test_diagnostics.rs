@@ -797,11 +797,8 @@ print(module1.internat.Config_Internat_Id)
 
 #[test]
 fn static_bracket_string_key_is_normalized() {
-    // Bracket-key-only tables (`{ ["foo"] = 1, [2] = "two" }`) are
-    // recognized as data-mapping tables. Their shape is open with no
-    // per-field entries, so `t.foo` / `t[2]` reads should NOT produce
-    // Error-severity "Unknown field" diagnostics (open shapes downgrade
-    // to Warning at most).
+    // Identifier-like string keys are normalized into named table
+    // fields, so `t.foo` should be recognized.
     let src = r#"
 local t = { ["foo"] = 1, [2] = "two" }
 print(t.foo)
@@ -825,8 +822,42 @@ print(t[2])
         .collect();
     assert!(
         errors.is_empty(),
-        "bracket-key-only table should be open (no Error-severity Unknown-field), got: {:?}",
+        "static string key table should not report Error-severity Unknown-field, got: {:?}",
         errors,
+    );
+}
+
+#[test]
+fn identifier_field_after_bracket_string_prefix_is_known() {
+    let src = r#"
+local t = {
+    ['A1'] = "A1",
+    ['A2'] = "A2",
+    ['A3'] = "A3",
+    ['A4'] = "A4",
+    A5 = "A5",
+}
+print(t.A5)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "mixed_bracket_prefix.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field") && d.message.contains("A5"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "identifier fields after bracket-string entries must still be extracted, got: {:?}",
+        unknown,
     );
 }
 
@@ -1245,9 +1276,6 @@ fn duplicate_table_key_reports_warning() {
 
 #[test]
 fn duplicate_table_key_across_numeric_and_string_keys() {
-    // Bracket-key-only tables are recognized as data-mapping tables
-    // and skip duplicate-key checking. Verify that no diagnostic is
-    // emitted for `{ [1] = "x", [1] = "y" }` (bracket-key-only).
     let src = "local t = { [1] = \"x\", [1] = \"y\" }\n";
     let (doc, uri, mut agg) = setup_single_file(src, "dup_num.lua");
     let cfg = DiagnosticsConfig::default();
@@ -1266,8 +1294,8 @@ fn duplicate_table_key_across_numeric_and_string_keys() {
         .collect();
     assert_eq!(
         dup.len(),
-        0,
-        "bracket-key-only tables skip duplicate-key check, got: {:?}",
+        1,
+        "duplicate numeric bracket keys should be checked, got: {:?}",
         diags
     );
 }

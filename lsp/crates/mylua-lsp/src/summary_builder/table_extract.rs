@@ -38,17 +38,6 @@ pub(super) fn extract_table_shape(
     // We also read the CST field `key` (not the historical name `name`)
     // as defined by the grammar's `field` rule.
 
-    // ── Fast path: bracket-key-only tables ──────────────────────────
-    // Tables where ALL fields use bracket-key syntax (`[exp] = value`)
-    // are typically data-mapping tables (e.g. asset path remapping).
-    // For these tables we skip per-field extraction and only record
-    // the key/value types — this avoids O(N) HashMap inserts and
-    // string allocations for tables with thousands of entries.
-    if crate::util::is_bracket_key_only_table(constructor) {
-        extract_bracket_key_table_types(ctx, constructor, shape, depth);
-        return;
-    }
-
     for i in 0..constructor.named_child_count() {
         let Some(field_list) = constructor.named_child(i as u32) else {
             continue;
@@ -66,62 +55,6 @@ pub(super) fn extract_table_shape(
             extract_single_field(ctx, field_node, shape, depth);
         }
     }
-}
-
-/// Fast-path extraction for bracket-key-only tables: sample a few
-/// fields to determine key and value types, then set them on the
-/// shape without storing individual field entries.
-fn extract_bracket_key_table_types(
-    ctx: &mut BuildContext,
-    constructor: tree_sitter::Node,
-    shape: &mut TableShape,
-    depth: usize,
-) {
-    shape.mark_open();
-
-    // Sample up to SAMPLE_COUNT fields to infer key/value types.
-    const SAMPLE_COUNT: usize = 4;
-    let mut sampled = 0usize;
-    let mut key_type: Option<TypeFact> = None;
-    let mut value_type: Option<TypeFact> = None;
-
-    'outer: for i in 0..constructor.named_child_count() {
-        let Some(field_list) = constructor.named_child(i as u32) else {
-            continue;
-        };
-        if field_list.kind() != "field_list" {
-            continue;
-        }
-        for j in 0..field_list.named_child_count() {
-            if sampled >= SAMPLE_COUNT {
-                break 'outer;
-            }
-            let Some(field_node) = field_list.named_child(j as u32) else {
-                continue;
-            };
-            if field_node.kind() != "field" {
-                continue;
-            }
-            if let Some(k) = field_node.child_by_field_name("key") {
-                let kt = infer_expression_type(ctx, k, depth);
-                key_type = Some(match key_type.take() {
-                    Some(existing) => merge_types(existing, kt),
-                    None => kt,
-                });
-            }
-            if let Some(v) = field_node.child_by_field_name("value") {
-                let vt = infer_field_value_type(ctx, field_node, v, depth);
-                value_type = Some(match value_type.take() {
-                    Some(existing) => merge_types(existing, vt),
-                    None => vt,
-                });
-            }
-            sampled += 1;
-        }
-    }
-
-    shape.key_type = key_type;
-    shape.array_element_type = value_type;
 }
 
 fn extract_single_field(
@@ -152,38 +85,33 @@ fn extract_single_field(
                 );
             }
         }
-        // `[literal] = value` — static bracket key (string / number).
-        // Normalize the raw lexeme:
-        //   - strings: strip surrounding quotes so `["foo"] = 1` is
-        //     indexed under `foo` (matching `t.foo` / `t["foo"]`
-        //     lookups in the diagnostics/hover paths).
-        //   - numbers: keep the source text as-is; callers that want
-        //     to compare `t[1]` look up by the decimal spelling.
-        // Non-string/number literals are rejected by the outer match.
-        Some(k) if matches!(k.kind(), "string" | "number") => {
-            let key_text = if k.kind() == "string" {
-                // Fall back to raw lexeme when the scanner produced an
-                // empty/exotic string that `extract_string_literal`
-                // can't reach.
-                extract_string_literal(k, ctx.source)
-                    .unwrap_or_else(|| node_text(k, ctx.source).to_string())
-            } else {
-                node_text(k, ctx.source).to_string()
-            };
-            if let Some(val) = value_node {
-                let type_fact = infer_field_value_type(ctx, field_node, val, depth);
-                shape.set_field(
-                    &key_text,
-                    FieldInfo {
-                        name: key_text.as_str().into(),
-                        type_fact,
-                        def_range: Some(
-                            ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
-                        ),
-                        assignment_count: 1,
-                    },
-                );
+        // `["name"] = value` — static string key that can be read via
+        // dot syntax (`t.name`). Non-identifier strings remain map-like
+        // entries rather than polluting the named-field table.
+        Some(k) if k.kind() == "string" => {
+            let key_text = extract_string_literal(k, ctx.source)
+                .unwrap_or_else(|| node_text(k, ctx.source).to_string());
+            if is_lua_identifier_key(&key_text) {
+                if let Some(val) = value_node {
+                    let type_fact = infer_field_value_type(ctx, field_node, val, depth);
+                    shape.set_field(
+                        &key_text,
+                        FieldInfo {
+                            name: key_text.as_str().into(),
+                            type_fact,
+                            def_range: Some(
+                                ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
+                            ),
+                            assignment_count: 1,
+                        },
+                    );
+                }
             }
+        }
+        // `[number] = value` is a static subscript key, but not a named
+        // field for dot access.
+        Some(k) if k.kind() == "number" => {
+            let _ = k;
         }
         // `[expr] = value` with a non-literal key — dynamic bracket
         // write. Mark the shape as open and roll the value type into
@@ -210,6 +138,17 @@ fn extract_single_field(
             }
         }
     }
+}
+
+fn is_lua_identifier_key(text: &str) -> bool {
+    let mut bytes = text.bytes();
+    let Some(first) = bytes.next() else {
+        return false;
+    };
+    if !(first == b'_' || first.is_ascii_alphabetic()) {
+        return false;
+    }
+    bytes.all(|b| b == b'_' || b.is_ascii_alphanumeric())
 }
 
 fn infer_field_value_type(
