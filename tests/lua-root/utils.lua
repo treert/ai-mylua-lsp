@@ -25,7 +25,7 @@ print(utils.test_const.A, utils.test_const.B, utils.test_const.C)
 
 utils.test_const_str_map = require('test_const_str_map')
 
-print(utils.test_const_str_map.A3)
+print(utils.test_const_str_map.A5)
 
 --- 2222
 -- utils.test_const = {}
