@@ -1,4 +1,5 @@
 local test_const = {
+    ['lalala'] = "lalala",
     A = 1,
     B = "B",
     C = "CC",

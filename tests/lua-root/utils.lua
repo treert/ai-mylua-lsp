@@ -21,6 +21,11 @@ function utils:empty_func(arg1, arg2) end
 
 --- 1111
 utils.test_const = require('test_const')
+print(utils.test_const.A, utils.test_const.B, utils.test_const.C)
+
+utils.test_const_str_map = require('test_const_str_map')
+
+print(utils.test_const_str_map.A3)
 
 --- 2222
 -- utils.test_const = {}

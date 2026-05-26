@@ -29,6 +29,7 @@ if utils.test_const.ON_Evt_LALA then
     print(utils.test_const.ON_Evt_HAHA)
 end
 
+print(utils.test_const_str_map.A3)
 
 ---@return boolean, number?
 local function test_ret1()
