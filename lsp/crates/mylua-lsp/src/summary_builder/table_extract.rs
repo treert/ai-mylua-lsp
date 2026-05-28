@@ -188,7 +188,8 @@ fn extract_preceding_field_type_annotation(
         .rposition(|&b| b == b'\n')
         .map(|idx| idx + 1)
         .unwrap_or(0);
-    let previous_line = std::str::from_utf8(&source[previous_line_start..previous_line_end]).ok()?;
+    let previous_line =
+        std::str::from_utf8(&source[previous_line_start..previous_line_end]).ok()?;
     if previous_line.trim().is_empty() {
         return None;
     }

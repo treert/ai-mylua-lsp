@@ -796,10 +796,8 @@ print(module1.internat)
 module1.internat.test_internat()
 print(module1.internat.Config_Internat_Id)
 "#;
-    let (docs, mut agg, _) = setup_workspace(&[
-        ("test_module1.lua", module_src),
-        ("main.lua", main_src),
-    ]);
+    let (docs, mut agg, _) =
+        setup_workspace(&[("test_module1.lua", module_src), ("main.lua", main_src)]);
     let module_uri = make_uri("test_module1.lua");
     let module_summary = summary_by_uri(&agg, &module_uri).expect("module summary");
     let test_module_type = module_summary

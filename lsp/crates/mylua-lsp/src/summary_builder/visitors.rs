@@ -1508,15 +1508,11 @@ fn register_nested_field_write(
     type_fact: TypeFact,
     assign_range: crate::util::ByteRange,
 ) -> bool {
-    let (base_shape_id, remaining_fields) = match table_shape_write_target(
-        ctx,
-        base_name,
-        fields,
-        assign_range.start_byte,
-    ) {
-        Some(target) => target,
-        None => return false,
-    };
+    let (base_shape_id, remaining_fields) =
+        match table_shape_write_target(ctx, base_name, fields, assign_range.start_byte) {
+            Some(target) => target,
+            None => return false,
+        };
 
     // Walk the intermediate shapes. Three cases per step:
     //   (a) field exists as `Known(Table(sid))` → reuse existing shape.
@@ -1760,12 +1756,10 @@ fn visit_function_body(
             kind: DefKind::Parameter,
             decl_byte: db,
             visible_after_byte: db,
-            range: implicit_self_range.unwrap_or_else(|| {
-                ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)
-            }),
-            selection_range: implicit_self_range.unwrap_or_else(|| {
-                ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)
-            }),
+            range: implicit_self_range
+                .unwrap_or_else(|| ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)),
+            selection_range: implicit_self_range
+                .unwrap_or_else(|| ctx.line_index.ts_node_to_byte_range(func_body, ctx.source)),
             type_fact: self_type,
             bound_class: self_bound_class,
             is_emmy_annotated: false,

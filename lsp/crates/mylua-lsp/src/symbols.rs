@@ -810,11 +810,7 @@ impl<'a> OutlineBuilder<'a> {
         }
     }
 
-    fn for_variable_symbols(
-        &self,
-        node: tree_sitter::Node,
-        source: &[u8],
-    ) -> Vec<DocumentSymbol> {
+    fn for_variable_symbols(&self, node: tree_sitter::Node, source: &[u8]) -> Vec<DocumentSymbol> {
         let mut symbols = Vec::new();
         match node.kind() {
             "for_numeric_statement" => {

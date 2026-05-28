@@ -1495,11 +1495,7 @@ pub fn collect_trailing_comment<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
 ) -> Option<String> {
-    let stmt_end_row = node.end_position().row;
-    let next = node.next_sibling()?;
-    if next.start_position().row != stmt_end_row {
-        return None;
-    }
+    let next = next_same_line_after_statement_separators(node, source)?;
     match next.kind() {
         "comment" => {
             let text = next.utf8_text(source).unwrap_or("");
@@ -1518,6 +1514,23 @@ pub fn collect_trailing_comment<'a>(
         }
         _ => None,
     }
+}
+
+fn next_same_line_after_statement_separators<'a>(
+    node: tree_sitter::Node<'a>,
+    source: &'a [u8],
+) -> Option<tree_sitter::Node<'a>> {
+    let stmt_end_row = node.end_position().row;
+    let mut next = node.next_sibling()?;
+    while next.start_position().row == stmt_end_row {
+        let text = next.utf8_text(source).unwrap_or("").trim();
+        if text == ";" {
+            next = next.next_sibling()?;
+            continue;
+        }
+        return Some(next);
+    }
+    None
 }
 
 /// Return the raw text of a same-line trailing `emmy_comment` (or `---`-style
@@ -1539,11 +1552,7 @@ pub fn collect_trailing_emmy_text<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
 ) -> Option<String> {
-    let stmt_end_row = node.end_position().row;
-    let next = node.next_sibling()?;
-    if next.start_position().row != stmt_end_row {
-        return None;
-    }
+    let next = next_same_line_after_statement_separators(node, source)?;
     match next.kind() {
         "emmy_comment" => {
             let mut lines = Vec::new();

@@ -98,7 +98,11 @@ end
     let syms = collect(src);
     let outer = syms.iter().find(|s| s.name == "outer").expect("outer");
     assert!(
-        outer.children.as_ref().map(|c| c.is_empty()).unwrap_or(true),
+        outer
+            .children
+            .as_ref()
+            .map(|c| c.is_empty())
+            .unwrap_or(true),
         "compact outline should keep nested declarations hidden, got: {:?}",
         outer.children
     );
@@ -139,7 +143,8 @@ end
         .filter(|c| c.name == "x" && c.kind == SymbolKind::VARIABLE)
         .count();
     assert_eq!(
-        local_x_count, 2,
+        local_x_count,
+        2,
         "allDeclarations should keep both shadowed local declarations, got: {:?}",
         children
             .iter()

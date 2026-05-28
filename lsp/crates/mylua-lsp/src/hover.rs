@@ -81,6 +81,17 @@ pub fn hover(
                 return Some(hover_variable_field(p, doc, uri_id, index, all_docs));
             }
         }
+        if p.kind() == "field" {
+            let key_is_ident = p
+                .child_by_field_name("key")
+                .map(|k| k.id() == ident_node.id())
+                .unwrap_or(false);
+            if key_is_ident {
+                return Some(hover_table_constructor_field(
+                    p, doc, uri_id, index, all_docs,
+                ));
+            }
+        }
         // `obj:method(...)` — the `method` identifier on a `function_call`
         // node. Infer the base type and resolve the method as a field so
         // hover shows the method's declaration + type info.
@@ -456,6 +467,78 @@ fn hover_variable_field(
         all_docs,
         doc.line_index(),
     )
+}
+
+fn hover_table_constructor_field(
+    field_node: tree_sitter::Node,
+    doc: &Document,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
+    all_docs: &impl DocumentLookup,
+) -> Option<Hover> {
+    let source = doc.source();
+    let key_node = field_node.child_by_field_name("key")?;
+    if key_node.kind() != "identifier" || key_node.start_byte() != field_node.start_byte() {
+        return None;
+    }
+
+    let field_name = node_text(key_node, source).to_string();
+    let def_range = doc.line_index().ts_node_to_byte_range(field_node, source);
+    let selection_range = doc.line_index().ts_node_to_byte_range(key_node, source);
+    let hover_range = doc.line_index().ts_node_to_range(key_node, source);
+    let type_info = table_constructor_field_type_info(
+        field_node,
+        &field_name,
+        def_range,
+        source,
+        uri_id,
+        &doc.scope_tree,
+        index,
+    );
+
+    let synth_def = crate::types::Definition {
+        name: field_name,
+        kind: DefKind::GlobalVariable,
+        range: def_range,
+        selection_range,
+        uri_id,
+        uri: resolve_uri(uri_id),
+    };
+
+    build_hover_for_definition(
+        &synth_def,
+        all_docs,
+        type_info.as_deref(),
+        Some(hover_range),
+    )
+}
+
+fn table_constructor_field_type_info(
+    field_node: tree_sitter::Node,
+    field_name: &str,
+    def_range: crate::util::ByteRange,
+    source: &[u8],
+    uri_id: UriId,
+    scope_tree: &crate::scope::ScopeTree,
+    index: &WorkspaceAggregation,
+) -> Option<String> {
+    let indexed_type = index.summary_by_id(uri_id).and_then(|summary| {
+        summary.table_shapes.values().find_map(|shape| {
+            let info = shape.get_field(field_name)?;
+            (info.def_range == Some(def_range)).then(|| info.type_fact.clone())
+        })
+    });
+
+    let type_fact = indexed_type.or_else(|| {
+        field_node.child_by_field_name("value").map(|value| {
+            crate::type_inference::infer_node_type_in_file_id(
+                value, source, uri_id, scope_tree, index,
+            )
+        })
+    })?;
+    let resolved = resolver::resolve_type(uri_id, &type_fact, index);
+    let display = format_resolved_type(&resolved.type_fact);
+    (display != "unknown").then_some(display)
 }
 
 /// Shared hover builder for dotted field access (`a.b`) and method calls
@@ -1038,27 +1121,14 @@ fn collect_table_field_trailing_comment(
     field_node: tree_sitter::Node,
     source: &[u8],
 ) -> Option<String> {
-    let field_row = field_node.end_position().row;
-    let mut next = field_node.next_sibling();
-    while let Some(node) = next {
-        if node.start_position().row != field_row {
-            return None;
-        }
-        let text = node.utf8_text(source).unwrap_or("").trim();
-        if text == "," || text == ";" {
-            next = node.next_sibling();
-            continue;
-        }
-        if text.starts_with("---") {
-            return None;
-        }
-        if let Some(rest) = text.strip_prefix("--") {
-            let trimmed = rest.trim();
-            return (!trimmed.is_empty()).then(|| trimmed.to_string());
-        }
+    let trailing = trailing_table_field_segment(field_node, source)?;
+    let text = strip_leading_table_field_separator(trailing);
+    if text.starts_with("---") {
         return None;
     }
-    None
+    let rest = text.strip_prefix("--")?;
+    let trimmed = rest.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 fn collect_table_field_preceding_comments(

@@ -361,6 +361,98 @@ end"#;
 }
 
 #[test]
+fn hover_table_constructor_field_definition_key() {
+    let src = r#"---@class Audit
+---@field enabled boolean @ 是否启用审计 11
+Audit = {
+    enabled = true; -- 是否启用审计 22
+    -- lua add field 1 head
+    field1 = 1; -- lua add field 1 tail
+}"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "audit_field_definition_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(5, 4),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on table constructor field key should resolve");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("field1 = 1") && content.contains("number"),
+        "hover should show field definition and inferred type, got: {}",
+        content
+    );
+    assert!(
+        content.contains("lua add field 1 head") && content.contains("lua add field 1 tail"),
+        "hover should keep field leading and trailing comments, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_global_field_assignment_trailing_comment_after_semicolon() {
+    let src = r#"---@class Audit
+Audit = {}
+-- lua add field 2 head
+Audit.field2 = 2; -- lua add field 2 tail
+print(Audit.field2)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "global_field_semicolon_tail_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on global field assignment should resolve");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("lua add field 2 head") && content.contains("lua add field 2 tail"),
+        "hover should keep field assignment leading and semicolon trailing comments, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_bracket_table_key_keeps_variable_hover() {
+    let src = r#"local key = "foo"
+local t = {
+    [key] = 1,
+}"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "bracket_table_key_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 5),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on bracket table key should resolve as variable");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("local key = \"foo\"") && content.contains("local variable"),
+        "hover should keep bracket key as variable, got: {}",
+        content
+    );
+    assert!(
+        !content.contains("*field*"),
+        "hover should not treat bracket key expression as table field, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_chain_call() {
     let src = HOVER1_SRC;
 
