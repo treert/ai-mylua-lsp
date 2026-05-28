@@ -192,7 +192,12 @@ pub fn hover(
             }
         }
         let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
-        return build_hover_for_definition(&synth_def, all_docs, Some(&type_info), Some(hover_range));
+        return build_hover_for_definition(
+            &synth_def,
+            all_docs,
+            Some(&type_info),
+            Some(hover_range),
+        );
     }
 
     None
@@ -538,7 +543,12 @@ fn build_field_chain_hover(
     })();
     if let Some(synth_def) = synth_def {
         let hover_range = line_index.ts_node_to_range(name_node, source);
-        return build_hover_for_definition(&synth_def, all_docs, Some(&type_display), Some(hover_range));
+        return build_hover_for_definition(
+            &synth_def,
+            all_docs,
+            Some(&type_display),
+            Some(hover_range),
+        );
     }
 
     fallback_field_hover(
@@ -666,10 +676,7 @@ fn format_annotations_lua(annotations: &[EmmyAnnotation]) -> Vec<String> {
                     .map(|t| format!("{}", t))
                     .collect::<Vec<_>>()
                     .join(", ");
-                let suffix = name
-                    .as_ref()
-                    .map(|n| format!(" {}", n))
-                    .unwrap_or_default();
+                let suffix = name.as_ref().map(|n| format!(" {}", n)).unwrap_or_default();
                 let desc_suffix = emmy_desc_suffix(desc);
                 lines.push(format!("---@return {}{}{}", types_str, suffix, desc_suffix));
             }
@@ -796,6 +803,14 @@ fn build_hover_for_definition(
     };
     let def_node = root.descendant_for_byte_range(def_start_byte, def_start_byte)?;
 
+    if let Some(emmy_line) = find_enclosing_emmy_line(def_node) {
+        if let Some(hover) =
+            build_hover_for_emmy_field(def, emmy_line, source, type_info, hover_range)
+        {
+            return Some(hover);
+        }
+    }
+
     if let Some(field_node) = find_enclosing_table_field(def_node) {
         return build_hover_for_table_field(def, field_node, source, type_info, hover_range);
     }
@@ -851,6 +866,45 @@ fn build_hover_for_definition(
 
     if let Some(trail) = &trailing {
         parts.push(trail.clone());
+    }
+
+    Some(Hover {
+        contents: HoverContents::Markup(MarkupContent {
+            kind: MarkupKind::Markdown,
+            value: parts.join("\n\n"),
+        }),
+        range: Some(hover_range.unwrap_or_else(|| def.selection_range.into())),
+    })
+}
+
+fn build_hover_for_emmy_field(
+    def: &crate::types::Definition,
+    emmy_line: tree_sitter::Node,
+    source: &[u8],
+    type_info: Option<&str>,
+    hover_range: Option<Range>,
+) -> Option<Hover> {
+    let line_text = node_text(emmy_line, source).to_string();
+    let field_annotations: Vec<_> = parse_emmy_comments(&line_text)
+        .into_iter()
+        .filter(|ann| matches!(ann, EmmyAnnotation::Field { name, .. } if name == &def.name))
+        .collect();
+    if field_annotations.is_empty() {
+        return None;
+    }
+
+    let mut parts = Vec::new();
+    parts.push(lua_code_block(&code_lines_for_definition(
+        &field_annotations,
+        def.name.to_string(),
+        type_info,
+    )));
+    parts.push("*field*".to_string());
+
+    if let Some(ti) = type_info {
+        if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
+            parts.push(format!("Type: `{}`", ti));
+        }
     }
 
     Some(Hover {
@@ -1131,6 +1185,27 @@ fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
                     current = parent;
                 } else {
                     return current;
+                }
+            }
+        }
+    }
+}
+
+fn find_enclosing_emmy_line(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
+    let mut current = node;
+    loop {
+        match current.kind() {
+            "emmy_line" => return Some(current),
+            "function_declaration"
+            | "local_function_declaration"
+            | "local_declaration"
+            | "assignment_statement"
+            | "function_call_statement" => return None,
+            _ => {
+                if let Some(parent) = current.parent() {
+                    current = parent;
+                } else {
+                    return None;
                 }
             }
         }

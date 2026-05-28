@@ -326,8 +326,44 @@ end"#,
 }
 
 #[test]
+fn hover_emmy_class_field_uses_field_annotation() {
+    let src = r#"-- FEATURE: 跨 workspace 全局贡献
+---@class Audit
+---@field enabled boolean @ 是否启用审计 11
+Audit = {
+    enabled = true -- 是否启用审计 22
+}
+
+function Audit.log(action)
+    if Audit.enabled then
+        print(action)
+    end
+end"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "audit_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(8, 14),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on Audit.enabled should resolve to @field annotation");
+    let content = hover_content_string(&result);
+    assert!(
+        content.contains("---@field enabled boolean @ 是否启用审计 11")
+            && !content.contains("FEATURE: 跨 workspace 全局贡献"),
+        "hover should show the @field doc instead of the file header, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_chain_call() {
     let src = HOVER1_SRC;
+
     let (doc, uri, mut agg) = setup_single_file(src, "hover1.lua");
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
@@ -1228,8 +1264,7 @@ local mgrs = {
 
 local field_value2 = mgrs.MiscMgr2.m_misc_id
 local field_value3 = mgrs.MiscMgr3.m_misc_id"#;
-    let (doc, uri, mut agg) =
-        setup_single_file(src, "table_field_trailing_type_hover.lua");
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_trailing_type_hover.lua");
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
@@ -1373,8 +1408,7 @@ local mgrs = {
 }
 
 local field_value3 = mgrs.MiscMgr3.m_misc_id"#;
-    let (doc, uri, mut agg) =
-        setup_single_file(src, "table_field_plain_comment_type_hover.lua");
+    let (doc, uri, mut agg) = setup_single_file(src, "table_field_plain_comment_type_hover.lua");
     let docs = HashMap::from([(intern_uri(&uri), doc)]);
     let doc = docs.get(&intern_uri(&uri)).unwrap();
 
@@ -1640,9 +1674,7 @@ local current
     let text = hover_content_string(&result);
 
     assert!(
-        text.contains(
-            "```lua\n---@class User\n---@field id number\n---@field name string\n```"
-        ),
+        text.contains("```lua\n---@class User\n---@field id number\n---@field name string\n```"),
         "type hover should render fields as EmmyLua annotations, got:\n{}",
         text,
     );
