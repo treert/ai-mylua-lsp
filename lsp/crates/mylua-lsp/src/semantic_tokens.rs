@@ -183,6 +183,7 @@ fn is_field_or_method(node: tree_sitter::Node) -> bool {
                 parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id())
             }
             "function_name" => parent.child(0).map(|n| n.id()) != Some(node.id()),
+            "field" => parent.child_by_field_name("key").map(|n| n.id()) == Some(node.id()),
             _ => false,
         }
     } else {

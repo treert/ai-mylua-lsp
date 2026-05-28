@@ -21,11 +21,78 @@ fn absolute_cols(tokens: &[tower_lsp_server::ls_types::SemanticToken]) -> Vec<(u
     out
 }
 
+fn absolute_cols_with_modifiers(
+    tokens: &[tower_lsp_server::ls_types::SemanticToken],
+) -> Vec<(u32, u32, u32, u32)> {
+    let mut out = Vec::with_capacity(tokens.len());
+    let mut line = 0u32;
+    let mut col = 0u32;
+    for t in tokens {
+        if t.delta_line == 0 {
+            col += t.delta_start;
+        } else {
+            line += t.delta_line;
+            col = t.delta_start;
+        }
+        out.push((line, col, t.length, t.token_modifiers_bitset));
+    }
+    out
+}
+
 fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Range {
     Range {
         start: pos(sl, sc),
         end: pos(el, ec),
     }
+}
+
+#[test]
+fn semantic_tokens_skip_table_field_keys() {
+    let src = "local Direction = {\n    Up = 0,\n    Down = 1,\n}\nlocal origin = { x = 0, y = 0 }\nlocal key = x\nlocal k = \"x\"\nlocal t = { [k] = 1, plain = 2 }\n";
+    let (doc, _uri, _agg) = setup_single_file(src, "table_keys.lua");
+
+    let tokens = semantic_tokens::collect_semantic_tokens(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &doc.scope_tree,
+        doc.line_index(),
+    );
+    let positions = absolute_cols(&tokens);
+    let with_modifiers = absolute_cols_with_modifiers(&tokens);
+
+    assert!(
+        !positions.contains(&(1, 4, 2)),
+        "`Up` key must not be tokenized"
+    );
+    assert!(
+        !positions.contains(&(2, 4, 4)),
+        "`Down` key must not be tokenized"
+    );
+    assert!(
+        !positions.contains(&(4, 17, 1)),
+        "`x` key must not be tokenized"
+    );
+    assert!(
+        !positions.contains(&(4, 24, 1)),
+        "`y` key must not be tokenized"
+    );
+    assert!(
+        positions.contains(&(7, 13, 1)),
+        "computed key `[k]` should still tokenize `k`"
+    );
+    assert!(
+        !positions.contains(&(7, 22, 5)),
+        "plain field key must not be tokenized"
+    );
+    assert!(
+        with_modifiers
+            .iter()
+            .any(|&(line, col, len, modifiers)| line == 5
+                && col == 12
+                && len == 1
+                && modifiers & (1 << 1) != 0),
+        "ordinary unresolved `x` reference should still be marked global"
+    );
 }
 
 #[test]
