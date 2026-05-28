@@ -16,8 +16,25 @@ AppVersion = 1
 ---@class Audit
 ---@field enabled boolean @ 是否启用审计 11
 Audit = { 
-    enabled = true -- 是否启用审计 22
+    enabled = true; -- 是否启用审计 22
+    -- lua add field 1 head
+    field1 = 1; -- lua add field 1 tail
 }
+
+-- lua add field 2 head
+Audit.field2 = 2; -- lua add field 2 tail
+
+function Audit:init()
+    -- lua add field 3 head
+    self.field3 = 3; -- lua add field 3 tail
+end
+
+function Audit:test_fields()
+    print(self.enabled)
+    print(self.field1)
+    print(self.field2)
+    print(self.field3)
+end
 
 ---@param action string
 function Audit.log(action)
