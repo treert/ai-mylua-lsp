@@ -1,0 +1,23 @@
+# 让 Git 自动识别文本文件，仓库内统一存 LF
+* text=auto
+
+# Rust 源码强制 LF（无论什么平台）
+*.rs text eol=lf
+
+# 其他常见源码/文本也统一 LF
+*.toml text eol=lf
+*.lock text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.lua text eol=lf
+*.mjs text eol=lf
+*.txt text eol=lf
+*.bnf text eol=lf
+
+# 二进制文件明确标记，避免 Git 瞎转换
+*.png binary
+*.jpg binary
+*.zip binary
+*.pdf binary
