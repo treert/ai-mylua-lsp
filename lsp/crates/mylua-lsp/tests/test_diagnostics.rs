@@ -563,6 +563,68 @@ print(TypeB.m_bb)
 }
 
 #[test]
+fn table_literal_fields_on_global_class_anchor_are_known() {
+    let src = r#"---@class Audit
+---@field enabled boolean
+Audit = {
+    enabled = true;
+    field1 = 1;
+}
+
+Audit.field2 = 2
+
+function Audit:init()
+    self.field3 = 3
+end
+
+function Audit:test_fields()
+    print(self.enabled)
+    print(self.field1)
+    print(self.field2)
+    print(self.field3)
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "global_class_table_literal_fields.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "fields from table literal, dotted assignment, and self assignment must all be known, got: {:?}",
+        unknown,
+    );
+
+    let summary = summary_by_uri(&agg, &uri).expect("summary should exist");
+    let audit_type = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.kind == TypeDefinitionKind::Class && td.name == "Audit")
+        .expect("Audit type");
+    let shape_id = audit_type
+        .anchor_shape_id
+        .expect("global @class table literal should backfill anchor shape");
+    let shape = summary
+        .table_shapes
+        .get(&shape_id)
+        .expect("anchor shape should exist");
+    assert!(
+        shape.get_field("field1").is_some(),
+        "table literal field should be available through the class anchor shape"
+    );
+}
+
+#[test]
 fn emmy_type_mismatch_string_vs_number() {
     let src = r#"
 ---@type string
@@ -970,12 +1032,11 @@ fn no_unknown_field_on_global_table_with_class_annotation() {
     //       if Audit.enabled then ... end  -- must NOT flag unknown field
     //   end
     //
-    // The reference `Audit.enabled` in the function body resolves the
-    // base `Audit` to `Known(Table(shape_id))` (via `global_shard`).
-    // The shape for `{ enabled = true }` clearly has an `enabled`
-    // field, so no diagnostic should fire. A previous bug: a warm
-    // resolution cache dropped the owner identity on cached GlobalRef
-    // resolutions, leaving the per-file `TableShapeId` unmoored.
+    // The reference `Audit.enabled` in the function body resolves through
+    // the global class binding and its declared/anchored fields, so no
+    // diagnostic should fire. A previous bug: a warm resolution cache
+    // dropped the owner identity on cached GlobalRef resolutions, leaving
+    // the per-file `TableShapeId` unmoored.
     let src = r#"---@class Audit
 ---@field enabled boolean
 Audit = { enabled = true }

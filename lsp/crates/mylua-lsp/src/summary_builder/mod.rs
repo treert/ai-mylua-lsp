@@ -99,9 +99,9 @@ pub fn build_file_analysis(
 }
 
 /// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local
-/// variable with a `Table` shape. `flush_pending_class` runs before
-/// `visit_local_declaration`, so the shape doesn't exist at class creation
-/// time — we scan the scope-registered declarations after traversal.
+/// variable or global assignment with a `Table` shape. `flush_pending_class`
+/// runs before the anchor visitor, so the shape doesn't exist at class creation
+/// time — we scan the recorded anchors after traversal.
 fn backfill_anchor_shape_ids(ctx: &mut BuildContext) {
     // Collect class name → shape_id from local declarations that were
     // explicitly bound by the immediately preceding `---@class`.

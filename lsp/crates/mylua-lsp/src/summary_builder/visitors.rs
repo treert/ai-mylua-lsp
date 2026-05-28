@@ -1254,26 +1254,47 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     }
                 }
 
+                let rhs_type_fact =
+                    if pending_type.is_none() || i != 0 || (i == 0 && pending_class.is_some()) {
+                        value_node
+                            .map(|v| infer_expression_type(ctx, v, 0))
+                            .unwrap_or(TypeFact::Unknown)
+                    } else {
+                        TypeFact::Unknown
+                    };
+
                 let type_fact = if i == 0 {
                     if let Some(ref type_expr) = pending_type {
                         emmy_type_to_fact(type_expr)
                     } else if let Some(class_name) = pending_class {
+                        if let TypeFact::Known(KnownType::Table(shape_id)) = &rhs_type_fact {
+                            if ctx
+                                .table_shapes
+                                .get(shape_id)
+                                .is_some_and(|shape| !shape.fields.is_empty())
+                            {
+                                ctx.class_anchor_shapes.insert(class_name, *shape_id);
+                            }
+                        }
                         TypeFact::Known(KnownType::EmmyType(class_name))
                     } else {
-                        value_node
-                            .map(|v| infer_expression_type(ctx, v, 0))
-                            .unwrap_or(TypeFact::Unknown)
+                        rhs_type_fact.clone()
                     }
                 } else {
-                    value_node
-                        .map(|v| infer_expression_type(ctx, v, 0))
-                        .unwrap_or(TypeFact::Unknown)
+                    rhs_type_fact.clone()
                 };
 
                 // Same owner-stamping as `visit_local_declaration`:
                 // anchor the binding name onto the literal table's
-                // shape when the RHS is `{ ... }`.
-                if let TypeFact::Known(KnownType::Table(shape_id)) = &type_fact {
+                // shape when the RHS is `{ ... }`. For `---@class Foo`
+                // followed by `Foo = { ... }`, the public type is the
+                // Emmy class, so use the separately inferred RHS shape.
+                let owner_type_fact = if matches!(type_fact, TypeFact::Known(KnownType::Table(_))) {
+                    &type_fact
+                } else {
+                    &rhs_type_fact
+                };
+                if let TypeFact::Known(KnownType::Table(shape_id)) = owner_type_fact {
                     if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
                         shape.set_owner(&name);
                     }

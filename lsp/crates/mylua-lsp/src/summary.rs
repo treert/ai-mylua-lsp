@@ -138,8 +138,8 @@ pub struct TypeDefinition {
     /// jumps precisely to the type name rather than the whole line.
     /// Falls back to `range` when absent.
     pub name_range: Option<ByteRange>,
-    /// When the `@class` anchors a local table (`local M = {}`), stores the
-    /// shape ID so cross-file consumers can look up fields directly.
+    /// When the `@class` anchors a table (`local M = {}` or `M = {}`), stores
+    /// the shape ID so cross-file consumers can look up fields directly.
     pub anchor_shape_id: Option<crate::table_shape::TableShapeId>,
 }
 

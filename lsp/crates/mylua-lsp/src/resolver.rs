@@ -1052,11 +1052,10 @@ fn resolve_emmy_field_with_visited(
                             }
                         }
 
-                        // Fallback: when the class anchor is a local table
-                        // (e.g. `local Damageable = {}`), methods defined via
-                        // `function Damageable:take_damage()` are written into
-                        // the table shape rather than global_shard. Use the
-                        // pre-computed anchor_shape_id to find them directly.
+                        // Fallback: when the class anchor has a table shape
+                        // (e.g. `local Damageable = {}` or `Damageable = {}`),
+                        // fields may live in the shape rather than global_shard.
+                        // Use the pre-computed anchor_shape_id to find them directly.
                         if let Some(shape_id) = td.anchor_shape_id {
                             if let Some(shape) = summary.table_shapes.get(&shape_id) {
                                 if let Some(fi) = shape.get_field(field) {
