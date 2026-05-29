@@ -614,18 +614,20 @@ impl WorkspaceAggregation {
     /// Register a module name → URI mapping in the module index.
     /// The module_name should already be normalized (lowercase, `.`-separated,
     /// init.lua handled).
-    pub fn set_require_mapping(&mut self, module_name: String, uri_id: UriId) {
+    pub fn set_require_mapping(&mut self, module_name: String, uri_id: UriId) -> bool {
         use crate::workspace_scanner::module_last_segment;
         let last_seg = intern_lua_symbol(module_last_segment(&module_name));
         let module_name = intern_lua_symbol(&module_name);
         let entries = self.module_index.entry(last_seg).or_default();
         // Avoid duplicates: if this exact (module_name, uri_id) pair exists, skip.
-        if !entries
+        if entries
             .iter()
             .any(|(m, id)| *m == module_name && *id == uri_id)
         {
-            entries.push((module_name, uri_id));
+            return false;
         }
+        entries.push((module_name, uri_id));
+        true
     }
 
     /// Get all registered module names (for completion).

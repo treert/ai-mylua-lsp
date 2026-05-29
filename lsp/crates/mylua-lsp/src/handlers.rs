@@ -499,35 +499,64 @@ impl LanguageServer for Backend {
         let filter = workspace_scanner::FileFilter::from_config(&workspace_config);
 
         for change in params.changes {
-            match change.typ {
+            let change_type = change.typ;
+            match change_type {
                 FileChangeType::CREATED | FileChangeType::CHANGED => {
-                    if let Some(path) = uri_to_path(&change.uri) {
-                        if path.extension().is_some_and(|e| e == "lua") {
-                            if !workspace_scanner::should_index_path(&path, &roots, &filter) {
-                                continue;
-                            }
-                            let Some(uri_id) = self.index_file_from_disk(&path) else {
-                                continue;
-                            };
-                            if let Some(module_name) =
-                                workspace_scanner::file_path_to_module_name(&path)
-                            {
-                                let mut idx = self.index.lock().unwrap();
-                                idx.set_require_mapping(module_name, uri_id);
-                            }
-                        }
+                    let Some(path) = uri_to_path(&change.uri) else {
+                        continue;
+                    };
+                    if !path.extension().is_some_and(|e| e == "lua") {
+                        continue;
                     }
+                    if !workspace_scanner::should_index_path(&path, &roots, &filter) {
+                        continue;
+                    }
+                    let Some(uri) = workspace_scanner::path_to_uri(&path) else {
+                        continue;
+                    };
+                    let mut uri_id = intern_uri(&uri);
+                    let lock = self.edit_lock_for(&uri);
+                    let _guard = lock.lock().await;
+
+                    let is_open = self.open_uris.lock().unwrap().contains(&uri_id);
+                    let mut should_cascade = change_type == FileChangeType::CREATED;
+                    if !is_open {
+                        let Some((indexed_uri_id, index_cascade)) =
+                            self.index_file_from_disk(&path)
+                        else {
+                            continue;
+                        };
+                        uri_id = indexed_uri_id;
+                        should_cascade |= index_cascade;
+                    }
+
+                    if let Some(module_name) = workspace_scanner::file_path_to_module_name(&path) {
+                        let mapping_changed = self
+                            .index
+                            .lock()
+                            .unwrap()
+                            .set_require_mapping(module_name, uri_id);
+                        should_cascade |= mapping_changed;
+                    }
+                    self.scheduler.schedule_changed(uri_id, should_cascade);
                 }
                 FileChangeType::DELETED => {
                     let uri = uri_to_path(&change.uri)
                         .and_then(|path| workspace_scanner::path_to_uri(&path))
                         .unwrap_or_else(|| change.uri.clone());
+                    let lock = self.edit_lock_for(&uri);
+                    let _guard = lock.lock().await;
                     let uri_id = intern_uri(&uri);
+
+                    if self.open_uris.lock().unwrap().contains(&uri_id) {
+                        self.scheduler.schedule_changed(uri_id, true);
+                        continue;
+                    }
+
                     self.index.lock().unwrap().remove_file(uri_id);
                     self.documents.lock().unwrap().remove(&uri_id);
                     self.scheduler.invalidate(&uri_id);
-                    self.open_uris.lock().unwrap().remove(&uri_id);
-                    self.edit_locks.lock().unwrap().remove(&uri_id);
+                    self.scheduler.schedule_changed(uri_id, true);
                     self.semantic_tokens_cache.lock().unwrap().remove(&uri_id);
                     // Also drop from `library_uris` so a deleted
                     // library file doesn't leave a stale entry
@@ -536,6 +565,7 @@ impl LanguageServer for Backend {
                     // would still be force-flagged meta just because
                     // its URI was previously registered.
                     self.library_uris.lock().unwrap().remove(&uri_id);
+                    self.client.publish_diagnostics(uri, Vec::new(), None).await;
                 }
                 _ => {}
             }

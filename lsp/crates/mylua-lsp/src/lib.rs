@@ -408,7 +408,7 @@ impl Backend {
         }
     }
 
-    pub(crate) fn index_file_from_disk(&self, path: &std::path::Path) -> Option<UriId> {
+    pub(crate) fn index_file_from_disk(&self, path: &std::path::Path) -> Option<(UriId, bool)> {
         let text = match std::fs::read_to_string(path) {
             Ok(t) => t,
             Err(_) => return None,
@@ -448,7 +448,13 @@ impl Backend {
                 .unwrap()
                 .get(&uri_id)
                 .and_then(|doc| doc.last_diagnostic_signature);
-            self.index.lock().unwrap().upsert_summary(uri_id, summary);
+            let should_cascade = {
+                let mut idx = self.index.lock().unwrap();
+                let old_fp = idx.summary_by_id(uri_id).map(|s| s.signature_fingerprint);
+                let new_fp = summary.signature_fingerprint;
+                idx.upsert_summary(uri_id, summary);
+                old_fp.map_or(true, |old| old != new_fp)
+            };
             self.documents.lock().unwrap().insert(
                 uri_id,
                 Document {
@@ -458,7 +464,7 @@ impl Backend {
                     last_diagnostic_signature,
                 },
             );
-            Some(uri_id)
+            Some((uri_id, should_cascade))
         } else {
             None
         }
