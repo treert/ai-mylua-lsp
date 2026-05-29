@@ -4,8 +4,8 @@
 //! or direct callee identifier), pulls its `FunctionSummary` from the
 //! workspace index, and returns one `SignatureInformation` per overload
 //! plus the primary signature. `active_parameter` is computed from the
-//! comma count between the `(` and the cursor, with `:` method syntax
-//! implicitly shifting the index by one (the `self` argument).
+//! comma count between the `(` and the cursor; for `:` calls the implicit
+//! receiver is not part of the user's visible argument list.
 
 use tower_lsp_server::ls_types::*;
 
@@ -68,6 +68,24 @@ fn find_enclosing_call(root: tree_sitter::Node, byte_offset: usize) -> Option<tr
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SignatureParamStyle {
+    /// A plain function value. In `obj:f(...)`, Lua passes `obj` as the
+    /// first argument and it must be counted against the signature.
+    PlainFunction,
+    /// A method signature whose stored parameters are the user-visible
+    /// parameters only, as with `function T:m(x) end` without `@param self`.
+    MethodVisible,
+    /// A method signature that explicitly stores leading `self`.
+    ExplicitSelf,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedCallSignature {
+    pub signature: FunctionSignature,
+    pub param_style: SignatureParamStyle,
+}
+
 /// Produces (signatures, is_method_call, callee_display_name).
 ///
 /// Exposed at `pub(crate)` so diagnostics (argument-count / -type
@@ -82,6 +100,27 @@ pub(crate) fn resolve_call_signatures(
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Option<(Vec<FunctionSignature>, bool, String)> {
+    resolve_call_signature_candidates(call, source, uri_id, scope_tree, index).map(
+        |(candidates, is_method, display)| {
+            (
+                candidates
+                    .into_iter()
+                    .map(|candidate| candidate.signature)
+                    .collect(),
+                is_method,
+                display,
+            )
+        },
+    )
+}
+
+pub(crate) fn resolve_call_signature_candidates(
+    call: tree_sitter::Node,
+    source: &[u8],
+    uri_id: UriId,
+    scope_tree: &crate::scope::ScopeTree,
+    index: &WorkspaceAggregation,
+) -> Option<(Vec<ResolvedCallSignature>, bool, String)> {
     let callee = call.child_by_field_name("callee")?;
     let method = call.child_by_field_name("method");
 
@@ -122,13 +161,13 @@ pub(crate) fn resolve_call_signatures(
         )) = scope_tree.resolve_type(callee.start_byte(), &name)
         {
             if let Some(fs) = summary.function_summaries.get(fid) {
-                let sigs = primary_plus_overloads(fs);
+                let sigs = primary_plus_overload_candidates(fs);
                 return Some((sigs, false, name));
             }
         }
         // Global function via function_name_index (O(1)).
         if let Some(fs) = summary.get_function_by_name(&name) {
-            let sigs = primary_plus_overloads(fs);
+            let sigs = primary_plus_overload_candidates(fs);
             return Some((sigs, false, name));
         }
     }
@@ -141,12 +180,16 @@ pub(crate) fn resolve_call_signatures(
     let resolved = resolver::resolve_type(uri_id, &base_fact, index);
     match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(ref sig)) => {
-            return Some((vec![sig.clone()], false, name));
+            return Some((
+                vec![standalone_signature_candidate(sig.clone())],
+                false,
+                name,
+            ));
         }
         TypeFact::Known(KnownType::FunctionRef(fid)) => {
             let summary = index.summary_by_id(resolved.source_uri_id());
             if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
-                let sigs = primary_plus_overloads(fs);
+                let sigs = primary_plus_overload_candidates(fs);
                 return Some((sigs, false, name));
             }
         }
@@ -157,17 +200,21 @@ pub(crate) fn resolve_call_signatures(
     for c in &candidates {
         if let Some(target_summary) = index.summary_by_id(c.source_uri_id()) {
             if let Some(fs) = target_summary.get_function_by_name(&name) {
-                let sigs = primary_plus_overloads(fs);
+                let sigs = primary_plus_overload_candidates(fs);
                 return Some((sigs, false, name));
             }
         }
         if let TypeFact::Known(KnownType::Function(ref sig)) = c.type_fact {
-            return Some((vec![sig.clone()], false, name));
+            return Some((
+                vec![standalone_signature_candidate(sig.clone())],
+                false,
+                name,
+            ));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = c.type_fact {
             if let Some(summary) = index.summary_by_id(c.source_uri_id()) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
-                    let sigs = primary_plus_overloads(fs);
+                    let sigs = primary_plus_overload_candidates(fs);
                     return Some((sigs, false, name));
                 }
             }
@@ -201,7 +248,7 @@ fn lookup_function_signatures_by_field(
     base_fact: &TypeFact,
     field_name: &str,
     index: &WorkspaceAggregation,
-) -> Vec<FunctionSignature> {
+) -> Vec<ResolvedCallSignature> {
     let resolved_base = resolver::resolve_type(caller_uri_id, base_fact, index);
     let owner_class = match &resolved_base.type_fact {
         TypeFact::Known(KnownType::EmmyType(n) | KnownType::EmmyGeneric(n, _)) => {
@@ -228,7 +275,7 @@ fn lookup_function_signatures_by_field(
                     for sep in [":", "."] {
                         let key = format!("{}{}{}", cls, sep, field_name);
                         if let Some(fs) = summary.get_function_by_name(&key) {
-                            return primary_plus_overloads(fs);
+                            return primary_plus_overload_candidates(fs);
                         }
                     }
                 }
@@ -257,14 +304,14 @@ fn lookup_function_signatures_by_field(
                 lookup_overloads_via_global_shard(cls, field_name, index)
             {
                 if Some(impl_uri.clone()) != def_uri_id.map(resolve_uri) {
-                    let mut merged = vec![sig.clone()];
+                    let mut merged = vec![standalone_signature_candidate(sig.clone())];
                     for s in impl_sigs {
                         // Skip entries that would render as duplicates of
                         // the `@field` primary (same params & returns) or
                         // as a visually-empty method stub (self-only, no
                         // returns) once the client hides `self` for `:`
                         // calls.
-                        if s == *sig || is_self_only_method_stub(&s) {
+                        if s.signature == *sig || is_self_only_method_stub(&s.signature) {
                             continue;
                         }
                         merged.push(s);
@@ -277,12 +324,12 @@ fn lookup_function_signatures_by_field(
         // the definition file (already exhausted by the block above) and its summary
         // carried no `function_summaries` entry for this name. Fall back
         // to the single signature we already have from `@field`.
-        return vec![sig.clone()];
+        return vec![standalone_signature_candidate(sig.clone())];
     }
     if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
         let summary = index.summary_by_id(resolved.source_uri_id());
         if let Some(fs) = summary.and_then(|summary| summary.function_summaries.get(fid)) {
-            return primary_plus_overloads(fs);
+            return primary_plus_overload_candidates(fs);
         }
     }
     // The resolver couldn't match the field through the class's declared
@@ -308,7 +355,7 @@ fn lookup_overloads_via_global_shard(
     cls: &str,
     field_name: &str,
     index: &WorkspaceAggregation,
-) -> Option<(Uri, Vec<FunctionSignature>)> {
+) -> Option<(Uri, Vec<ResolvedCallSignature>)> {
     // The tree-structured global_shard merges dot and colon separators,
     // so a single lookup covers both `function Cls.field()` and
     // `function Cls:field()`.
@@ -323,16 +370,16 @@ fn lookup_overloads_via_global_shard(
             // Use the candidate's original name (preserves `:` vs `.`)
             // for function_summaries lookup, which is still a flat HashMap.
             if let Some(fs) = summary.get_function_by_name(&candidate.name) {
-                return Some((source_uri, primary_plus_overloads(fs)));
+                return Some((source_uri, primary_plus_overload_candidates(fs)));
             }
         }
         if let TypeFact::Known(KnownType::Function(sig)) = candidate.type_fact {
-            return Some((source_uri, vec![sig]));
+            return Some((source_uri, vec![standalone_signature_candidate(sig)]));
         }
         if let TypeFact::Known(KnownType::FunctionRef(ref fid)) = candidate.type_fact {
             if let Some(summary) = index.summary_by_id(candidate.source_uri_id()) {
                 if let Some(fs) = summary.function_summaries.get(fid) {
-                    return Some((source_uri, primary_plus_overloads(fs)));
+                    return Some((source_uri, primary_plus_overload_candidates(fs)));
                 }
             }
         }
@@ -348,7 +395,7 @@ fn is_self_only_method_stub(sig: &FunctionSignature) -> bool {
     sig.returns.is_empty() && sig.params.len() == 1 && sig.params[0].name == "self"
 }
 
-fn primary_plus_overloads(fs: &FunctionSummary) -> Vec<FunctionSignature> {
+fn primary_plus_overload_candidates(fs: &FunctionSummary) -> Vec<ResolvedCallSignature> {
     let mut out = Vec::with_capacity(1 + fs.overloads.len());
     // Skip a stub primary signature that only exists because `@overload`
     // was declared on a function with no base-level `@param` / `@return`.
@@ -357,13 +404,56 @@ fn primary_plus_overloads(fs: &FunctionSummary) -> Vec<FunctionSignature> {
         && fs.signature.returns.is_empty()
         && !fs.overloads.is_empty()
         && !fs.emmy_annotated;
+    let is_method_decl = fs.name.contains(':');
     if !primary_is_stub {
-        out.push(fs.signature.clone());
+        out.push(function_summary_signature_candidate(
+            fs.signature.clone(),
+            is_method_decl,
+        ));
     }
     for o in &fs.overloads {
-        out.push(o.clone());
+        out.push(function_summary_signature_candidate(
+            o.clone(),
+            is_method_decl,
+        ));
     }
     out
+}
+
+fn function_summary_signature_candidate(
+    signature: FunctionSignature,
+    is_method_decl: bool,
+) -> ResolvedCallSignature {
+    let param_style = if signature_has_leading_self(&signature) {
+        SignatureParamStyle::ExplicitSelf
+    } else if is_method_decl {
+        SignatureParamStyle::MethodVisible
+    } else {
+        SignatureParamStyle::PlainFunction
+    };
+    ResolvedCallSignature {
+        signature,
+        param_style,
+    }
+}
+
+fn standalone_signature_candidate(signature: FunctionSignature) -> ResolvedCallSignature {
+    let param_style = if signature_has_leading_self(&signature) {
+        SignatureParamStyle::ExplicitSelf
+    } else {
+        SignatureParamStyle::PlainFunction
+    };
+    ResolvedCallSignature {
+        signature,
+        param_style,
+    }
+}
+
+fn signature_has_leading_self(signature: &FunctionSignature) -> bool {
+    signature
+        .params
+        .first()
+        .is_some_and(|param| param.name == "self")
 }
 
 /// Count commas between `(` and the cursor at top nesting level to get the

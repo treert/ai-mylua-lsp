@@ -2106,6 +2106,105 @@ g:hello("world")
 }
 
 #[test]
+fn argument_count_colon_method_decl_without_self_does_not_report() {
+    let src = r#"
+local T = {}
+function T:m(x) end
+T:m(1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_colon_method_visible.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "colon method declaration without explicit self should not flag, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_colon_method_visible_overload_does_not_report() {
+    let src = r#"
+local T = {}
+---@overload fun(x: number)
+function T:m() end
+T:m(1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_colon_method_overload.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags.iter().all(|d| !d.message.contains("argument(s)")),
+        "method-visible overload should not count implicit self as extra, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
+fn argument_count_colon_call_to_plain_fun_counts_implicit_self() {
+    let src = r#"
+---@class MiscManager
+---@field miscFunc fun():number
+---@field miscMethod :fun():string
+
+local mgrs = {
+    ---@type MiscManager
+    MiscMgr2 = nil,
+}
+
+mgrs.MiscMgr2:miscFunc()
+mgrs.MiscMgr2:miscMethod()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "argcount_colon_plain_fun.lua");
+    let mut cfg = DiagnosticsConfig::default();
+    cfg.argument_count_mismatch = DiagnosticSeverityOption::Warning;
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let mismatches: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        mismatches.len(),
+        1,
+        "colon-calling a plain fun() should flag only the implicit self, got: {:?}",
+        diags,
+    );
+    assert!(
+        mismatches[0].message.contains("miscFunc")
+            && mismatches[0].message.contains("passes 1")
+            && mismatches[0].message.contains("expected 0"),
+        "diagnostic should describe the extra implicit self, got: {}",
+        mismatches[0].message,
+    );
+}
+
+#[test]
 fn argument_count_overload_accepting_clears_diagnostic() {
     // One overload takes 1 arg, another takes 2 — calling with 1 arg
     // matches an overload, so nothing should be reported.

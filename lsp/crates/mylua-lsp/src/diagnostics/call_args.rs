@@ -1,6 +1,7 @@
 use super::type_compat::{infer_argument_type, is_type_compatible};
 use crate::aggregation::WorkspaceAggregation;
-use crate::type_system::TypeFact;
+use crate::signature_help::{ResolvedCallSignature, SignatureParamStyle};
+use crate::type_system::{ParamInfo, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::LineIndex;
 use tower_lsp_server::ls_types::*;
@@ -11,8 +12,9 @@ use tower_lsp_server::ls_types::*;
 /// alternative signatures; if any one matches the call, no diagnostic
 /// is emitted.
 ///
-/// - `self` is implicit for `obj:method(...)` calls and is therefore
-///   filtered out of the parameter list before counting.
+/// - For `obj:method(...)`, method-style signatures hide leading `self`,
+///   while plain function fields count the implicit receiver as an
+///   actual argument.
 /// - A vararg trailing param (`...`) absorbs any number of extra
 ///   arguments; only the required-arg minimum is enforced.
 /// - Unknown-typed args (literal expression whose `infer_literal_type`
@@ -38,7 +40,9 @@ pub(super) fn check_call_argument_diagnostics(
 
     for call in calls {
         let Some((sigs, is_method, display)) =
-            crate::signature_help::resolve_call_signatures(call, source, uri_id, scope_tree, index)
+            crate::signature_help::resolve_call_signature_candidates(
+                call, source, uri_id, scope_tree, index,
+            )
         else {
             continue;
         };
@@ -65,6 +69,7 @@ pub(super) fn check_call_argument_diagnostics(
                 // Use the smallest/largest expected count range across
                 // overloads for the human-readable message.
                 let (min_expected, max_expected) = expected_count_range(&sigs, is_method);
+                let reported_actual = reported_actual_count(&sigs, actual_count, is_method);
                 let range = line_index.ts_node_to_range(args_node, source);
                 let expected_desc = if min_expected == max_expected {
                     format!("{}", min_expected)
@@ -79,7 +84,7 @@ pub(super) fn check_call_argument_diagnostics(
                     source: Some("mylua".to_string()),
                     message: format!(
                         "Call to '{}' passes {} argument(s), expected {}",
-                        display, actual_count, expected_desc,
+                        display, reported_actual, expected_desc,
                     ),
                     ..Default::default()
                 });
@@ -104,12 +109,11 @@ pub(super) fn check_call_argument_diagnostics(
             else {
                 continue;
             };
-            let visible_params = visible_params_for(&best_sig, is_method);
             for (i, arg_expr) in arg_exprs.iter().enumerate() {
                 // Vararg param absorbs everything past its position.
-                let param_idx = i;
-                let param = match visible_params.get(param_idx) {
-                    Some(p) => p,
+                let param = match param_for_explicit_arg(&best_sig, is_method, i) {
+                    Some(ExplicitArgParam::Check(p)) => p,
+                    Some(ExplicitArgParam::Skip) => continue,
                     None => break,
                 };
                 if param.name == "..." {
@@ -169,40 +173,101 @@ fn collect_call_arguments<'tree>(
     (exprs.len() as u32, exprs)
 }
 
-fn visible_params_for(
-    sig: &crate::type_system::FunctionSignature,
-    is_method: bool,
-) -> Vec<crate::type_system::ParamInfo> {
-    sig.params
-        .iter()
-        .filter(|p| !(is_method && p.name == "self"))
-        .cloned()
-        .collect()
+fn actual_count_for(candidate: &ResolvedCallSignature, actual: u32, is_method: bool) -> u32 {
+    if is_method && candidate.param_style == SignatureParamStyle::PlainFunction {
+        actual.saturating_add(1)
+    } else {
+        actual
+    }
 }
 
-fn signature_accepts_count(
-    sig: &crate::type_system::FunctionSignature,
-    actual: u32,
+fn count_bounds_for(candidate: &ResolvedCallSignature, is_method: bool) -> (u32, u32) {
+    let params = &candidate.signature.params;
+    match (is_method, candidate.param_style) {
+        (true, SignatureParamStyle::ExplicitSelf) => accepted_count_bounds(&params[1..]),
+        (false, SignatureParamStyle::MethodVisible) => {
+            add_required_self_bound(accepted_count_bounds(params))
+        }
+        _ => accepted_count_bounds(params),
+    }
+}
+
+fn add_required_self_bound((min, max): (u32, u32)) -> (u32, u32) {
+    (
+        min.saturating_add(1),
+        if max == u32::MAX {
+            u32::MAX
+        } else {
+            max.saturating_add(1)
+        },
+    )
+}
+
+fn reported_actual_count(sigs: &[ResolvedCallSignature], actual: u32, is_method: bool) -> u32 {
+    if is_method
+        && sigs
+            .iter()
+            .all(|sig| sig.param_style == SignatureParamStyle::PlainFunction)
+    {
+        actual.saturating_add(1)
+    } else {
+        actual
+    }
+}
+
+enum ExplicitArgParam<'a> {
+    Check(&'a ParamInfo),
+    Skip,
+}
+
+fn param_for_explicit_arg(
+    candidate: &ResolvedCallSignature,
     is_method: bool,
-) -> bool {
-    let visible = visible_params_for(sig, is_method);
-    let (min, max) = accepted_count_bounds(&visible);
+    explicit_arg_index: usize,
+) -> Option<ExplicitArgParam<'_>> {
+    let params = &candidate.signature.params;
+    match (is_method, candidate.param_style) {
+        (true, SignatureParamStyle::ExplicitSelf | SignatureParamStyle::PlainFunction) => {
+            param_at_or_vararg(params, explicit_arg_index.saturating_add(1))
+                .map(ExplicitArgParam::Check)
+        }
+        (true, SignatureParamStyle::MethodVisible) => {
+            param_at_or_vararg(params, explicit_arg_index).map(ExplicitArgParam::Check)
+        }
+        (false, SignatureParamStyle::MethodVisible) => {
+            if explicit_arg_index == 0 {
+                Some(ExplicitArgParam::Skip)
+            } else {
+                param_at_or_vararg(params, explicit_arg_index - 1).map(ExplicitArgParam::Check)
+            }
+        }
+        (false, _) => param_at_or_vararg(params, explicit_arg_index).map(ExplicitArgParam::Check),
+    }
+}
+
+fn param_at_or_vararg(params: &[ParamInfo], index: usize) -> Option<&ParamInfo> {
+    params.get(index).or_else(|| {
+        params
+            .last()
+            .filter(|param| param.name == "..." && index >= params.len().saturating_sub(1))
+    })
+}
+
+fn signature_accepts_count(sig: &ResolvedCallSignature, actual: u32, is_method: bool) -> bool {
+    let actual = actual_count_for(sig, actual, is_method);
+    let (min, max) = count_bounds_for(sig, is_method);
     actual >= min && (max == u32::MAX || actual <= max)
 }
 
 /// Return the `(min, max)` acceptable argument counts across all
 /// overloads, where `max == u32::MAX` indicates at least one overload
 /// has a vararg trailing parameter.
-fn expected_count_range(
-    sigs: &[crate::type_system::FunctionSignature],
-    is_method: bool,
-) -> (u32, u32) {
+fn expected_count_range(sigs: &[ResolvedCallSignature], is_method: bool) -> (u32, u32) {
     let mut min_acc = u32::MAX;
     let mut max_acc = 0u32;
     let mut any_vararg = false;
     for sig in sigs {
-        let visible = visible_params_for(sig, is_method);
-        let (lo, hi) = accepted_count_bounds(&visible);
+        let (lo, hi) = count_bounds_for(sig, is_method);
         if hi == u32::MAX {
             any_vararg = true;
         }
@@ -220,7 +285,7 @@ fn expected_count_range(
     }
 }
 
-fn accepted_count_bounds(visible: &[crate::type_system::ParamInfo]) -> (u32, u32) {
+fn accepted_count_bounds(visible: &[ParamInfo]) -> (u32, u32) {
     let has_vararg = visible.last().is_some_and(|p| p.name == "...");
     let fixed_len = if has_vararg {
         visible.len().saturating_sub(1)
@@ -246,26 +311,29 @@ fn accepted_count_bounds(visible: &[crate::type_system::ParamInfo]) -> (u32, u32
 /// argument literal types. Returns `None` when no overload is a count
 /// match — the caller already diagnosed that case.
 fn pick_best_typing_overload(
-    sigs: &[crate::type_system::FunctionSignature],
+    sigs: &[ResolvedCallSignature],
     arg_exprs: &[tree_sitter::Node],
     is_method: bool,
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
-) -> Option<crate::type_system::FunctionSignature> {
+) -> Option<ResolvedCallSignature> {
     let actual_count = arg_exprs.len() as u32;
-    let candidates: Vec<&crate::type_system::FunctionSignature> = sigs
+    let candidates: Vec<&ResolvedCallSignature> = sigs
         .iter()
         .filter(|s| signature_accepts_count(s, actual_count, is_method))
         .collect();
     if candidates.is_empty() {
         return None;
     }
-    let mut best: Option<(&crate::type_system::FunctionSignature, usize)> = None;
+    let mut best: Option<(&ResolvedCallSignature, usize)> = None;
     for sig in candidates {
-        let visible = visible_params_for(sig, is_method);
         let mut score = 0usize;
         for (i, arg) in arg_exprs.iter().enumerate() {
-            let Some(param) = visible.get(i) else { break };
+            let param = match param_for_explicit_arg(sig, is_method, i) {
+                Some(ExplicitArgParam::Check(param)) => param,
+                Some(ExplicitArgParam::Skip) => continue,
+                None => break,
+            };
             if param.name == "..." {
                 break;
             }
