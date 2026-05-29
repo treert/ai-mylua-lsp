@@ -27,6 +27,7 @@ Audit.field2 = 2; -- lua add field 2 tail
 function Audit:init()
     -- lua add field 3 head
     self.field3 = 3; -- lua add field 3 tail
+    return true
 end
 
 function Audit:test_fields()
@@ -34,6 +35,7 @@ function Audit:test_fields()
     print(self.field1)
     print(self.field2)
     print(self.field3)
+    return 1,"123"
 end
 
 ---@param action string

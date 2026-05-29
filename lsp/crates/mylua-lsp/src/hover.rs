@@ -5,7 +5,7 @@ use crate::emmy::{
     is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
-use crate::type_system::TypeFact;
+use crate::type_system::{FunctionSignature, KnownType, TypeFact};
 use crate::types::DefKind;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
@@ -230,7 +230,7 @@ fn hover_type_name(
             continue;
         }
 
-        return build_hover_for_type_definition(td, candidate.source_uri_id(), all_docs);
+        return build_hover_for_type_definition(td, summary, candidate.source_uri_id(), all_docs);
     }
 
     None
@@ -238,6 +238,7 @@ fn hover_type_name(
 
 fn build_hover_for_type_definition(
     td: &crate::summary::TypeDefinition,
+    summary: &crate::summary::DocumentSummary,
     source_uri_id: UriId,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
@@ -247,7 +248,7 @@ fn build_hover_for_type_definition(
             let alias_display = td
                 .alias_type
                 .as_ref()
-                .map(|t| format!("{}", t))
+                .map(|t| format_type_fact_for_hover(t, summary))
                 .unwrap_or_else(|| "unknown".to_string());
             code_lines.push(format!("---@alias {} {}", td.name, alias_display));
         }
@@ -269,7 +270,11 @@ fn build_hover_for_type_definition(
         }
     }
     for field in &td.fields {
-        code_lines.push(format!("---@field {} {}", field.name, field.type_fact));
+        code_lines.push(format!(
+            "---@field {} {}",
+            field.name,
+            format_type_fact_for_class_field_hover(&field.type_fact, summary, td.name.as_str())
+        ));
     }
 
     let mut parts = vec![lua_code_block(&code_lines)];
@@ -294,6 +299,164 @@ fn build_hover_for_type_definition(
         }),
         range: None,
     })
+}
+
+fn format_type_fact_for_hover(
+    fact: &TypeFact,
+    summary: &crate::summary::DocumentSummary,
+) -> String {
+    format_type_fact_for_hover_inner(fact, summary, 0, None)
+}
+
+fn format_type_fact_for_class_field_hover(
+    fact: &TypeFact,
+    summary: &crate::summary::DocumentSummary,
+    class_name: &str,
+) -> String {
+    format_type_fact_for_hover_inner(fact, summary, 0, Some(class_name))
+}
+
+fn format_type_fact_for_hover_inner(
+    fact: &TypeFact,
+    summary: &crate::summary::DocumentSummary,
+    depth: usize,
+    method_self_class: Option<&str>,
+) -> String {
+    if depth > 8 {
+        return format!("{}", fact);
+    }
+    match fact {
+        TypeFact::Known(kind) => {
+            format_known_type_for_hover(kind, summary, depth + 1, method_self_class)
+        }
+        TypeFact::Union(types) => types
+            .iter()
+            .map(|ty| format_type_fact_for_hover_inner(ty, summary, depth + 1, method_self_class))
+            .collect::<Vec<_>>()
+            .join(" | "),
+        TypeFact::Stub(_) | TypeFact::Unknown => format!("{}", fact),
+    }
+}
+
+fn format_known_type_for_hover(
+    kind: &KnownType,
+    summary: &crate::summary::DocumentSummary,
+    depth: usize,
+    method_self_class: Option<&str>,
+) -> String {
+    match kind {
+        KnownType::Nil => "nil".to_string(),
+        KnownType::Boolean => "boolean".to_string(),
+        KnownType::Number => "number".to_string(),
+        KnownType::Integer => "integer".to_string(),
+        KnownType::String => "string".to_string(),
+        KnownType::Table(id) => format!("table<{}>", id.0),
+        KnownType::Function(sig) => format_signature_for_hover(sig, summary, depth + 1, None),
+        KnownType::FunctionRef(id) => summary
+            .function_summaries
+            .get(id)
+            .map(|fs| format_function_summary_for_hover(fs, summary, depth + 1, method_self_class))
+            .unwrap_or_else(|| format!("function<{}>", id)),
+        KnownType::EmmyType(name) => name.to_string(),
+        KnownType::EmmyGeneric(name, params) => {
+            if name.as_str() == "__array" && params.len() == 1 {
+                format!(
+                    "{}[]",
+                    format_type_fact_for_hover_inner(
+                        &params[0],
+                        summary,
+                        depth + 1,
+                        method_self_class
+                    )
+                )
+            } else {
+                format!(
+                    "{}<{}>",
+                    name,
+                    params
+                        .iter()
+                        .map(|param| {
+                            format_type_fact_for_hover_inner(
+                                param,
+                                summary,
+                                depth + 1,
+                                method_self_class,
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            }
+        }
+    }
+}
+
+fn format_function_summary_for_hover(
+    fs: &crate::summary::FunctionSummary,
+    summary: &crate::summary::DocumentSummary,
+    depth: usize,
+    method_self_class: Option<&str>,
+) -> String {
+    let name = fs.name.as_str();
+    let class_name = if name.contains(':') {
+        method_self_class.unwrap_or_else(|| crate::type_system::class_prefix_of(name))
+    } else {
+        ""
+    };
+    let has_self_param = fs
+        .signature
+        .params
+        .first()
+        .is_some_and(|param| param.name.as_str() == "self");
+    let synthetic_self_class = (!class_name.is_empty() && !has_self_param).then_some(class_name);
+    format_signature_for_hover(&fs.signature, summary, depth + 1, synthetic_self_class)
+}
+
+fn format_signature_for_hover(
+    sig: &FunctionSignature,
+    summary: &crate::summary::DocumentSummary,
+    depth: usize,
+    synthetic_self_class: Option<&str>,
+) -> String {
+    let mut label = String::from("fun(");
+    let mut first = true;
+    if let Some(class_name) = synthetic_self_class {
+        let _ = write!(label, "self: {}", class_name);
+        first = false;
+    }
+    for param in &sig.params {
+        if !first {
+            label.push_str(", ");
+        }
+        first = false;
+        let param_name = if param.optional && param.name.as_str() != "..." {
+            format!("{}?", param.name)
+        } else {
+            param.name.to_string()
+        };
+        if param.type_fact == TypeFact::Unknown {
+            label.push_str(&param_name);
+        } else {
+            let _ = write!(
+                label,
+                "{}: {}",
+                param_name,
+                format_type_fact_for_hover_inner(&param.type_fact, summary, depth + 1, None)
+            );
+        }
+    }
+    label.push(')');
+    if !sig.returns.is_empty() {
+        label.push_str(": ");
+        label.push_str(
+            &sig.returns
+                .iter()
+                .map(|ret| format_type_fact_for_hover_inner(ret, summary, depth + 1, None))
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+    }
+    label
 }
 
 /// Returns true when `ident` is the tail identifier of `function_name`,
@@ -1406,9 +1569,161 @@ fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::No
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lua_symbol::intern_lua_symbol;
+    use crate::summary::{CallSite, DocumentSummary, FunctionSummary, GlobalContribution};
+    use crate::type_system::{FunctionSummaryId, ParamInfo};
     use crate::types::{DefKind, Definition};
     use crate::uri_id::intern_uri;
     use crate::util::ByteRange;
+    use std::collections::HashMap;
+
+    fn empty_range() -> ByteRange {
+        ByteRange::default()
+    }
+
+    fn summary_with_function(
+        func_id: FunctionSummaryId,
+        name: &str,
+        signature: FunctionSignature,
+    ) -> DocumentSummary {
+        let mut function_summaries = HashMap::new();
+        function_summaries.insert(
+            func_id,
+            FunctionSummary {
+                name: intern_lua_symbol(name),
+                signature,
+                range: empty_range(),
+                signature_fingerprint: 0,
+                emmy_annotated: true,
+                overloads: Vec::new(),
+                generic_params: Vec::new(),
+            },
+        );
+        DocumentSummary {
+            uri: "file:///test.lua".parse().unwrap(),
+            global_contributions: Vec::<GlobalContribution>::new(),
+            function_summaries,
+            function_name_index: HashMap::new(),
+            type_definitions: Vec::new(),
+            table_shapes: HashMap::new(),
+            module_return_type: None,
+            module_return_range: None,
+            signature_fingerprint: 0,
+            call_sites: Vec::<CallSite>::new(),
+            is_meta: false,
+            meta_name: None,
+        }
+    }
+
+    #[test]
+    fn hover_type_display_expands_function_ref_signature() {
+        let func_id = FunctionSummaryId(7);
+        let summary = summary_with_function(
+            func_id,
+            "Audit.log",
+            FunctionSignature {
+                params: vec![
+                    ParamInfo {
+                        name: intern_lua_symbol("action"),
+                        type_fact: TypeFact::Known(KnownType::String),
+                        optional: false,
+                    },
+                    ParamInfo {
+                        name: intern_lua_symbol("enabled"),
+                        type_fact: TypeFact::Known(KnownType::Boolean),
+                        optional: true,
+                    },
+                ],
+                returns: vec![TypeFact::Known(KnownType::String)],
+            },
+        );
+
+        assert_eq!(
+            format_type_fact_for_hover(&TypeFact::Known(KnownType::FunctionRef(func_id)), &summary),
+            "fun(action: string, enabled?: boolean): string"
+        );
+    }
+
+    #[test]
+    fn hover_type_display_expands_colon_method_with_implicit_self() {
+        let func_id = FunctionSummaryId(8);
+        let summary = summary_with_function(
+            func_id,
+            "Audit:init",
+            FunctionSignature {
+                params: vec![ParamInfo {
+                    name: intern_lua_symbol("action"),
+                    type_fact: TypeFact::Known(KnownType::String),
+                    optional: false,
+                }],
+                returns: vec![TypeFact::Known(KnownType::Boolean)],
+            },
+        );
+
+        assert_eq!(
+            format_type_fact_for_hover(&TypeFact::Known(KnownType::FunctionRef(func_id)), &summary),
+            "fun(self: Audit, action: string): boolean"
+        );
+    }
+
+    #[test]
+    fn hover_type_display_uses_class_owner_for_bound_colon_method_self() {
+        let func_id = FunctionSummaryId(9);
+        let summary = summary_with_function(
+            func_id,
+            "M:init",
+            FunctionSignature {
+                params: vec![ParamInfo {
+                    name: intern_lua_symbol("action"),
+                    type_fact: TypeFact::Known(KnownType::String),
+                    optional: false,
+                }],
+                returns: Vec::new(),
+            },
+        );
+
+        assert_eq!(
+            format_type_fact_for_class_field_hover(
+                &TypeFact::Known(KnownType::FunctionRef(func_id)),
+                &summary,
+                "Audit"
+            ),
+            "fun(self: Audit, action: string)"
+        );
+    }
+
+    #[test]
+    fn hover_type_display_does_not_duplicate_explicit_self_param() {
+        let func_id = FunctionSummaryId(10);
+        let summary = summary_with_function(
+            func_id,
+            "Audit:init",
+            FunctionSignature {
+                params: vec![
+                    ParamInfo {
+                        name: intern_lua_symbol("self"),
+                        type_fact: TypeFact::Known(KnownType::EmmyType(intern_lua_symbol("Audit"))),
+                        optional: false,
+                    },
+                    ParamInfo {
+                        name: intern_lua_symbol("action"),
+                        type_fact: TypeFact::Known(KnownType::String),
+                        optional: false,
+                    },
+                ],
+                returns: Vec::new(),
+            },
+        );
+
+        assert_eq!(
+            format_type_fact_for_class_field_hover(
+                &TypeFact::Known(KnownType::FunctionRef(func_id)),
+                &summary,
+                "Audit"
+            ),
+            "fun(self: Audit, action: string)"
+        );
+    }
 
     #[test]
     fn definition_origin_link_escapes_markdown_target_parentheses() {
