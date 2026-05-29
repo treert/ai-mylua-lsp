@@ -1395,6 +1395,13 @@ fn extract_block_comment_content(text: &str) -> Option<String> {
     Some(content.to_string())
 }
 
+/// A comment line starting with four or more `-` characters is a visual
+/// separator, not documentation. Treat it like a blank line when binding
+/// comments to the following Lua syntax node.
+pub(crate) fn is_comment_separator_line(text: &str) -> bool {
+    text.trim_start().bytes().take_while(|b| *b == b'-').count() >= 4
+}
+
 /// Collect comment lines immediately before a given node.
 ///
 /// Collects all consecutive preceding comment siblings:
@@ -1402,6 +1409,9 @@ fn extract_block_comment_content(text: &str) -> Option<String> {
 /// - `---` line comments (Emmy doc lines)
 /// - `--[[ ... ]]` block comments (content converted to `--- line` format)
 /// - `--` plain line comments (kept as-is for doc display)
+///
+/// Pure hyphen comment separators (`----` and longer) terminate collection,
+/// exactly like a blank line, and are not returned.
 pub fn collect_preceding_comments<'a>(
     node: tree_sitter::Node<'a>,
     source: &'a [u8],
@@ -1413,7 +1423,7 @@ pub fn collect_preceding_comments<'a>(
     // line in between), we stop collecting — the comment block is not contiguous.
     let mut next_start_row = node.start_position().row;
 
-    while let Some(prev) = sibling {
+    'collect: while let Some(prev) = sibling {
         let prev_end_row = prev.end_position().row;
         // If there is a blank line gap between this comment and the node/comment
         // that follows it, the comment block is not contiguous — stop.
@@ -1422,21 +1432,31 @@ pub fn collect_preceding_comments<'a>(
         }
         match prev.kind() {
             "emmy_comment" => {
-                let mut lines = Vec::new();
-                for i in 0..prev.named_child_count() {
+                for i in (0..prev.named_child_count()).rev() {
                     if let Some(line_node) = prev.named_child(i as u32) {
-                        if line_node.kind() == "emmy_line" {
-                            lines.push(line_node.utf8_text(source).unwrap_or("").to_string());
+                        if line_node.kind() != "emmy_line" {
+                            continue;
                         }
+                        let line_end_row = line_node.end_position().row;
+                        if next_start_row > line_end_row + 1 {
+                            break 'collect;
+                        }
+                        let text = line_node.utf8_text(source).unwrap_or("");
+                        if is_comment_separator_line(text) {
+                            break 'collect;
+                        }
+                        comments.push(text.to_string());
+                        next_start_row = line_node.start_position().row;
                     }
                 }
-                comments.extend(lines.into_iter().rev());
-                next_start_row = prev.start_position().row;
                 sibling = prev.prev_sibling();
                 continue;
             }
             "comment" => {
                 let text = prev.utf8_text(source).unwrap_or("");
+                if is_comment_separator_line(text) {
+                    break;
+                }
                 if text.starts_with("---") {
                     comments.push(text.to_string());
                     next_start_row = prev.start_position().row;
@@ -1772,6 +1792,59 @@ pub fn parse_type_from_str(input: &str) -> EmmyType {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn parse_source(src: &str) -> tree_sitter::Tree {
+        let mut parser = crate::new_parser();
+        parser.parse(src.as_bytes(), None).expect("parse")
+    }
+
+    fn find_first_kind<'a>(
+        node: tree_sitter::Node<'a>,
+        kind: &str,
+    ) -> Option<tree_sitter::Node<'a>> {
+        if node.kind() == kind {
+            return Some(node);
+        }
+        for i in 0..node.child_count() {
+            if let Some(child) = node.child(i as u32) {
+                if let Some(found) = find_first_kind(child, kind) {
+                    return Some(found);
+                }
+            }
+        }
+        None
+    }
+
+    #[test]
+    fn separator_line_detects_four_plus_leading_hyphens() {
+        assert!(is_comment_separator_line("----"));
+        assert!(is_comment_separator_line("  -----  "));
+        assert!(is_comment_separator_line("---- section"));
+        assert!(is_comment_separator_line("-----section"));
+        assert!(!is_comment_separator_line("---"));
+        assert!(!is_comment_separator_line("-- -- section"));
+    }
+
+    #[test]
+    fn collect_preceding_comments_stops_at_separator_line() {
+        let src = "-- file header\n----\n-- real doc\nlocal x = 1\n";
+        let tree = parse_source(src);
+        let local_decl = find_first_kind(tree.root_node(), "local_declaration").unwrap();
+
+        assert_eq!(
+            collect_preceding_comments(local_decl, src.as_bytes()),
+            vec!["-- real doc".to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_preceding_comments_ignores_section_separator_above_decl() {
+        let src = "-----------------------------------------------------------------------------\n-- Module declaration\n-----------------------------------------------------------------------------\nlocal json = {}\n";
+        let tree = parse_source(src);
+        let local_decl = find_first_kind(tree.root_node(), "local_declaration").unwrap();
+
+        assert!(collect_preceding_comments(local_decl, src.as_bytes()).is_empty());
+    }
 
     // -- Type expression parsing --
 

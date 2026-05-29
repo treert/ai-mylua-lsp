@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
 use crate::emmy::{
     collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text,
-    parse_emmy_comments, EmmyAnnotation,
+    is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
 use crate::type_system::TypeFact;
@@ -1203,7 +1203,7 @@ fn collect_table_field_preceding_comments(
             break;
         };
         let trimmed = line.trim();
-        if trimmed.is_empty() {
+        if trimmed.is_empty() || is_comment_separator_line(trimmed) {
             break;
         }
         if !trimmed.starts_with("--") {
