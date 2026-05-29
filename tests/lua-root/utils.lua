@@ -33,6 +33,7 @@ print(utils.test_const_str_map.A5)
 ---@class MiscManager
 ---@field m_misc_id number
 ---@field miscFunc fun():number
+---@field miscMethod :fun():string
 
 local mgrs = {
     --- 222 head
@@ -42,11 +43,14 @@ local mgrs = {
 }
 
 local _ = mgrs.MiscMgr2.m_misc_id
-local _ = mgrs.MiscMgr2:miscFunc()
+local _ = mgrs.MiscMgr2.miscFunc()
+local _ = mgrs.MiscMgr2:miscFunc() -- 应该提示参数多了 self
+local _ = mgrs.MiscMgr2:miscMethod()
+local _ = mgrs.MiscMgr2.miscMethod()
 
 local _ = mgrs.MiscMgr3.m_misc_id
-local _ = mgrs.MiscMgr3:miscFunc()
-
+local _ = mgrs.MiscMgr3.miscFunc()
+local _ = mgrs.MiscMgr3:miscMethod()
 
 utils.mgrs = {
     --- 444 head
@@ -76,3 +80,4 @@ local MiscManager = utils.locals.MiscManager
 local ret1 = MiscManager.m_misc_id
 local ret2 = MiscManager:miscFunc(MiscManager.m_misc_id)
 local ret3 = MiscManager.miscFunc()
+local ret4 = MiscManager:miscMethod()

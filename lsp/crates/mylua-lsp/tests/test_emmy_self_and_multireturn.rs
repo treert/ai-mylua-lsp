@@ -142,6 +142,65 @@ local function free() return nil end
 }
 
 #[test]
+fn class_field_method_sugar_injects_typed_self() {
+    let src = r#"
+---@class MiscManager
+---@field miscFunc :fun(x: number): self
+---@field compatFunc fun(self): self
+local MiscManager = {}
+"#;
+    let (_doc, uri, agg) = setup_single_file(src, "field_method_sugar.lua");
+    let summary = summary_by_uri(&agg, &uri).expect("summary");
+    let td = summary
+        .type_definitions
+        .iter()
+        .find(|td| td.name.as_str() == "MiscManager")
+        .expect("MiscManager typedef");
+
+    let misc = td
+        .fields
+        .iter()
+        .find(|field| field.name.as_str() == "miscFunc")
+        .expect("miscFunc field");
+    match &misc.type_fact {
+        TypeFact::Known(KnownType::Function(sig)) => {
+            assert_eq!(sig.params.len(), 2);
+            assert_eq!(sig.params[0].name.as_str(), "self");
+            assert!(matches!(
+                &sig.params[0].type_fact,
+                TypeFact::Known(KnownType::EmmyType(n)) if n.as_str() == "MiscManager"
+            ));
+            assert!(matches!(
+                &sig.returns[0],
+                TypeFact::Known(KnownType::EmmyType(n)) if n.as_str() == "MiscManager"
+            ));
+        }
+        other => panic!("expected Function, got {:?}", other),
+    }
+
+    let compat = td
+        .fields
+        .iter()
+        .find(|field| field.name.as_str() == "compatFunc")
+        .expect("compatFunc field");
+    match &compat.type_fact {
+        TypeFact::Known(KnownType::Function(sig)) => {
+            assert_eq!(sig.params.len(), 1);
+            assert_eq!(sig.params[0].name.as_str(), "self");
+            assert!(matches!(
+                &sig.params[0].type_fact,
+                TypeFact::Known(KnownType::EmmyType(n)) if n.as_str() == "MiscManager"
+            ));
+            assert!(matches!(
+                &sig.returns[0],
+                TypeFact::Known(KnownType::EmmyType(n)) if n.as_str() == "MiscManager"
+            ));
+        }
+        other => panic!("expected Function, got {:?}", other),
+    }
+}
+
+#[test]
 fn fun_type_multi_return_parses_end_to_end() {
     // `fun(): A, B` as a @param type should produce a
     // FunctionSignature with 2 returns.

@@ -118,7 +118,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                 type_expr,
                 ..
             } => {
-                if let Some((_, _, ref mut fields, _, _)) = ctx.pending_class {
+                if let Some((ref cname, _, ref mut fields, _, _)) = ctx.pending_class {
                     let full_range = ctx.line_index.ts_node_to_byte_range(line_node, ctx.source);
                     let name_range = find_name_range_in_line(
                         ctx.line_index,
@@ -129,9 +129,11 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
                         fname,
                         "field",
                     );
+                    let type_fact =
+                        crate::type_system::substitute_self(&emmy_type_to_fact(type_expr), cname);
                     fields.push(TypeFieldDef {
                         name: intern_lua_symbol(fname),
-                        type_fact: emmy_type_to_fact(type_expr),
+                        type_fact,
                         range: full_range,
                         name_range: Some(name_range),
                     });

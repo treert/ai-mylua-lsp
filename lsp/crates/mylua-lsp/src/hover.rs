@@ -994,16 +994,18 @@ fn format_annotations_lua(annotations: &[EmmyAnnotation]) -> Vec<String> {
                 visibility,
                 name,
                 type_expr,
+                is_method,
                 desc,
             } => {
                 let visibility = visibility
                     .as_ref()
                     .map(|v| format!("{} ", v))
                     .unwrap_or_default();
+                let type_prefix = if *is_method { ":" } else { "" };
                 let suffix = emmy_desc_suffix(desc);
                 lines.push(format!(
-                    "---@field {}{} {}{}",
-                    visibility, name, type_expr, suffix
+                    "---@field {}{} {}{}{}",
+                    visibility, name, type_prefix, type_expr, suffix
                 ));
             }
             EmmyAnnotation::Alias { name, type_expr } => {
@@ -1068,6 +1070,49 @@ fn code_lines_for_definition(
         if let Some(ti) = simple_type_info(type_info) {
             code_lines.push(format!("---@type {}", ti));
         }
+    }
+    code_lines.push(def_line);
+    code_lines
+}
+
+fn code_lines_for_field_definition(
+    annotations: &[EmmyAnnotation],
+    def_line: String,
+    type_info: Option<&str>,
+) -> Vec<String> {
+    let Some(ti) = type_info.filter(|ti| *ti != "unknown") else {
+        return code_lines_for_definition(annotations, def_line, type_info);
+    };
+
+    let mut code_lines = Vec::new();
+    for ann in annotations {
+        if let EmmyAnnotation::Field {
+            visibility,
+            name,
+            is_method,
+            desc,
+            ..
+        } = ann
+        {
+            let visibility = visibility
+                .as_ref()
+                .map(|v| format!("{} ", v))
+                .unwrap_or_default();
+            let type_prefix = if *is_method && ti.starts_with("fun(") {
+                ":"
+            } else {
+                ""
+            };
+            let suffix = emmy_desc_suffix(desc);
+            code_lines.push(format!(
+                "---@field {}{} {}{}{}",
+                visibility, name, type_prefix, ti, suffix
+            ));
+        }
+    }
+
+    if code_lines.is_empty() {
+        return code_lines_for_definition(annotations, def_line, type_info);
     }
     code_lines.push(def_line);
     code_lines
@@ -1183,7 +1228,7 @@ fn build_hover_for_emmy_field(
     }
 
     let mut parts = Vec::new();
-    parts.push(lua_code_block(&code_lines_for_definition(
+    parts.push(lua_code_block(&code_lines_for_field_definition(
         &field_annotations,
         def.name.to_string(),
         type_info,
@@ -1576,6 +1621,22 @@ mod tests {
     use crate::uri_id::intern_uri;
     use crate::util::ByteRange;
     use std::collections::HashMap;
+
+    #[test]
+    fn field_definition_lines_use_resolved_method_self_type() {
+        let annotations = parse_emmy_comments("---@field miscFunc :fun(x: number): self");
+        let lines = code_lines_for_field_definition(
+            &annotations,
+            "miscFunc".to_string(),
+            Some("fun(self: MiscManager, x: number): MiscManager"),
+        );
+
+        assert_eq!(
+            lines[0],
+            "---@field miscFunc :fun(self: MiscManager, x: number): MiscManager"
+        );
+        assert!(!lines[0].contains("self: self"));
+    }
 
     fn empty_range() -> ByteRange {
         ByteRange::default()

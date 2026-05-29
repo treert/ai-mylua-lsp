@@ -154,6 +154,9 @@ pub enum EmmyAnnotation {
         visibility: Option<String>,
         name: String,
         type_expr: EmmyType,
+        /// Whether the field was declared as a method via `---@field f :fun(...)`
+        /// or compatible `---@field f fun(self...)` syntax.
+        is_method: bool,
         desc: String,
     },
     Param {
@@ -1235,7 +1238,7 @@ fn parse_ann_class(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     })
 }
 
-/// `@field [visibility] field_key type_expr [desc]`
+/// `@field [visibility] field_key [':'] type_expr [desc]`
 fn parse_ann_field(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     let visibility = match tz.peek() {
         Token::Name(s) if matches!(s.as_str(), "public" | "protected" | "private" | "package") => {
@@ -1247,25 +1250,90 @@ fn parse_ann_field(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     };
 
     // field_key: Name or `[type_expr]`
-    let name = match tz.peek() {
+    let (name, is_index_key) = match tz.peek() {
         Token::LBracket => {
             tz.advance();
             let key_type = parse_type_expr(tz);
             tz.eat(&Token::RBracket);
-            format!("[{}]", key_type)
+            (format!("[{}]", key_type), true)
         }
-        Token::Name(_) => tz.eat_name().unwrap_or_default(),
+        Token::Name(_) => (tz.eat_name().unwrap_or_default(), false),
         _ => return None,
     };
 
-    let type_expr = parse_type_expr(tz);
+    // Field/type separator may be written as `name: Type`; only treat it as
+    // method sugar when the type after `:` is a function type: `name :fun(...)`.
+    let had_colon_separator = tz.eat(&Token::Colon);
+    let mut type_expr = parse_type_expr(tz);
+    let explicit_method_sugar =
+        !is_index_key && had_colon_separator && matches!(type_expr, EmmyType::Function { .. });
+    let compatible_self_sugar = function_type_starts_with_self(&type_expr);
+    let is_method = explicit_method_sugar || compatible_self_sugar;
+    if is_method {
+        type_expr = ensure_method_self_param(type_expr);
+    }
+
     let desc = tz.rest_as_string();
     Some(EmmyAnnotation::Field {
         visibility,
         name,
         type_expr,
+        is_method,
         desc,
     })
+}
+
+fn function_type_starts_with_self(type_expr: &EmmyType) -> bool {
+    match type_expr {
+        EmmyType::Function { params, .. } => params.first().is_some_and(is_self_fun_param),
+        _ => false,
+    }
+}
+
+fn ensure_method_self_param(type_expr: EmmyType) -> EmmyType {
+    let EmmyType::Function {
+        mut params,
+        returns,
+    } = type_expr
+    else {
+        return type_expr;
+    };
+
+    let self_param = EmmyFunParam {
+        name: Some("self".to_string()),
+        type_expr: EmmyType::Named {
+            name: "self".to_string(),
+            generics: vec![],
+        },
+    };
+
+    if let Some(first) = params.first_mut() {
+        if is_self_fun_param(first) {
+            if first.name.is_none() {
+                *first = self_param;
+            }
+            return EmmyType::Function { params, returns };
+        }
+    }
+
+    params.insert(0, self_param);
+    EmmyType::Function { params, returns }
+}
+
+fn is_self_fun_param(param: &EmmyFunParam) -> bool {
+    if param.name.as_deref() == Some("self") {
+        return true;
+    }
+    matches!(
+        (&param.name, &param.type_expr),
+        (
+            None,
+            EmmyType::Named {
+                name,
+                generics,
+            }
+        ) if name == "self" && generics.is_empty()
+    )
 }
 
 /// `@param param_name ['?'] type_expr [desc]`
@@ -1668,10 +1736,12 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
             EmmyAnnotation::Field {
                 name,
                 type_expr,
+                is_method,
                 desc,
                 ..
             } => {
-                let mut s = format!("@field `{}` `{}`", name, type_expr);
+                let type_prefix = if *is_method { ":" } else { "" };
+                let mut s = format!("@field `{}` `{}{}`", name, type_prefix, type_expr);
                 if !desc.is_empty() {
                     let _ = write!(s, " — {}", desc);
                 }
@@ -2208,6 +2278,143 @@ mod tests {
                     }
                 );
                 assert_eq!(desc, "some desc");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_colon_separator_is_not_method_for_non_function_type() {
+        let anns = parse_emmy_comments("---@field name: string some desc");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                is_method,
+                desc,
+                ..
+            } => {
+                assert_eq!(name, "name");
+                assert!(!*is_method);
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "string".into(),
+                        generics: vec![]
+                    }
+                );
+                assert_eq!(desc, "some desc");
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_bracket_colon_separator_is_not_method() {
+        let anns = parse_emmy_comments("---@field [string]: number");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                is_method,
+                ..
+            } => {
+                assert_eq!(name, "[string]");
+                assert!(!*is_method);
+                assert_eq!(
+                    *type_expr,
+                    EmmyType::Named {
+                        name: "number".into(),
+                        generics: vec![]
+                    }
+                );
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_bracket_fun_type_is_not_method() {
+        let anns = parse_emmy_comments("---@field [string]: fun(x: number): string");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                is_method,
+                ..
+            } => {
+                assert_eq!(name, "[string]");
+                assert!(!*is_method);
+                match type_expr {
+                    EmmyType::Function { params, returns } => {
+                        assert_eq!(params.len(), 1);
+                        assert_eq!(params[0].name.as_deref(), Some("x"));
+                        assert_eq!(returns.len(), 1);
+                    }
+                    other => panic!("expected Function, got {:?}", other),
+                }
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_method_colon_fun_sugar() {
+        let anns = parse_emmy_comments("---@field miscFunc :fun(x: number): string");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field {
+                name,
+                type_expr,
+                is_method,
+                ..
+            } => {
+                assert_eq!(name, "miscFunc");
+                assert!(*is_method);
+                match type_expr {
+                    EmmyType::Function { params, returns } => {
+                        assert_eq!(params.len(), 2);
+                        assert_eq!(params[0].name.as_deref(), Some("self"));
+                        assert!(matches!(
+                            &params[0].type_expr,
+                            EmmyType::Named { name, generics } if name == "self" && generics.is_empty()
+                        ));
+                        assert_eq!(params[1].name.as_deref(), Some("x"));
+                        assert_eq!(returns.len(), 1);
+                    }
+                    other => panic!("expected Function, got {:?}", other),
+                }
+            }
+            _ => panic!("expected Field"),
+        }
+    }
+
+    #[test]
+    fn annotation_field_method_fun_self_compat() {
+        let anns = parse_emmy_comments("---@field miscFunc fun(self): number");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Field {
+                type_expr,
+                is_method,
+                ..
+            } => {
+                assert!(*is_method);
+                match type_expr {
+                    EmmyType::Function { params, returns } => {
+                        assert_eq!(params.len(), 1);
+                        assert_eq!(params[0].name.as_deref(), Some("self"));
+                        assert!(matches!(
+                            &params[0].type_expr,
+                            EmmyType::Named { name, generics } if name == "self" && generics.is_empty()
+                        ));
+                        assert_eq!(returns.len(), 1);
+                    }
+                    other => panic!("expected Function, got {:?}", other),
+                }
             }
             _ => panic!("expected Field"),
         }
