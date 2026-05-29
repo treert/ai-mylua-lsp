@@ -56,4 +56,4 @@ a1_test3:Say()
 local MiscManager = utils.locals.MiscManager
 
 local ret1 = MiscManager.m_misc_id
-local ret2 = MiscManager:miscFunc(MiscManager.m_misc_id)
+local ret2 = MiscManager.miscFunc()

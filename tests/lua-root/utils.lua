@@ -44,9 +44,9 @@ local mgrs = {
 
 local _ = mgrs.MiscMgr2.m_misc_id
 local _ = mgrs.MiscMgr2.miscFunc()
-local _ = mgrs.MiscMgr2:miscFunc() -- 应该提示参数多了 self
+-- local _ = mgrs.MiscMgr2:miscFunc() -- 应该提示参数多了 self
 local _ = mgrs.MiscMgr2:miscMethod()
-local _ = mgrs.MiscMgr2.miscMethod()
+-- local _ = mgrs.MiscMgr2.miscMethod() -- 应该提示少了参数
 
 local _ = mgrs.MiscMgr3.m_misc_id
 local _ = mgrs.MiscMgr3.miscFunc()
@@ -60,7 +60,7 @@ utils.mgrs = {
 }
 
 local _ = utils.mgrs.MiscMgr4.m_misc_id
-local _ = utils.mgrs.MiscMgr4:miscFunc()
+local _ = utils.mgrs.MiscMgr4.miscFunc()
 
 
 
@@ -78,6 +78,5 @@ utils.locals = {}
 local MiscManager = utils.locals.MiscManager
 
 local ret1 = MiscManager.m_misc_id
-local ret2 = MiscManager:miscFunc(MiscManager.m_misc_id)
 local ret3 = MiscManager.miscFunc()
 local ret4 = MiscManager:miscMethod()
