@@ -1446,9 +1446,7 @@ pub fn collect_preceding_comments<'a>(
                 if let Some(content) = extract_block_comment_content(text) {
                     let block_lines: Vec<String> = content
                         .lines()
-                        .map(|l| l.trim())
-                        .filter(|l| !l.is_empty())
-                        .map(|l| format!("--- {}", l))
+                        .map(|l| format!("--- {}", l.trim_end()))
                         .collect();
                     comments.extend(block_lines.into_iter().rev());
                     next_start_row = prev.start_position().row;

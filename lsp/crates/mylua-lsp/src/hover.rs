@@ -1260,28 +1260,85 @@ fn strip_leading_table_field_separator(text: &str) -> &str {
     text.trim_start()
 }
 
-/// Extract plain documentation text from collected comment lines.
+/// Format plain documentation text from collected comment lines.
 /// Strips `---` or `--` prefix, excludes `@`-prefixed annotation lines
 /// and `#`-prefixed directive lines (e.g. `---#disable top_keyword`).
+///
+/// Empty comment lines are preserved as Markdown paragraph breaks, and
+/// adjacent non-empty comment lines use Markdown hard breaks so hover keeps
+/// the source comment layout instead of rendering everything as one paragraph.
+/// Leading indentation after the comment marker is rendered with `&nbsp;`
+/// because Markdown collapses ordinary leading spaces.
 fn extract_doc_lines(comment_lines: &[String]) -> String {
-    let lines: Vec<&str> = comment_lines
-        .iter()
-        .filter_map(|l| {
-            let stripped = if let Some(s) = l.strip_prefix("---") {
-                s.trim()
-            } else if let Some(s) = l.strip_prefix("--") {
-                s.trim()
-            } else {
-                return None;
-            };
-            if stripped.starts_with('@') || stripped.starts_with('#') || stripped.is_empty() {
-                None
-            } else {
-                Some(stripped)
+    let mut out = String::new();
+    let mut saw_text = false;
+    let mut pending_blank = false;
+
+    for line in comment_lines {
+        let Some(content) = strip_doc_comment_prefix_preserving_indent(line) else {
+            continue;
+        };
+        let content = trim_one_comment_padding_space(content).trim_end();
+        let logical = content.trim_start();
+        if logical.starts_with('@') || logical.starts_with('#') {
+            continue;
+        }
+        if logical.is_empty() {
+            if saw_text {
+                pending_blank = true;
             }
-        })
-        .collect();
-    lines.join("\n")
+            continue;
+        }
+
+        if saw_text {
+            if pending_blank {
+                out.push_str("\n\n");
+            } else {
+                out.push_str("  \n");
+            }
+        }
+        out.push_str(&format_markdown_preserving_leading_indent(content));
+        saw_text = true;
+        pending_blank = false;
+    }
+
+    out
+}
+
+fn strip_doc_comment_prefix_preserving_indent(line: &str) -> Option<&str> {
+    if let Some(rest) = line.strip_prefix("---") {
+        if !rest.is_empty() && rest.chars().all(|ch| ch == '-') {
+            return line.strip_prefix("--");
+        }
+        return Some(rest);
+    }
+    line.strip_prefix("--")
+}
+
+fn trim_one_comment_padding_space(text: &str) -> &str {
+    text.strip_prefix(' ')
+        .or_else(|| text.strip_prefix('\t'))
+        .unwrap_or(text)
+}
+
+fn format_markdown_preserving_leading_indent(text: &str) -> String {
+    let mut out = String::new();
+    let mut rest_start = 0;
+    for (idx, ch) in text.char_indices() {
+        match ch {
+            ' ' => {
+                out.push_str("&nbsp;");
+                rest_start = idx + ch.len_utf8();
+            }
+            '\t' => {
+                out.push_str("&nbsp;&nbsp;&nbsp;&nbsp;");
+                rest_start = idx + ch.len_utf8();
+            }
+            _ => break,
+        }
+    }
+    out.push_str(&text[rest_start..]);
+    out
 }
 
 fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
@@ -1372,6 +1429,32 @@ mod tests {
         assert_eq!(
             definition_origin_link(&def).as_deref(),
             Some("[foo(bar).lua](file:///test/foo%28bar%29.lua#L7)")
+        );
+    }
+
+    #[test]
+    fn extract_doc_lines_preserves_comment_layout_as_markdown() {
+        let comments = vec![
+            "--- first line".to_string(),
+            "--- second line".to_string(),
+            "---Returns text without padding space.".to_string(),
+            "---[`View online doc`](https://example.test)".to_string(),
+            "---".to_string(),
+            "-- USAGE:".to_string(),
+            "--   json.encode(o)".to_string(),
+            "--     Returns a JSON string.".to_string(),
+            "--".to_string(),
+            "-- CHANGELOG".to_string(),
+            "--    1.0.1 Introduced plugin info.".to_string(),
+            "-- \t\tIntroduced json.null.".to_string(),
+            "-----".to_string(),
+            "---@type string".to_string(),
+            "---#disable top_keyword".to_string(),
+        ];
+
+        assert_eq!(
+            extract_doc_lines(&comments),
+            "first line  \nsecond line  \nReturns text without padding space.  \n[`View online doc`](https://example.test)\n\nUSAGE:  \n&nbsp;&nbsp;json.encode(o)  \n&nbsp;&nbsp;&nbsp;&nbsp;Returns a JSON string.\n\nCHANGELOG  \n&nbsp;&nbsp;&nbsp;1.0.1 Introduced plugin info.  \n&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Introduced json.null.  \n---"
         );
     }
 }
