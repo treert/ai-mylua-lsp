@@ -82,9 +82,12 @@ print(abc)"#;
         &mut agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
     );
+    let hover = result.expect("hover should return a result for local variable `abc`");
+    let content = hover_content_string(&hover);
     assert!(
-        result.is_some(),
-        "hover should return a result for local variable `abc`"
+        content.contains("*local variable* · [test.lua](file:///test/test.lua#L1)"),
+        "hover should show definition origin link, got: {}",
+        content
     );
 }
 
@@ -383,7 +386,11 @@ Audit = {
     .expect("hover on table constructor field key should resolve");
     let content = hover_content_string(&result);
     assert!(
-        content.contains("field1 = 1") && content.contains("number"),
+        content.contains("field1 = 1")
+            && content.contains("number")
+            && content.contains(
+                "*field* · [audit_field_definition_hover.lua](file:///test/audit_field_definition_hover.lua#L6)"
+            ),
         "hover should show field definition and inferred type, got: {}",
         content
     );
@@ -1674,7 +1681,9 @@ end
 
     assert!(
         text.contains("```lua\n---@param bb number\nbb\n```")
-            && text.contains("*parameter*")
+            && text.contains(
+                "*parameter* · [hover_param_decl.lua](file:///test/hover_param_decl.lua#L3)"
+            )
             && !text.contains("Type: `number`"),
         "parameter hover should focus the parameter and its type, got:\n{}",
         text,

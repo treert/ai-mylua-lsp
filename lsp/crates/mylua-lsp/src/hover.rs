@@ -9,7 +9,8 @@ use crate::type_system::TypeFact;
 use crate::types::DefKind;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
-    extract_field_chain, find_node_at_position, node_text, walk_ancestors, LineIndex,
+    extract_field_chain, find_node_at_position, node_text, percent_decode, walk_ancestors,
+    LineIndex,
 };
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
@@ -727,6 +728,48 @@ fn simple_type_info(type_info: Option<&str>) -> Option<&str> {
     type_info.filter(|ti| *ti != "unknown" && !ti.contains('\n'))
 }
 
+fn kind_label_with_origin(kind_label: &str, def: &crate::types::Definition) -> String {
+    match definition_origin_link(def) {
+        Some(origin) => format!("*{}* · {}", kind_label, origin),
+        None => format!("*{}*", kind_label),
+    }
+}
+
+fn definition_origin_link(def: &crate::types::Definition) -> Option<String> {
+    let uri = def.uri.as_str();
+    let raw_filename = uri.rsplit('/').next()?.split('?').next().unwrap_or("");
+    if raw_filename.is_empty() {
+        return None;
+    }
+
+    let filename = escape_markdown_link_text(&percent_decode(raw_filename));
+    let target = definition_link_target(def);
+    Some(format!("[{}]({})", filename, target))
+}
+
+fn definition_link_target(def: &crate::types::Definition) -> String {
+    escape_markdown_link_target(&format!(
+        "{}#L{}",
+        def.uri.as_str(),
+        def.selection_range.start_row + 1
+    ))
+}
+
+fn escape_markdown_link_target(target: &str) -> String {
+    target.replace('(', "%28").replace(')', "%29")
+}
+
+fn escape_markdown_link_text(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for ch in text.chars() {
+        if matches!(ch, '\\' | '[' | ']' | '`') {
+            escaped.push('\\');
+        }
+        escaped.push(ch);
+    }
+    escaped
+}
+
 fn emmy_desc_suffix(desc: &str) -> String {
     if desc.is_empty() {
         String::new()
@@ -934,7 +977,7 @@ fn build_hover_for_definition(
         def_line,
         type_info,
     )));
-    parts.push(format!("*{}*", kind_label));
+    parts.push(kind_label_with_origin(kind_label, def));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -982,7 +1025,7 @@ fn build_hover_for_emmy_field(
         def.name.to_string(),
         type_info,
     )));
-    parts.push("*field*".to_string());
+    parts.push(kind_label_with_origin("field", def));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1028,7 +1071,7 @@ fn build_hover_for_parameter(
         def.name.to_string(),
         type_info,
     )));
-    parts.push("*parameter*".to_string());
+    parts.push(kind_label_with_origin("parameter", def));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1091,7 +1134,7 @@ fn build_hover_for_table_field(
         def_line,
         type_info,
     )));
-    parts.push("*field*".to_string());
+    parts.push(kind_label_with_origin("field", def));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1300,5 +1343,35 @@ fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::No
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::{DefKind, Definition};
+    use crate::uri_id::intern_uri;
+    use crate::util::ByteRange;
+
+    #[test]
+    fn definition_origin_link_escapes_markdown_target_parentheses() {
+        let uri: Uri = "file:///test/foo(bar).lua".parse().unwrap();
+        let uri_id = intern_uri(&uri);
+        let def = Definition {
+            name: "value".to_string(),
+            kind: DefKind::LocalVariable,
+            range: ByteRange::default(),
+            selection_range: ByteRange {
+                start_row: 6,
+                ..ByteRange::default()
+            },
+            uri_id,
+            uri,
+        };
+
+        assert_eq!(
+            definition_origin_link(&def).as_deref(),
+            Some("[foo(bar).lua](file:///test/foo%28bar%29.lua#L7)")
+        );
     }
 }
