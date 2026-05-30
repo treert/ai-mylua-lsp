@@ -279,7 +279,6 @@ impl Default for InlayHintConfig {
             parameter_names: true,
             variable_types: false,
         }
-
     }
 }
 
