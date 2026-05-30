@@ -1,6 +1,7 @@
 use super::type_compat::{infer_argument_type, is_type_compatible};
 use crate::aggregation::WorkspaceAggregation;
 use crate::signature_help::{ResolvedCallSignature, SignatureParamStyle};
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{ParamInfo, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::LineIndex;
@@ -147,7 +148,7 @@ fn collect_function_calls<'tree>(
     node: tree_sitter::Node<'tree>,
     out: &mut Vec<tree_sitter::Node<'tree>>,
 ) {
-    if node.kind() == "function_call" {
+    if node.kind_name() == "function_call" {
         out.push(node);
     }
     for i in 0..node.named_child_count() {

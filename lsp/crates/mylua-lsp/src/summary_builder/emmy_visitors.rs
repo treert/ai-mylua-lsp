@@ -3,6 +3,7 @@ use crate::emmy::{
 };
 use crate::lua_symbol::intern_lua_symbol;
 use crate::summary::*;
+use crate::syntax_kind::NodeKindExt;
 use crate::util::{encode_col, node_text, LineIndex};
 
 use super::BuildContext;
@@ -71,7 +72,7 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
         let Some(line_node) = node.named_child(i as u32) else {
             continue;
         };
-        if line_node.kind() != "emmy_line" {
+        if line_node.kind_name() != "emmy_line" {
             continue;
         }
         let line_text = node_text(line_node, ctx.source).to_string();

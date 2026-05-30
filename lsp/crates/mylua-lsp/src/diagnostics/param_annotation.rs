@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use std::collections::HashSet;
 
 use tower_lsp_server::ls_types::*;
@@ -21,7 +22,7 @@ pub(super) fn check_param_annotation_diagnostics(
         if is_colon_method(fun, source) {
             lua_params.insert("self".to_string());
         }
-        let anchor = match fun.kind() {
+        let anchor = match fun.kind_name() {
             "function_definition" => {
                 crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
             }
@@ -52,7 +53,7 @@ fn collect_function_like_nodes<'tree>(
     out: &mut Vec<tree_sitter::Node<'tree>>,
 ) {
     if matches!(
-        node.kind(),
+        node.kind_name(),
         "function_declaration" | "local_function_declaration" | "function_definition"
     ) {
         out.push(node);
@@ -73,7 +74,7 @@ fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<Hash
         let Some(child) = param_list.child(i as u32) else {
             continue;
         };
-        match child.kind() {
+        match child.kind_name() {
             "identifier" => {
                 names.insert(node_text(child, source).to_string());
             }
@@ -82,7 +83,7 @@ fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<Hash
                     let Some(id) = child.named_child(j as u32) else {
                         continue;
                     };
-                    if id.kind() == "identifier" {
+                    if id.kind_name() == "identifier" {
                         names.insert(node_text(id, source).to_string());
                     }
                 }
@@ -126,13 +127,13 @@ fn collect_preceding_emmy_lines(
             break;
         }
 
-        match prev.kind() {
+        match prev.kind_name() {
             "emmy_comment" => {
                 for i in 0..prev.named_child_count() {
                     let Some(line) = prev.named_child(i as u32) else {
                         continue;
                     };
-                    if line.kind() == "emmy_line" {
+                    if line.kind_name() == "emmy_line" {
                         lines.push(AnnotationLine {
                             text: node_text(line, source).to_string(),
                             range: line_index.ts_node_to_range(line, source),

@@ -7,6 +7,7 @@
 //! comma count between the `(` and the cursor; for `:` calls the implicit
 //! receiver is not part of the user's visible argument list.
 
+use crate::syntax_kind::NodeKindExt;
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
@@ -56,7 +57,7 @@ pub fn signature_help(
 fn find_enclosing_call(root: tree_sitter::Node, byte_offset: usize) -> Option<tree_sitter::Node> {
     let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
     loop {
-        if node.kind() == "function_call" {
+        if node.kind_name() == "function_call" {
             if let Some(args) = node.child_by_field_name("arguments") {
                 // Include the closing `)` position so that `foo(|)` still matches.
                 if byte_offset >= args.start_byte() && byte_offset <= args.end_byte() {
@@ -135,7 +136,7 @@ pub(crate) fn resolve_call_signature_candidates(
     }
 
     // `obj.method(...)` / `mod.func(...)`
-    if matches!(callee.kind(), "variable" | "field_expression") {
+    if matches!(callee.kind_name(), "variable" | "field_expression") {
         if let (Some(object), Some(field)) = (
             callee.child_by_field_name("object"),
             callee.child_by_field_name("field"),

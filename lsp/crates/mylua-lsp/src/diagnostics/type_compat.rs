@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::node_text;
 
@@ -6,7 +7,7 @@ pub(crate) fn infer_literal_type(
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
-    match node.kind() {
+    match node.kind_name() {
         "number" => TypeFact::Known(KnownType::Number),
         "string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),
@@ -54,7 +55,7 @@ where
 {
     if let Some(op_node) = node.child_by_field_name("operator") {
         let op = if source.is_empty() {
-            op_node.kind()
+            op_node.kind_name()
         } else {
             node_text(op_node, source)
         };
@@ -80,10 +81,10 @@ where
         }
     }
 
-    if node.kind() == "unary_expression" {
+    if node.kind_name() == "unary_expression" {
         if let Some(op_child) = node.child(0) {
             let op = if source.is_empty() {
-                op_child.kind()
+                op_child.kind_name()
             } else {
                 node_text(op_child, source)
             };
@@ -233,13 +234,13 @@ pub(crate) fn infer_argument_type(
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
-    if matches!(node.kind(), "variable" | "identifier") {
+    if matches!(node.kind_name(), "variable" | "identifier") {
         let text = node_text(node, source);
         if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
             return tf.clone();
         }
     }
-    match node.kind() {
+    match node.kind_name() {
         "parenthesized_expression" => node
             .named_child(0)
             .map(|inner| infer_argument_type(inner, source, scope_tree))
@@ -257,7 +258,7 @@ pub(crate) fn infer_argument_type(
 /// dependency of `infer_literal_type` so this walk can run without a
 /// summary in scope (keeps the diagnostic self-contained).
 pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
-    match node.kind() {
+    match node.kind_name() {
         "number" => TypeFact::Known(KnownType::Number),
         "string" => TypeFact::Known(KnownType::String),
         "true" | "false" => TypeFact::Known(KnownType::Boolean),

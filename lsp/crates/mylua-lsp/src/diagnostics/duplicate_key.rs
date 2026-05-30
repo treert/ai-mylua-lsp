@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use crate::util::{node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
@@ -24,13 +25,13 @@ fn check_duplicate_keys_recursive(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    if node.kind() == "table_constructor" {
+    if node.kind_name() == "table_constructor" {
         let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
         for i in 0..node.named_child_count() {
             let Some(field_list) = node.named_child(i as u32) else {
                 continue;
             };
-            let fields = if field_list.kind() == "field_list" {
+            let fields = if field_list.kind_name() == "field_list" {
                 field_list
             } else {
                 continue;
@@ -39,7 +40,7 @@ fn check_duplicate_keys_recursive(
                 let Some(field) = fields.named_child(j as u32) else {
                     continue;
                 };
-                if field.kind() != "field" {
+                if field.kind_name() != "field" {
                     continue;
                 }
                 let Some(key_text) = extract_field_key(field, source) else {
@@ -79,7 +80,7 @@ fn check_duplicate_keys_recursive(
 fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> {
     // Identifier key: `a = 1`
     if let Some(key) = field.child_by_field_name("key") {
-        match key.kind() {
+        match key.kind_name() {
             "identifier" => {
                 return Some(node_text(key, source).to_string());
             }

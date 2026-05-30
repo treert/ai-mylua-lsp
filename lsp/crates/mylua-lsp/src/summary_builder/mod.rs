@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 mod call_sites;
 mod emmy_visitors;
 pub(crate) mod fingerprint;
@@ -141,13 +142,13 @@ fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Opti
         let Some(child) = root.named_child(i as u32) else {
             continue;
         };
-        match child.kind() {
+        match child.kind_name() {
             "emmy_comment" => {
                 for j in 0..child.named_child_count() {
                     let Some(line) = child.named_child(j as u32) else {
                         continue;
                     };
-                    if line.kind() != "emmy_line" {
+                    if line.kind_name() != "emmy_line" {
                         continue;
                     }
                     let text = node_text(line, source);

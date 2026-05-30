@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -366,7 +367,7 @@ pub fn find_node_at_position<'a>(
     byte_offset: usize,
 ) -> Option<tree_sitter::Node<'a>> {
     let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
-    while node.kind() != "identifier" {
+    while node.kind_name() != "identifier" {
         node = node.parent()?;
     }
     Some(node)
@@ -378,7 +379,7 @@ pub fn extract_field_chain<'a>(
 ) -> Option<(tree_sitter::Node<'a>, Vec<String>)> {
     let mut fields = Vec::new();
 
-    while matches!(node.kind(), "variable" | "field_expression") {
+    while matches!(node.kind_name(), "variable" | "field_expression") {
         let Some(field) = node.child_by_field_name("field") else {
             break;
         };
@@ -426,7 +427,7 @@ pub fn walk_ancestors<'a, T>(
     crate::logger::log(&format!(
         "[walk_ancestors] hit depth limit ({}) starting at {} — malformed tree?",
         ANCESTOR_WALK_LIMIT,
-        node.kind(),
+        node.kind_name(),
     ));
     None
 }
@@ -563,7 +564,7 @@ pub fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter
 pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
     // Strategy 1: recursive search for `short_string_content` child.
     fn find_string_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
-        if n.kind().starts_with("short_string_content") {
+        if n.kind_name().starts_with("short_string_content") {
             return Some(node_text(n, source).to_string());
         }
         for i in 0..n.named_child_count() {
@@ -581,7 +582,7 @@ pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<
     }
 
     // Strategy 2: strip matching quotes from the raw text.
-    if node.kind() == "string" {
+    if node.kind_name() == "string" {
         let text = node_text(node, source);
         if text.len() >= 2 {
             let bytes = text.as_bytes();
@@ -619,7 +620,7 @@ pub fn extract_call_arg_nodes<'tree>(
     let mut exprs = Vec::new();
     for i in 0..args.named_child_count() {
         if let Some(child) = args.named_child(i as u32) {
-            if child.kind() == "expression_list" {
+            if child.kind_name() == "expression_list" {
                 for j in 0..child.named_child_count() {
                     if let Some(e) = child.named_child(j as u32) {
                         exprs.push(e);
@@ -799,9 +800,9 @@ mod tests {
         let tree = parse_source("function foo() return 1 end\n");
         let root = tree.root_node();
         let number = root.descendant_for_byte_range(22, 22).expect("number node");
-        assert_eq!(number.kind(), "number");
+        assert_eq!(number.kind_name(), "number");
         let func = walk_ancestors(number, |p| {
-            if p.kind() == "function_declaration" {
+            if p.kind_name() == "function_declaration" {
                 Some(p)
             } else {
                 None
@@ -817,7 +818,7 @@ mod tests {
         let number = root.descendant_for_byte_range(10, 10).expect("number");
         let hit: Option<()> = walk_ancestors(number, |p| {
             // A kind that doesn't exist in Lua AST.
-            if p.kind() == "nonexistent_node_kind" {
+            if p.kind_name() == "nonexistent_node_kind" {
                 Some(())
             } else {
                 None
@@ -850,7 +851,7 @@ mod tests {
         let number = root
             .descendant_for_byte_range(number_byte, number_byte)
             .expect("number node");
-        assert_eq!(number.kind(), "number");
+        assert_eq!(number.kind_name(), "number");
 
         let mut calls = 0usize;
         let hit: Option<()> = walk_ancestors(number, |_p| {
@@ -946,7 +947,7 @@ mod tests {
         let idx = LineIndex::new(src.as_bytes());
         // Find the `1` number literal.
         let number = root.descendant_for_byte_range(10, 10).expect("number");
-        assert_eq!(number.kind(), "number");
+        assert_eq!(number.kind_name(), "number");
         let br = idx.ts_node_to_byte_range(number, src.as_bytes());
         assert_eq!(br.start_byte, 10);
         assert_eq!(br.end_byte, 11);

@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use crate::util::{byte_col_to_utf16_col, node_text, truncate, LineIndex};
 use tower_lsp_server::ls_types::*;
 
@@ -22,7 +23,7 @@ pub(super) fn collect_errors_recursive(
             range: line_index.ts_node_to_range(node, source),
             severity: Some(DiagnosticSeverity::ERROR),
             source: Some("mylua".to_string()),
-            message: format!("Missing '{}'", node.kind()),
+            message: format!("Missing '{}'", node.kind_name()),
             ..Default::default()
         });
     }

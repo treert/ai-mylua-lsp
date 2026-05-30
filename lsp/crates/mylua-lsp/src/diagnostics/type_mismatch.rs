@@ -1,5 +1,6 @@
 use super::type_compat::{infer_literal_type, is_type_compatible};
 use crate::scope::ScopeTree;
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::TypeFact;
 use crate::util::{node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -73,7 +74,7 @@ fn walk_assignment_nodes(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    if node.kind() == "assignment_statement" {
+    if node.kind_name() == "assignment_statement" {
         inspect_assignment_for_mismatch(
             node,
             source,
@@ -120,13 +121,13 @@ fn inspect_assignment_for_mismatch(
         let Some(lhs) = left.named_child(i as u32) else {
             continue;
         };
-        let ident_node = if lhs.kind() == "identifier" {
+        let ident_node = if lhs.kind_name() == "identifier" {
             Some(lhs)
-        } else if lhs.kind() == "variable"
+        } else if lhs.kind_name() == "variable"
             && lhs.child_by_field_name("object").is_none()
             && lhs.child_by_field_name("index").is_none()
         {
-            lhs.named_child(0).filter(|c| c.kind() == "identifier")
+            lhs.named_child(0).filter(|c| c.kind_name() == "identifier")
         } else {
             None
         };
@@ -185,11 +186,11 @@ fn find_local_rhs_type(
     scope_tree: &crate::scope::ScopeTree,
     source: &[u8],
 ) -> TypeFact {
-    if node.kind() == "local_declaration" {
+    if node.kind_name() == "local_declaration" {
         if let Some(names) = node.child_by_field_name("names") {
             for i in 0..names.named_child_count() {
                 if let Some(n) = names.named_child(i as u32) {
-                    if n.kind() == "identifier" && node_text(n, source) == name {
+                    if n.kind_name() == "identifier" && node_text(n, source) == name {
                         let node_line = n.start_position().row as u32;
                         if node_line == target_line {
                             if let Some(values) = node.child_by_field_name("values") {

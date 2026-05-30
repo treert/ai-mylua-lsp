@@ -2,6 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
@@ -38,8 +39,8 @@ fn goto_definition_inner(
     lsp_log!(
         "[goto] ident='{}' kind='{}' parent='{}'",
         name,
-        ident_node.kind(),
-        ident_node.parent().map_or("none", |p| p.kind())
+        ident_node.kind_name(),
+        ident_node.parent().map_or("none", |p| p.kind_name())
     );
 
     // If clicking on the LHS name of `local x = require("mod")`, prefer
@@ -62,7 +63,7 @@ fn goto_definition_inner(
     // a warning if ever hit — protects against runaway trees on
     // malformed input.
     if let Some(result) = walk_ancestors(ident_node, |p| {
-        if matches!(p.kind(), "variable" | "field_expression") {
+        if matches!(p.kind_name(), "variable" | "field_expression") {
             let field_is_ident = p
                 .child_by_field_name("field")
                 .map(|f| f.id() == ident_node.id())
@@ -74,7 +75,7 @@ fn goto_definition_inner(
         // `obj:method(...)` — the `method` identifier on a `function_call`
         // node. Infer the base type and resolve the method as a field so
         // goto jumps to the method's definition site.
-        if p.kind() == "function_call" {
+        if p.kind_name() == "function_call" {
             let method_is_ident = p
                 .child_by_field_name("method")
                 .map(|m| m.id() == ident_node.id())
@@ -366,7 +367,7 @@ fn try_label_goto(
     ident_node: tree_sitter::Node,
 ) -> Option<GotoDefinitionResponse> {
     let goto_stmt = ident_node.parent()?;
-    if goto_stmt.kind() != "goto_statement" {
+    if goto_stmt.kind_name() != "goto_statement" {
         return None;
     }
     let goto_name = goto_stmt.child_by_field_name("name")?;
@@ -392,11 +393,11 @@ fn find_visible_label_for_goto<'a>(
 ) -> Option<tree_sitter::Node<'a>> {
     let mut child = goto_stmt;
     while let Some(block) = child.parent() {
-        if is_label_block(block.kind()) && should_search_label_block(block, child) {
+        if is_label_block(block.kind_name()) && should_search_label_block(block, child) {
             if let Some(label) = find_label_in_block(block, source, target_name) {
                 return Some(label);
             }
-            if block.kind() == "function_body" {
+            if block.kind_name() == "function_body" {
                 break;
             }
         }
@@ -422,7 +423,8 @@ fn is_label_block(kind: &str) -> bool {
 }
 
 fn should_search_label_block(block: tree_sitter::Node, child: tree_sitter::Node) -> bool {
-    !(block.kind() == "if_statement" && matches!(child.kind(), "elseif_clause" | "else_clause"))
+    !(block.kind_name() == "if_statement"
+        && matches!(child.kind_name(), "elseif_clause" | "else_clause"))
 }
 
 fn find_label_in_block<'a>(
@@ -436,13 +438,13 @@ fn find_label_in_block<'a>(
     }
     loop {
         let child = cursor.node();
-        if child.kind() == "label_statement" {
+        if child.kind_name() == "label_statement" {
             if let Some(name_node) = child.child_by_field_name("name") {
                 if node_text(name_node, source) == target_name {
                     return Some(name_node);
                 }
             }
-        } else if !is_label_block(child.kind()) {
+        } else if !is_label_block(child.kind_name()) {
             if let Some(label) = find_label_in_block(child, source, target_name) {
                 return Some(label);
             }
@@ -471,19 +473,19 @@ fn try_require_goto(
     // in `local x <const>, y = require(...)` don't push `y`'s index past
     // the end of `values`.
     let mut p = ident_node.parent()?;
-    let idx_in_names = if matches!(p.kind(), "name_list" | "attribute_name_list") {
+    let idx_in_names = if matches!(p.kind_name(), "name_list" | "attribute_name_list") {
         let list = p;
         p = p.parent()?;
         identifier_index_in_list(list, ident_node)?
     } else {
         0
     };
-    if p.kind() != "local_declaration" {
+    if p.kind_name() != "local_declaration" {
         return None;
     }
     let values = p.child_by_field_name("values")?;
     let first_val = values.named_child(idx_in_names)?;
-    if first_val.kind() != "function_call" {
+    if first_val.kind_name() != "function_call" {
         return None;
     }
     let callee = first_val.child_by_field_name("callee")?;
@@ -495,7 +497,7 @@ fn try_require_goto(
     let arg = args.named_child(0)?;
 
     // Unwrap expression_list wrapper if present, then extract string content.
-    let string_node = if arg.kind() == "expression_list" {
+    let string_node = if arg.kind_name() == "expression_list" {
         arg.named_child(0)?
     } else {
         arg
@@ -531,7 +533,7 @@ fn identifier_index_in_list(list: tree_sitter::Node, target: tree_sitter::Node) 
     let mut id_idx: u32 = 0;
     for i in 0..list.named_child_count() {
         if let Some(c) = list.named_child(i as u32) {
-            if c.kind() == "identifier" {
+            if c.kind_name() == "identifier" {
                 if c.id() == target.id() {
                     return Some(id_idx);
                 }

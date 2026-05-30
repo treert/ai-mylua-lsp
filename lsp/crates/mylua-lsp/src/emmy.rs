@@ -5,6 +5,7 @@
 //!
 //! Grammar reference: `grammar/emmy.bnf`.
 
+use crate::syntax_kind::NodeKindExt;
 use std::fmt::{self, Write as _};
 
 // ===========================================================================
@@ -1540,11 +1541,11 @@ pub fn collect_preceding_comments<'a>(
         if next_start_row > prev_end_row + 1 {
             break;
         }
-        match prev.kind() {
+        match prev.kind_name() {
             "emmy_comment" => {
                 for i in (0..prev.named_child_count()).rev() {
                     if let Some(line_node) = prev.named_child(i as u32) {
-                        if line_node.kind() != "emmy_line" {
+                        if line_node.kind_name() != "emmy_line" {
                             continue;
                         }
                         let line_end_row = line_node.end_position().row;
@@ -1624,7 +1625,7 @@ pub fn collect_trailing_comment<'a>(
     source: &'a [u8],
 ) -> Option<String> {
     let next = next_same_line_after_statement_separators(node, source)?;
-    match next.kind() {
+    match next.kind_name() {
         "comment" => {
             let text = next.utf8_text(source).unwrap_or("");
             // Strip the `--` prefix (but not `---` Emmy lines — those are
@@ -1681,12 +1682,12 @@ pub fn collect_trailing_emmy_text<'a>(
     source: &'a [u8],
 ) -> Option<String> {
     let next = next_same_line_after_statement_separators(node, source)?;
-    match next.kind() {
+    match next.kind_name() {
         "emmy_comment" => {
             let mut lines = Vec::new();
             for i in 0..next.named_child_count() {
                 if let Some(child) = next.named_child(i as u32) {
-                    if child.kind() == "emmy_line" {
+                    if child.kind_name() == "emmy_line" {
                         let text = child.utf8_text(source).unwrap_or("").trim_end();
                         if !text.is_empty() {
                             lines.push(text.to_string());
@@ -1916,7 +1917,7 @@ mod tests {
         node: tree_sitter::Node<'a>,
         kind: &str,
     ) -> Option<tree_sitter::Node<'a>> {
-        if node.kind() == kind {
+        if node.kind_name() == kind {
             return Some(node);
         }
         for i in 0..node.child_count() {

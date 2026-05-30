@@ -5,6 +5,7 @@ use crate::emmy::{
     is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{
     format_resolved_type, format_signature, FunctionSignature, KnownType, TypeFact,
 };
@@ -43,8 +44,8 @@ pub fn hover(
     lsp_log!(
         "[hover] ident='{}' kind='{}' parent='{}'",
         ident_text,
-        ident_node.kind(),
-        ident_node.parent().map_or("none", |p| p.kind()),
+        ident_node.kind_name(),
+        ident_node.parent().map_or("none", |p| p.kind_name()),
     );
 
     // Walk ancestors to find a dotted access (`variable` node with
@@ -75,7 +76,7 @@ pub fn hover(
     // a function. If `hover_at_declaration` ever gains a real failure
     // path, revisit the tail `return Some(...)` too.
     if let Some(result) = walk_ancestors(ident_node, |p| {
-        if matches!(p.kind(), "variable" | "field_expression") {
+        if matches!(p.kind_name(), "variable" | "field_expression") {
             let field_is_ident = p
                 .child_by_field_name("field")
                 .map(|f| f.id() == ident_node.id())
@@ -84,7 +85,7 @@ pub fn hover(
                 return Some(hover_variable_field(p, doc, uri_id, index, all_docs));
             }
         }
-        if p.kind() == "field" {
+        if p.kind_name() == "field" {
             let key_is_ident = p
                 .child_by_field_name("key")
                 .map(|k| k.id() == ident_node.id())
@@ -98,7 +99,7 @@ pub fn hover(
         // `obj:method(...)` — the `method` identifier on a `function_call`
         // node. Infer the base type and resolve the method as a field so
         // hover shows the method's declaration + type info.
-        if p.kind() == "function_call" {
+        if p.kind_name() == "function_call" {
             let method_is_ident = p
                 .child_by_field_name("method")
                 .map(|m| m.id() == ident_node.id())
@@ -107,10 +108,10 @@ pub fn hover(
                 return Some(hover_method_call(p, doc, uri_id, index, all_docs));
             }
         }
-        if p.kind() == "function_name" {
+        if p.kind_name() == "function_name" {
             if let Some(decl) = p.parent() {
-                if decl.kind() == "function_declaration"
-                    || decl.kind() == "local_function_declaration"
+                if decl.kind_name() == "function_declaration"
+                    || decl.kind_name() == "local_function_declaration"
                 {
                     // `function a.b.c()` / `function a:m()` — only short
                     // circuit to the whole-declaration hover when the
@@ -482,7 +483,7 @@ fn is_function_name_tail(function_name: tree_sitter::Node, ident: tree_sitter::N
     let mut last_ident: Option<tree_sitter::Node> = None;
     for i in 0..function_name.child_count() {
         if let Some(child) = function_name.child(i as u32) {
-            if child.kind() == "identifier" {
+            if child.kind_name() == "identifier" {
                 last_ident = Some(child);
             }
         }
@@ -516,7 +517,7 @@ fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<
         .unwrap_or("")
         .to_string();
 
-    let kind_label = match decl_node.kind() {
+    let kind_label = match decl_node.kind_name() {
         "local_function_declaration" => "local function",
         _ => "function",
     };
@@ -644,7 +645,7 @@ fn hover_table_constructor_field(
 ) -> Option<Hover> {
     let source = doc.source();
     let key_node = field_node.child_by_field_name("key")?;
-    if key_node.kind() != "identifier" || key_node.start_byte() != field_node.start_byte() {
+    if key_node.kind_name() != "identifier" || key_node.start_byte() != field_node.start_byte() {
         return None;
     }
 
@@ -1448,7 +1449,7 @@ fn trailing_table_field_segment<'a>(
         if node.start_position().row != field_row {
             break;
         }
-        if node.kind() == "field" {
+        if node.kind_name() == "field" {
             segment_end = segment_end.min(node.start_byte());
             break;
         }
@@ -1550,7 +1551,7 @@ fn format_markdown_preserving_leading_indent(text: &str) -> String {
 fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
     let mut current = node;
     loop {
-        match current.kind() {
+        match current.kind_name() {
             "function_declaration"
             | "local_function_declaration"
             | "local_declaration"
@@ -1570,7 +1571,7 @@ fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
 fn find_enclosing_emmy_line(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
     let mut current = node;
     loop {
-        match current.kind() {
+        match current.kind_name() {
             "emmy_line" => return Some(current),
             "function_declaration"
             | "local_function_declaration"
@@ -1591,7 +1592,7 @@ fn find_enclosing_emmy_line(node: tree_sitter::Node) -> Option<tree_sitter::Node
 fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
     let mut current = node;
     loop {
-        match current.kind() {
+        match current.kind_name() {
             "field" => return Some(current),
             "function_declaration"
             | "local_function_declaration"

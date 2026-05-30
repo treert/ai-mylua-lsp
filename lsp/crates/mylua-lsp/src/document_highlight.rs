@@ -16,6 +16,7 @@
 //! declaration (so shadowing in nested scopes and the `local x = x + 1`
 //! RHS referring to the outer `x` are handled correctly).
 
+use crate::syntax_kind::NodeKindExt;
 use tower_lsp_server::ls_types::*;
 
 use crate::document::Document;
@@ -71,7 +72,7 @@ fn collect_highlights(
     out: &mut Vec<DocumentHighlight>,
 ) {
     let node = cursor.node();
-    if node.kind() == "identifier" && node_text(node, source) == name {
+    if node.kind_name() == "identifier" && node_text(node, source) == name {
         // Scope filter: when the click resolved to a local, only
         // include occurrences that point to the same declaration.
         let matches_scope = match target_decl_byte {
@@ -122,7 +123,7 @@ fn collect_highlights(
 fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
     let mut current = ident;
     while let Some(parent) = current.parent() {
-        match parent.kind() {
+        match parent.kind_name() {
             // `variable` with field / subscript form: `object`
             // (required for nested access) or `index` (subscript form)
             // represents a READ of the current frame, regardless of

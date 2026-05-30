@@ -19,6 +19,7 @@
 //! Hints emitted outside the requested `params.range` are skipped —
 //! clients typically request viewport-scoped results.
 
+use crate::syntax_kind::NodeKindExt;
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
@@ -93,7 +94,7 @@ fn walk(cursor: &mut tree_sitter::TreeCursor, ctx: &mut InlayCtx) {
         return;
     }
 
-    match node.kind() {
+    match node.kind_name() {
         "function_call" if ctx.cfg.parameter_names => {
             collect_parameter_name_hints(
                 node,
@@ -234,7 +235,7 @@ fn collect_variable_type_hints(
         let Some(id) = names.named_child(i as u32) else {
             continue;
         };
-        if id.kind() != "identifier" {
+        if id.kind_name() != "identifier" {
             continue;
         }
         let name = node_text(id, source);
@@ -305,7 +306,7 @@ fn is_interesting_type(fact: &TypeFact) -> bool {
 fn preceded_by_type_annotation(decl: tree_sitter::Node, source: &[u8]) -> bool {
     let mut prev = decl.prev_sibling();
     while let Some(n) = prev {
-        match n.kind() {
+        match n.kind_name() {
             "emmy_comment" => {
                 let text = node_text(n, source);
                 if text.contains("@type") {
@@ -321,7 +322,7 @@ fn preceded_by_type_annotation(decl: tree_sitter::Node, source: &[u8]) -> bool {
     }
     // Also check trailing comment on the same line: `local x = {} ---@type Foo`
     if let Some(next) = decl.next_sibling() {
-        if next.start_position().row == decl.end_position().row && next.kind() == "comment" {
+        if next.start_position().row == decl.end_position().row && next.kind_name() == "comment" {
             let text = node_text(next, source);
             if text.contains("@type") {
                 return true;

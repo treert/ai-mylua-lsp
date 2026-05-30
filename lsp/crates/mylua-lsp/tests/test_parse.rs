@@ -1,5 +1,6 @@
 mod test_helpers;
 
+use mylua_lsp::syntax_kind::{kind, NodeKindExt};
 use test_helpers::*;
 
 #[test]
@@ -7,7 +8,7 @@ fn parse_simple_local() {
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, "local abc = 1");
     let root = doc.root_node().unwrap();
-    assert_eq!(root.kind(), "source_file");
+    assert!(root.is_kind(kind::SOURCE_FILE));
     assert!(!root.has_error(), "parse tree should have no errors");
 }
 
@@ -77,7 +78,7 @@ print(ppd)
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let root = doc.root_node().unwrap();
-    assert_eq!(root.kind(), "source_file");
+    assert!(root.is_kind(kind::SOURCE_FILE));
     // test1 has some intentionally broken lines, so we expect parse errors
 }
 
@@ -100,7 +101,7 @@ afjsofjao"#;
     let mut parser = new_parser();
     let doc = parse_doc(&mut parser, src);
     let root = doc.root_node().unwrap();
-    assert_eq!(root.kind(), "source_file");
+    assert!(root.is_kind(kind::SOURCE_FILE));
 }
 
 #[test]

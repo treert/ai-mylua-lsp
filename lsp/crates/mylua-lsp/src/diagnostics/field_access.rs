@@ -1,5 +1,6 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
@@ -55,7 +56,7 @@ pub(super) fn check_field_access_diagnostics(
 fn is_assignment_target(node: tree_sitter::Node) -> bool {
     let mut current = node;
     while let Some(parent) = current.parent() {
-        if parent.kind() == "assignment_statement" {
+        if parent.kind_name() == "assignment_statement" {
             // `current` is always an ancestor of (or equal to) `node`,
             // so `is_ancestor_or_equal(left, node)` already covers the
             // `left == current` case.
@@ -71,7 +72,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
 fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
     let node = cursor.node();
 
-    let is_dotted = matches!(node.kind(), "field_expression" | "variable")
+    let is_dotted = matches!(node.kind_name(), "field_expression" | "variable")
         && node.child_by_field_name("object").is_some()
         && node.child_by_field_name("field").is_some();
 
@@ -81,7 +82,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
         }
     }
 
-    if node.kind() == "function_call" {
+    if node.kind_name() == "function_call" {
         if let (Some(callee), Some(method)) = (
             node.child_by_field_name("callee"),
             node.child_by_field_name("method"),

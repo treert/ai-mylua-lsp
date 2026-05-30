@@ -122,6 +122,7 @@ impl DocumentLookup for DocumentStoreView<'_> {
 #[cfg(test)]
 mod tests {
     use super::{find_document, Document};
+    use crate::syntax_kind::{kind, NodeKindExt};
     use crate::uri_id::UriId;
     use crate::util::LuaSource;
     use crate::{new_parser, summary_builder};
@@ -226,7 +227,7 @@ mod tests {
 
         let rebuilt = doc.ensure_tree().expect("tree should parse");
 
-        assert_eq!(rebuilt.root_node().kind(), "source_file");
+        assert!(rebuilt.root_node().is_kind(kind::SOURCE_FILE));
         assert!(doc.tree.is_some());
     }
 }

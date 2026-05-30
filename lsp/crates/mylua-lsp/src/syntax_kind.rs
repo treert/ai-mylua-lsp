@@ -51,6 +51,7 @@ impl PartialEq<SyntaxKind> for u16 {
 pub trait NodeKindExt {
     fn syntax_kind(&self) -> SyntaxKind;
     fn is_kind(&self, kind: SyntaxKind) -> bool;
+    fn kind_name(&self) -> &'static str;
 }
 
 impl<'tree> NodeKindExt for tree_sitter::Node<'tree> {
@@ -62,6 +63,11 @@ impl<'tree> NodeKindExt for tree_sitter::Node<'tree> {
     #[inline]
     fn is_kind(&self, kind: SyntaxKind) -> bool {
         self.kind_id() == kind.id()
+    }
+
+    #[inline]
+    fn kind_name(&self) -> &'static str {
+        kind::name(self.syntax_kind()).unwrap_or("<unknown>")
     }
 }
 

@@ -1,4 +1,5 @@
 use super::type_compat::{infer_return_literal_type, is_type_compatible};
+use crate::syntax_kind::NodeKindExt;
 use crate::type_system::{KnownType, TypeFact};
 use crate::util::LineIndex;
 use tower_lsp_server::ls_types::*;
@@ -27,7 +28,7 @@ fn collect_function_like_nodes<'tree>(
     out: &mut Vec<tree_sitter::Node<'tree>>,
 ) {
     if matches!(
-        node.kind(),
+        node.kind_name(),
         "function_declaration" | "local_function_declaration" | "function_definition"
     ) {
         out.push(node);
@@ -51,7 +52,7 @@ fn inspect_function_returns(
     // locate preceding `---@return` comments) is the enclosing
     // `local_declaration` / `assignment_statement`. For the named
     // forms, the declaration node itself carries the comments.
-    let anchor = match fun.kind() {
+    let anchor = match fun.kind_name() {
         "function_definition" => {
             crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
         }
@@ -106,14 +107,14 @@ fn collect_return_statements<'tree>(
     node: tree_sitter::Node<'tree>,
     out: &mut Vec<tree_sitter::Node<'tree>>,
 ) {
-    if node.kind() == "return_statement" {
+    if node.kind_name() == "return_statement" {
         out.push(node);
         return;
     }
     // Do NOT descend into nested functions — their own `return`
     // statements belong to them, not the outer function.
     if matches!(
-        node.kind(),
+        node.kind_name(),
         "function_declaration" | "local_function_declaration" | "function_definition"
     ) {
         return;
@@ -138,7 +139,7 @@ fn inspect_single_return(
     // child directly; absence means a bare `return` (0 values).
     let values = (0..ret.named_child_count())
         .filter_map(|i| ret.named_child(i as u32))
-        .find(|c| c.kind() == "expression_list");
+        .find(|c| c.kind_name() == "expression_list");
     let actual_count = values.map(|v| v.named_child_count() as u32).unwrap_or(0);
     let declared_count = declared_types.len() as u32;
     let required_count = required_return_count(declared_types) as u32;
@@ -152,7 +153,7 @@ fn inspect_single_return(
     if let Some(values) = values {
         if let Some(last) = values.named_child(values.named_child_count().saturating_sub(1) as u32)
         {
-            if matches!(last.kind(), "function_call" | "vararg_expression") {
+            if matches!(last.kind_name(), "function_call" | "vararg_expression") {
                 return;
             }
         }

@@ -1,3 +1,4 @@
+use crate::syntax_kind::NodeKindExt;
 use std::collections::HashMap;
 
 use crate::type_system::FunctionSummaryId;
@@ -49,7 +50,7 @@ fn collect_calls_in_scope(
     name_to_id: &HashMap<String, FunctionSummaryId>,
     function_node_to_id: &HashMap<(usize, usize), FunctionSummaryId>,
 ) {
-    match node.kind() {
+    match node.kind_name() {
         "function_declaration" | "local_function_declaration" => {
             let name = node
                 .child_by_field_name("name")
@@ -145,13 +146,13 @@ fn collect_calls_in_scope(
 /// (rare for `function_definition`) are kept as-is.
 fn infer_anon_caller_name(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
     let stmt = enclosing_statement_for_function_expr(node)?;
-    match stmt.kind() {
+    match stmt.kind_name() {
         "local_declaration" => {
             let names = stmt.child_by_field_name("names")?;
             let values = stmt.child_by_field_name("values")?;
             let index = rhs_index_of(values, node)?;
             let id = names.named_child(index as u32)?;
-            if id.kind() == "identifier" {
+            if id.kind_name() == "identifier" {
                 Some(node_text(id, source).to_string())
             } else {
                 None

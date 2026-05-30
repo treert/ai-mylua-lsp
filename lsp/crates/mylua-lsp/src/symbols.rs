@@ -22,6 +22,7 @@
 //! known to the summary, we still emit it at top level under its full
 //! dotted name so users aren't surprised by a missing symbol.
 
+use crate::syntax_kind::NodeKindExt;
 use std::collections::{HashMap, HashSet};
 
 use tower_lsp_server::ls_types::*;
@@ -224,7 +225,7 @@ impl<'a> OutlineBuilder<'a> {
         }
         loop {
             let node = cursor.node();
-            match node.kind() {
+            match node.kind_name() {
                 "function_declaration" => {
                     if let Some(sym) = self.function_declaration_symbol(node, source) {
                         self.top.push(sym);
@@ -251,7 +252,7 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_statement(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        match node.kind() {
+        match node.kind_name() {
             "function_declaration" => self.visit_function_declaration(node, source),
             "local_function_declaration" => self.visit_local_function(node, source),
             "local_declaration" => self.visit_local_declaration(node, source),
@@ -369,7 +370,7 @@ impl<'a> OutlineBuilder<'a> {
             let Some(id_node) = names_node.named_child(i as u32) else {
                 continue;
             };
-            if id_node.kind() != "identifier" {
+            if id_node.kind_name() != "identifier" {
                 continue;
             }
             let name = node_text(id_node, source).to_string();
@@ -377,7 +378,7 @@ impl<'a> OutlineBuilder<'a> {
                 continue;
             }
             let value_node = values_node.and_then(|v| v.named_child(i as u32));
-            if let Some(value) = value_node.filter(|n| n.kind() == "function_definition") {
+            if let Some(value) = value_node.filter(|n| n.kind_name() == "function_definition") {
                 symbols.push(self.anonymous_function_symbol(
                     name,
                     Some("anonymous".to_string()),
@@ -415,7 +416,7 @@ impl<'a> OutlineBuilder<'a> {
             let Some(id_node) = names_node.named_child(i as u32) else {
                 continue;
             };
-            if id_node.kind() != "identifier" {
+            if id_node.kind_name() != "identifier" {
                 continue;
             }
             let name = node_text(id_node, source).to_string();
@@ -500,7 +501,7 @@ impl<'a> OutlineBuilder<'a> {
         let value = node
             .child_by_field_name("right")
             .and_then(|right| right.named_child(0))
-            .filter(|n| n.kind() == "function_definition")?;
+            .filter(|n| n.kind_name() == "function_definition")?;
 
         Some(self.anonymous_function_symbol(
             name,
@@ -634,7 +635,7 @@ impl<'a> OutlineBuilder<'a> {
         }
         loop {
             let child = cursor.node();
-            match child.kind() {
+            match child.kind_name() {
                 "function_declaration" => {
                     if let Some(sym) = self.function_declaration_symbol(child, source) {
                         out.push(sym);
@@ -692,7 +693,7 @@ impl<'a> OutlineBuilder<'a> {
         }
         loop {
             let child = cursor.node();
-            match child.kind() {
+            match child.kind_name() {
                 "function_definition" => {
                     out.push(self.anonymous_function_symbol(
                         "<anonymous>".to_string(),
@@ -735,7 +736,7 @@ impl<'a> OutlineBuilder<'a> {
             let Some(id_node) = names_node.named_child(i as u32) else {
                 continue;
             };
-            if id_node.kind() != "identifier" {
+            if id_node.kind_name() != "identifier" {
                 continue;
             }
             let name = node_text(id_node, source).to_string();
@@ -745,7 +746,7 @@ impl<'a> OutlineBuilder<'a> {
             let Some(value) = values_node.and_then(|v| v.named_child(i as u32)) else {
                 continue;
             };
-            if value.kind() == "function_definition" {
+            if value.kind_name() == "function_definition" {
                 out.push(self.anonymous_function_symbol(
                     name,
                     Some("anonymous".to_string()),
@@ -782,7 +783,7 @@ impl<'a> OutlineBuilder<'a> {
         source: &[u8],
         out: &mut Vec<DocumentSymbol>,
     ) {
-        match node.kind() {
+        match node.kind_name() {
             "identifier" | "varargs" => {
                 let name = node_text(node, source).to_string();
                 if name.is_empty() {
@@ -812,7 +813,7 @@ impl<'a> OutlineBuilder<'a> {
 
     fn for_variable_symbols(&self, node: tree_sitter::Node, source: &[u8]) -> Vec<DocumentSymbol> {
         let mut symbols = Vec::new();
-        match node.kind() {
+        match node.kind_name() {
             "for_numeric_statement" => {
                 if let Some(name_node) = node.child_by_field_name("name") {
                     self.push_for_variable_symbol(node, name_node, source, &mut symbols);
@@ -822,7 +823,7 @@ impl<'a> OutlineBuilder<'a> {
                 if let Some(names_node) = node.child_by_field_name("names") {
                     for i in 0..names_node.named_child_count() {
                         if let Some(id_node) = names_node.named_child(i as u32) {
-                            if id_node.kind() == "identifier" {
+                            if id_node.kind_name() == "identifier" {
                                 self.push_for_variable_symbol(node, id_node, source, &mut symbols);
                             }
                         }
@@ -923,7 +924,7 @@ fn find_named_child_kind<'tree>(
 ) -> Option<tree_sitter::Node<'tree>> {
     for i in 0..node.named_child_count() {
         let child = node.named_child(i as u32)?;
-        if child.kind() == kind {
+        if child.kind_name() == kind {
             return Some(child);
         }
     }

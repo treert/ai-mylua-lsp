@@ -3,6 +3,7 @@ use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
+use crate::syntax_kind::NodeKindExt;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{find_node_at_position, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -350,7 +351,7 @@ fn try_identify_field(
     let source = doc.source();
     let parent = ident_node.parent()?;
 
-    let (base_node, field_name) = match parent.kind() {
+    let (base_node, field_name) = match parent.kind_name() {
         // `obj.field` — ident is the `field` child
         "variable" | "field_expression" => {
             let field_child = parent.child_by_field_name("field")?;
@@ -390,7 +391,7 @@ fn try_identify_field(
                 if child.id() == ident_node.id() {
                     break;
                 }
-                if child.kind() == "identifier" {
+                if child.kind_name() == "identifier" {
                     if segments.is_empty() {
                         first_segment_byte = child.start_byte();
                     }
@@ -538,7 +539,7 @@ fn verify_field(
         return false;
     };
 
-    let base_node = match parent.kind() {
+    let base_node = match parent.kind_name() {
         "variable" | "field_expression" => {
             let Some(field_child) = parent.child_by_field_name("field") else {
                 return false;
@@ -582,7 +583,7 @@ fn verify_field(
                 if child.id() == node.id() {
                     break;
                 }
-                if child.kind() == "identifier" {
+                if child.kind_name() == "identifier" {
                     if segments.is_empty() {
                         first_segment_byte = child.start_byte();
                     }
@@ -663,7 +664,7 @@ fn find_identifier_at<'a>(
 ) -> Option<tree_sitter::Node<'a>> {
     let node =
         root.descendant_for_byte_range(byte_offset, byte_offset + name_len.saturating_sub(1))?;
-    if node.kind() == "identifier"
+    if node.kind_name() == "identifier"
         && node.start_byte() == byte_offset
         && node.end_byte() == byte_offset + name_len
     {
@@ -740,7 +741,7 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
     let Some(parent) = node.parent() else {
         return false;
     };
-    match parent.kind() {
+    match parent.kind_name() {
         "variable" | "field_expression" => parent
             .child_by_field_name("field")
             .is_some_and(|f| f.id() == node.id()),
@@ -802,7 +803,7 @@ fn scan_type_in_comments(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    match node.kind() {
+    match node.kind_name() {
         "emmy_line" | "comment" => {
             emit_type_matches_in_node(node, type_name, source, uri_id, locations, line_index);
             return;
