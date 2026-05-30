@@ -1,0 +1,142 @@
+//! Tree-sitter node kind IDs for the mylua grammar.
+//!
+//! `tree_sitter::Node::kind()` is convenient but goes through the C string
+//! path. This module centralizes the generated `kind_id()` constants so hot
+//! AST walks can use readable numeric kind checks without scattering raw IDs.
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[repr(transparent)]
+pub struct SyntaxKind(u16);
+
+impl SyntaxKind {
+    #[inline]
+    pub const fn new(id: u16) -> Self {
+        Self(id)
+    }
+
+    #[inline]
+    pub const fn id(self) -> u16 {
+        self.0
+    }
+}
+
+impl From<SyntaxKind> for u16 {
+    #[inline]
+    fn from(kind: SyntaxKind) -> Self {
+        kind.id()
+    }
+}
+
+impl From<u16> for SyntaxKind {
+    #[inline]
+    fn from(id: u16) -> Self {
+        Self::new(id)
+    }
+}
+
+impl PartialEq<u16> for SyntaxKind {
+    #[inline]
+    fn eq(&self, other: &u16) -> bool {
+        self.0 == *other
+    }
+}
+
+impl PartialEq<SyntaxKind> for u16 {
+    #[inline]
+    fn eq(&self, other: &SyntaxKind) -> bool {
+        *self == other.0
+    }
+}
+
+pub trait NodeKindExt {
+    fn syntax_kind(&self) -> SyntaxKind;
+    fn is_kind(&self, kind: SyntaxKind) -> bool;
+}
+
+impl<'tree> NodeKindExt for tree_sitter::Node<'tree> {
+    #[inline]
+    fn syntax_kind(&self) -> SyntaxKind {
+        SyntaxKind::new(self.kind_id())
+    }
+
+    #[inline]
+    fn is_kind(&self, kind: SyntaxKind) -> bool {
+        self.kind_id() == kind.id()
+    }
+}
+
+pub mod kind {
+    include!(concat!(env!("OUT_DIR"), "/syntax_kind_generated.rs"));
+}
+
+pub use kind::name;
+
+#[cfg(test)]
+mod tests {
+    use super::{kind, NodeKindExt};
+
+    #[test]
+    fn generated_constants_match_tree_sitter_language() {
+        let language: tree_sitter::Language = tree_sitter_mylua::LANGUAGE.into();
+
+        for (kind, name) in kind::ALL {
+            let named = !matches!(
+                *name,
+                ";" | "="
+                    | "::"
+                    | ","
+                    | "."
+                    | ":"
+                    | "["
+                    | "]"
+                    | "<"
+                    | ">"
+                    | "<="
+                    | ">="
+                    | "=="
+                    | "~="
+                    | "|"
+                    | "~"
+                    | "&"
+                    | "<<"
+                    | ">>"
+                    | ".."
+                    | "+"
+                    | "-"
+                    | "*"
+                    | "/"
+                    | "//"
+                    | "%"
+                    | "^"
+                    | "#"
+                    | "..."
+                    | "("
+                    | ")"
+                    | "{"
+                    | "}"
+                    | "\""
+                    | "'"
+            );
+            assert_eq!(language.id_for_node_kind(name, named), kind.id(), "{name}");
+        }
+    }
+
+    #[test]
+    fn node_extension_reads_kind_id() {
+        let mut parser = tree_sitter::Parser::new();
+        parser
+            .set_language(&tree_sitter_mylua::LANGUAGE.into())
+            .expect("mylua grammar");
+        let tree = parser
+            .parse("local function hello() end\n", None)
+            .expect("parse");
+        let root = tree.root_node();
+
+        assert!(root.is_kind(kind::SOURCE_FILE));
+        assert_eq!(super::name(root.syntax_kind()), Some("source_file"));
+        match root.syntax_kind() {
+            kind::SOURCE_FILE => {}
+            other => panic!("unexpected root kind: {other:?}"),
+        }
+    }
+}

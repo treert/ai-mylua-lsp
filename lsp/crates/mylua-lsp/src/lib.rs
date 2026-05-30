@@ -29,6 +29,7 @@ pub mod signature_help;
 pub mod summary;
 pub mod summary_builder;
 pub mod symbols;
+pub mod syntax_kind;
 pub mod table_shape;
 pub mod type_inference;
 pub mod type_system;
