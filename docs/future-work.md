@@ -24,24 +24,18 @@
 
 ## 2. 泛型支持缺口
 
-### 2.1 [P2] `is_named_type_compatible` 忽略泛型实参
+### 2.1 [P3] 泛型上界约束（`@generic T : Foo`）未校验
 
-- **问题**：`List<string>` 和 `List<number>` 被当成同一类型，不报诊断。
-- **方案**：按 params 递归比较；允许无实参侧作为"any"宽松兜底。默认 severity 建议 `Warning` 或 `default off`。
-- **验收**：`List<string>` 赋值 `List<number>` 触发 `emmyTypeMismatch`。
-
-### 2.2 [P3] 泛型上界约束（`@generic T : Foo`）未解析
-
-- **问题**：`generic_params` 只存名字不存 bound，违反约束的用法无法诊断。
-- **方案**：升级为 `Vec<GenericParam { name, bound }>` + 解析 + 校验。
+- **问题**：Emmy 注解解析层已能读出 constraint，但 summary 仍只保存泛型名，违反约束的用法无法诊断。
+- **方案**：将 bound 传播到 `FunctionSummary` / `TypeDefinition`，并在泛型实例化与调用诊断中校验。
 - **验收**：约束违反 / 满足两类用例。
 
-### 2.3 [P3] 泛型实参数量不校验
+### 2.2 [P3] 泛型实参数量不校验
 
 - **问题**：`Foo<T, U>` 用 `Foo<string>`（少一个）静默兜底不报错。
 - **方案**：对比 `generic_params.len()` 与实参数量，不等报 `genericArityMismatch`。
 
-### 2.4 [P3] 递归泛型栈溢出风险
+### 2.3 [P3] 递归泛型栈溢出风险
 
 - **问题**：`substitute_in_fact` 无深度保护，病态递归输入可能栈溢出。
 - **方案**：加深度计数器，超阈值（如 32）停止递归返回原 fact。
@@ -61,10 +55,9 @@
 
 ## 4. 推荐落地顺序
 
-1. **2.1** 泛型 variance 诊断 — 收益明显，默认 off 降低风险
-2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
-3. **1.3** 反向图查重数据结构 — 规模到 1 万+ 文件前不紧迫
-4. 其余 P3 项按需补做
+1. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
+2. **1.3** `type_definitions` O(1) 详情索引 — 规模到 1 万+ 文件前不紧迫
+3. 其余 P3 项按需补做
 
 ---
 
