@@ -10,10 +10,11 @@
 //!   argument if `foo`'s `FunctionSummary` is indexed. Method calls
 //!   (`obj:m(1)`) skip the implicit `self` parameter.
 //! - **Variable types** (`inlayHint.variableTypes = true`): after a
-//!   `local x = ...` declaration, show `: Type` when the inferred
-//!   `scope_tree` type carries a non-`Unknown`, non-`Table` /
-//!   non-`Function` fact (those render as info-less "table" /
-//!   "function" labels and get filtered out to reduce noise).
+//!   `local x = ...` declaration, resolve the inferred local type through
+//!   the workspace index and show `: Type` when the final type is useful.
+//!   Non-informative `Unknown`, `Table`, and `Function` facts are filtered
+//!   out to reduce noise.
+
 //!
 //! Hints emitted outside the requested `params.range` are skipped —
 //! clients typically request viewport-scoped results.
@@ -23,8 +24,10 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::config::InlayHintConfig;
 use crate::document::Document;
+use crate::resolver;
 use crate::signature_help;
-use crate::type_system::{KnownType, TypeFact};
+use crate::type_system::{format_resolved_type, KnownType, TypeFact};
+
 use crate::uri_id::UriId;
 use crate::util::{node_text, LineIndex};
 
@@ -103,8 +106,17 @@ fn walk(cursor: &mut tree_sitter::TreeCursor, ctx: &mut InlayCtx) {
             );
         }
         "local_declaration" if ctx.cfg.variable_types => {
-            collect_variable_type_hints(node, ctx.source, ctx.scope_tree, ctx.out, ctx.line_index);
+            collect_variable_type_hints(
+                node,
+                ctx.source,
+                ctx.uri_id,
+                ctx.scope_tree,
+                ctx.index,
+                ctx.out,
+                ctx.line_index,
+            );
         }
+
         _ => {}
     }
 
@@ -204,7 +216,9 @@ fn emit_param_hint(
 fn collect_variable_type_hints(
     decl: tree_sitter::Node,
     source: &[u8],
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
+    index: &WorkspaceAggregation,
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
@@ -224,16 +238,26 @@ fn collect_variable_type_hints(
             continue;
         }
         let name = node_text(id, source);
-        let Some(tf) = scope_tree.resolve_type(id.start_byte(), name).cloned() else {
+        let Some(raw_type) = scope_tree.resolve_type(id.start_byte(), name).cloned() else {
             continue;
         };
-        if !is_interesting_type(&tf) {
+        let resolved =
+            resolver::resolve_local_in_file(uri_id, name, id.start_byte(), scope_tree, index);
+        let Some(display_type) = display_type_for_variable_hint(&raw_type, &resolved.type_fact)
+        else {
+            continue;
+        };
+        if !is_interesting_type(display_type) {
+            continue;
+        }
+        let display = format_resolved_type(display_type);
+        if display == "unknown" {
             continue;
         }
         let end_pos = line_index.ts_point_to_position(id.end_position(), source);
         out.push(InlayHint {
             position: end_pos,
-            label: InlayHintLabel::String(format!(": {}", tf)),
+            label: InlayHintLabel::String(format!(": {}", display)),
             kind: Some(InlayHintKind::TYPE),
             text_edits: None,
             tooltip: None,
@@ -241,6 +265,24 @@ fn collect_variable_type_hints(
             padding_right: None,
             data: None,
         });
+    }
+}
+
+fn display_type_for_variable_hint<'a>(
+    raw: &'a TypeFact,
+    resolved: &'a TypeFact,
+) -> Option<&'a TypeFact> {
+    if resolved != &TypeFact::Unknown {
+        return Some(resolved);
+    }
+    is_user_facing_fallback_type(raw).then_some(raw)
+}
+
+fn is_user_facing_fallback_type(fact: &TypeFact) -> bool {
+    match fact {
+        TypeFact::Stub(_) | TypeFact::Unknown => false,
+        TypeFact::Union(types) => types.iter().all(is_user_facing_fallback_type),
+        TypeFact::Known(_) => true,
     }
 }
 

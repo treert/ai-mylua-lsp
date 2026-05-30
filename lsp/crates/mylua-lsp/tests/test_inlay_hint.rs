@@ -121,6 +121,97 @@ fn inlay_hints_variable_type_for_primitive() {
 }
 
 #[test]
+fn inlay_hints_variable_type_resolves_call_return_to_final_class() {
+    let src = r#"
+---@class BaseCls
+local BaseCls = {}
+
+---@generic T
+---@param self T
+---@return T
+function BaseCls:new()
+    return self
+end
+
+---@param class_name string
+---@param super? BaseCls
+---@return BaseCls
+function class(class_name, super)
+    return {}
+end
+
+---@class ClassA1:BaseCls
+ClassA1 = class("ClassA1")
+
+---@class ClassA2:ClassA1
+ClassA2 = class("ClassA2", ClassA1)
+
+local a1 = ClassA1:new()
+local a2 = ClassA2:new()
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
+    let hints = inlay_hint::inlay_hints(
+        &doc,
+        intern_uri(&uri),
+        full_range(),
+        &mut agg,
+        &cfg(true, false, true),
+    );
+    let labels: Vec<String> = hints.iter().map(label).collect();
+    assert!(
+        labels.iter().any(|l| l == ": ClassA1"),
+        "should resolve ClassA1:new() to ClassA1, got: {:?}",
+        labels,
+    );
+    assert!(
+        labels.iter().any(|l| l == ": ClassA2"),
+        "should resolve ClassA2:new() to ClassA2, got: {:?}",
+        labels,
+    );
+    assert!(
+        labels.iter().all(|l| !l.contains("global:")),
+        "resolved inlay hints should not expose raw symbolic stubs, got: {:?}",
+        labels,
+    );
+}
+
+#[test]
+fn inlay_hints_variable_type_skips_unresolved_symbolic_stubs() {
+    let src = r#"
+local x = MissingGlobal.foo
+local y = require("missing_mod")
+local n = 1
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
+    let hints = inlay_hint::inlay_hints(
+        &doc,
+        intern_uri(&uri),
+        full_range(),
+        &mut agg,
+        &cfg(true, false, true),
+    );
+    let labels: Vec<String> = hints
+        .iter()
+        .filter(|h| h.kind == Some(InlayHintKind::TYPE))
+        .map(label)
+        .collect();
+    assert!(
+        labels
+            .iter()
+            .any(|l| l.contains("integer") || l.contains("number")),
+        "sanity check: primitive type hint should still be emitted, got: {:?}",
+        labels,
+    );
+    assert!(
+        labels.iter().all(|l| !l.contains("global:")
+            && !l.contains("require(")
+            && !l.contains("missing_mod")),
+        "unresolved symbolic stubs should not be shown as variable type hints, got: {:?}",
+        labels,
+    );
+}
+
+#[test]
 fn inlay_hints_variable_type_skipped_when_emmy_annotated() {
     // `---@type Foo local x = nil` — user already wrote the type,
     // don't duplicate as an inlay hint.

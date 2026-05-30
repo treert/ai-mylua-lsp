@@ -5,7 +5,9 @@ use crate::emmy::{
     is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
-use crate::type_system::{FunctionSignature, KnownType, TypeFact};
+use crate::type_system::{
+    format_resolved_type, format_signature, FunctionSignature, KnownType, TypeFact,
+};
 use crate::types::DefKind;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
@@ -860,27 +862,6 @@ fn resolve_local_type_info(
     } else {
         Some(display)
     }
-}
-
-fn format_resolved_type(fact: &TypeFact) -> String {
-    // Specialize `Known(Function(sig))` to a fully formatted
-    // `fun(a: T, b: U): R` signature — the default `Display` for
-    // `KnownType::Function` renders just `"function"` which is
-    // info-less on the hover "Type:" line.
-    match fact {
-        TypeFact::Known(crate::type_system::KnownType::Function(sig)) => {
-            return format_signature(sig);
-        }
-        TypeFact::Known(crate::type_system::KnownType::FunctionRef(_)) => {
-            // FunctionRef is an opaque ID; fall through to Display.
-        }
-        _ => {}
-    }
-    format!("{}", fact)
-}
-
-fn format_signature(sig: &crate::type_system::FunctionSignature) -> String {
-    sig.display_label(None, false)
 }
 
 fn lua_code_block(lines: &[String]) -> String {

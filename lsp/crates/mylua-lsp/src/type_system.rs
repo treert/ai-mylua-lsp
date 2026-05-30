@@ -185,6 +185,19 @@ impl FunctionSignature {
     }
 }
 
+/// Format a function signature for concise type displays such as hover and inlay hints.
+pub fn format_signature(sig: &FunctionSignature) -> String {
+    sig.display_label(None, false)
+}
+
+/// Format a resolved type fact for user-facing type displays.
+pub fn format_resolved_type(fact: &TypeFact) -> String {
+    match fact {
+        TypeFact::Known(KnownType::Function(sig)) => format_signature(sig),
+        _ => format!("{}", fact),
+    }
+}
+
 /// Recursively replace `EmmyType("self")` / `EmmyGeneric("self", …)`
 /// references inside `fact` with the supplied `class_name`. Used by
 /// `summary_builder` when building method signatures so that
