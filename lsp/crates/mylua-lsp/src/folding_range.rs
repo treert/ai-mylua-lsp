@@ -32,6 +32,7 @@
 use tower_lsp_server::ls_types::{FoldingRange, FoldingRangeKind};
 
 use crate::document::Document;
+use crate::syntax_kind::{kind, NodeKindExt};
 
 pub fn folding_range(doc: &Document) -> Vec<FoldingRange> {
     let mut out = Vec::new();
@@ -74,7 +75,7 @@ fn walk_for_blocks<'t>(
     // `if` branch so each branch has its own collapse affordance
     // alongside `elseif_clause` / `else_clause` folds which match
     // below as their own kinds.
-    if node.kind() == "if_statement" {
+    if node.is_kind(kind::IF_STATEMENT) {
         if let Some(fold) = fold_for_if_branch(node) {
             out.push(fold);
         }
@@ -104,7 +105,7 @@ fn fold_for_if_branch(if_stmt: tree_sitter::Node) -> Option<FoldingRange> {
         let Some(child) = if_stmt.named_child(i as u32) else {
             continue;
         };
-        if matches!(child.kind(), "elseif_clause" | "else_clause") {
+        if matches!(child.syntax_kind(), kind::ELSEIF_CLAUSE | kind::ELSE_CLAUSE) {
             first_clause_row = Some(child.start_position().row as u32);
             break;
         }
@@ -127,17 +128,17 @@ fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<Folding
     let start_row = node.start_position().row as u32;
     let end_row = node.end_position().row as u32;
 
-    match node.kind() {
-        "function_declaration"
-        | "local_function_declaration"
-        | "function_definition"
-        | "do_statement"
-        | "while_statement"
-        | "repeat_statement"
-        | "if_statement"
-        | "for_numeric_statement"
-        | "for_generic_statement"
-        | "table_constructor" => {
+    match node.syntax_kind() {
+        kind::FUNCTION_DECLARATION
+        | kind::LOCAL_FUNCTION_DECLARATION
+        | kind::FUNCTION_DEFINITION
+        | kind::DO_STATEMENT
+        | kind::WHILE_STATEMENT
+        | kind::REPEAT_STATEMENT
+        | kind::IF_STATEMENT
+        | kind::FOR_NUMERIC_STATEMENT
+        | kind::FOR_GENERIC_STATEMENT
+        | kind::TABLE_CONSTRUCTOR => {
             if end_row > start_row + 1 {
                 Some(FoldingRange {
                     start_line: start_row,
@@ -160,7 +161,7 @@ fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<Folding
         // another clause or the `end` keyword) so every body line
         // of this branch collapses and only the clause opener stays
         // visible.
-        "elseif_clause" | "else_clause" => {
+        kind::ELSEIF_CLAUSE | kind::ELSE_CLAUSE => {
             let next_row = node
                 .next_sibling()
                 .map(|n| n.start_position().row as u32)
@@ -179,7 +180,7 @@ fn fold_for_block_node(node: tree_sitter::Node, source: &[u8]) -> Option<Folding
             }
         }
 
-        "comment" => {
+        kind::COMMENT => {
             if end_row > start_row && is_block_comment(node, source) {
                 Some(FoldingRange {
                     start_line: start_row,
@@ -237,7 +238,7 @@ fn collect_emmy_rows<'t>(
     cursor: &mut tree_sitter::TreeCursor<'t>,
     rows: &mut Vec<u32>,
 ) {
-    if node.kind() == "emmy_comment" {
+    if node.is_kind(kind::EMMY_COMMENT) {
         let sr = node.start_position().row as u32;
         let er = node.end_position().row as u32;
         for r in sr..=er {

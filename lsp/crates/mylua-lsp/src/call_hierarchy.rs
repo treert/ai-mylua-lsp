@@ -31,6 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::type_system::FunctionSummaryId;
 use crate::uri_id::{intern_uri, resolve_uri, UriId};
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
@@ -131,11 +132,11 @@ fn item_from_enclosing_declaration(
     // For `function_declaration`, walking up from the identifier
     // leaves us at `function_name`, and its parent is
     // `function_declaration`.
-    let decl = match parent.kind() {
-        "function_declaration" | "local_function_declaration" => parent,
-        "function_name" => parent
+    let decl = match parent.syntax_kind() {
+        kind::FUNCTION_DECLARATION | kind::LOCAL_FUNCTION_DECLARATION => parent,
+        kind::FUNCTION_NAME => parent
             .parent()
-            .filter(|p| p.kind() == "function_declaration")?,
+            .filter(|p| p.is_kind(kind::FUNCTION_DECLARATION))?,
         _ => return None,
     };
     let name_node = decl.child_by_field_name("name")?;
@@ -160,7 +161,7 @@ fn item_from_enclosing_declaration(
 
 fn identifier_at_offset(root: tree_sitter::Node, byte_offset: usize) -> Option<tree_sitter::Node> {
     let node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
-    if node.kind() == "identifier" {
+    if node.is_kind(kind::IDENTIFIER) {
         Some(node)
     } else {
         // Descend to the deepest identifier overlapping the offset.
@@ -169,7 +170,7 @@ fn identifier_at_offset(root: tree_sitter::Node, byte_offset: usize) -> Option<t
             loop {
                 let c = cursor.node();
                 if c.start_byte() <= byte_offset && byte_offset <= c.end_byte() {
-                    if c.kind() == "identifier" {
+                    if c.is_kind(kind::IDENTIFIER) {
                         return Some(c);
                     }
                     if let Some(inner) = identifier_at_offset(c, byte_offset) {
@@ -468,12 +469,12 @@ pub fn extract_call_site(
         // `obj:m(...)` — use the method name
         let name = node_text(m, source).to_string();
         (name, line_index.ts_node_to_byte_range(m, source))
-    } else if callee.kind() == "identifier" {
+    } else if callee.is_kind(kind::IDENTIFIER) {
         (
             node_text(callee, source).to_string(),
             line_index.ts_node_to_byte_range(callee, source),
         )
-    } else if matches!(callee.kind(), "variable" | "field_expression") {
+    } else if callee.is_kind(kind::VARIABLE) {
         // Dotted: `a.b.c()` or field expression — take the rightmost
         // field's range and the whole dotted chain as the callee_name
         // (caller can use `last_segment` if they only want the name).

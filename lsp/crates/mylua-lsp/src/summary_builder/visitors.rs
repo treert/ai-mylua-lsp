@@ -5,6 +5,7 @@ use crate::emmy::{
 use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol};
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
+use crate::syntax_kind::{kind, NodeKindExt, SyntaxKind};
 use crate::table_shape::{FieldInfo, TableShape};
 use crate::type_system::*;
 use crate::types::DefKind;
@@ -31,15 +32,15 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
     }
     loop {
         let node = cursor.node();
-        match node.kind() {
-            "local_declaration" => {
+        match node.syntax_kind() {
+            kind::LOCAL_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_local_declaration(ctx, node);
                 ctx.pending_generic_params.clear();
                 skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
-            "local_function_declaration" => {
+            kind::LOCAL_FUNCTION_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
@@ -47,7 +48,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 visit_local_function(ctx, node);
                 ctx.pending_generic_params.clear();
             }
-            "function_declaration" => {
+            kind::FUNCTION_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
@@ -55,14 +56,14 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 visit_function_declaration(ctx, node);
                 ctx.pending_generic_params.clear();
             }
-            "assignment_statement" => {
+            kind::ASSIGNMENT_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_assignment(ctx, node);
                 ctx.pending_generic_params.clear();
                 skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
-            "return_statement" => {
+            kind::RETURN_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
@@ -71,17 +72,17 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, node);
             }
-            "emmy_comment" => {
+            kind::EMMY_COMMENT => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 visit_emmy_comment(ctx, node);
                 ctx.last_emmy_end_row = Some(node.end_position().row as u32);
             }
-            "if_statement"
-            | "do_statement"
-            | "while_statement"
-            | "repeat_statement"
-            | "for_numeric_statement"
-            | "for_generic_statement" => {
+            kind::IF_STATEMENT
+            | kind::DO_STATEMENT
+            | kind::WHILE_STATEMENT
+            | kind::REPEAT_STATEMENT
+            | kind::FOR_NUMERIC_STATEMENT
+            | kind::FOR_GENERIC_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
@@ -124,7 +125,7 @@ fn skip_same_line_trailing_type_emmy(
     if next.start_position().row != end_row {
         return;
     }
-    if next.kind() != "emmy_comment" {
+    if !next.is_kind(kind::EMMY_COMMENT) {
         return;
     }
     // Verify this emmy_comment only contains @type (not @class, @param, etc.)
@@ -163,7 +164,7 @@ fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.module_return_range = Some(ctx.line_index.ts_node_to_byte_range(node, ctx.source));
     // Grammar: `return_statement = word_return, optional(expression_list), optional(';')`
     // The expression_list has no field name, so use `find_named_child_by_kind`.
-    if let Some(values) = find_named_child_by_kind(node, "expression_list") {
+    if let Some(values) = find_named_child_by_kind(node, kind::EXPRESSION_LIST) {
         if let Some(first_expr) = values.named_child(0) {
             let type_fact = infer_expression_type(ctx, first_expr, 0);
             ctx.module_return_type = Some(type_fact);
@@ -175,11 +176,11 @@ fn visit_module_return(ctx: &mut BuildContext, node: tree_sitter::Node) {
 /// Used when the grammar doesn't assign a field name to a child.
 pub(super) fn find_named_child_by_kind<'a>(
     node: tree_sitter::Node<'a>,
-    kind: &str,
+    kind: SyntaxKind,
 ) -> Option<tree_sitter::Node<'a>> {
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
-            if child.kind() == kind {
+            if child.is_kind(kind) {
                 return Some(child);
             }
         }
@@ -197,15 +198,15 @@ fn visit_nested_block_inner(
     node: tree_sitter::Node,
     return_types: &mut Option<&mut Vec<TypeFact>>,
 ) {
-    let scope_kind = match node.kind() {
-        "do_statement" => Some(ScopeKind::DoBlock),
-        "while_statement" => Some(ScopeKind::WhileBlock),
-        "repeat_statement" => Some(ScopeKind::RepeatBlock),
-        "if_statement" | "if_clause" => Some(ScopeKind::IfThenBlock),
-        "elseif_clause" => Some(ScopeKind::ElseIfBlock),
-        "else_clause" => Some(ScopeKind::ElseBlock),
-        "for_numeric_statement" => Some(ScopeKind::ForNumeric),
-        "for_generic_statement" => Some(ScopeKind::ForGeneric),
+    let scope_kind = match node.syntax_kind() {
+        kind::DO_STATEMENT => Some(ScopeKind::DoBlock),
+        kind::WHILE_STATEMENT => Some(ScopeKind::WhileBlock),
+        kind::REPEAT_STATEMENT => Some(ScopeKind::RepeatBlock),
+        kind::IF_STATEMENT => Some(ScopeKind::IfThenBlock),
+        kind::ELSEIF_CLAUSE => Some(ScopeKind::ElseIfBlock),
+        kind::ELSE_CLAUSE => Some(ScopeKind::ElseBlock),
+        kind::FOR_NUMERIC_STATEMENT => Some(ScopeKind::ForNumeric),
+        kind::FOR_GENERIC_STATEMENT => Some(ScopeKind::ForGeneric),
         _ => None,
     };
     if let Some(kind) = scope_kind {
@@ -213,8 +214,8 @@ fn visit_nested_block_inner(
     }
 
     // Register for-loop variables into scope
-    match node.kind() {
-        "for_numeric_statement" => {
+    match node.syntax_kind() {
+        kind::FOR_NUMERIC_STATEMENT => {
             if let Some(name_node) = node.child_by_field_name("name") {
                 let db = name_node.start_byte();
                 ctx.add_scoped_decl(ScopeDecl {
@@ -230,11 +231,11 @@ fn visit_nested_block_inner(
                 });
             }
         }
-        "for_generic_statement" => {
+        kind::FOR_GENERIC_STATEMENT => {
             if let Some(names_node) = node.child_by_field_name("names") {
                 for i in 0..names_node.named_child_count() {
                     if let Some(id_node) = names_node.named_child(i as u32) {
-                        if id_node.kind() == "identifier" {
+                        if id_node.is_kind(kind::IDENTIFIER) {
                             let db = id_node.start_byte();
                             ctx.add_scoped_decl(ScopeDecl {
                                 name: node_text(id_node, ctx.source).into(),
@@ -266,42 +267,40 @@ fn visit_nested_block_inner(
     }
     loop {
         let child = cursor.node();
-        match child.kind() {
-            "block"
-            | "if_clause"
-            | "elseif_clause"
-            | "else_clause"
-            | "if_statement"
-            | "do_statement"
-            | "while_statement"
-            | "repeat_statement"
-            | "for_numeric_statement"
-            | "for_generic_statement" => {
+        match child.syntax_kind() {
+            kind::ELSEIF_CLAUSE
+            | kind::ELSE_CLAUSE
+            | kind::IF_STATEMENT
+            | kind::DO_STATEMENT
+            | kind::WHILE_STATEMENT
+            | kind::REPEAT_STATEMENT
+            | kind::FOR_NUMERIC_STATEMENT
+            | kind::FOR_GENERIC_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 ctx.pending_generic_params.clear();
                 visit_nested_block_inner(ctx, child, return_types);
             }
-            "function_declaration" => {
+            kind::FUNCTION_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_function_declaration(ctx, child);
                 ctx.pending_generic_params.clear();
             }
-            "assignment_statement" => {
+            kind::ASSIGNMENT_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_assignment(ctx, child);
                 ctx.pending_generic_params.clear();
             }
-            "local_declaration" => {
+            kind::LOCAL_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_declaration(ctx, child);
                 ctx.pending_generic_params.clear();
             }
-            "local_function_declaration" => {
+            kind::LOCAL_FUNCTION_DECLARATION => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_function(ctx, child);
                 ctx.pending_generic_params.clear();
             }
-            "return_statement" => {
+            kind::RETURN_STATEMENT => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 if let Some(returns) = return_types.as_deref_mut() {
                     collect_return_statement_types(ctx, child, returns);
@@ -309,7 +308,7 @@ fn visit_nested_block_inner(
                 ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, child);
             }
-            "emmy_comment" => {
+            kind::EMMY_COMMENT => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_emmy_comment(ctx, child);
                 ctx.last_emmy_end_row = Some(child.end_position().row as u32);
@@ -367,7 +366,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     for i in 0..name_count {
         let name_node = match names_node.named_child(i as u32) {
-            Some(n) if n.kind() == "identifier" => n,
+            Some(n) if n.is_kind(kind::IDENTIFIER) => n,
             _ => continue,
         };
         let name = node_text(name_node, ctx.source).to_string();
@@ -436,7 +435,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 continue;
             }
 
-            let (type_fact, function_expr_body) = if val.kind() == "function_definition" {
+            let (type_fact, function_expr_body) = if val.is_kind(kind::FUNCTION_DEFINITION) {
                 let body = val.child_by_field_name("body");
                 let func_id = ctx.alloc_function_id();
                 let fs = build_function_summary(ctx, &name, node, body, false);
@@ -534,7 +533,7 @@ fn single_function_call_rhs(values: tree_sitter::Node) -> Option<tree_sitter::No
         return None;
     }
     let only = values.named_child(0)?;
-    if only.kind() == "function_call" {
+    if only.is_kind(kind::FUNCTION_CALL) {
         Some(only)
     } else {
         None
@@ -569,7 +568,7 @@ fn extract_call_return_types(
     // dotted calls (`mod.f()`) and subscript calls fall through the
     // resolver as CallReturn stubs without direct access to the full
     // returns list.
-    if !matches!(callee.kind(), "variable" | "identifier") {
+    if !matches!(callee.syntax_kind(), kind::VARIABLE | kind::IDENTIFIER) {
         return None;
     }
     let callee_text = node_text(callee, ctx.source);
@@ -611,8 +610,8 @@ fn extract_trailing_type_annotation(node: tree_sitter::Node, source: &[u8]) -> O
     if next.start_position().row != end_row {
         return None;
     }
-    match next.kind() {
-        "comment" => {
+    match next.syntax_kind() {
+        kind::COMMENT => {
             let text = node_text(next, source).trim();
             if let Some(rest) = text.strip_prefix("---@type") {
                 let type_text = rest.trim();
@@ -621,10 +620,10 @@ fn extract_trailing_type_annotation(node: tree_sitter::Node, source: &[u8]) -> O
                 }
             }
         }
-        "emmy_comment" => {
+        kind::EMMY_COMMENT => {
             for i in 0..next.named_child_count() {
                 if let Some(line_node) = next.named_child(i as u32) {
-                    if line_node.kind() == "emmy_line" {
+                    if line_node.is_kind(kind::EMMY_LINE) {
                         let text = node_text(line_node, source).trim();
                         if let Some(rest) = text.strip_prefix("---") {
                             let rest = rest.trim();
@@ -647,11 +646,11 @@ fn extract_trailing_type_annotation(node: tree_sitter::Node, source: &[u8]) -> O
 /// Extract `---@type X` from a comment node immediately preceding the given node.
 fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> Option<EmmyType> {
     let prev = node.prev_sibling()?;
-    match prev.kind() {
-        "emmy_comment" => {
+    match prev.syntax_kind() {
+        kind::EMMY_COMMENT => {
             for i in 0..prev.named_child_count() {
                 if let Some(line_node) = prev.named_child(i as u32) {
-                    if line_node.kind() == "emmy_line" {
+                    if line_node.is_kind(kind::EMMY_LINE) {
                         let text = node_text(line_node, source).trim();
                         if let Some(rest) = text.strip_prefix("---") {
                             let rest = rest.trim();
@@ -667,7 +666,7 @@ fn extract_preceding_type_annotation(node: tree_sitter::Node, source: &[u8]) -> 
             }
             None
         }
-        "comment" => {
+        kind::COMMENT => {
             let text = node_text(prev, source).trim();
             if let Some(rest) = text.strip_prefix("---@type") {
                 let type_text = rest.trim();
@@ -685,7 +684,7 @@ fn try_extract_require<'a>(
     ctx: &BuildContext<'a>,
     value_node: tree_sitter::Node<'a>,
 ) -> Option<String> {
-    if value_node.kind() != "function_call" {
+    if !value_node.is_kind(kind::FUNCTION_CALL) {
         return None;
     }
     let callee = value_node.child_by_field_name("callee")?;
@@ -695,7 +694,7 @@ fn try_extract_require<'a>(
     let args = value_node.child_by_field_name("arguments")?;
     let first_arg = args.named_child(0)?;
     // Unwrap expression_list wrapper if present, then extract string content.
-    let string_node = if first_arg.kind() == "expression_list" {
+    let string_node = if first_arg.is_kind(kind::EXPRESSION_LIST) {
         first_arg.named_child(0)?
     } else {
         first_arg
@@ -1100,12 +1099,12 @@ pub(crate) fn enclosing_statement_for_function_expr(
     // `expression_list`; any other immediate parent means we're
     // inside a call / wrapper / table / nested context.
     let parent = node.parent()?;
-    if parent.kind() != "expression_list" {
+    if !parent.is_kind(kind::EXPRESSION_LIST) {
         return None;
     }
     let grandparent = parent.parent()?;
-    match grandparent.kind() {
-        "local_declaration" | "assignment_statement" => Some(grandparent),
+    match grandparent.syntax_kind() {
+        kind::LOCAL_DECLARATION | kind::ASSIGNMENT_STATEMENT => Some(grandparent),
         _ => None,
     }
 }
@@ -1124,18 +1123,18 @@ pub(super) fn extract_ast_params(
         let Some(child) = param_list.child(i as u32) else {
             continue;
         };
-        match child.kind() {
-            "identifier" => {
+        match child.syntax_kind() {
+            kind::IDENTIFIER => {
                 params.push(ParamInfo {
                     name: node_text(child, source).into(),
                     type_fact: TypeFact::Unknown,
                     optional: false,
                 });
             }
-            "name_list" => {
+            kind::NAME_LIST => {
                 for j in 0..child.named_child_count() {
                     if let Some(id) = child.named_child(j as u32) {
-                        if id.kind() == "identifier" {
+                        if id.is_kind(kind::IDENTIFIER) {
                             params.push(ParamInfo {
                                 name: node_text(id, source).into(),
                                 type_fact: TypeFact::Unknown,
@@ -1144,15 +1143,6 @@ pub(super) fn extract_ast_params(
                         }
                     }
                 }
-            }
-            // Legacy explicit node name (if the grammar ever exposes
-            // vararg as a named node again) or anonymous `...` token.
-            "varargs" => {
-                params.push(ParamInfo {
-                    name: "...".into(),
-                    type_fact: TypeFact::Unknown,
-                    optional: false,
-                });
             }
             _ => {
                 // Anonymous `...` token in `function f(a, ...)`:
@@ -1185,12 +1175,13 @@ pub(super) fn collect_return_types(
     }
     loop {
         let child = cursor.node();
-        match child.kind() {
-            "return_statement" => {
+        match child.syntax_kind() {
+            kind::RETURN_STATEMENT => {
                 collect_return_statement_types(ctx, child, returns);
             }
             // Don't recurse into nested function bodies
-            "function_body" | "function_declaration" | "local_function_declaration" => {}
+            kind::FUNCTION_BODY | kind::FUNCTION_DECLARATION | kind::LOCAL_FUNCTION_DECLARATION => {
+            }
             _ => {
                 collect_return_types(ctx, child, returns, depth + 1);
             }
@@ -1206,7 +1197,7 @@ fn collect_return_statement_types(
     node: tree_sitter::Node,
     returns: &mut Vec<TypeFact>,
 ) {
-    if let Some(values) = find_named_child_by_kind(node, "expression_list") {
+    if let Some(values) = find_named_child_by_kind(node, kind::EXPRESSION_LIST) {
         for i in 0..values.named_child_count() {
             if let Some(expr) = values.named_child(i as u32) {
                 let tf = infer_expression_type(ctx, expr, 0);
@@ -1251,9 +1242,9 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             visit_anonymous_function_definitions_in_node(ctx, value);
         }
 
-        match var_node.kind() {
+        match var_node.syntax_kind() {
             // Simple global: `foo = expr`
-            "variable" if var_node.child_count() == 1 => {
+            kind::VARIABLE if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
                 if ctx
                     .resolve_visible_in_build_scopes(&name, var_node.start_byte())
@@ -1339,7 +1330,7 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             //        innermost. Intermediate shape creation is on-demand.
             //      - Otherwise → legacy global TableExtension with the full
             //        dotted path as name.
-            "field_expression" | "variable" => {
+            kind::VARIABLE => {
                 let chain = match extract_dotted_chain(var_node, ctx.source) {
                     Some(c) if !c.fields.is_empty() => c,
                     _ => continue,
@@ -1419,22 +1410,6 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
                 });
             }
-            // Bracket index: `t[expr] = value` — mark shape open if key is dynamic
-            "subscript_expression" => {
-                if let Some(base) = var_node.child_by_field_name("object") {
-                    let base_text = node_text(base, ctx.source);
-                    if let Some(decl) =
-                        ctx.resolve_visible_in_build_scopes(base_text, base.start_byte())
-                    {
-                        if let Some(TypeFact::Known(KnownType::Table(shape_id))) = &decl.type_fact {
-                            let sid = *shape_id;
-                            if let Some(shape) = ctx.table_shapes.get_mut(&sid) {
-                                shape.mark_open();
-                            }
-                        }
-                    }
-                }
-            }
             _ => {}
         }
     }
@@ -1484,7 +1459,7 @@ fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<Dotted
     let mut fields_rev: Vec<String> = Vec::new();
     let mut current = node;
     loop {
-        if !matches!(current.kind(), "variable" | "field_expression") {
+        if !current.is_kind(kind::VARIABLE) {
             return None;
         }
         let field = match current.child_by_field_name("field") {
@@ -1493,7 +1468,7 @@ fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<Dotted
                 // Innermost: a `variable` with a single `identifier` child.
                 if current.named_child_count() == 1 {
                     let child = current.named_child(0)?;
-                    if child.kind() == "identifier" {
+                    if child.is_kind(kind::IDENTIFIER) {
                         let base_name = node_text(child, source).to_string();
                         fields_rev.reverse();
                         return Some(DottedChain {
@@ -1672,7 +1647,7 @@ fn function_name_tail_identifier(function_name: tree_sitter::Node) -> Option<tre
     let mut last_ident = None;
     for i in 0..function_name.child_count() {
         if let Some(child) = function_name.child(i as u32) {
-            if child.kind() == "identifier" {
+            if child.is_kind(kind::IDENTIFIER) {
                 last_ident = Some(child);
             }
         }
@@ -1681,7 +1656,7 @@ fn function_name_tail_identifier(function_name: tree_sitter::Node) -> Option<tre
 }
 
 fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    if node.kind() == "function_definition" {
+    if node.is_kind(kind::FUNCTION_DEFINITION) {
         visit_anonymous_function_definition(ctx, node);
         return;
     }
@@ -1804,37 +1779,18 @@ fn register_params_into_scope(
         let Some(child) = param_list.child(i as u32) else {
             continue;
         };
-        match child.kind() {
-            "identifier" => {
+        match child.syntax_kind() {
+            kind::IDENTIFIER => {
                 register_single_param(ctx, child, emmy_params);
             }
-            "name_list" => {
+            kind::NAME_LIST => {
                 for j in 0..child.named_child_count() {
                     if let Some(id) = child.named_child(j as u32) {
-                        if id.kind() == "identifier" {
+                        if id.is_kind(kind::IDENTIFIER) {
                             register_single_param(ctx, id, emmy_params);
                         }
                     }
                 }
-            }
-            "varargs" => {
-                // `...` parameter — register as a vararg decl
-                let db = child.start_byte();
-                ctx.add_scoped_decl(ScopeDecl {
-                    name: "...".into(),
-                    kind: DefKind::Parameter,
-                    decl_byte: db,
-                    visible_after_byte: db,
-                    range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
-                    selection_range: ctx.line_index.ts_node_to_byte_range(child, ctx.source),
-                    type_fact: emmy_params
-                        .iter()
-                        .find(|p| p.name == "...")
-                        .map(|p| p.type_fact.clone())
-                        .filter(|tf| *tf != TypeFact::Unknown),
-                    bound_class: None,
-                    is_emmy_annotated: false,
-                });
             }
             _ => {
                 // Anonymous `...` token

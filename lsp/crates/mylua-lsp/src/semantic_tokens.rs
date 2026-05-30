@@ -1,4 +1,5 @@
 use crate::scope::ScopeTree;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::util::{node_text, LineIndex};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -138,7 +139,7 @@ fn collect_variable_tokens(
 ) {
     let node = cursor.node();
 
-    if node.kind() == "identifier" && !is_field_or_method(node) {
+    if node.is_kind(kind::IDENTIFIER) && !is_field_or_method(node) {
         let name = node_text(node, source);
         let byte_offset = node.start_byte();
         let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
@@ -177,13 +178,15 @@ fn collect_variable_tokens(
 
 fn is_field_or_method(node: tree_sitter::Node) -> bool {
     if let Some(parent) = node.parent() {
-        match parent.kind() {
-            "variable" => parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id()),
-            "function_call" => {
+        match parent.syntax_kind() {
+            kind::VARIABLE => {
+                parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id())
+            }
+            kind::FUNCTION_CALL => {
                 parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id())
             }
-            "function_name" => parent.child(0).map(|n| n.id()) != Some(node.id()),
-            "field" => parent.child_by_field_name("key").map(|n| n.id()) == Some(node.id()),
+            kind::FUNCTION_NAME => parent.child(0).map(|n| n.id()) != Some(node.id()),
+            kind::FIELD => parent.child_by_field_name("key").map(|n| n.id()) == Some(node.id()),
             _ => false,
         }
     } else {
