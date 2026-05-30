@@ -187,18 +187,18 @@ mod tests {
         assert!(call.is_kind(kind::FUNCTION_CALL));
         assert_eq!(
             call.child_by_field(super::field::CALLEE)
-                .map(|node| node.kind_name()),
-            Some("variable")
+                .map(|node| node.syntax_kind()),
+            Some(kind::VARIABLE)
         );
         assert_eq!(
             call.child_by_field(super::field::METHOD)
-                .map(|node| node.kind_name()),
-            Some("identifier")
+                .map(|node| node.syntax_kind()),
+            Some(kind::IDENTIFIER)
         );
         assert_eq!(
             call.child_by_field(super::field::ARGUMENTS)
-                .map(|node| node.kind_name()),
-            Some("arguments")
+                .map(|node| node.syntax_kind()),
+            Some(kind::ARGUMENTS)
         );
     }
 }

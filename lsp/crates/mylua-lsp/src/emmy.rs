@@ -1907,6 +1907,7 @@ pub fn parse_type_from_str(input: &str) -> EmmyType {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syntax_kind::SyntaxKind;
 
     fn parse_source(src: &str) -> tree_sitter::Tree {
         let mut parser = crate::new_parser();
@@ -1915,11 +1916,12 @@ mod tests {
 
     fn find_first_kind<'a>(
         node: tree_sitter::Node<'a>,
-        kind: &str,
+        kind: SyntaxKind,
     ) -> Option<tree_sitter::Node<'a>> {
-        if node.kind_name() == kind {
+        if node.is_kind(kind) {
             return Some(node);
         }
+
         for i in 0..node.child_count() {
             if let Some(child) = node.child(i as u32) {
                 if let Some(found) = find_first_kind(child, kind) {
@@ -1944,7 +1946,7 @@ mod tests {
     fn collect_preceding_comments_stops_at_separator_line() {
         let src = "-- file header\n----\n-- real doc\nlocal x = 1\n";
         let tree = parse_source(src);
-        let local_decl = find_first_kind(tree.root_node(), "local_declaration").unwrap();
+        let local_decl = find_first_kind(tree.root_node(), kind::LOCAL_DECLARATION).unwrap();
 
         assert_eq!(
             collect_preceding_comments(local_decl, src.as_bytes()),
@@ -1956,7 +1958,7 @@ mod tests {
     fn collect_preceding_comments_ignores_section_separator_above_decl() {
         let src = "-----------------------------------------------------------------------------\n-- Module declaration\n-----------------------------------------------------------------------------\nlocal json = {}\n";
         let tree = parse_source(src);
-        let local_decl = find_first_kind(tree.root_node(), "local_declaration").unwrap();
+        let local_decl = find_first_kind(tree.root_node(), kind::LOCAL_DECLARATION).unwrap();
 
         assert!(collect_preceding_comments(local_decl, src.as_bytes()).is_empty());
     }

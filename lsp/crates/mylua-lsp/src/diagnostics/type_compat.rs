@@ -26,10 +26,9 @@ pub(crate) fn infer_literal_type(
             .map(|inner| infer_literal_type(inner, source, scope_tree))
             .unwrap_or(TypeFact::Unknown),
         kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
-            infer_operator_type_with(node, source, |child| {
-                infer_literal_type(child, source, scope_tree)
-            })
+            infer_operator_type_with(node, |child| infer_literal_type(child, source, scope_tree))
         }
+
         kind::VARIABLE | kind::IDENTIFIER => {
             let text = node_text(node, source);
             if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
@@ -45,34 +44,33 @@ pub(crate) fn infer_literal_type(
     }
 }
 
-fn infer_operator_type_with<F>(
-    node: tree_sitter::Node,
-    source: &[u8],
-    mut infer_child: F,
-) -> TypeFact
+fn infer_operator_type_with<F>(node: tree_sitter::Node, mut infer_child: F) -> TypeFact
 where
     F: FnMut(tree_sitter::Node) -> TypeFact,
 {
     if let Some(op_node) = node.child_by_field(field::OPERATOR) {
-        let op = if source.is_empty() {
-            op_node.kind_name()
-        } else {
-            node_text(op_node, source)
-        };
-        match op {
-            "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
-                return TypeFact::Known(KnownType::Number);
-            }
-            ".." => return TypeFact::Known(KnownType::String),
-            "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" | "word_not" => {
-                return TypeFact::Known(KnownType::Boolean);
-            }
-            "and" | "word_and" => {
+        match op_node.syntax_kind() {
+            kind::PLUS
+            | kind::DASH
+            | kind::STAR
+            | kind::SLASH
+            | kind::SLASH_SLASH
+            | kind::PERCENT
+            | kind::CARET => return TypeFact::Known(KnownType::Number),
+            kind::DOT_DOT => return TypeFact::Known(KnownType::String),
+            kind::EQ_EQ
+            | kind::TILDE_EQ
+            | kind::LT
+            | kind::LT_EQ
+            | kind::GT
+            | kind::GT_EQ
+            | kind::WORD_NOT => return TypeFact::Known(KnownType::Boolean),
+            kind::WORD_AND => {
                 if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_child(right);
                 }
             }
-            "or" | "word_or" => {
+            kind::WORD_OR => {
                 if let Some(left) = node.child_by_field(field::LEFT) {
                     return infer_child(left);
                 }
@@ -83,15 +81,10 @@ where
 
     if node.is_kind(kind::UNARY_EXPRESSION) {
         if let Some(op_child) = node.child(0) {
-            let op = if source.is_empty() {
-                op_child.kind_name()
-            } else {
-                node_text(op_child, source)
-            };
-            match op {
-                "-" => return TypeFact::Known(KnownType::Number),
-                "#" => return TypeFact::Known(KnownType::Integer),
-                "not" | "word_not" => return TypeFact::Known(KnownType::Boolean),
+            match op_child.syntax_kind() {
+                kind::DASH => return TypeFact::Known(KnownType::Number),
+                kind::POUND => return TypeFact::Known(KnownType::Integer),
+                kind::WORD_NOT => return TypeFact::Known(KnownType::Boolean),
                 _ => {}
             }
         }
@@ -246,10 +239,9 @@ pub(crate) fn infer_argument_type(
             .map(|inner| infer_argument_type(inner, source, scope_tree))
             .unwrap_or(TypeFact::Unknown),
         kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
-            infer_operator_type_with(node, source, |child| {
-                infer_argument_type(child, source, scope_tree)
-            })
+            infer_operator_type_with(node, |child| infer_argument_type(child, source, scope_tree))
         }
+
         _ => infer_literal_type(node, source, scope_tree),
     }
 }
@@ -277,8 +269,9 @@ pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
             .map(infer_return_literal_type)
             .unwrap_or(TypeFact::Unknown),
         kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
-            infer_operator_type_with(node, &[], infer_return_literal_type)
+            infer_operator_type_with(node, infer_return_literal_type)
         }
+
         _ => TypeFact::Unknown,
     }
 }

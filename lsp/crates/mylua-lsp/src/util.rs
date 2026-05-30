@@ -806,7 +806,8 @@ mod tests {
         let tree = parse_source("function foo() return 1 end\n");
         let root = tree.root_node();
         let number = root.descendant_for_byte_range(22, 22).expect("number node");
-        assert_eq!(number.kind_name(), "number");
+        assert!(number.is_kind(kind::NUMBER));
+
         let func = walk_ancestors(number, |p| {
             if p.is_kind(kind::FUNCTION_DECLARATION) {
                 Some(p)
@@ -823,13 +824,13 @@ mod tests {
         let root = tree.root_node();
         let number = root.descendant_for_byte_range(10, 10).expect("number");
         let hit: Option<()> = walk_ancestors(number, |p| {
-            // A kind that doesn't exist in Lua AST.
-            if p.kind_name() == "nonexistent_node_kind" {
+            if p.is_kind(kind::FUNCTION_CALL) {
                 Some(())
             } else {
                 None
             }
         });
+
         assert!(hit.is_none());
     }
 
@@ -857,9 +858,10 @@ mod tests {
         let number = root
             .descendant_for_byte_range(number_byte, number_byte)
             .expect("number node");
-        assert_eq!(number.kind_name(), "number");
+        assert!(number.is_kind(kind::NUMBER));
 
         let mut calls = 0usize;
+
         let hit: Option<()> = walk_ancestors(number, |_p| {
             calls += 1;
             None
@@ -953,7 +955,8 @@ mod tests {
         let idx = LineIndex::new(src.as_bytes());
         // Find the `1` number literal.
         let number = root.descendant_for_byte_range(10, 10).expect("number");
-        assert_eq!(number.kind_name(), "number");
+        assert!(number.is_kind(kind::NUMBER));
+
         let br = idx.ts_node_to_byte_range(number, src.as_bytes());
         assert_eq!(br.start_byte, 10);
         assert_eq!(br.end_byte, 11);
