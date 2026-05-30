@@ -43,6 +43,11 @@ mm.hi()
 local tt = test_g()
 print(tt.a)
 
+local tt = ClassA1 and ClassA1:new()
+local tt = ClassA1 and ClassA1:new() or nil
+local tt = utils.mgrs and utils.mgrs.MiscMgr4 and utils.mgrs.MiscMgr4:miscFunc()
+local tt = utils.mgrs and utils.mgrs.MiscMgr4 and utils.mgrs.MiscMgr4:miscFunc() or 0
+
 local module1 = require('test_module1')
 
 module1.test()
