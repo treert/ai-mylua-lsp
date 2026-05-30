@@ -25,7 +25,7 @@
 - `useBundledStdlib=true` 时将内置 stdlib 路径预置到 `workspace.library`
 - 用户自定义 library 路径追加其后
 - stdlib 按 `runtime.version` 查找，找不到时沿 fallback 链回落到 5.4
-- `inlayHint.enable` / `parameterNames` / `variableTypes` 会透传给 LSP，默认开启主开关与参数名提示，默认关闭变量类型提示
+- `inlayHint.enable` / `parameterNames` / `variableTypes` 会透传给 LSP；默认值以 `vscode-extension/package.json` 为准
 
 - `performance.slowParseKeepTreeThresholdMs` 透传给 LSP，控制冷启动解析后哪些文件保留 parse tree；小于 15 时改为全部缓存
 - MyLua 配置变更后默认由扩展自动重启 LSP；设置 `mylua.server.autoRestartOnConfigChange=false` 后改为弹窗询问

@@ -304,7 +304,7 @@
         },
         "mylua.inlayHint.variableTypes": {
           "type": "boolean",
-          "default": false,
+          "default": true,
           "description": "Show inferred type inlay hints after local variable names."
         },
         "mylua.documentSymbol.detailLevel": {

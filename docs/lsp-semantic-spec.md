@@ -109,38 +109,40 @@
 
 完整配置项列表（均以 `mylua.` 为前缀）：
 
-| 配置项 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| `server.path` | string/object | `""` | LSP 可执行文件路径，支持按平台配置 |
-| `server.autoRestartOnConfigChange` | boolean | `true` | VS Code 配置变更后自动重启 LSP；关闭时弹窗询问 |
+默认值不在本文维护；以 `vscode-extension/package.json` 为唯一来源。
 
-| `debug.fileLog` | boolean | `false` | 写调试日志到 `.vscode/mylua-lsp.log` |
-| `runtime.version` | `"5.3"` \| `"5.4"` | `"5.4"` | Lua 运行时版本 |
-| `runtime.topKeyword` | boolean | `false` | 启用列 0 关键字分割（改善错误定位） |
-| `require.aliases` | object | `{}` | require 路径别名，最长前缀匹配 |
-| `workspace.include` | string[] | `["**/*.lua"]` | 索引包含的 glob 模式 |
-| `workspace.exclude` | string[] | `["**/.*", "**/node_modules"]` | 索引排除的 glob 模式 |
-| `workspace.library` | string[] | `[]` | 额外索引目录（只读，抑制诊断） |
-| `workspace.useBundledStdlib` | boolean | `true` | 自动注入内置 stdlib stubs |
-| `diagnostics.enable` | boolean | `true` | 语义诊断开关；语法诊断始终保留 |
-| `diagnostics.scope` | `"full"` \| `"openOnly"` | `"full"` | 诊断范围 |
+| 配置项 | 类型 | 说明 |
+|--------|------|------|
+| `server.path` | string/object | LSP 可执行文件路径，支持按平台配置 |
+| `server.autoRestartOnConfigChange` | boolean | VS Code 配置变更后自动重启 LSP；关闭时弹窗询问 |
 
-| `diagnostics.undefinedGlobal` | severity | `"warning"` | 未定义全局变量 |
-| `diagnostics.emmyTypeMismatch` | severity | `"warning"` | Emmy 类型不匹配 |
-| `diagnostics.emmyUnknownField` | severity | `"warning"` | Emmy 未知字段 |
-| `diagnostics.luaFieldError` | severity | `"warning"` | Lua 高确定性字段错误 |
-| `diagnostics.luaFieldWarning` | severity | `"warning"` | Lua 保守字段警告 |
-| `diagnostics.duplicateTableKey` | severity | `"warning"` | 重复 table key |
-| `diagnostics.unusedLocal` | severity | `"hint"` | 未使用局部变量 |
-| `diagnostics.argumentCountMismatch` | severity | `"warning"` | 参数数量不匹配 |
-| `diagnostics.argumentTypeMismatch` | severity | `"warning"` | 参数类型不匹配 |
-| `diagnostics.returnMismatch` | severity | `"warning"` | 返回值不匹配 |
-| `inlayHint.enable` | boolean | `true` | 启用内嵌提示 |
-| `inlayHint.parameterNames` | boolean | `true` | 调用实参前显示形参名 |
-| `inlayHint.variableTypes` | boolean | `false` | 局部变量后显示推断类型 |
+| `debug.fileLog` | boolean | 写调试日志到 `.vscode/mylua-lsp.log` |
+| `runtime.version` | `"5.3"` \| `"5.4"` | Lua 运行时版本 |
+| `runtime.topKeyword` | boolean | 启用列 0 关键字分割（改善错误定位） |
+| `require.aliases` | object | require 路径别名，最长前缀匹配 |
+| `workspace.include` | string[] | 索引包含的 glob 模式 |
+| `workspace.exclude` | string[] | 索引排除的 glob 模式 |
+| `workspace.library` | string[] | 额外索引目录（只读，抑制诊断） |
+| `workspace.useBundledStdlib` | boolean | 自动注入内置 stdlib stubs |
+| `diagnostics.enable` | boolean | 语义诊断开关；语法诊断始终保留 |
+| `diagnostics.scope` | `"full"` \| `"openOnly"` | 诊断范围 |
 
-| `gotoDefinition.strategy` | `"auto"` \| `"single"` \| `"list"` | `"auto"` | 多候选跳转策略 |
-| `references.strategy` | `"best"` \| `"merge"` \| `"select"` | `"best"` | 多候选引用策略 |
+| `diagnostics.undefinedGlobal` | severity | 未定义全局变量 |
+| `diagnostics.emmyTypeMismatch` | severity | Emmy 类型不匹配 |
+| `diagnostics.emmyUnknownField` | severity | Emmy 未知字段 |
+| `diagnostics.luaFieldError` | severity | Lua 高确定性字段错误 |
+| `diagnostics.luaFieldWarning` | severity | Lua 保守字段警告 |
+| `diagnostics.duplicateTableKey` | severity | 重复 table key |
+| `diagnostics.unusedLocal` | severity | 未使用局部变量 |
+| `diagnostics.argumentCountMismatch` | severity | 参数数量不匹配 |
+| `diagnostics.argumentTypeMismatch` | severity | 参数类型不匹配 |
+| `diagnostics.returnMismatch` | severity | 返回值不匹配 |
+| `inlayHint.enable` | boolean | 启用内嵌提示 |
+| `inlayHint.parameterNames` | boolean | 调用实参前显示形参名 |
+| `inlayHint.variableTypes` | boolean | 局部变量后显示推断类型 |
+
+| `gotoDefinition.strategy` | `"auto"` \| `"single"` \| `"list"` | 多候选跳转策略 |
+| `references.strategy` | `"best"` \| `"merge"` \| `"select"` | 多候选引用策略 |
 
 
 > severity 可选值：`"error"` / `"warning"` / `"hint"` / `"off"`

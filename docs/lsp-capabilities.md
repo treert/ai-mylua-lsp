@@ -68,7 +68,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - `active_parameter` 感知嵌套括号与字符串
 
 ### inlayHint
-两类虚拟标签：`mylua.inlayHint.enable` 默认 on，`parameterNames` 默认 on，`variableTypes` 默认 off。
+两类虚拟标签：`mylua.inlayHint.enable` 控制总开关，`parameterNames` 与 `variableTypes` 分别控制参数名提示和变量类型提示；默认值以 `vscode-extension/package.json` 为准。
 
 
 | 类型 | 行为 | 跳过条件 |
