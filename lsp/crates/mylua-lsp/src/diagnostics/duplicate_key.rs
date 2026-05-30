@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::util::{node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
@@ -25,13 +25,13 @@ fn check_duplicate_keys_recursive(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    if node.kind_name() == "table_constructor" {
+    if node.is_kind(kind::TABLE_CONSTRUCTOR) {
         let mut seen: std::collections::HashMap<String, Range> = std::collections::HashMap::new();
         for i in 0..node.named_child_count() {
             let Some(field_list) = node.named_child(i as u32) else {
                 continue;
             };
-            let fields = if field_list.kind_name() == "field_list" {
+            let fields = if field_list.is_kind(kind::FIELD_LIST) {
                 field_list
             } else {
                 continue;
@@ -40,7 +40,7 @@ fn check_duplicate_keys_recursive(
                 let Some(field) = fields.named_child(j as u32) else {
                     continue;
                 };
-                if field.kind_name() != "field" {
+                if !field.is_kind(kind::FIELD) {
                     continue;
                 }
                 let Some(key_text) = extract_field_key(field, source) else {
@@ -80,11 +80,11 @@ fn check_duplicate_keys_recursive(
 fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> {
     // Identifier key: `a = 1`
     if let Some(key) = field.child_by_field_name("key") {
-        match key.kind_name() {
-            "identifier" => {
+        match key.syntax_kind() {
+            kind::IDENTIFIER => {
                 return Some(node_text(key, source).to_string());
             }
-            "string" => {
+            kind::STRING => {
                 // Bracket string key: `["a"] = 1` — normalize by text
                 // content excluding quotes so that `["a"]` vs `['a']`
                 // dedup.
@@ -94,7 +94,7 @@ fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> 
                         .to_string(),
                 );
             }
-            "number" => {
+            kind::NUMBER => {
                 return Some(format!("num:{}", node_text(key, source)));
             }
             _ => return None,

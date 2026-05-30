@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use std::collections::HashMap;
 
 use crate::type_system::FunctionSummaryId;
@@ -50,8 +50,8 @@ fn collect_calls_in_scope(
     name_to_id: &HashMap<String, FunctionSummaryId>,
     function_node_to_id: &HashMap<(usize, usize), FunctionSummaryId>,
 ) {
-    match node.kind_name() {
-        "function_declaration" | "local_function_declaration" => {
+    match node.syntax_kind() {
+        kind::FUNCTION_DECLARATION | kind::LOCAL_FUNCTION_DECLARATION => {
             let name = node
                 .child_by_field_name("name")
                 .map(|n| node_text(n, source).to_string())
@@ -74,7 +74,7 @@ fn collect_calls_in_scope(
             }
             return;
         }
-        "function_definition" => {
+        kind::FUNCTION_DEFINITION => {
             // Anonymous function — caller_name for its body is the
             // binding anchor if we can identify one, else inherit
             // from the outer scope. We only set a meaningful name
@@ -107,7 +107,7 @@ fn collect_calls_in_scope(
             }
             return;
         }
-        "function_call" => {
+        kind::FUNCTION_CALL => {
             if let Some(cs) = crate::call_hierarchy::extract_call_site(
                 node,
                 source,
@@ -146,19 +146,19 @@ fn collect_calls_in_scope(
 /// (rare for `function_definition`) are kept as-is.
 fn infer_anon_caller_name(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
     let stmt = enclosing_statement_for_function_expr(node)?;
-    match stmt.kind_name() {
-        "local_declaration" => {
+    match stmt.syntax_kind() {
+        kind::LOCAL_DECLARATION => {
             let names = stmt.child_by_field_name("names")?;
             let values = stmt.child_by_field_name("values")?;
             let index = rhs_index_of(values, node)?;
             let id = names.named_child(index as u32)?;
-            if id.kind_name() == "identifier" {
+            if id.is_kind(kind::IDENTIFIER) {
                 Some(node_text(id, source).to_string())
             } else {
                 None
             }
         }
-        "assignment_statement" => {
+        kind::ASSIGNMENT_STATEMENT => {
             let left = stmt.child_by_field_name("left")?;
             let right = stmt.child_by_field_name("right")?;
             let index = rhs_index_of(right, node)?;

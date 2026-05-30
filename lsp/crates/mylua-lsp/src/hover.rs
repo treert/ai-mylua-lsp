@@ -5,7 +5,7 @@ use crate::emmy::{
     is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::type_system::{
     format_resolved_type, format_signature, FunctionSignature, KnownType, TypeFact,
 };
@@ -85,7 +85,7 @@ pub fn hover(
                 return Some(hover_variable_field(p, doc, uri_id, index, all_docs));
             }
         }
-        if p.kind_name() == "field" {
+        if p.is_kind(kind::FIELD) {
             let key_is_ident = p
                 .child_by_field_name("key")
                 .map(|k| k.id() == ident_node.id())
@@ -99,7 +99,7 @@ pub fn hover(
         // `obj:method(...)` — the `method` identifier on a `function_call`
         // node. Infer the base type and resolve the method as a field so
         // hover shows the method's declaration + type info.
-        if p.kind_name() == "function_call" {
+        if p.is_kind(kind::FUNCTION_CALL) {
             let method_is_ident = p
                 .child_by_field_name("method")
                 .map(|m| m.id() == ident_node.id())
@@ -108,10 +108,10 @@ pub fn hover(
                 return Some(hover_method_call(p, doc, uri_id, index, all_docs));
             }
         }
-        if p.kind_name() == "function_name" {
+        if p.is_kind(kind::FUNCTION_NAME) {
             if let Some(decl) = p.parent() {
-                if decl.kind_name() == "function_declaration"
-                    || decl.kind_name() == "local_function_declaration"
+                if decl.is_kind(kind::FUNCTION_DECLARATION)
+                    || decl.is_kind(kind::LOCAL_FUNCTION_DECLARATION)
                 {
                     // `function a.b.c()` / `function a:m()` — only short
                     // circuit to the whole-declaration hover when the
@@ -483,7 +483,7 @@ fn is_function_name_tail(function_name: tree_sitter::Node, ident: tree_sitter::N
     let mut last_ident: Option<tree_sitter::Node> = None;
     for i in 0..function_name.child_count() {
         if let Some(child) = function_name.child(i as u32) {
-            if child.kind_name() == "identifier" {
+            if child.is_kind(kind::IDENTIFIER) {
                 last_ident = Some(child);
             }
         }
@@ -517,8 +517,8 @@ fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<
         .unwrap_or("")
         .to_string();
 
-    let kind_label = match decl_node.kind_name() {
-        "local_function_declaration" => "local function",
+    let kind_label = match decl_node.syntax_kind() {
+        kind::LOCAL_FUNCTION_DECLARATION => "local function",
         _ => "function",
     };
 
@@ -645,7 +645,7 @@ fn hover_table_constructor_field(
 ) -> Option<Hover> {
     let source = doc.source();
     let key_node = field_node.child_by_field_name("key")?;
-    if key_node.kind_name() != "identifier" || key_node.start_byte() != field_node.start_byte() {
+    if !key_node.is_kind(kind::IDENTIFIER) || key_node.start_byte() != field_node.start_byte() {
         return None;
     }
 
@@ -1449,7 +1449,7 @@ fn trailing_table_field_segment<'a>(
         if node.start_position().row != field_row {
             break;
         }
-        if node.kind_name() == "field" {
+        if node.is_kind(kind::FIELD) {
             segment_end = segment_end.min(node.start_byte());
             break;
         }
@@ -1551,12 +1551,12 @@ fn format_markdown_preserving_leading_indent(text: &str) -> String {
 fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
     let mut current = node;
     loop {
-        match current.kind_name() {
-            "function_declaration"
-            | "local_function_declaration"
-            | "local_declaration"
-            | "assignment_statement"
-            | "function_call_statement" => return current,
+        match current.syntax_kind() {
+            kind::FUNCTION_DECLARATION
+            | kind::LOCAL_FUNCTION_DECLARATION
+            | kind::LOCAL_DECLARATION
+            | kind::ASSIGNMENT_STATEMENT
+            | kind::FUNCTION_CALL_STATEMENT => return current,
             _ => {
                 if let Some(parent) = current.parent() {
                     current = parent;
@@ -1571,13 +1571,13 @@ fn find_enclosing_statement(node: tree_sitter::Node) -> tree_sitter::Node {
 fn find_enclosing_emmy_line(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
     let mut current = node;
     loop {
-        match current.kind_name() {
-            "emmy_line" => return Some(current),
-            "function_declaration"
-            | "local_function_declaration"
-            | "local_declaration"
-            | "assignment_statement"
-            | "function_call_statement" => return None,
+        match current.syntax_kind() {
+            kind::EMMY_LINE => return Some(current),
+            kind::FUNCTION_DECLARATION
+            | kind::LOCAL_FUNCTION_DECLARATION
+            | kind::LOCAL_DECLARATION
+            | kind::ASSIGNMENT_STATEMENT
+            | kind::FUNCTION_CALL_STATEMENT => return None,
             _ => {
                 if let Some(parent) = current.parent() {
                     current = parent;
@@ -1592,13 +1592,13 @@ fn find_enclosing_emmy_line(node: tree_sitter::Node) -> Option<tree_sitter::Node
 fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::Node> {
     let mut current = node;
     loop {
-        match current.kind_name() {
-            "field" => return Some(current),
-            "function_declaration"
-            | "local_function_declaration"
-            | "local_declaration"
-            | "assignment_statement"
-            | "function_call_statement" => return None,
+        match current.syntax_kind() {
+            kind::FIELD => return Some(current),
+            kind::FUNCTION_DECLARATION
+            | kind::LOCAL_FUNCTION_DECLARATION
+            | kind::LOCAL_DECLARATION
+            | kind::ASSIGNMENT_STATEMENT
+            | kind::FUNCTION_CALL_STATEMENT => return None,
             _ => {
                 if let Some(parent) = current.parent() {
                     current = parent;

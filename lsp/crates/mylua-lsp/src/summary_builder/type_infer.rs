@@ -2,7 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::lua_symbol::get_lua_symbol;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::table_shape::{TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::node_text;
@@ -25,13 +25,19 @@ pub(super) fn infer_expression_type(
     if depth > MAX_TABLE_SHAPE_DEPTH {
         return TypeFact::Unknown;
     }
-    match node.kind_name() {
-        "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
-        "true" | "false" => TypeFact::Known(KnownType::Boolean),
-        "nil" => TypeFact::Known(KnownType::Nil),
+    if node.kind_name() == "field_expression"
+        && node.child_by_field_name("object").is_some()
+        && node.child_by_field_name("field").is_some()
+    {
+        return infer_field_expression_type(ctx, node, depth);
+    }
+    match node.syntax_kind() {
+        kind::NUMBER => TypeFact::Known(KnownType::Number),
+        kind::STRING => TypeFact::Known(KnownType::String),
+        kind::TRUE | kind::FALSE => TypeFact::Known(KnownType::Boolean),
+        kind::NIL => TypeFact::Known(KnownType::Nil),
 
-        "table_constructor" => {
+        kind::TABLE_CONSTRUCTOR => {
             let shape_id = ctx.alloc_shape_id();
             let mut shape = TableShape::new(shape_id);
             extract_table_shape(ctx, node, &mut shape, depth + 1);
@@ -39,7 +45,7 @@ pub(super) fn infer_expression_type(
             TypeFact::Known(KnownType::Table(shape_id))
         }
 
-        "function_definition" => {
+        kind::FUNCTION_DEFINITION => {
             // Extract params from the `parameters` list on the
             // function_body child; fall through to Emmy-annotation
             // enrichment on the enclosing `local f = function(...)`
@@ -103,16 +109,16 @@ pub(super) fn infer_expression_type(
             TypeFact::Known(KnownType::Function(FunctionSignature { params, returns }))
         }
 
-        "function_call" => infer_call_return_type(ctx, node, depth),
+        kind::FUNCTION_CALL => infer_call_return_type(ctx, node, depth),
 
-        "variable" | "field_expression"
+        kind::VARIABLE
             if node.child_by_field_name("object").is_some()
                 && node.child_by_field_name("field").is_some() =>
         {
             infer_field_expression_type(ctx, node, depth)
         }
 
-        "variable" | "identifier" => {
+        kind::VARIABLE | kind::IDENTIFIER => {
             let text = node_text(node, ctx.source);
             // Check if it's a known local
             if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
@@ -124,9 +130,9 @@ pub(super) fn infer_expression_type(
             TypeFact::Stub(SymbolicStub::GlobalRef { name: text.into() })
         }
 
-        "unary_expression" | "binary_expression" => infer_operator_type(ctx, node, depth),
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => infer_operator_type(ctx, node, depth),
 
-        "parenthesized_expression" => {
+        kind::PARENTHESIZED_EXPRESSION => {
             if let Some(inner) = node.named_child(0) {
                 infer_expression_type(ctx, inner, depth)
             } else {
@@ -197,18 +203,24 @@ fn function_return_with_call_args(
 /// and local variable lookups. Sufficient for function-level generic
 /// unification (e.g. `identity("abc")` → `T = string`).
 fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
-    match node.kind_name() {
-        "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
-        "true" | "false" => TypeFact::Known(KnownType::Boolean),
-        "nil" => TypeFact::Known(KnownType::Nil),
-        "variable" | "field_expression"
+    if node.kind_name() == "field_expression"
+        && node.child_by_field_name("object").is_some()
+        && node.child_by_field_name("field").is_some()
+    {
+        return infer_field_expression_type(ctx, node, 0);
+    }
+    match node.syntax_kind() {
+        kind::NUMBER => TypeFact::Known(KnownType::Number),
+        kind::STRING => TypeFact::Known(KnownType::String),
+        kind::TRUE | kind::FALSE => TypeFact::Known(KnownType::Boolean),
+        kind::NIL => TypeFact::Known(KnownType::Nil),
+        kind::VARIABLE
             if node.child_by_field_name("object").is_some()
                 && node.child_by_field_name("field").is_some() =>
         {
             infer_field_expression_type(ctx, node, 0)
         }
-        "variable" | "identifier" => {
+        kind::VARIABLE | kind::IDENTIFIER => {
             let text = node_text(node, ctx.source);
             if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
                 if let Some(ref tf) = decl.type_fact {
@@ -217,16 +229,18 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
             }
             TypeFact::Unknown
         }
-        "table_constructor" => {
+        kind::TABLE_CONSTRUCTOR => {
             // For array-like table literals `{ 1, 2, "a" }`, infer the
             // element type so generic unification can bind `T` in `T[]`.
             infer_table_array_element_type_lightweight(ctx, node)
         }
-        "parenthesized_expression" => node
+        kind::PARENTHESIZED_EXPRESSION => node
             .named_child(0)
             .map(|inner| infer_arg_type_lightweight(ctx, inner))
             .unwrap_or(TypeFact::Unknown),
-        "unary_expression" | "binary_expression" => infer_operator_arg_type_lightweight(ctx, node),
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
+            infer_operator_arg_type_lightweight(ctx, node)
+        }
         _ => TypeFact::Unknown,
     }
 }
@@ -256,7 +270,7 @@ fn infer_operator_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::No
         }
     }
 
-    if node.kind_name() == "unary_expression" {
+    if node.is_kind(kind::UNARY_EXPRESSION) {
         if let Some(op_child) = node.child(0) {
             match node_text(op_child, ctx.source) {
                 "-" => return TypeFact::Known(KnownType::Number),
@@ -283,14 +297,14 @@ fn infer_table_array_element_type_lightweight(
         let Some(field_list) = constructor.named_child(i as u32) else {
             continue;
         };
-        if field_list.kind_name() != "field_list" {
+        if !field_list.is_kind(kind::FIELD_LIST) {
             continue;
         }
         for j in 0..field_list.named_child_count() {
             let Some(field_node) = field_list.named_child(j as u32) else {
                 continue;
             };
-            if field_node.kind_name() != "field" {
+            if !field_node.is_kind(kind::FIELD) {
                 continue;
             }
             // Only handle positional entries (no key)
@@ -415,7 +429,7 @@ fn infer_call_return_type(
     // Current grammar wraps dotted access as a `variable` node with
     // `object` + `field` fields; `field_expression` is kept for forward
     // compatibility only.
-    if matches!(callee.kind_name(), "variable" | "field_expression") {
+    if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
         if let Some(base) = callee.child_by_field_name("object") {
             if let Some(field) = callee.child_by_field_name("field") {
                 let base_text = node_text(base, ctx.source);
@@ -562,7 +576,7 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
         return TypeFact::Unknown;
     }
 
-    if matches!(base.kind_name(), "variable" | "field_expression")
+    if (base.is_kind(kind::VARIABLE) || base.kind_name() == "field_expression")
         && base.child_by_field_name("object").is_some()
         && base.child_by_field_name("field").is_some()
     {
@@ -570,7 +584,7 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
     }
 
     let base_text = node_text(base, ctx.source);
-    if matches!(base.kind_name(), "variable" | "identifier") {
+    if matches!(base.syntax_kind(), kind::VARIABLE | kind::IDENTIFIER) {
         if let Some(decl) = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte()) {
             if let Some(ref tf) = decl.type_fact {
                 return tf.clone();
@@ -610,7 +624,7 @@ fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: u
         }
     }
     // Unary minus/length
-    if node.kind_name() == "unary_expression" {
+    if node.is_kind(kind::UNARY_EXPRESSION) {
         if let Some(op_child) = node.child(0) {
             let op_text = node_text(op_child, ctx.source);
             match op_text {

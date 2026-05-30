@@ -1,5 +1,5 @@
 use crate::emmy::{emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation};
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::table_shape::{FieldInfo, TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::{extract_string_literal, node_text};
@@ -43,14 +43,14 @@ pub(super) fn extract_table_shape(
         let Some(field_list) = constructor.named_child(i as u32) else {
             continue;
         };
-        if field_list.kind_name() != "field_list" {
+        if !field_list.is_kind(kind::FIELD_LIST) {
             continue;
         }
         for j in 0..field_list.named_child_count() {
             let Some(field_node) = field_list.named_child(j as u32) else {
                 continue;
             };
-            if field_node.kind_name() != "field" {
+            if !field_node.is_kind(kind::FIELD) {
                 continue;
             }
             extract_single_field(ctx, field_node, shape, depth);
@@ -69,7 +69,7 @@ fn extract_single_field(
 
     match key_node {
         // `name = value` — key is an identifier → named field.
-        Some(k) if k.kind_name() == "identifier" => {
+        Some(k) if k.is_kind(kind::IDENTIFIER) => {
             let key = node_text(k, ctx.source).to_string();
             if let Some(val) = value_node {
                 let type_fact = infer_field_value_type(ctx, field_node, val, depth);
@@ -89,7 +89,7 @@ fn extract_single_field(
         // `["name"] = value` — static string key that can be read via
         // dot syntax (`t.name`). Non-identifier strings remain map-like
         // entries rather than polluting the named-field table.
-        Some(k) if k.kind_name() == "string" => {
+        Some(k) if k.is_kind(kind::STRING) => {
             let key_text = extract_string_literal(k, ctx.source)
                 .unwrap_or_else(|| node_text(k, ctx.source).to_string());
             if is_lua_identifier_key(&key_text) {
@@ -111,7 +111,7 @@ fn extract_single_field(
         }
         // `[number] = value` is a static subscript key, but not a named
         // field for dot access.
-        Some(k) if k.kind_name() == "number" => {
+        Some(k) if k.is_kind(kind::NUMBER) => {
             let _ = k;
         }
         // `[expr] = value` with a non-literal key — dynamic bracket
@@ -221,7 +221,7 @@ fn trailing_field_segment<'a>(field_node: tree_sitter::Node, source: &'a [u8]) -
         if node.start_position().row != field_row {
             break;
         }
-        if node.kind_name() == "field" {
+        if node.is_kind(kind::FIELD) {
             segment_end = segment_end.min(node.start_byte());
             break;
         }
@@ -255,7 +255,7 @@ pub(super) fn extract_string_from_node(
     ctx: &BuildContext,
     node: tree_sitter::Node,
 ) -> Option<String> {
-    let inner = if node.kind_name() == "expression_list" {
+    let inner = if node.is_kind(kind::EXPRESSION_LIST) {
         node.named_child(0)?
     } else {
         node

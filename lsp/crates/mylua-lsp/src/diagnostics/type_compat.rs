@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::node_text;
 
@@ -7,30 +7,30 @@ pub(crate) fn infer_literal_type(
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
-    match node.kind_name() {
-        "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
-        "true" | "false" => TypeFact::Known(KnownType::Boolean),
-        "nil" => TypeFact::Known(KnownType::Nil),
-        "table_constructor" => {
+    match node.syntax_kind() {
+        kind::NUMBER => TypeFact::Known(KnownType::Number),
+        kind::STRING => TypeFact::Known(KnownType::String),
+        kind::TRUE | kind::FALSE => TypeFact::Known(KnownType::Boolean),
+        kind::NIL => TypeFact::Known(KnownType::Nil),
+        kind::TABLE_CONSTRUCTOR => {
             TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
         }
-        "function_definition" => {
+        kind::FUNCTION_DEFINITION => {
             TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
                 params: vec![],
                 returns: vec![],
             }))
         }
-        "parenthesized_expression" => node
+        kind::PARENTHESIZED_EXPRESSION => node
             .named_child(0)
             .map(|inner| infer_literal_type(inner, source, scope_tree))
             .unwrap_or(TypeFact::Unknown),
-        "unary_expression" | "binary_expression" => {
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
             infer_operator_type_with(node, source, |child| {
                 infer_literal_type(child, source, scope_tree)
             })
         }
-        "variable" | "identifier" => {
+        kind::VARIABLE | kind::IDENTIFIER => {
             let text = node_text(node, source);
             if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
                 if !decl.is_emmy_annotated {
@@ -81,7 +81,7 @@ where
         }
     }
 
-    if node.kind_name() == "unary_expression" {
+    if node.is_kind(kind::UNARY_EXPRESSION) {
         if let Some(op_child) = node.child(0) {
             let op = if source.is_empty() {
                 op_child.kind_name()
@@ -234,18 +234,18 @@ pub(crate) fn infer_argument_type(
     source: &[u8],
     scope_tree: &crate::scope::ScopeTree,
 ) -> TypeFact {
-    if matches!(node.kind_name(), "variable" | "identifier") {
+    if matches!(node.syntax_kind(), kind::VARIABLE | kind::IDENTIFIER) {
         let text = node_text(node, source);
         if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
             return tf.clone();
         }
     }
-    match node.kind_name() {
-        "parenthesized_expression" => node
+    match node.syntax_kind() {
+        kind::PARENTHESIZED_EXPRESSION => node
             .named_child(0)
             .map(|inner| infer_argument_type(inner, source, scope_tree))
             .unwrap_or(TypeFact::Unknown),
-        "unary_expression" | "binary_expression" => {
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
             infer_operator_type_with(node, source, |child| {
                 infer_argument_type(child, source, scope_tree)
             })
@@ -258,25 +258,25 @@ pub(crate) fn infer_argument_type(
 /// dependency of `infer_literal_type` so this walk can run without a
 /// summary in scope (keeps the diagnostic self-contained).
 pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
-    match node.kind_name() {
-        "number" => TypeFact::Known(KnownType::Number),
-        "string" => TypeFact::Known(KnownType::String),
-        "true" | "false" => TypeFact::Known(KnownType::Boolean),
-        "nil" => TypeFact::Known(KnownType::Nil),
-        "table_constructor" => {
+    match node.syntax_kind() {
+        kind::NUMBER => TypeFact::Known(KnownType::Number),
+        kind::STRING => TypeFact::Known(KnownType::String),
+        kind::TRUE | kind::FALSE => TypeFact::Known(KnownType::Boolean),
+        kind::NIL => TypeFact::Known(KnownType::Nil),
+        kind::TABLE_CONSTRUCTOR => {
             TypeFact::Known(KnownType::Table(crate::table_shape::TableShapeId(u32::MAX)))
         }
-        "function_definition" => {
+        kind::FUNCTION_DEFINITION => {
             TypeFact::Known(KnownType::Function(crate::type_system::FunctionSignature {
                 params: vec![],
                 returns: vec![],
             }))
         }
-        "parenthesized_expression" => node
+        kind::PARENTHESIZED_EXPRESSION => node
             .named_child(0)
             .map(infer_return_literal_type)
             .unwrap_or(TypeFact::Unknown),
-        "unary_expression" | "binary_expression" => {
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
             infer_operator_type_with(node, &[], infer_return_literal_type)
         }
         _ => TypeFact::Unknown,

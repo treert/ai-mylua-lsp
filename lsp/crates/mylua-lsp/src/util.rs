@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -367,7 +367,7 @@ pub fn find_node_at_position<'a>(
     byte_offset: usize,
 ) -> Option<tree_sitter::Node<'a>> {
     let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
-    while node.kind_name() != "identifier" {
+    while !node.is_kind(kind::IDENTIFIER) {
         node = node.parent()?;
     }
     Some(node)
@@ -582,7 +582,7 @@ pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<
     }
 
     // Strategy 2: strip matching quotes from the raw text.
-    if node.kind_name() == "string" {
+    if node.is_kind(kind::STRING) {
         let text = node_text(node, source);
         if text.len() >= 2 {
             let bytes = text.as_bytes();
@@ -620,7 +620,7 @@ pub fn extract_call_arg_nodes<'tree>(
     let mut exprs = Vec::new();
     for i in 0..args.named_child_count() {
         if let Some(child) = args.named_child(i as u32) {
-            if child.kind_name() == "expression_list" {
+            if child.is_kind(kind::EXPRESSION_LIST) {
                 for j in 0..child.named_child_count() {
                     if let Some(e) = child.named_child(j as u32) {
                         exprs.push(e);
@@ -802,7 +802,7 @@ mod tests {
         let number = root.descendant_for_byte_range(22, 22).expect("number node");
         assert_eq!(number.kind_name(), "number");
         let func = walk_ancestors(number, |p| {
-            if p.kind_name() == "function_declaration" {
+            if p.is_kind(kind::FUNCTION_DECLARATION) {
                 Some(p)
             } else {
                 None

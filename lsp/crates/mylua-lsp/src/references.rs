@@ -3,7 +3,7 @@ use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{find_node_at_position, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -391,7 +391,7 @@ fn try_identify_field(
                 if child.id() == ident_node.id() {
                     break;
                 }
-                if child.kind_name() == "identifier" {
+                if child.is_kind(kind::IDENTIFIER) {
                     if segments.is_empty() {
                         first_segment_byte = child.start_byte();
                     }
@@ -583,7 +583,7 @@ fn verify_field(
                 if child.id() == node.id() {
                     break;
                 }
-                if child.kind_name() == "identifier" {
+                if child.is_kind(kind::IDENTIFIER) {
                     if segments.is_empty() {
                         first_segment_byte = child.start_byte();
                     }
@@ -664,7 +664,7 @@ fn find_identifier_at<'a>(
 ) -> Option<tree_sitter::Node<'a>> {
     let node =
         root.descendant_for_byte_range(byte_offset, byte_offset + name_len.saturating_sub(1))?;
-    if node.kind_name() == "identifier"
+    if node.is_kind(kind::IDENTIFIER)
         && node.start_byte() == byte_offset
         && node.end_byte() == byte_offset + name_len
     {
@@ -803,8 +803,8 @@ fn scan_type_in_comments(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    match node.kind_name() {
-        "emmy_line" | "comment" => {
+    match node.syntax_kind() {
+        kind::EMMY_LINE | kind::COMMENT => {
             emit_type_matches_in_node(node, type_name, source, uri_id, locations, line_index);
             return;
         }

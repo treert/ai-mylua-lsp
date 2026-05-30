@@ -23,7 +23,7 @@
 //! - `m = require; m("foo")` aliased call chains are out of scope —
 //!   the callee must be the literal identifier `require`.
 
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
@@ -53,7 +53,7 @@ fn collect_recursive(
     line_index: &LineIndex,
 ) {
     let node = cursor.node();
-    if node.kind_name() == "function_call" {
+    if node.is_kind(kind::FUNCTION_CALL) {
         if let Some((string_node, module_path)) = extract_require_argument(node, source) {
             if let Some(target) = resolve_module_target(index, &module_path) {
                 // Narrow the link range to the string *contents*
@@ -95,15 +95,15 @@ fn extract_require_argument<'tree>(
     // single identifier child also matches (grammar may wrap
     // identifiers as `variable`). Reject dotted / method-style
     // callees — `m.require()` isn't Lua's require.
-    let callee_ident = if callee.kind_name() == "identifier" {
+    let callee_ident = if callee.is_kind(kind::IDENTIFIER) {
         callee
-    } else if callee.kind_name() == "variable"
+    } else if callee.is_kind(kind::VARIABLE)
         && callee.child_by_field_name("object").is_none()
         && callee.child_by_field_name("index").is_none()
     {
         callee
             .named_child(0)
-            .filter(|c| c.kind_name() == "identifier")?
+            .filter(|c| c.is_kind(kind::IDENTIFIER))?
     } else {
         return None;
     };
@@ -120,10 +120,10 @@ fn extract_require_argument<'tree>(
         Some(b'"') | Some(b'\'') => {
             // Either `args` IS the string (older grammar inlining)
             // or wraps it as a single named child.
-            let string_node = if args.kind_name() == "string" {
+            let string_node = if args.is_kind(kind::STRING) {
                 args
             } else {
-                args.named_child(0).filter(|c| c.kind_name() == "string")?
+                args.named_child(0).filter(|c| c.is_kind(kind::STRING))?
             };
             let path = parse_module_path_from_string(string_node, source)?;
             return Some((string_node, path));
@@ -135,12 +135,12 @@ fn extract_require_argument<'tree>(
     if source.get(args.start_byte()).copied() == Some(b'(') {
         let list = (0..args.named_child_count())
             .filter_map(|i| args.named_child(i as u32))
-            .find(|c| c.kind_name() == "expression_list")?;
+            .find(|c| c.is_kind(kind::EXPRESSION_LIST))?;
         if list.named_child_count() != 1 {
             return None; // require takes exactly one arg; be strict
         }
         let first = list.named_child(0)?;
-        if first.kind_name() != "string" {
+        if !first.is_kind(kind::STRING) {
             return None;
         }
         let path = parse_module_path_from_string(first, source)?;

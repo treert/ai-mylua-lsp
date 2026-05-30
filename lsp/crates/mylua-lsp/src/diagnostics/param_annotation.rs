@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use std::collections::HashSet;
 
 use tower_lsp_server::ls_types::*;
@@ -22,8 +22,8 @@ pub(super) fn check_param_annotation_diagnostics(
         if is_colon_method(fun, source) {
             lua_params.insert("self".to_string());
         }
-        let anchor = match fun.kind_name() {
-            "function_definition" => {
+        let anchor = match fun.syntax_kind() {
+            kind::FUNCTION_DEFINITION => {
                 crate::summary_builder::enclosing_statement_for_function_expr(fun).unwrap_or(fun)
             }
             _ => fun,
@@ -53,8 +53,8 @@ fn collect_function_like_nodes<'tree>(
     out: &mut Vec<tree_sitter::Node<'tree>>,
 ) {
     if matches!(
-        node.kind_name(),
-        "function_declaration" | "local_function_declaration" | "function_definition"
+        node.syntax_kind(),
+        kind::FUNCTION_DECLARATION | kind::LOCAL_FUNCTION_DECLARATION | kind::FUNCTION_DEFINITION
     ) {
         out.push(node);
     }
@@ -74,25 +74,24 @@ fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<Hash
         let Some(child) = param_list.child(i as u32) else {
             continue;
         };
-        match child.kind_name() {
-            "identifier" => {
+        match child.syntax_kind() {
+            kind::IDENTIFIER => {
                 names.insert(node_text(child, source).to_string());
             }
-            "name_list" => {
+            kind::NAME_LIST => {
                 for j in 0..child.named_child_count() {
                     let Some(id) = child.named_child(j as u32) else {
                         continue;
                     };
-                    if id.kind_name() == "identifier" {
+                    if id.is_kind(kind::IDENTIFIER) {
                         names.insert(node_text(id, source).to_string());
                     }
                 }
             }
-            "varargs" => {
-                names.insert("...".to_string());
-            }
             _ => {
-                if !child.is_named() && node_text(child, source) == "..." {
+                if child.kind_name() == "varargs"
+                    || (!child.is_named() && node_text(child, source) == "...")
+                {
                     names.insert("...".to_string());
                 }
             }
@@ -127,13 +126,13 @@ fn collect_preceding_emmy_lines(
             break;
         }
 
-        match prev.kind_name() {
-            "emmy_comment" => {
+        match prev.syntax_kind() {
+            kind::EMMY_COMMENT => {
                 for i in 0..prev.named_child_count() {
                     let Some(line) = prev.named_child(i as u32) else {
                         continue;
                     };
-                    if line.kind_name() == "emmy_line" {
+                    if line.is_kind(kind::EMMY_LINE) {
                         lines.push(AnnotationLine {
                             text: node_text(line, source).to_string(),
                             range: line_index.ts_node_to_range(line, source),
@@ -144,7 +143,7 @@ fn collect_preceding_emmy_lines(
                 sibling = prev.prev_sibling();
                 continue;
             }
-            "comment" => {
+            kind::COMMENT => {
                 let text = node_text(prev, source);
                 if text.starts_with("---") {
                     if text.starts_with("---@") {

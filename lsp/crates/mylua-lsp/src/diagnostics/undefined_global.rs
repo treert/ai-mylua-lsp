@@ -1,6 +1,6 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::scope::ScopeTree;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::util::{node_text, LineIndex};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -29,7 +29,7 @@ fn function_name_has_path_separator(function_name: tree_sitter::Node) -> bool {
 fn is_function_name_base(function_name: tree_sitter::Node, ident: tree_sitter::Node) -> bool {
     for i in 0..function_name.child_count() {
         if let Some(child) = function_name.child(i as u32) {
-            if child.kind_name() == "identifier" {
+            if child.is_kind(kind::IDENTIFIER) {
                 return child.id() == ident.id();
             }
         }
@@ -49,12 +49,12 @@ pub(super) fn check_undefined_globals(
 ) {
     let node = cursor.node();
 
-    if node.kind_name() == "identifier" {
+    if node.is_kind(kind::IDENTIFIER) {
         if let Some(parent) = node.parent() {
-            let is_bare_var = parent.kind_name() == "variable" && parent.child_count() == 1;
+            let is_bare_var = parent.is_kind(kind::VARIABLE) && parent.child_count() == 1;
             let is_definition = matches!(
-                parent.kind_name(),
-                "attribute_name_list" | "name_list" | "label_statement"
+                parent.syntax_kind(),
+                kind::ATTRIBUTE_NAME_LIST | kind::NAME_LIST | kind::LABEL_STATEMENT
             );
             // `function_name` covers three forms with very different
             // semantics w.r.t. the *base* identifier:
@@ -66,7 +66,7 @@ pub(super) fn check_undefined_globals(
             // base identifier must participate in the undefined-global
             // check. Later identifiers (`bar`, `m`) are field writes —
             // skip them.
-            let is_function_name_child = parent.kind_name() == "function_name";
+            let is_function_name_child = parent.is_kind(kind::FUNCTION_NAME);
             let should_check_as_ref = is_bare_var
                 || (is_function_name_child
                     && is_function_name_base(parent, node)

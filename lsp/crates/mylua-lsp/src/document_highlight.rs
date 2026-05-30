@@ -16,7 +16,7 @@
 //! declaration (so shadowing in nested scopes and the `local x = x + 1`
 //! RHS referring to the outer `x` are handled correctly).
 
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use tower_lsp_server::ls_types::*;
 
 use crate::document::Document;
@@ -72,7 +72,7 @@ fn collect_highlights(
     out: &mut Vec<DocumentHighlight>,
 ) {
     let node = cursor.node();
-    if node.kind_name() == "identifier" && node_text(node, source) == name {
+    if node.is_kind(kind::IDENTIFIER) && node_text(node, source) == name {
         // Scope filter: when the click resolved to a local, only
         // include occurrences that point to the same declaration.
         let matches_scope = match target_decl_byte {
@@ -123,12 +123,12 @@ fn collect_highlights(
 fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
     let mut current = ident;
     while let Some(parent) = current.parent() {
-        match parent.kind_name() {
+        match parent.syntax_kind() {
             // `variable` with field / subscript form: `object`
             // (required for nested access) or `index` (subscript form)
             // represents a READ of the current frame, regardless of
             // any outer assignment putting the whole thing on the LHS.
-            "variable" => {
+            kind::VARIABLE => {
                 if let Some(obj) = parent.child_by_field_name("object") {
                     if obj.id() == current.id() {
                         return DocumentHighlightKind::READ;
@@ -143,7 +143,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 // we're the outer wrapper being looked at from below:
                 // keep walking.
             }
-            "assignment_statement" => {
+            kind::ASSIGNMENT_STATEMENT => {
                 if let Some(lhs) = parent.child_by_field_name("left") {
                     if is_ancestor_or_equal(lhs, ident) {
                         return DocumentHighlightKind::WRITE;
@@ -151,7 +151,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 }
                 return DocumentHighlightKind::READ;
             }
-            "local_declaration" => {
+            kind::LOCAL_DECLARATION => {
                 if let Some(names) = parent.child_by_field_name("names") {
                     if is_ancestor_or_equal(names, ident) {
                         return DocumentHighlightKind::WRITE;
@@ -159,7 +159,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 }
                 return DocumentHighlightKind::READ;
             }
-            "local_function_declaration" | "function_declaration" => {
+            kind::LOCAL_FUNCTION_DECLARATION | kind::FUNCTION_DECLARATION => {
                 if let Some(name) = parent.child_by_field_name("name") {
                     if is_ancestor_or_equal(name, ident) {
                         return DocumentHighlightKind::WRITE;
@@ -167,7 +167,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 }
                 return DocumentHighlightKind::READ;
             }
-            "for_numeric_statement" => {
+            kind::FOR_NUMERIC_STATEMENT => {
                 if let Some(name) = parent.child_by_field_name("name") {
                     if is_ancestor_or_equal(name, ident) {
                         return DocumentHighlightKind::WRITE;
@@ -175,7 +175,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 }
                 return DocumentHighlightKind::READ;
             }
-            "for_generic_statement" => {
+            kind::FOR_GENERIC_STATEMENT => {
                 if let Some(names) = parent.child_by_field_name("names") {
                     if is_ancestor_or_equal(names, ident) {
                         return DocumentHighlightKind::WRITE;
@@ -183,7 +183,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 }
                 return DocumentHighlightKind::READ;
             }
-            "parameter_list" => return DocumentHighlightKind::WRITE,
+            kind::PARAMETER_LIST => return DocumentHighlightKind::WRITE,
             _ => {}
         }
         current = parent;

@@ -10,7 +10,7 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::scope::ScopeTree;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::type_system::{KnownType, TypeFact};
 
 use crate::uri_id::UriId;
@@ -79,7 +79,7 @@ pub(crate) fn infer_node_type_in_file_id(
             // `variable` wrapping a single identifier — local/global lookup.
             if node.named_child_count() == 1 {
                 if let Some(child) = node.named_child(0) {
-                    if child.kind_name() == "identifier" {
+                    if child.is_kind(kind::IDENTIFIER) {
                         let text = node_text(child, source);
                         if let Some(tf) = scope_tree.resolve_type(child.start_byte(), text) {
                             return tf.clone();
@@ -161,7 +161,7 @@ fn infer_operator_type_in_file_id(
         }
     }
 
-    if node.kind_name() == "unary_expression" {
+    if node.is_kind(kind::UNARY_EXPRESSION) {
         if let Some(op_child) = node.child(0) {
             match node_text(op_child, source) {
                 "-" => return TypeFact::Known(KnownType::Number),
@@ -185,14 +185,14 @@ fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {
         let Some(field_list) = constructor.named_child(i as u32) else {
             continue;
         };
-        if field_list.kind_name() != "field_list" {
+        if !field_list.is_kind(kind::FIELD_LIST) {
             continue;
         }
         for j in 0..field_list.named_child_count() {
             let Some(field_node) = field_list.named_child(j as u32) else {
                 continue;
             };
-            if field_node.kind_name() != "field" {
+            if !field_node.is_kind(kind::FIELD) {
                 continue;
             }
             // Only handle positional entries (no key)
@@ -200,11 +200,13 @@ fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {
                 return TypeFact::Unknown; // has named keys, not a pure array
             }
             if let Some(val) = field_node.child_by_field_name("value") {
-                let val_type = match val.kind_name() {
-                    "number" => TypeFact::Known(crate::type_system::KnownType::Number),
-                    "string" => TypeFact::Known(crate::type_system::KnownType::String),
-                    "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
-                    "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
+                let val_type = match val.syntax_kind() {
+                    kind::NUMBER => TypeFact::Known(crate::type_system::KnownType::Number),
+                    kind::STRING => TypeFact::Known(crate::type_system::KnownType::String),
+                    kind::TRUE | kind::FALSE => {
+                        TypeFact::Known(crate::type_system::KnownType::Boolean)
+                    }
+                    kind::NIL => TypeFact::Known(crate::type_system::KnownType::Nil),
                     _ => continue,
                 };
                 elem_type = Some(match elem_type {
@@ -265,7 +267,7 @@ fn infer_call_return_fact(
     };
 
     // `require("mod")` — note callee is a plain identifier.
-    if callee.kind_name() == "identifier" && node_text(callee, source) == "require" {
+    if callee.is_kind(kind::IDENTIFIER) && node_text(callee, source) == "require" {
         if let Some(args) = node.child_by_field_name("arguments") {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_literal(first_arg, source) {
@@ -317,7 +319,7 @@ fn infer_call_return_fact(
     }
 
     // Dotted call `mod.f()` — callee is a `variable` with `object`+`field`.
-    if matches!(callee.kind_name(), "variable" | "field_expression") {
+    if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
         if let (Some(base_node), Some(field_node)) = (
             callee.child_by_field_name("object"),
             callee.child_by_field_name("field"),

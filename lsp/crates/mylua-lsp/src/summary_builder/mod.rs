@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 mod call_sites;
 mod emmy_visitors;
 pub(crate) mod fingerprint;
@@ -142,13 +142,13 @@ fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Opti
         let Some(child) = root.named_child(i as u32) else {
             continue;
         };
-        match child.kind_name() {
-            "emmy_comment" => {
+        match child.syntax_kind() {
+            kind::EMMY_COMMENT => {
                 for j in 0..child.named_child_count() {
                     let Some(line) = child.named_child(j as u32) else {
                         continue;
                     };
-                    if line.kind_name() != "emmy_line" {
+                    if !line.is_kind(kind::EMMY_LINE) {
                         continue;
                     }
                     let text = node_text(line, source);
@@ -162,11 +162,11 @@ fn detect_meta_annotation(root: tree_sitter::Node, source: &[u8]) -> (bool, Opti
             }
             // Any non-emmy sibling that represents real code tells us
             // there's no leading `---@meta`.
-            "local_declaration"
-            | "local_function_declaration"
-            | "function_declaration"
-            | "assignment_statement"
-            | "return_statement" => return (false, None),
+            kind::LOCAL_DECLARATION
+            | kind::LOCAL_FUNCTION_DECLARATION
+            | kind::FUNCTION_DECLARATION
+            | kind::ASSIGNMENT_STATEMENT
+            | kind::RETURN_STATEMENT => return (false, None),
             _ => continue,
         }
     }

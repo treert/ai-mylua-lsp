@@ -1,6 +1,6 @@
 use crate::lua_symbol::LuaSymbol;
 use crate::scope::{ScopeDecl, ScopeTree};
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::types::DefKind;
 use crate::util::node_text;
 use tower_lsp_server::ls_types::*;
@@ -74,11 +74,11 @@ fn count_identifier_references(
     ref_count: &mut std::collections::HashMap<(LuaSymbol, usize), usize>,
 ) {
     let node = cursor.node();
-    if matches!(
-        node.kind_name(),
-        "identifier" | "varargs" | "vararg_expression"
-    ) {
-        let name = if matches!(node.kind_name(), "varargs" | "vararg_expression") {
+    if node.is_kind(kind::IDENTIFIER)
+        || node.is_kind(kind::VARARG_EXPRESSION)
+        || node.kind_name() == "varargs"
+    {
+        let name = if node.is_kind(kind::VARARG_EXPRESSION) || node.kind_name() == "varargs" {
             "..."
         } else {
             node_text(node, source)
@@ -110,13 +110,13 @@ fn is_param_in_empty_function_body(root: tree_sitter::Node, decl_byte: usize) ->
     // Find the deepest node at decl_byte, then walk up to find function_body.
     let mut node = root.descendant_for_byte_range(decl_byte, decl_byte);
     while let Some(n) = node {
-        if n.kind_name() == "function_body" {
+        if n.is_kind(kind::FUNCTION_BODY) {
             // function_body children: `parameter_list`, statements, `word_end`.
             // If only non-statement children are present, the body is empty.
             for i in 0..n.named_child_count() {
                 if let Some(child) = n.named_child(i as u32) {
-                    match child.kind_name() {
-                        "parameter_list" | "word_end" => {}
+                    match child.syntax_kind() {
+                        kind::PARAMETER_LIST | kind::WORD_END => {}
                         _ => return false,
                     }
                 }

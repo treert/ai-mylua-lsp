@@ -1,4 +1,4 @@
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 // ---------------------------------------------------------------------------
 // ---@diagnostic suppression directives
 // ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ fn collect_suppression_directives(root: tree_sitter::Node, source: &[u8]) -> Vec
 }
 
 fn collect_directives_recursive(node: tree_sitter::Node, source: &[u8], out: &mut Vec<Directive>) {
-    if node.kind_name() == "emmy_line" {
+    if node.is_kind(kind::EMMY_LINE) {
         if let Some(d) = parse_directive_from_emmy_line(node, source) {
             out.push(d);
         }

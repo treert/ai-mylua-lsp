@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
 use crate::lua_builtins::LUA_KEYWORDS;
 use crate::resolver;
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use crate::type_inference;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{node_text, walk_ancestors};
@@ -159,11 +159,11 @@ fn try_require_path_completion(
     // `walk_ancestors` caps depth with a shared safety limit + logs on
     // overflow (see `util::ANCESTOR_WALK_LIMIT`).
     let source = doc.source();
-    let string_node = if matches!(node.kind_name(), "short_string" | "string") {
+    let string_node = if matches!(node.syntax_kind(), kind::SHORT_STRING | kind::STRING) {
         Some(node)
     } else {
         walk_ancestors(node, |p| {
-            if matches!(p.kind_name(), "short_string" | "string") {
+            if matches!(p.syntax_kind(), kind::SHORT_STRING | kind::STRING) {
                 Some(p)
             } else {
                 None
@@ -194,7 +194,7 @@ fn try_require_path_completion(
 /// `require`. Uses `walk_ancestors` for depth-capped traversal.
 fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool {
     walk_ancestors(string_node, |p| {
-        if p.kind_name() == "function_call" {
+        if p.is_kind(kind::FUNCTION_CALL) {
             let callee_is_require = p
                 .child_by_field_name("callee")
                 .map(|callee| node_text(callee, source) == "require")

@@ -5,7 +5,7 @@
 //!
 //! Grammar reference: `grammar/emmy.bnf`.
 
-use crate::syntax_kind::NodeKindExt;
+use crate::syntax_kind::{kind, NodeKindExt};
 use std::fmt::{self, Write as _};
 
 // ===========================================================================
@@ -1541,11 +1541,11 @@ pub fn collect_preceding_comments<'a>(
         if next_start_row > prev_end_row + 1 {
             break;
         }
-        match prev.kind_name() {
-            "emmy_comment" => {
+        match prev.syntax_kind() {
+            kind::EMMY_COMMENT => {
                 for i in (0..prev.named_child_count()).rev() {
                     if let Some(line_node) = prev.named_child(i as u32) {
-                        if line_node.kind_name() != "emmy_line" {
+                        if !line_node.is_kind(kind::EMMY_LINE) {
                             continue;
                         }
                         let line_end_row = line_node.end_position().row;
@@ -1563,7 +1563,7 @@ pub fn collect_preceding_comments<'a>(
                 sibling = prev.prev_sibling();
                 continue;
             }
-            "comment" => {
+            kind::COMMENT => {
                 let text = prev.utf8_text(source).unwrap_or("");
                 if is_comment_separator_line(text) {
                     break;
@@ -1625,8 +1625,8 @@ pub fn collect_trailing_comment<'a>(
     source: &'a [u8],
 ) -> Option<String> {
     let next = next_same_line_after_statement_separators(node, source)?;
-    match next.kind_name() {
-        "comment" => {
+    match next.syntax_kind() {
+        kind::COMMENT => {
             let text = next.utf8_text(source).unwrap_or("");
             // Strip the `--` prefix (but not `---` Emmy lines — those are
             // preceding-comment material, not trailing doc).
@@ -1682,12 +1682,12 @@ pub fn collect_trailing_emmy_text<'a>(
     source: &'a [u8],
 ) -> Option<String> {
     let next = next_same_line_after_statement_separators(node, source)?;
-    match next.kind_name() {
-        "emmy_comment" => {
+    match next.syntax_kind() {
+        kind::EMMY_COMMENT => {
             let mut lines = Vec::new();
             for i in 0..next.named_child_count() {
                 if let Some(child) = next.named_child(i as u32) {
-                    if child.kind_name() == "emmy_line" {
+                    if child.is_kind(kind::EMMY_LINE) {
                         let text = child.utf8_text(source).unwrap_or("").trim_end();
                         if !text.is_empty() {
                             lines.push(text.to_string());
@@ -1701,7 +1701,7 @@ pub fn collect_trailing_emmy_text<'a>(
                 Some(lines.join("\n"))
             }
         }
-        "comment" => {
+        kind::COMMENT => {
             let text = next.utf8_text(source).unwrap_or("");
             if text.starts_with("---") {
                 Some(text.trim_end().to_string())
