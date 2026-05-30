@@ -136,7 +136,7 @@ pub(crate) fn resolve_call_signature_candidates(
     }
 
     // `obj.method(...)` / `mod.func(...)`
-    if matches!(callee.kind_name(), "variable" | "field_expression") {
+    if callee.is_kind(kind::VARIABLE) {
         if let (Some(object), Some(field)) = (
             callee.child_by_field(field::OBJECT),
             callee.child_by_field(field::FIELD),

@@ -89,7 +89,7 @@ fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<Hash
                 }
             }
             _ => {
-                if child.kind_name() == "varargs"
+                if child.is_kind(kind::DOT_DOT_DOT)
                     || (!child.is_named() && node_text(child, source) == "...")
                 {
                     names.insert("...".to_string());

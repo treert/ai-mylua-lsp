@@ -351,10 +351,11 @@ fn try_identify_field(
     let source = doc.source();
     let parent = ident_node.parent()?;
 
-    let (base_node, field_name) = match parent.kind_name() {
+    let (base_node, field_name) = match parent.syntax_kind() {
         // `obj.field` — ident is the `field` child
-        "variable" | "field_expression" => {
+        kind::VARIABLE => {
             let field_child = parent.child_by_field(field::FIELD)?;
+
             if field_child.id() != ident_node.id() {
                 return None;
             }
@@ -362,8 +363,9 @@ fn try_identify_field(
             (object, node_text(ident_node, source).to_string())
         }
         // `obj:method()` — ident is the `method` child
-        "function_call" => {
+        kind::FUNCTION_CALL => {
             let method_child = parent.child_by_field(field::METHOD)?;
+
             if method_child.id() != ident_node.id() {
                 return None;
             }
@@ -371,8 +373,9 @@ fn try_identify_field(
             (callee, node_text(ident_node, source).to_string())
         }
         // `function M.foo()` / `function M:foo()` — ident is non-first in function_name
-        "function_name" => {
+        kind::FUNCTION_NAME => {
             let first_child = parent.child(0)?;
+
             if first_child.id() == ident_node.id() {
                 return None; // root name, not a field
             }
@@ -539,8 +542,8 @@ fn verify_field(
         return false;
     };
 
-    let base_node = match parent.kind_name() {
-        "variable" | "field_expression" => {
+    let base_node = match parent.syntax_kind() {
+        kind::VARIABLE => {
             let Some(field_child) = parent.child_by_field(field::FIELD) else {
                 return false;
             };
@@ -552,7 +555,7 @@ fn verify_field(
                 None => return false,
             }
         }
-        "function_call" => {
+        kind::FUNCTION_CALL => {
             let Some(method_child) = parent.child_by_field(field::METHOD) else {
                 return false;
             };
@@ -564,7 +567,7 @@ fn verify_field(
                 None => return false,
             }
         }
-        "function_name" => {
+        kind::FUNCTION_NAME => {
             // `function M.foo()` — collect segments before this ident
             let first_child = match parent.child(0) {
                 Some(c) => c,
@@ -741,26 +744,26 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
     let Some(parent) = node.parent() else {
         return false;
     };
-    match parent.kind_name() {
-        "variable" | "field_expression" => parent
+    match parent.syntax_kind() {
+        kind::VARIABLE => parent
             .child_by_field(field::FIELD)
             .is_some_and(|f| f.id() == node.id()),
-        "function_call" => parent
+        kind::FUNCTION_CALL => parent
             .child_by_field(field::METHOD)
             .is_some_and(|m| m.id() == node.id()),
-        "function_name" => {
+        kind::FUNCTION_NAME => {
             let first_child = parent.child(0);
             first_child.map(|fc| fc.id() != node.id()).unwrap_or(false)
         }
-        "field" => parent
+        kind::FIELD => parent
             .child_by_field(field::KEY)
             .is_some_and(|k| k.id() == node.id()),
-        "label_statement" | "goto_statement" => true,
-        "attribute_name_list" | "name_list" => true,
-        "local_function_declaration" => parent
+        kind::LABEL_STATEMENT | kind::GOTO_STATEMENT => true,
+        kind::ATTRIBUTE_NAME_LIST | kind::NAME_LIST => true,
+        kind::LOCAL_FUNCTION_DECLARATION => parent
             .child_by_field(field::NAME)
             .is_some_and(|n| n.id() == node.id()),
-        "attribute" => true,
+        kind::ATTRIBUTE => true,
         _ => false,
     }
 }

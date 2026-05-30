@@ -379,10 +379,11 @@ pub fn extract_field_chain<'a>(
 ) -> Option<(tree_sitter::Node<'a>, Vec<String>)> {
     let mut fields = Vec::new();
 
-    while matches!(node.kind_name(), "variable" | "field_expression") {
+    while node.is_kind(kind::VARIABLE) {
         let Some(field) = node.child_by_field(field::FIELD) else {
             break;
         };
+
         let object = node.child_by_field(field::OBJECT)?;
         fields.push(node_text(field, source).to_string());
         node = object;
@@ -398,8 +399,9 @@ pub fn extract_field_chain<'a>(
 
 /// Hard ceiling for "walk ancestors looking for X" loops across the
 /// codebase. Lua AST ancestor chains for the patterns we inspect
-/// (variable / field_expression / function_name / function_call)
+/// (variable / function_name / function_call)
 /// are at most a handful of levels deep; anything beyond `ANCESTOR_WALK_LIMIT`
+
 /// signals a malformed tree or a pathological source we'd rather
 /// bail out of than spin on.
 pub const ANCESTOR_WALK_LIMIT: usize = 64;
@@ -564,9 +566,13 @@ pub fn is_ancestor_or_equal(ancestor: tree_sitter::Node, descendant: tree_sitter
 pub fn extract_string_literal(node: tree_sitter::Node, source: &[u8]) -> Option<String> {
     // Strategy 1: recursive search for `short_string_content` child.
     fn find_string_content(n: tree_sitter::Node, source: &[u8]) -> Option<String> {
-        if n.kind_name().starts_with("short_string_content") {
+        if matches!(
+            n.syntax_kind(),
+            kind::SHORT_STRING_CONTENT_DOUBLE | kind::SHORT_STRING_CONTENT_SINGLE
+        ) {
             return Some(node_text(n, source).to_string());
         }
+
         for i in 0..n.named_child_count() {
             if let Some(child) = n.named_child(i as u32) {
                 if let Some(s) = find_string_content(child, source) {

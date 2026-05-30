@@ -1445,9 +1445,10 @@ impl DottedChain {
 
 fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<DottedChain> {
     // Walk down the `object` chain, collecting field names. Every
-    // intermediate node must itself be a `variable` (or legacy
-    // `field_expression`) with an `object` + `field` pair. The innermost
-    // `object` must be a `variable` whose only named child is a bare
+    // intermediate node must itself be a `variable` with an `object` +
+    // `field` pair. The innermost `object` must be a `variable` whose
+    // only named child is a bare
+
     // `identifier` — i.e. the chain roots at a plain local/global name.
     //
     // Rejected (return None):

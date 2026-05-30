@@ -49,10 +49,11 @@ pub(super) fn check_field_access_diagnostics(
 
 /// Returns true if `node` is (or is any descendant of) the left-hand side
 /// of an assignment statement. Walks ancestors so that chained LHS like
-/// `a.b.c = 1` — where the outer node is `variable` and the inner
-/// `field_expression` node (`a.b`) is not a direct child of `variable_list` —
+/// `a.b.c = 1` — where the outer node is `variable` and an inner
+/// dotted `variable` node is not a direct child of `variable_list` —
 /// is still recognized as an assignment target and skipped by field
 /// diagnostics.
+
 fn is_assignment_target(node: tree_sitter::Node) -> bool {
     let mut current = node;
     while let Some(parent) = current.parent() {
@@ -72,7 +73,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
 fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
     let node = cursor.node();
 
-    let is_dotted = (node.is_kind(kind::VARIABLE) || node.kind_name() == "field_expression")
+    let is_dotted = node.is_kind(kind::VARIABLE)
         && node.child_by_field(field::OBJECT).is_some()
         && node.child_by_field(field::FIELD).is_some();
 

@@ -54,16 +54,17 @@ fn goto_definition_inner(
         return Some(target);
     }
 
-    // Dotted-access goto: walk ancestors to find a `variable` /
-    // `field_expression` node whose `field` is this identifier, then
-    // resolve via the AST-driven infer chain (supports `a[1].b`,
+    // Dotted-access goto: walk ancestors to find a `variable` node whose
+    // `field` is this identifier, then resolve via the AST-driven infer chain
+    // (supports `a[1].b`,
+
     // `a:m().c`, `require("mod").field`, etc.).
     //
     // `walk_ancestors` caps depth to [`ANCESTOR_WALK_LIMIT`] and logs
     // a warning if ever hit — protects against runaway trees on
     // malformed input.
     if let Some(result) = walk_ancestors(ident_node, |p| {
-        if matches!(p.kind_name(), "variable" | "field_expression") {
+        if p.is_kind(kind::VARIABLE) {
             let field_is_ident = p
                 .child_by_field(field::FIELD)
                 .map(|f| f.id() == ident_node.id())
@@ -72,6 +73,7 @@ fn goto_definition_inner(
                 return Some(goto_variable_field(p, doc, uri_id, index));
             }
         }
+
         // `obj:method(...)` — the `method` identifier on a `function_call`
         // node. Infer the base type and resolve the method as a field so
         // goto jumps to the method's definition site.
@@ -393,7 +395,7 @@ fn find_visible_label_for_goto<'a>(
 ) -> Option<tree_sitter::Node<'a>> {
     let mut child = goto_stmt;
     while let Some(block) = child.parent() {
-        if is_label_block(block.kind_name()) && should_search_label_block(block, child) {
+        if is_label_block(block) && should_search_label_block(block, child) {
             if let Some(label) = find_label_in_block(block, source, target_name) {
                 return Some(label);
             }
@@ -406,19 +408,19 @@ fn find_visible_label_for_goto<'a>(
     None
 }
 
-fn is_label_block(kind: &str) -> bool {
+fn is_label_block(node: tree_sitter::Node) -> bool {
     matches!(
-        kind,
-        "source_file"
-            | "do_statement"
-            | "while_statement"
-            | "repeat_statement"
-            | "if_statement"
-            | "elseif_clause"
-            | "else_clause"
-            | "for_numeric_statement"
-            | "for_generic_statement"
-            | "function_body"
+        node.syntax_kind(),
+        kind::SOURCE_FILE
+            | kind::DO_STATEMENT
+            | kind::WHILE_STATEMENT
+            | kind::REPEAT_STATEMENT
+            | kind::IF_STATEMENT
+            | kind::ELSEIF_CLAUSE
+            | kind::ELSE_CLAUSE
+            | kind::FOR_NUMERIC_STATEMENT
+            | kind::FOR_GENERIC_STATEMENT
+            | kind::FUNCTION_BODY
     )
 }
 
@@ -444,7 +446,7 @@ fn find_label_in_block<'a>(
                     return Some(name_node);
                 }
             }
-        } else if !is_label_block(child.kind_name()) {
+        } else if !is_label_block(child) {
             if let Some(label) = find_label_in_block(child, source, target_name) {
                 return Some(label);
             }

@@ -12,11 +12,8 @@ use tower_lsp_server::ls_types::*;
 fn function_name_has_path_separator(function_name: tree_sitter::Node) -> bool {
     for i in 0..function_name.child_count() {
         if let Some(child) = function_name.child(i as u32) {
-            if !child.is_named() {
-                let kind = child.kind_name();
-                if kind == "." || kind == ":" {
-                    return true;
-                }
+            if !child.is_named() && (child.is_kind(kind::DOT) || child.is_kind(kind::COLON)) {
+                return true;
             }
         }
     }

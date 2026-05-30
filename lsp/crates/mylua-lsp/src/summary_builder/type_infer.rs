@@ -25,12 +25,7 @@ pub(super) fn infer_expression_type(
     if depth > MAX_TABLE_SHAPE_DEPTH {
         return TypeFact::Unknown;
     }
-    if node.kind_name() == "field_expression"
-        && node.child_by_field(field::OBJECT).is_some()
-        && node.child_by_field(field::FIELD).is_some()
-    {
-        return infer_field_expression_type(ctx, node, depth);
-    }
+
     match node.syntax_kind() {
         kind::NUMBER => TypeFact::Known(KnownType::Number),
         kind::STRING => TypeFact::Known(KnownType::String),
@@ -203,12 +198,6 @@ fn function_return_with_call_args(
 /// and local variable lookups. Sufficient for function-level generic
 /// unification (e.g. `identity("abc")` → `T = string`).
 fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
-    if node.kind_name() == "field_expression"
-        && node.child_by_field(field::OBJECT).is_some()
-        && node.child_by_field(field::FIELD).is_some()
-    {
-        return infer_field_expression_type(ctx, node, 0);
-    }
     match node.syntax_kind() {
         kind::NUMBER => TypeFact::Known(KnownType::Number),
         kind::STRING => TypeFact::Known(KnownType::String),
@@ -427,9 +416,8 @@ fn infer_call_return_type(
 
     // `mod.func()` → CallReturn(RequireRef/GlobalRef, func_name)
     // Current grammar wraps dotted access as a `variable` node with
-    // `object` + `field` fields; `field_expression` is kept for forward
-    // compatibility only.
-    if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
+    // `object` + `field` fields.
+    if callee.is_kind(kind::VARIABLE) {
         if let Some(base) = callee.child_by_field(field::OBJECT) {
             if let Some(field) = callee.child_by_field(field::FIELD) {
                 let base_text = node_text(base, ctx.source);
@@ -576,7 +564,7 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
         return TypeFact::Unknown;
     }
 
-    if (base.is_kind(kind::VARIABLE) || base.kind_name() == "field_expression")
+    if base.is_kind(kind::VARIABLE)
         && base.child_by_field(field::OBJECT).is_some()
         && base.child_by_field(field::FIELD).is_some()
     {

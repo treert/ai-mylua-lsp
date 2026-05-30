@@ -20,8 +20,7 @@ use crate::util::{extract_string_literal, node_text};
 ///
 /// The mylua grammar uses `variable` nodes for both plain identifiers and
 /// dotted access (`a.b.c` is a `variable` whose `object` field is another
-/// `variable` and whose `field` field is an identifier). `field_expression`
-/// is kept as a legacy alias for future grammar revisions.
+/// `variable` and whose `field` field is an identifier).
 ///
 /// Handles:
 /// - Pure dotted chains (`a.b.c`) via recursive `variable.object/.field`.
@@ -38,8 +37,8 @@ pub(crate) fn infer_node_type_in_file_id(
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> TypeFact {
-    match node.kind_name() {
-        "variable" | "field_expression" => {
+    match node.syntax_kind() {
+        kind::VARIABLE => {
             if let (Some(object), Some(field)) = (
                 node.child_by_field(field::OBJECT),
                 node.child_by_field(field::FIELD),
@@ -92,7 +91,7 @@ pub(crate) fn infer_node_type_in_file_id(
             }
             TypeFact::Unknown
         }
-        "function_call" => {
+        kind::FUNCTION_CALL => {
             // Reconstruct a `CallReturn` stub (or `RequireRef` for
             // `require("…")`) so the resolver can pick up declared
             // `@return` types. Mirrors the logic in
@@ -101,11 +100,11 @@ pub(crate) fn infer_node_type_in_file_id(
             // per-file `BuildContext`.
             infer_call_return_fact(node, source, uri_id, scope_tree, index)
         }
-        "parenthesized_expression" => node
+        kind::PARENTHESIZED_EXPRESSION => node
             .named_child(0)
             .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, scope_tree, index))
             .unwrap_or(TypeFact::Unknown),
-        "identifier" => {
+        kind::IDENTIFIER => {
             let text = node_text(node, source);
             if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
                 return tf.clone();
@@ -114,16 +113,16 @@ pub(crate) fn infer_node_type_in_file_id(
         }
         // Literal types — needed for function-level generic inference
         // so that `identity("abc")` can infer `T = string`.
-        "number" => TypeFact::Known(crate::type_system::KnownType::Number),
-        "string" => TypeFact::Known(crate::type_system::KnownType::String),
-        "true" | "false" => TypeFact::Known(crate::type_system::KnownType::Boolean),
-        "nil" => TypeFact::Known(crate::type_system::KnownType::Nil),
-        "table_constructor" => {
+        kind::NUMBER => TypeFact::Known(crate::type_system::KnownType::Number),
+        kind::STRING => TypeFact::Known(crate::type_system::KnownType::String),
+        kind::TRUE | kind::FALSE => TypeFact::Known(crate::type_system::KnownType::Boolean),
+        kind::NIL => TypeFact::Known(crate::type_system::KnownType::Nil),
+        kind::TABLE_CONSTRUCTOR => {
             // For array-like table literals `{ 1, 2, 3 }`, infer the
             // element type so generic unification can bind `T` in `T[]`.
             infer_table_array_element_type(node)
         }
-        "unary_expression" | "binary_expression" => {
+        kind::UNARY_EXPRESSION | kind::BINARY_EXPRESSION => {
             infer_operator_type_in_file_id(node, source, uri_id, scope_tree, index)
         }
         _ => TypeFact::Unknown,
@@ -319,7 +318,7 @@ fn infer_call_return_fact(
     }
 
     // Dotted call `mod.f()` — callee is a `variable` with `object`+`field`.
-    if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
+    if callee.is_kind(kind::VARIABLE) {
         if let (Some(base_node), Some(field_node)) = (
             callee.child_by_field(field::OBJECT),
             callee.child_by_field(field::FIELD),

@@ -322,7 +322,7 @@ fn is_base_expr_node(node: tree_sitter::Node) -> bool {
     matches!(
         node.syntax_kind(),
         kind::VARIABLE | kind::FUNCTION_CALL | kind::IDENTIFIER | kind::PARENTHESIZED_EXPRESSION
-    ) || node.kind_name() == "field_expression"
+    )
 }
 
 // ---------------------------------------------------------------------------

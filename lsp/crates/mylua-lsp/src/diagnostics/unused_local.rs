@@ -74,15 +74,13 @@ fn count_identifier_references(
     ref_count: &mut std::collections::HashMap<(LuaSymbol, usize), usize>,
 ) {
     let node = cursor.node();
-    if node.is_kind(kind::IDENTIFIER)
-        || node.is_kind(kind::VARARG_EXPRESSION)
-        || node.kind_name() == "varargs"
-    {
-        let name = if node.is_kind(kind::VARARG_EXPRESSION) || node.kind_name() == "varargs" {
+    if node.is_kind(kind::IDENTIFIER) || node.is_kind(kind::VARARG_EXPRESSION) {
+        let name = if node.is_kind(kind::VARARG_EXPRESSION) {
             "..."
         } else {
             node_text(node, source)
         };
+
         let byte = node.start_byte();
         if let Some(decl) = scope_tree.resolve_decl(byte, name) {
             // Skip if this identifier IS the declaration itself —

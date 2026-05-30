@@ -22,7 +22,8 @@
 //! known to the summary, we still emit it at top level under its full
 //! dotted name so users aren't surprised by a missing symbol.
 
-use crate::syntax_kind::{field, kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt, SyntaxKind};
+
 use std::collections::{HashMap, HashSet};
 
 use tower_lsp_server::ls_types::*;
@@ -766,7 +767,7 @@ impl<'a> OutlineBuilder<'a> {
         node: tree_sitter::Node,
         source: &[u8],
     ) -> Vec<DocumentSymbol> {
-        let Some(body) = find_named_child_kind(node, "function_body") else {
+        let Some(body) = find_named_child_kind(node, kind::FUNCTION_BODY) else {
             return Vec::new();
         };
         let Some(params) = body.child_by_field(field::PARAMETERS) else {
@@ -783,12 +784,13 @@ impl<'a> OutlineBuilder<'a> {
         source: &[u8],
         out: &mut Vec<DocumentSymbol>,
     ) {
-        match node.kind_name() {
-            "identifier" | "varargs" => {
+        match node.syntax_kind() {
+            kind::IDENTIFIER | kind::DOT_DOT_DOT => {
                 let name = node_text(node, source).to_string();
                 if name.is_empty() {
                     return;
                 }
+
                 #[allow(deprecated)]
                 out.push(DocumentSymbol {
                     name,
@@ -920,11 +922,11 @@ fn has_dotted_or_subscript_form(node: tree_sitter::Node) -> bool {
 
 fn find_named_child_kind<'tree>(
     node: tree_sitter::Node<'tree>,
-    kind: &str,
+    kind: SyntaxKind,
 ) -> Option<tree_sitter::Node<'tree>> {
     for i in 0..node.named_child_count() {
         let child = node.named_child(i as u32)?;
-        if child.kind_name() == kind {
+        if child.is_kind(kind) {
             return Some(child);
         }
     }

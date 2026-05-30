@@ -49,8 +49,9 @@ pub fn hover(
     );
 
     // Walk ancestors to find a dotted access (`variable` node with
-    // object+field fields, or the legacy `field_expression`) where this
-    // identifier is the `field`. That path is AST-driven and recurses
+    // object+field fields) where this identifier is the `field`.
+    // That path is AST-driven and recurses
+
     // through the resolver — it correctly handles `a[1].b`, `a:m().c`, etc.
     //
     // Uses the shared `walk_ancestors` helper so we never spin on a
@@ -76,7 +77,7 @@ pub fn hover(
     // a function. If `hover_at_declaration` ever gains a real failure
     // path, revisit the tail `return Some(...)` too.
     if let Some(result) = walk_ancestors(ident_node, |p| {
-        if matches!(p.kind_name(), "variable" | "field_expression") {
+        if p.is_kind(kind::VARIABLE) {
             let field_is_ident = p
                 .child_by_field(field::FIELD)
                 .map(|f| f.id() == ident_node.id())
@@ -85,6 +86,7 @@ pub fn hover(
                 return Some(hover_variable_field(p, doc, uri_id, index, all_docs));
             }
         }
+
         if p.is_kind(kind::FIELD) {
             let key_is_ident = p
                 .child_by_field(field::KEY)
@@ -594,8 +596,9 @@ fn hover_method_call(
 }
 
 /// AST-driven hover for a dotted access: `var_node` is the enclosing
-/// `variable` (or `field_expression`) whose `field` is the identifier
-/// the user clicked. Handles arbitrary bases via `infer_node_type` which
+/// `variable` whose `field` is the identifier the user clicked. Handles
+/// arbitrary bases via `infer_node_type` which
+
 /// recurses through nested variables / subscripts / call returns.
 fn hover_variable_field(
     var_node: tree_sitter::Node,
