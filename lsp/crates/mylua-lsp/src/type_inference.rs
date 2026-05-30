@@ -10,7 +10,8 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::scope::ScopeTree;
-use crate::type_system::TypeFact;
+use crate::type_system::{KnownType, TypeFact};
+
 use crate::uri_id::UriId;
 use crate::util::{extract_string_literal, node_text};
 
@@ -121,11 +122,60 @@ pub(crate) fn infer_node_type_in_file_id(
             // element type so generic unification can bind `T` in `T[]`.
             infer_table_array_element_type(node)
         }
+        "unary_expression" | "binary_expression" => {
+            infer_operator_type_in_file_id(node, source, uri_id, scope_tree, index)
+        }
         _ => TypeFact::Unknown,
     }
 }
 
+fn infer_operator_type_in_file_id(
+    node: tree_sitter::Node,
+    source: &[u8],
+    uri_id: UriId,
+    scope_tree: &ScopeTree,
+    index: &WorkspaceAggregation,
+) -> TypeFact {
+    if let Some(op_node) = node.child_by_field_name("operator") {
+        let op = node_text(op_node, source);
+        match op {
+            "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
+                return TypeFact::Known(KnownType::Number);
+            }
+            ".." => return TypeFact::Known(KnownType::String),
+            "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" => {
+                return TypeFact::Known(KnownType::Boolean);
+            }
+            "and" => {
+                if let Some(right) = node.child_by_field_name("right") {
+                    return infer_node_type_in_file_id(right, source, uri_id, scope_tree, index);
+                }
+            }
+            "or" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    return infer_node_type_in_file_id(left, source, uri_id, scope_tree, index);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if node.kind() == "unary_expression" {
+        if let Some(op_child) = node.child(0) {
+            match node_text(op_child, source) {
+                "-" => return TypeFact::Known(KnownType::Number),
+                "#" => return TypeFact::Known(KnownType::Integer),
+                "not" => return TypeFact::Known(KnownType::Boolean),
+                _ => {}
+            }
+        }
+    }
+
+    TypeFact::Unknown
+}
+
 /// Infer the array element type of a table constructor for generic unification.
+
 /// Returns `__array<elem_type>` if the table has only positional (array) entries
 /// with a uniform literal type, otherwise returns `Unknown`.
 fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {

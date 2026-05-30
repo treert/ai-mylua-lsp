@@ -180,6 +180,38 @@ local a1_test = test()"#;
 }
 
 #[test]
+fn hover_local_logical_expr_uses_and_or_rule() {
+    let src = r#"---@class ClassA1
+ClassA1 = {}
+---@return ClassA1
+function ClassA1:new() end
+local direct = ClassA1 and ClassA1:new()
+local fallback = ClassA1 and ClassA1:new() or nil"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_logical_expr_return.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    for (line, name) in [(4, "direct"), (5, "fallback")] {
+        let result = hover::hover(
+            doc,
+            intern_uri(&uri),
+            pos(line, 6),
+            &mut agg,
+            &mylua_lsp::document::DocumentStoreView::new(&docs),
+        );
+        assert!(result.is_some(), "hover on {name} should return a result");
+        if let Some(h) = &result {
+            let content = hover_content_string(h);
+            assert!(
+                content.contains("---@type ClassA1"),
+                "{name} hover should infer ClassA1 through logical expression, got: {}",
+                content
+            );
+        }
+    }
+}
+
+#[test]
 fn hover_local_call_return_from_chained_method_return() {
     let src = r#"---@class ClassA1
 ClassA1 = {}

@@ -200,11 +200,56 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
             // element type so generic unification can bind `T` in `T[]`.
             infer_table_array_element_type_lightweight(ctx, node)
         }
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(|inner| infer_arg_type_lightweight(ctx, inner))
+            .unwrap_or(TypeFact::Unknown),
+        "unary_expression" | "binary_expression" => infer_operator_arg_type_lightweight(ctx, node),
         _ => TypeFact::Unknown,
     }
 }
 
+fn infer_operator_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
+    if let Some(op_node) = node.child_by_field_name("operator") {
+        let op = node_text(op_node, ctx.source);
+        match op {
+            "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
+                return TypeFact::Known(KnownType::Number);
+            }
+            ".." => return TypeFact::Known(KnownType::String),
+            "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" => {
+                return TypeFact::Known(KnownType::Boolean);
+            }
+            "and" => {
+                if let Some(right) = node.child_by_field_name("right") {
+                    return infer_arg_type_lightweight(ctx, right);
+                }
+            }
+            "or" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    return infer_arg_type_lightweight(ctx, left);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if node.kind() == "unary_expression" {
+        if let Some(op_child) = node.child(0) {
+            match node_text(op_child, ctx.source) {
+                "-" => return TypeFact::Known(KnownType::Number),
+                "#" => return TypeFact::Known(KnownType::Integer),
+                "not" => return TypeFact::Known(KnownType::Boolean),
+                _ => {}
+            }
+        }
+    }
+
+    TypeFact::Unknown
+}
+
 /// Infer the array element type of a table constructor for generic unification.
+
 /// Returns `__array<elem_type>` if the table has only positional (array) entries,
 /// otherwise returns `Unknown`.
 fn infer_table_array_element_type_lightweight(
@@ -512,7 +557,7 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
     })
 }
 
-fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, _depth: usize) -> TypeFact {
+fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: usize) -> TypeFact {
     if let Some(op_node) = node.child_by_field_name("operator") {
         let op = node_text(op_node, ctx.source);
         match op {
@@ -525,8 +570,15 @@ fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, _depth: 
             "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" => {
                 return TypeFact::Known(KnownType::Boolean);
             }
-            "and" | "or" => {
-                return TypeFact::Unknown;
+            "and" => {
+                if let Some(right) = node.child_by_field_name("right") {
+                    return infer_expression_type(ctx, right, depth + 1);
+                }
+            }
+            "or" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    return infer_expression_type(ctx, left, depth + 1);
+                }
             }
             _ => {}
         }

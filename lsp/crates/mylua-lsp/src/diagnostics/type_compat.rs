@@ -20,6 +20,15 @@ pub(crate) fn infer_literal_type(
                 returns: vec![],
             }))
         }
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(|inner| infer_literal_type(inner, source, scope_tree))
+            .unwrap_or(TypeFact::Unknown),
+        "unary_expression" | "binary_expression" => {
+            infer_operator_type_with(node, source, |child| {
+                infer_literal_type(child, source, scope_tree)
+            })
+        }
         "variable" | "identifier" => {
             let text = node_text(node, source);
             if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
@@ -33,6 +42,61 @@ pub(crate) fn infer_literal_type(
         }
         _ => TypeFact::Unknown,
     }
+}
+
+fn infer_operator_type_with<F>(
+    node: tree_sitter::Node,
+    source: &[u8],
+    mut infer_child: F,
+) -> TypeFact
+where
+    F: FnMut(tree_sitter::Node) -> TypeFact,
+{
+    if let Some(op_node) = node.child_by_field_name("operator") {
+        let op = if source.is_empty() {
+            op_node.kind()
+        } else {
+            node_text(op_node, source)
+        };
+        match op {
+            "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
+                return TypeFact::Known(KnownType::Number);
+            }
+            ".." => return TypeFact::Known(KnownType::String),
+            "==" | "~=" | "<" | "<=" | ">" | ">=" | "not" | "word_not" => {
+                return TypeFact::Known(KnownType::Boolean);
+            }
+            "and" | "word_and" => {
+                if let Some(right) = node.child_by_field_name("right") {
+                    return infer_child(right);
+                }
+            }
+            "or" | "word_or" => {
+                if let Some(left) = node.child_by_field_name("left") {
+                    return infer_child(left);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if node.kind() == "unary_expression" {
+        if let Some(op_child) = node.child(0) {
+            let op = if source.is_empty() {
+                op_child.kind()
+            } else {
+                node_text(op_child, source)
+            };
+            match op {
+                "-" => return TypeFact::Known(KnownType::Number),
+                "#" => return TypeFact::Known(KnownType::Integer),
+                "not" | "word_not" => return TypeFact::Known(KnownType::Boolean),
+                _ => {}
+            }
+        }
+    }
+
+    TypeFact::Unknown
 }
 
 pub(crate) fn is_type_compatible(declared: &TypeFact, actual: &TypeFact) -> bool {
@@ -175,7 +239,18 @@ pub(crate) fn infer_argument_type(
             return tf.clone();
         }
     }
-    infer_literal_type(node, source, scope_tree)
+    match node.kind() {
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(|inner| infer_argument_type(inner, source, scope_tree))
+            .unwrap_or(TypeFact::Unknown),
+        "unary_expression" | "binary_expression" => {
+            infer_operator_type_with(node, source, |child| {
+                infer_argument_type(child, source, scope_tree)
+            })
+        }
+        _ => infer_literal_type(node, source, scope_tree),
+    }
 }
 
 /// Literal-only type inference for return values. Avoids the summary
@@ -195,6 +270,13 @@ pub(crate) fn infer_return_literal_type(node: tree_sitter::Node) -> TypeFact {
                 params: vec![],
                 returns: vec![],
             }))
+        }
+        "parenthesized_expression" => node
+            .named_child(0)
+            .map(infer_return_literal_type)
+            .unwrap_or(TypeFact::Unknown),
+        "unary_expression" | "binary_expression" => {
+            infer_operator_type_with(node, &[], infer_return_literal_type)
         }
         _ => TypeFact::Unknown,
     }
