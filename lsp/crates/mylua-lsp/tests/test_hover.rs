@@ -3339,6 +3339,249 @@ local a1 = ClassA1:new()"#;
 }
 
 #[test]
+fn hover_local_generic_class_method_return_substitutes_receiver_type_args() {
+    let src = r#"---@class Stack<T>
+local Stack = {}
+Stack.__index = Stack
+
+---@generic T
+---@return Stack<T>
+function Stack.new()
+    return setmetatable({ items = {} }, Stack)
+end
+
+---@generic T
+---@return T?
+function Stack:pop()
+    return self.items[#self.items]
+end
+
+---@type Stack<string>
+local sstack = Stack.new()
+local top_str = sstack:pop()
+
+---@type Stack<number>
+local nstack = Stack.new()
+local top_num = nstack:pop()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_local_generic_stack.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let top_str = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(18, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on top_str should succeed");
+    let top_str_text = hover_content_string(&top_str);
+    assert!(
+        top_str_text.contains("---@type string | nil"),
+        "Stack<string>:pop() should return string | nil, got:\n{}",
+        top_str_text
+    );
+
+    let top_num = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(22, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on top_num should succeed");
+    let top_num_text = hover_content_string(&top_num);
+    assert!(
+        top_num_text.contains("---@type number | nil"),
+        "Stack<number>:pop() should return number | nil, got:\n{}",
+        top_num_text
+    );
+}
+
+#[test]
+fn hover_class_generic_not_polluted_by_previous_function_generic() {
+    let src = r#"---@generic T
+---@param x T
+---@return T
+function identity(x)
+    return x
+end
+---@class Box<U>
+local Box = {}
+
+---@return U
+function Box:get()
+    return nil
+end
+
+---@type Box<string>
+local b = nil
+local v = b:get()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_class_generic_pollution.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(16, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on v should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@type string"),
+        "Box<U> should not inherit identity<T>'s generic param, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_generic_class_method_preserves_function_generic_inference() {
+    let src = r#"---@class Box<T>
+local Box = {}
+
+---@generic U
+---@param x U
+---@return U
+function Box:id(x)
+    return x
+end
+
+---@type Box<string>
+local b = nil
+local n = b:id(123)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_class_method_generic.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(12, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on n should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@type number"),
+        "Box<string>:id(123) should infer method generic U = number, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_class_generic_not_polluted_by_local_function_expression_generic() {
+    let src = r#"---@generic T
+---@param x T
+---@return T
+local identity = function(x)
+    return x
+end
+---@class Box<U>
+local Box = {}
+
+---@return U
+function Box:get()
+    return nil
+end
+
+---@type Box<string>
+local b = nil
+local v = b:get()"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_class_generic_local_fn_pollution.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(16, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on v should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@type string"),
+        "Box<U> should not inherit local identity<T>'s generic param, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_local_table_colon_method_generic_uses_explicit_arg_not_self() {
+    let src = r#"local obj = {}
+
+---@generic T
+---@param x T
+---@return T
+function obj:id(x)
+    return x
+end
+
+local s = obj:id("abc")"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_table_colon_method_generic.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(9, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@type string"),
+        "obj:id(\"abc\") should infer T = string, got:\n{}",
+        text
+    );
+}
+
+#[test]
+fn hover_cross_file_require_colon_method_generic_uses_explicit_arg_not_self() {
+    let mod_src = r#"local M = {}
+
+---@generic T
+---@param x T
+---@return T
+function M:id(x)
+    return x
+end
+
+return M"#;
+    let main_src = r#"local M = require("generic_mod")
+local s = M:id("abc")"#;
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("generic_mod.lua", mod_src), ("main.lua", main_src)]);
+    let mod_uri = make_uri("generic_mod.lua");
+    let mod_uri_id = summary_id_by_uri(&agg, &mod_uri);
+    agg.set_require_mapping("generic_mod".to_string(), mod_uri_id);
+
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).unwrap();
+    let result = hover::hover(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on s should succeed");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("---@type string"),
+        "require returned M:id(\"abc\") should infer T = string, got:\n{}",
+        text
+    );
+}
+
+#[test]
 fn hover_global_class_value_requires_explicit_class_binding() {
     let src = r#"---@class BaseCls
 BaseCls = {}

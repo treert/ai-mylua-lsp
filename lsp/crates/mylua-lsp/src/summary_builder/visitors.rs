@@ -36,6 +36,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_local_declaration(ctx, node);
+                ctx.pending_generic_params.clear();
                 skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
             "local_function_declaration" => {
@@ -44,6 +45,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_local_function(ctx, node);
+                ctx.pending_generic_params.clear();
             }
             "function_declaration" => {
                 clear_pending_on_blank_line_gap(ctx, node);
@@ -51,11 +53,13 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_function_declaration(ctx, node);
+                ctx.pending_generic_params.clear();
             }
             "assignment_statement" => {
                 clear_pending_on_blank_line_gap(ctx, node);
                 flush_pending_class(ctx, node);
                 visit_assignment(ctx, node);
+                ctx.pending_generic_params.clear();
                 skip_same_line_trailing_type_emmy(&mut cursor, node, ctx.source);
             }
             "return_statement" => {
@@ -64,6 +68,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
                 visit_module_return(ctx, node);
+                ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, node);
             }
             "emmy_comment" => {
@@ -81,6 +86,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
+                ctx.pending_generic_params.clear();
                 visit_nested_block(ctx, node);
             }
             _ => {
@@ -88,6 +94,7 @@ pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
                 flush_pending_class(ctx, node);
                 ctx.pending_class_name = None;
                 ctx.pending_type_annotation = None;
+                ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, node);
             }
         }
@@ -147,6 +154,7 @@ fn clear_pending_on_blank_line_gap(ctx: &mut BuildContext, node: tree_sitter::No
             emit_pending_class_as_typedef(ctx, node);
             ctx.pending_class_name = None;
             ctx.pending_type_annotation = None;
+            ctx.pending_generic_params.clear();
         }
     }
 }
@@ -270,29 +278,35 @@ fn visit_nested_block_inner(
             | "for_numeric_statement"
             | "for_generic_statement" => {
                 clear_pending_on_blank_line_gap(ctx, child);
+                ctx.pending_generic_params.clear();
                 visit_nested_block_inner(ctx, child, return_types);
             }
             "function_declaration" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_function_declaration(ctx, child);
+                ctx.pending_generic_params.clear();
             }
             "assignment_statement" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_assignment(ctx, child);
+                ctx.pending_generic_params.clear();
             }
             "local_declaration" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_declaration(ctx, child);
+                ctx.pending_generic_params.clear();
             }
             "local_function_declaration" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 visit_local_function(ctx, child);
+                ctx.pending_generic_params.clear();
             }
             "return_statement" => {
                 clear_pending_on_blank_line_gap(ctx, child);
                 if let Some(returns) = return_types.as_deref_mut() {
                     collect_return_statement_types(ctx, child, returns);
                 }
+                ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, child);
             }
             "emmy_comment" => {
@@ -302,6 +316,7 @@ fn visit_nested_block_inner(
             }
             _ => {
                 clear_pending_on_blank_line_gap(ctx, child);
+                ctx.pending_generic_params.clear();
                 visit_anonymous_function_definitions_in_node(ctx, child);
             }
         }

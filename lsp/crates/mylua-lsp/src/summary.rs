@@ -124,7 +124,7 @@ pub struct TypeDefinition {
     pub parents: Vec<LuaSymbol>,
     pub fields: Vec<TypeFieldDef>,
     pub alias_type: Option<TypeFact>,
-    /// Names of generic type parameters (from `---@generic T, K`).
+    /// Names of generic type parameters (from `---@class Foo<T>` or class-attached `---@generic T, K`).
     pub generic_params: Vec<LuaSymbol>,
     /// Full range of the declaration anchor — for a class this is the
     /// following statement that anchors the class value (`Foo = {}`);

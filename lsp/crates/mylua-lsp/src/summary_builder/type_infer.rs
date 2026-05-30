@@ -152,6 +152,27 @@ fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> V
         .collect()
 }
 
+fn function_return_with_call_args_for_call(
+    fs: &crate::summary::FunctionSummary,
+    call_arg_types: &[TypeFact],
+    is_method_call: bool,
+) -> Option<TypeFact> {
+    let effective_args = if is_method_call
+        && !call_arg_types.is_empty()
+        && fs
+            .signature
+            .params
+            .first()
+            .map(|p| p.name.as_str() != "self")
+            .unwrap_or(true)
+    {
+        &call_arg_types[1..]
+    } else {
+        call_arg_types
+    };
+    function_return_with_call_args(fs, effective_args)
+}
+
 fn function_return_with_call_args(
     fs: &crate::summary::FunctionSummary,
     call_arg_types: &[TypeFact],
@@ -347,9 +368,11 @@ fn infer_call_return_type(
                         }
                         TypeFact::Known(KnownType::FunctionRef(ref fid)) => {
                             if let Some(fs) = ctx.function_summaries.get(fid) {
-                                if let Some(ret) =
-                                    function_return_with_call_args(fs, &call_arg_types)
-                                {
+                                if let Some(ret) = function_return_with_call_args_for_call(
+                                    fs,
+                                    &call_arg_types,
+                                    true,
+                                ) {
                                     return ret.clone();
                                 }
                             }
@@ -364,7 +387,9 @@ fn infer_call_return_type(
                 let qualified = format!("{}{}{}", callee_text, sep, method_name);
                 if let Some(&func_id) = ctx.function_name_to_id.get(&qualified) {
                     if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                        if let Some(ret) = function_return_with_call_args(fs, &call_arg_types) {
+                        if let Some(ret) =
+                            function_return_with_call_args_for_call(fs, &call_arg_types, true)
+                        {
                             return ret.clone();
                         }
                     }

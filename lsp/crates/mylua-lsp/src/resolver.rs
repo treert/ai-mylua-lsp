@@ -387,13 +387,14 @@ fn resolve_stub(
         SymbolicStub::CallReturn {
             base,
             func_name,
+            is_method_call,
             generic_args,
             call_arg_types,
-            ..
         } => resolve_call_return(
             ctx,
             base,
             func_name,
+            *is_method_call,
             generic_args,
             call_arg_types,
             agg,
@@ -551,6 +552,7 @@ fn resolve_call_return(
     ctx: ResolveCtx,
     base: &TypeFact,
     func_name: &str,
+    is_method_call: bool,
     generic_args: &[TypeFact],
     call_arg_types: &[TypeFact],
     agg: &WorkspaceAggregation,
@@ -565,7 +567,14 @@ fn resolve_call_return(
     if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) =
         base_resolved.type_fact
     {
-        let ret = resolve_method_return_with_generics(type_name, func_name, actual_params, agg);
+        let ret = resolve_method_return_with_generics(
+            type_name,
+            func_name,
+            actual_params,
+            call_arg_types,
+            is_method_call,
+            agg,
+        );
         if ret != TypeFact::Unknown {
             return resolve_recursive(base_ctx, &ret, agg, depth + 1, visited);
         }
@@ -576,7 +585,14 @@ fn resolve_call_return(
     // base lost the generic info (TypeRef -> EmmyType).
     if !generic_args.is_empty() {
         if let Some(type_name) = base_type_name(base) {
-            let ret = resolve_method_return_with_generics(type_name, func_name, generic_args, agg);
+            let ret = resolve_method_return_with_generics(
+                type_name,
+                func_name,
+                generic_args,
+                call_arg_types,
+                is_method_call,
+                agg,
+            );
             if ret != TypeFact::Unknown {
                 return resolve_recursive(ctx, &ret, agg, depth + 1, visited);
             }
@@ -588,7 +604,8 @@ fn resolve_call_return(
     // Emmy class type and use the same field lookup path as method hover.
     if let TypeFact::Known(KnownType::EmmyType(ref type_name)) = base_resolved.type_fact {
         let field_result = resolve_emmy_field(base_ctx, type_name, func_name, agg);
-        if let Some(ret) = first_function_return_with_call_args(&field_result, call_arg_types, agg)
+        if let Some(ret) =
+            first_function_return_with_call_args(&field_result, call_arg_types, is_method_call, agg)
         {
             return resolve_recursive(base_ctx, &ret, agg, depth + 1, visited);
         }
@@ -609,10 +626,15 @@ fn resolve_call_return(
                 .and_then(|shape| shape.get_field(func_name))
                 .and_then(|fi| match &fi.type_fact {
                     TypeFact::Known(KnownType::Function(ref sig)) => sig.returns.first().cloned(),
-                    TypeFact::Known(KnownType::FunctionRef(fid)) => summary
-                        .function_summaries
-                        .get(fid)
-                        .and_then(|fs| function_return_with_call_args(fs, call_arg_types)),
+                    TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                        summary.function_summaries.get(fid).and_then(|fs| {
+                            function_return_with_call_args_for_call(
+                                fs,
+                                call_arg_types,
+                                is_method_call,
+                            )
+                        })
+                    }
                     _ => None,
                 })
         };
@@ -705,7 +727,11 @@ fn resolve_call_return(
                     let uri_id = resolved.source_uri_id();
                     if let Some(summary) = agg.summary_by_id(uri_id) {
                         if let Some(fs) = summary.function_summaries.get(fid) {
-                            if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
+                            if let Some(ret) = function_return_with_call_args_for_call(
+                                fs,
+                                call_arg_types,
+                                is_method_call,
+                            ) {
                                 let mut ret_resolved =
                                     resolve_recursive(candidate_ctx, &ret, agg, depth + 1, visited);
                                 if ret_resolved.def_location.is_none() {
@@ -735,6 +761,7 @@ fn resolve_call_return(
 fn first_function_return_with_call_args(
     result: &ResolvedType,
     call_arg_types: &[TypeFact],
+    is_method_call: bool,
     agg: &WorkspaceAggregation,
 ) -> Option<TypeFact> {
     match &result.type_fact {
@@ -743,10 +770,31 @@ fn first_function_return_with_call_args(
             let uri_id = result.source_uri_id();
             let summary = agg.summary_by_id(uri_id)?;
             let fs = summary.function_summaries.get(fid)?;
-            function_return_with_call_args(fs, call_arg_types)
+            function_return_with_call_args_for_call(fs, call_arg_types, is_method_call)
         }
         _ => None,
     }
+}
+
+fn function_return_with_call_args_for_call(
+    fs: &crate::summary::FunctionSummary,
+    call_arg_types: &[TypeFact],
+    is_method_call: bool,
+) -> Option<TypeFact> {
+    let effective_args = if is_method_call
+        && !call_arg_types.is_empty()
+        && fs
+            .signature
+            .params
+            .first()
+            .map(|p| p.name.as_str() != "self")
+            .unwrap_or(true)
+    {
+        &call_arg_types[1..]
+    } else {
+        call_arg_types
+    };
+    function_return_with_call_args(fs, effective_args)
 }
 
 fn function_return_with_call_args(
@@ -1264,6 +1312,8 @@ pub fn resolve_method_return_with_generics(
     type_name: &str,
     method_name: &str,
     actual_params: &[TypeFact],
+    call_arg_types: &[TypeFact],
+    is_method_call: bool,
     agg: &WorkspaceAggregation,
 ) -> TypeFact {
     // Find the source UriId for this type so we can look up function_summaries.
@@ -1273,17 +1323,42 @@ pub fn resolve_method_return_with_generics(
         .map(|c| c.source_uri_id());
 
     if let Some(uri_id) = source_uri_id {
-        // Try qualified name `TypeName:method` or `TypeName.method` in
-        // function_summaries (the summary builder registers colon methods
-        // under `TypeName:method`).
-        let qualified_colon = format!("{}:{}", type_name, method_name);
-        let qualified_dot = format!("{}.{}", type_name, method_name);
-
         let ret = agg.summary_by_id(uri_id).and_then(|summary| {
+            for td in &summary.type_definitions {
+                if td.name != type_name {
+                    continue;
+                }
+                for field in &td.fields {
+                    if field.name != method_name {
+                        continue;
+                    }
+                    return match &field.type_fact {
+                        TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
+                        TypeFact::Known(KnownType::FunctionRef(fid)) => {
+                            summary.function_summaries.get(fid).and_then(|fs| {
+                                function_return_with_call_args_for_call(
+                                    fs,
+                                    call_arg_types,
+                                    is_method_call,
+                                )
+                            })
+                        }
+                        _ => None,
+                    };
+                }
+            }
+
+            // Try qualified name `TypeName:method` or `TypeName.method` in
+            // function_summaries (global functions are indexed with colon
+            // normalized to dot).
+            let qualified_colon = format!("{}:{}", type_name, method_name);
+            let qualified_dot = format!("{}.{}", type_name, method_name);
             let fs = summary
                 .get_function_by_name(&qualified_colon)
                 .or_else(|| summary.get_function_by_name(&qualified_dot));
-            fs.and_then(|fs| fs.signature.returns.first().cloned())
+            fs.and_then(|fs| {
+                function_return_with_call_args_for_call(fs, call_arg_types, is_method_call)
+            })
         });
 
         if let Some(ret_fact) = ret {
@@ -1316,8 +1391,12 @@ pub fn resolve_method_return_with_generics(
                 let uri_id = resolved.source_uri_id();
                 if let Some(summary) = agg.summary_by_id(uri_id) {
                     if let Some(fs) = summary.function_summaries.get(fid) {
-                        if let Some(ret) = fs.signature.returns.first() {
-                            return substitute_generics(ret, type_name, actual_params, agg);
+                        if let Some(ret) = function_return_with_call_args_for_call(
+                            fs,
+                            call_arg_types,
+                            is_method_call,
+                        ) {
+                            return substitute_generics(&ret, type_name, actual_params, agg);
                         }
                     }
                 }

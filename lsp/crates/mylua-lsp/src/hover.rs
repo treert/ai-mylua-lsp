@@ -957,15 +957,32 @@ fn format_annotations_lua(annotations: &[EmmyAnnotation]) -> Vec<String> {
             EmmyAnnotation::Class {
                 name,
                 parents,
+                generic_params,
                 desc,
             } => {
+                let generic_suffix = if generic_params.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        "<{}>",
+                        generic_params
+                            .iter()
+                            .map(|param| match &param.constraint {
+                                Some(constraint) => format!("{} : {}", param.name, constraint),
+                                None => param.name.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    )
+                };
                 let suffix = emmy_desc_suffix(desc);
                 if parents.is_empty() {
-                    lines.push(format!("---@class {}{}", name, suffix));
+                    lines.push(format!("---@class {}{}{}", name, generic_suffix, suffix));
                 } else {
                     lines.push(format!(
-                        "---@class {} : {}{}",
+                        "---@class {}{} : {}{}",
                         name,
+                        generic_suffix,
                         parents.join(", "),
                         suffix
                     ));

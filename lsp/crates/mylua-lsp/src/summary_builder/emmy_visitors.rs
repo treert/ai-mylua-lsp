@@ -82,9 +82,19 @@ pub(super) fn visit_emmy_comment(ctx: &mut BuildContext, node: tree_sitter::Node
         let line_end_byte = line_node.end_byte();
 
         match ann {
-            EmmyAnnotation::Class { name, parents, .. } => {
+            EmmyAnnotation::Class {
+                name,
+                parents,
+                generic_params,
+                ..
+            } => {
                 emit_pending_class_as_typedef(ctx, node);
-                let initial_gparams = std::mem::take(&mut ctx.pending_generic_params);
+                let mut initial_gparams = std::mem::take(&mut ctx.pending_generic_params);
+                for gp in generic_params {
+                    if !initial_gparams.iter().any(|p| p == &gp.name) {
+                        initial_gparams.push(gp.name.clone());
+                    }
+                }
                 let name_range = find_name_range_in_line(
                     ctx.line_index,
                     ctx.source,

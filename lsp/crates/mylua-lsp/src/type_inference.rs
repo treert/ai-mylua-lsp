@@ -281,46 +281,24 @@ fn infer_call_return_fact(
     if let Some(method_node) = node.child_by_field_name("method") {
         let method_name = node_text(method_node, source).to_string();
         let base_fact = infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
+        let generic_args = generic_args_from_call_base(&base_fact);
+        let mut call_arg_types = Vec::with_capacity(1);
+        call_arg_types.push(base_fact.clone());
+        call_arg_types.extend(collect_call_arg_types_in_file_id(
+            node, source, uri_id, scope_tree, index,
+        ));
 
         // When the base is a generic class instance (e.g. `Stack<string>`),
         // resolve the method's return type eagerly and substitute generic
         // parameters. A `CallReturn` stub would lose the actual type args.
         if let TypeFact::Known(KnownType::EmmyGeneric(ref type_name, ref actual_params)) = base_fact
         {
-            let field_result = resolver::resolve_field_chain_in_file_id(
-                uri_id,
-                &base_fact,
-                std::slice::from_ref(&method_name),
-                index,
-            );
-            // If the field resolved to a function, extract its first return
-            // type (already substituted by resolve_field_chain_in_file's
-            // EmmyGeneric branch).
-            match &field_result.type_fact {
-                TypeFact::Known(KnownType::Function(ref sig)) => {
-                    if let Some(ret) = sig.returns.first() {
-                        return ret.clone();
-                    }
-                }
-                TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                    if let Some(location) = field_result.def_location {
-                        if let Some(summary) = index.summary_by_id(location.uri_id) {
-                            if let Some(fs) = summary.function_summaries.get(fid) {
-                                if let Some(ret) = fs.signature.returns.first() {
-                                    return ret.clone();
-                                }
-                            }
-                        }
-                    }
-                }
-                _ => {}
-            }
-            // Fallback: look up the method in function_summaries and
-            // substitute generics on the raw return type.
             let ret_fact = resolver::resolve_method_return_with_generics(
                 type_name,
                 &method_name,
                 actual_params,
+                &call_arg_types,
+                true,
                 index,
             );
             if ret_fact != TypeFact::Unknown {
@@ -328,12 +306,6 @@ fn infer_call_return_fact(
             }
         }
 
-        let generic_args = generic_args_from_call_base(&base_fact);
-        let mut call_arg_types = Vec::with_capacity(1);
-        call_arg_types.push(base_fact.clone());
-        call_arg_types.extend(collect_call_arg_types_in_file_id(
-            node, source, uri_id, scope_tree, index,
-        ));
         return TypeFact::Stub(SymbolicStub::CallReturn {
             base: Box::new(base_fact),
             func_name: method_name.into(),

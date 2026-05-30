@@ -148,6 +148,7 @@ pub enum EmmyAnnotation {
     Class {
         name: String,
         parents: Vec<String>,
+        generic_params: Vec<GenericParam>,
         desc: String,
     },
     Field {
@@ -1213,9 +1214,10 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
     }
 }
 
-/// `@class qualified_name [ ':' qualified_name { ',' qualified_name } ] [ desc ]`
+/// `@class qualified_name [ '<' generic_param_list '>' ] [ ':' qualified_name { ',' qualified_name } ] [ desc ]`
 fn parse_ann_class(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     let name = tz.eat_qualified_name()?;
+    let generic_params = parse_angle_generic_params(tz);
     let parents = if tz.eat(&Token::Colon) {
         let mut ps = Vec::new();
         if let Some(p) = tz.eat_qualified_name() {
@@ -1234,8 +1236,48 @@ fn parse_ann_class(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     Some(EmmyAnnotation::Class {
         name,
         parents,
+        generic_params,
         desc,
     })
+}
+
+fn parse_angle_generic_params(tz: &mut Tokenizer) -> Vec<GenericParam> {
+    if !tz.eat(&Token::LAngle) {
+        return Vec::new();
+    }
+
+    let mut params = Vec::new();
+    loop {
+        let Some(name) = tz.eat_name() else {
+            break;
+        };
+        let constraint = if tz.eat(&Token::Colon) {
+            Some(parse_type_expr(tz))
+        } else {
+            None
+        };
+        params.push(GenericParam { name, constraint });
+        if !tz.eat(&Token::Comma) {
+            break;
+        }
+    }
+    tz.eat(&Token::RAngle);
+    params
+}
+
+fn format_generic_params(params: &[GenericParam]) -> String {
+    if params.is_empty() {
+        return String::new();
+    }
+    let parts = params
+        .iter()
+        .map(|p| match &p.constraint {
+            Some(constraint) => format!("{} : {}", p.name, constraint),
+            None => p.name.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("<{}>", parts)
 }
 
 /// `@field [visibility] field_key [':'] type_expr [desc]`
@@ -1722,9 +1764,11 @@ pub fn format_annotations_markdown(annotations: &[EmmyAnnotation]) -> String {
             EmmyAnnotation::Class {
                 name,
                 parents,
+                generic_params,
                 desc,
             } => {
-                let mut s = format!("@class `{}`", name);
+                let generic_suffix = format_generic_params(generic_params);
+                let mut s = format!("@class `{}{}`", name, generic_suffix);
                 if !parents.is_empty() {
                     let _ = write!(s, " : {}", parents.join(", "));
                 }
@@ -2253,6 +2297,28 @@ mod tests {
             EmmyAnnotation::Class { name, parents, .. } => {
                 assert_eq!(name, "XMod.ClassX1");
                 assert_eq!(parents, &["Base.Mod"]);
+            }
+            _ => panic!("expected Class"),
+        }
+    }
+
+    #[test]
+    fn annotation_class_inline_generics() {
+        let anns = parse_emmy_comments("---@class Stack<T, K : Key> : Base");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::Class {
+                name,
+                parents,
+                generic_params,
+                ..
+            } => {
+                assert_eq!(name, "Stack");
+                assert_eq!(parents, &["Base"]);
+                assert_eq!(generic_params.len(), 2);
+                assert_eq!(generic_params[0].name, "T");
+                assert_eq!(generic_params[1].name, "K");
+                assert!(generic_params[1].constraint.is_some());
             }
             _ => panic!("expected Class"),
         }
