@@ -7,7 +7,7 @@
 //! comma count between the `(` and the cursor; for `:` calls the implicit
 //! receiver is not part of the user's visible argument list.
 
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
@@ -58,7 +58,7 @@ fn find_enclosing_call(root: tree_sitter::Node, byte_offset: usize) -> Option<tr
     let mut node = root.descendant_for_byte_range(byte_offset, byte_offset)?;
     loop {
         if node.is_kind(kind::FUNCTION_CALL) {
-            if let Some(args) = node.child_by_field_name("arguments") {
+            if let Some(args) = node.child_by_field(field::ARGUMENTS) {
                 // Include the closing `)` position so that `foo(|)` still matches.
                 if byte_offset >= args.start_byte() && byte_offset <= args.end_byte() {
                     return Some(node);
@@ -122,8 +122,8 @@ pub(crate) fn resolve_call_signature_candidates(
     scope_tree: &crate::scope::ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Option<(Vec<ResolvedCallSignature>, bool, String)> {
-    let callee = call.child_by_field_name("callee")?;
-    let method = call.child_by_field_name("method");
+    let callee = call.child_by_field(field::CALLEE)?;
+    let method = call.child_by_field(field::METHOD);
 
     // `obj:method(...)`
     if let Some(m) = method {
@@ -138,8 +138,8 @@ pub(crate) fn resolve_call_signature_candidates(
     // `obj.method(...)` / `mod.func(...)`
     if matches!(callee.kind_name(), "variable" | "field_expression") {
         if let (Some(object), Some(field)) = (
-            callee.child_by_field_name("object"),
-            callee.child_by_field_name("field"),
+            callee.child_by_field(field::OBJECT),
+            callee.child_by_field(field::FIELD),
         ) {
             let field_name = node_text(field, source).to_string();
             let base_fact = type_inference::infer_node_type_in_file_id(
@@ -473,7 +473,7 @@ fn compute_active_parameter(
     source: &[u8],
     _is_method: bool,
 ) -> u32 {
-    let Some(args) = call.child_by_field_name("arguments") else {
+    let Some(args) = call.child_by_field(field::ARGUMENTS) else {
         return 0;
     };
     // Only the paren-form `foo(a, b, ...)` has multiple top-level arguments

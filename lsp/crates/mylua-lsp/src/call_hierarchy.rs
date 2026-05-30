@@ -31,7 +31,7 @@ use tower_lsp_server::ls_types::*;
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::summary::{CallSite, DocumentSummary, GlobalContributionKind};
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::FunctionSummaryId;
 use crate::uri_id::{intern_uri, resolve_uri, UriId};
 use crate::util::{is_ancestor_or_equal, node_text, LineIndex};
@@ -139,7 +139,7 @@ fn item_from_enclosing_declaration(
             .filter(|p| p.is_kind(kind::FUNCTION_DECLARATION))?,
         _ => return None,
     };
-    let name_node = decl.child_by_field_name("name")?;
+    let name_node = decl.child_by_field(field::NAME)?;
     // Ensure the identifier is (part of) the name.
     if !is_ancestor_or_equal(name_node, ident) {
         return None;
@@ -462,8 +462,8 @@ pub fn extract_call_site(
     caller_id: Option<FunctionSummaryId>,
     line_index: &LineIndex,
 ) -> Option<CallSite> {
-    let callee = call.child_by_field_name("callee")?;
-    let method = call.child_by_field_name("method");
+    let callee = call.child_by_field(field::CALLEE)?;
+    let method = call.child_by_field(field::METHOD);
 
     let (callee_name, range) = if let Some(m) = method {
         // `obj:m(...)` — use the method name
@@ -479,7 +479,7 @@ pub fn extract_call_site(
         // field's range and the whole dotted chain as the callee_name
         // (caller can use `last_segment` if they only want the name).
         let text = node_text(callee, source).to_string();
-        if let Some(field) = callee.child_by_field_name("field") {
+        if let Some(field) = callee.child_by_field(field::FIELD) {
             (text, line_index.ts_node_to_byte_range(field, source))
         } else {
             (text, line_index.ts_node_to_byte_range(callee, source))

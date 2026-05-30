@@ -1,6 +1,6 @@
 use super::type_compat::{infer_literal_type, is_type_compatible};
 use crate::scope::ScopeTree;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::TypeFact;
 use crate::util::{node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -110,10 +110,10 @@ fn inspect_assignment_for_mismatch(
     severity: DiagnosticSeverity,
     line_index: &LineIndex,
 ) {
-    let Some(left) = node.child_by_field_name("left") else {
+    let Some(left) = node.child_by_field(field::LEFT) else {
         return;
     };
-    let Some(right) = node.child_by_field_name("right") else {
+    let Some(right) = node.child_by_field(field::RIGHT) else {
         return;
     };
 
@@ -124,8 +124,8 @@ fn inspect_assignment_for_mismatch(
         let ident_node = if lhs.is_kind(kind::IDENTIFIER) {
             Some(lhs)
         } else if lhs.is_kind(kind::VARIABLE)
-            && lhs.child_by_field_name("object").is_none()
-            && lhs.child_by_field_name("index").is_none()
+            && lhs.child_by_field(field::OBJECT).is_none()
+            && lhs.child_by_field(field::INDEX).is_none()
         {
             lhs.named_child(0).filter(|c| c.is_kind(kind::IDENTIFIER))
         } else {
@@ -187,13 +187,13 @@ fn find_local_rhs_type(
     source: &[u8],
 ) -> TypeFact {
     if node.is_kind(kind::LOCAL_DECLARATION) {
-        if let Some(names) = node.child_by_field_name("names") {
+        if let Some(names) = node.child_by_field(field::NAMES) {
             for i in 0..names.named_child_count() {
                 if let Some(n) = names.named_child(i as u32) {
                     if n.is_kind(kind::IDENTIFIER) && node_text(n, source) == name {
                         let node_line = n.start_position().row as u32;
                         if node_line == target_line {
-                            if let Some(values) = node.child_by_field_name("values") {
+                            if let Some(values) = node.child_by_field(field::VALUES) {
                                 if let Some(val) = values.named_child(i as u32) {
                                     return infer_literal_type(val, source, scope_tree);
                                 }

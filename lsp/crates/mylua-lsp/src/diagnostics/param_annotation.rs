@@ -1,4 +1,4 @@
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use std::collections::HashSet;
 
 use tower_lsp_server::ls_types::*;
@@ -66,8 +66,8 @@ fn collect_function_like_nodes<'tree>(
 }
 
 fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<HashSet<String>> {
-    let body = fun.child_by_field_name("body")?;
-    let param_list = body.child_by_field_name("parameters")?;
+    let body = fun.child_by_field(field::BODY)?;
+    let param_list = body.child_by_field(field::PARAMETERS)?;
     let mut names = HashSet::new();
 
     for i in 0..param_list.child_count() {
@@ -102,7 +102,7 @@ fn collect_lua_param_names(fun: tree_sitter::Node, source: &[u8]) -> Option<Hash
 }
 
 fn is_colon_method(fun: tree_sitter::Node, source: &[u8]) -> bool {
-    fun.child_by_field_name("name")
+    fun.child_by_field(field::NAME)
         .is_some_and(|name| node_text(name, source).contains(':'))
 }
 

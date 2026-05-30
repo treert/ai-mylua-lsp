@@ -1,7 +1,7 @@
 use super::type_compat::{infer_argument_type, is_type_compatible};
 use crate::aggregation::WorkspaceAggregation;
 use crate::signature_help::{ResolvedCallSignature, SignatureParamStyle};
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{ParamInfo, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::LineIndex;
@@ -55,7 +55,7 @@ pub(super) fn check_call_argument_diagnostics(
         if sigs.is_empty() {
             continue;
         }
-        let Some(args_node) = call.child_by_field_name("arguments") else {
+        let Some(args_node) = call.child_by_field(field::ARGUMENTS) else {
             continue;
         };
         let (actual_count, arg_exprs) = collect_call_arguments(args_node, source);

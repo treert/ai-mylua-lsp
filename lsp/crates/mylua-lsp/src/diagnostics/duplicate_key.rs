@@ -1,4 +1,4 @@
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::util::{node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
@@ -79,7 +79,7 @@ fn check_duplicate_keys_recursive(
 
 fn extract_field_key(field: tree_sitter::Node, source: &[u8]) -> Option<String> {
     // Identifier key: `a = 1`
-    if let Some(key) = field.child_by_field_name("key") {
+    if let Some(key) = field.child_by_field(field::KEY) {
         match key.syntax_kind() {
             kind::IDENTIFIER => {
                 return Some(node_text(key, source).to_string());

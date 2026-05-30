@@ -23,7 +23,7 @@
 //! - `m = require; m("foo")` aliased call chains are out of scope —
 //!   the callee must be the literal identifier `require`.
 
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
@@ -90,7 +90,7 @@ fn extract_require_argument<'tree>(
     call: tree_sitter::Node<'tree>,
     source: &[u8],
 ) -> Option<(tree_sitter::Node<'tree>, String)> {
-    let callee = call.child_by_field_name("callee")?;
+    let callee = call.child_by_field(field::CALLEE)?;
     // Callee must be a bare `require` identifier. `variable` with a
     // single identifier child also matches (grammar may wrap
     // identifiers as `variable`). Reject dotted / method-style
@@ -98,8 +98,8 @@ fn extract_require_argument<'tree>(
     let callee_ident = if callee.is_kind(kind::IDENTIFIER) {
         callee
     } else if callee.is_kind(kind::VARIABLE)
-        && callee.child_by_field_name("object").is_none()
-        && callee.child_by_field_name("index").is_none()
+        && callee.child_by_field(field::OBJECT).is_none()
+        && callee.child_by_field(field::INDEX).is_none()
     {
         callee
             .named_child(0)
@@ -111,7 +111,7 @@ fn extract_require_argument<'tree>(
         return None;
     }
 
-    let args = call.child_by_field_name("arguments")?;
+    let args = call.child_by_field(field::ARGUMENTS)?;
     // Short call form `require "mod"` / `require 'mod'`: the
     // grammar's `arguments` node wraps a single `string` named
     // child (no parens). Identified by the first byte being a

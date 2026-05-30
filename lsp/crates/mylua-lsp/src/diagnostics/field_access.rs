@@ -1,6 +1,6 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
@@ -61,7 +61,7 @@ fn is_assignment_target(node: tree_sitter::Node) -> bool {
             // so `is_ancestor_or_equal(left, node)` already covers the
             // `left == current` case.
             return parent
-                .child_by_field_name("left")
+                .child_by_field(field::LEFT)
                 .is_some_and(|left| is_ancestor_or_equal(left, node));
         }
         current = parent;
@@ -73,8 +73,8 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
     let node = cursor.node();
 
     let is_dotted = (node.is_kind(kind::VARIABLE) || node.kind_name() == "field_expression")
-        && node.child_by_field_name("object").is_some()
-        && node.child_by_field_name("field").is_some();
+        && node.child_by_field(field::OBJECT).is_some()
+        && node.child_by_field(field::FIELD).is_some();
 
     if is_dotted && !is_assignment_target(node) {
         if let Some((base_node, fields)) = extract_field_chain(node, ctx.source) {
@@ -84,8 +84,8 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
 
     if node.is_kind(kind::FUNCTION_CALL) {
         if let (Some(callee), Some(method)) = (
-            node.child_by_field_name("callee"),
-            node.child_by_field_name("method"),
+            node.child_by_field(field::CALLEE),
+            node.child_by_field(field::METHOD),
         ) {
             let base_fact = crate::type_inference::infer_node_type_in_file_id(
                 callee,
@@ -147,7 +147,7 @@ fn check_dotted_field(
     let Some(field_name) = fields.last() else {
         return;
     };
-    let Some(field_node) = node.child_by_field_name("field") else {
+    let Some(field_node) = node.child_by_field(field::FIELD) else {
         return;
     };
 

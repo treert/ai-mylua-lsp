@@ -1,4 +1,4 @@
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
@@ -380,10 +380,10 @@ pub fn extract_field_chain<'a>(
     let mut fields = Vec::new();
 
     while matches!(node.kind_name(), "variable" | "field_expression") {
-        let Some(field) = node.child_by_field_name("field") else {
+        let Some(field) = node.child_by_field(field::FIELD) else {
             break;
         };
-        let object = node.child_by_field_name("object")?;
+        let object = node.child_by_field(field::OBJECT)?;
         fields.push(node_text(field, source).to_string());
         node = object;
     }

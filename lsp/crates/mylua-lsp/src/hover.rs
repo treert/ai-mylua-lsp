@@ -5,7 +5,7 @@ use crate::emmy::{
     is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::resolver;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{
     format_resolved_type, format_signature, FunctionSignature, KnownType, TypeFact,
 };
@@ -78,7 +78,7 @@ pub fn hover(
     if let Some(result) = walk_ancestors(ident_node, |p| {
         if matches!(p.kind_name(), "variable" | "field_expression") {
             let field_is_ident = p
-                .child_by_field_name("field")
+                .child_by_field(field::FIELD)
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
@@ -87,7 +87,7 @@ pub fn hover(
         }
         if p.is_kind(kind::FIELD) {
             let key_is_ident = p
-                .child_by_field_name("key")
+                .child_by_field(field::KEY)
                 .map(|k| k.id() == ident_node.id())
                 .unwrap_or(false);
             if key_is_ident {
@@ -101,7 +101,7 @@ pub fn hover(
         // hover shows the method's declaration + type info.
         if p.is_kind(kind::FUNCTION_CALL) {
             let method_is_ident = p
-                .child_by_field_name("method")
+                .child_by_field(field::METHOD)
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
@@ -476,7 +476,7 @@ fn is_function_name_tail(function_name: tree_sitter::Node, ident: tree_sitter::N
     // Grammar: function_name = identifier ( '.' identifier )* ( ':' identifier )?
     // The method form exposes the trailing identifier via the
     // `method` field.
-    if let Some(method) = function_name.child_by_field_name("method") {
+    if let Some(method) = function_name.child_by_field(field::METHOD) {
         return method.id() == ident.id();
     }
     // Dotted / bare form: the tail is the last `identifier` child.
@@ -539,7 +539,7 @@ fn hover_at_declaration(decl_node: tree_sitter::Node, doc: &Document) -> Option<
         parts.push(trail.clone());
     }
 
-    let name_node = decl_node.child_by_field_name("name");
+    let name_node = decl_node.child_by_field(field::NAME);
     let range = name_node.map(|n| doc.line_index().ts_node_to_range(n, source));
 
     Some(Hover {
@@ -563,8 +563,8 @@ fn hover_method_call(
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let source = doc.source();
-    let base_node = call_node.child_by_field_name("callee")?;
-    let name_node = call_node.child_by_field_name("method")?;
+    let base_node = call_node.child_by_field(field::CALLEE)?;
+    let name_node = call_node.child_by_field(field::METHOD)?;
     if let Some((root_node, mut fields)) = extract_field_chain(base_node, source) {
         fields.push(node_text(name_node, source).to_string());
         return build_field_chain_hover(
@@ -606,7 +606,7 @@ fn hover_variable_field(
 ) -> Option<Hover> {
     let source = doc.source();
     if let Some((base_node, fields)) = extract_field_chain(var_node, source) {
-        let name_node = var_node.child_by_field_name("field")?;
+        let name_node = var_node.child_by_field(field::FIELD)?;
         return build_field_chain_hover(
             base_node,
             fields,
@@ -621,8 +621,8 @@ fn hover_variable_field(
         );
     }
 
-    let base_node = var_node.child_by_field_name("object")?;
-    let name_node = var_node.child_by_field_name("field")?;
+    let base_node = var_node.child_by_field(field::OBJECT)?;
+    let name_node = var_node.child_by_field(field::FIELD)?;
     build_field_hover(
         base_node,
         name_node,
@@ -644,7 +644,7 @@ fn hover_table_constructor_field(
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
     let source = doc.source();
-    let key_node = field_node.child_by_field_name("key")?;
+    let key_node = field_node.child_by_field(field::KEY)?;
     if !key_node.is_kind(kind::IDENTIFIER) || key_node.start_byte() != field_node.start_byte() {
         return None;
     }
@@ -697,7 +697,7 @@ fn table_constructor_field_type_info(
     });
 
     let type_fact = indexed_type.or_else(|| {
-        field_node.child_by_field_name("value").map(|value| {
+        field_node.child_by_field(field::VALUE).map(|value| {
             crate::type_inference::infer_node_type_in_file_id(
                 value, source, uri_id, scope_tree, index,
             )

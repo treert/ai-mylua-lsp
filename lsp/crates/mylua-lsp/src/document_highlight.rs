@@ -16,7 +16,7 @@
 //! declaration (so shadowing in nested scopes and the `local x = x + 1`
 //! RHS referring to the outer `x` are handled correctly).
 
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use tower_lsp_server::ls_types::*;
 
 use crate::document::Document;
@@ -129,12 +129,12 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
             // represents a READ of the current frame, regardless of
             // any outer assignment putting the whole thing on the LHS.
             kind::VARIABLE => {
-                if let Some(obj) = parent.child_by_field_name("object") {
+                if let Some(obj) = parent.child_by_field(field::OBJECT) {
                     if obj.id() == current.id() {
                         return DocumentHighlightKind::READ;
                     }
                 }
-                if let Some(idx) = parent.child_by_field_name("index") {
+                if let Some(idx) = parent.child_by_field(field::INDEX) {
                     if idx.id() == current.id() {
                         return DocumentHighlightKind::READ;
                     }
@@ -144,7 +144,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 // keep walking.
             }
             kind::ASSIGNMENT_STATEMENT => {
-                if let Some(lhs) = parent.child_by_field_name("left") {
+                if let Some(lhs) = parent.child_by_field(field::LEFT) {
                     if is_ancestor_or_equal(lhs, ident) {
                         return DocumentHighlightKind::WRITE;
                     }
@@ -152,7 +152,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 return DocumentHighlightKind::READ;
             }
             kind::LOCAL_DECLARATION => {
-                if let Some(names) = parent.child_by_field_name("names") {
+                if let Some(names) = parent.child_by_field(field::NAMES) {
                     if is_ancestor_or_equal(names, ident) {
                         return DocumentHighlightKind::WRITE;
                     }
@@ -160,7 +160,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 return DocumentHighlightKind::READ;
             }
             kind::LOCAL_FUNCTION_DECLARATION | kind::FUNCTION_DECLARATION => {
-                if let Some(name) = parent.child_by_field_name("name") {
+                if let Some(name) = parent.child_by_field(field::NAME) {
                     if is_ancestor_or_equal(name, ident) {
                         return DocumentHighlightKind::WRITE;
                     }
@@ -168,7 +168,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 return DocumentHighlightKind::READ;
             }
             kind::FOR_NUMERIC_STATEMENT => {
-                if let Some(name) = parent.child_by_field_name("name") {
+                if let Some(name) = parent.child_by_field(field::NAME) {
                     if is_ancestor_or_equal(name, ident) {
                         return DocumentHighlightKind::WRITE;
                     }
@@ -176,7 +176,7 @@ fn classify_kind(ident: tree_sitter::Node) -> DocumentHighlightKind {
                 return DocumentHighlightKind::READ;
             }
             kind::FOR_GENERIC_STATEMENT => {
-                if let Some(names) = parent.child_by_field_name("names") {
+                if let Some(names) = parent.child_by_field(field::NAMES) {
                     if is_ancestor_or_equal(names, ident) {
                         return DocumentHighlightKind::WRITE;
                     }

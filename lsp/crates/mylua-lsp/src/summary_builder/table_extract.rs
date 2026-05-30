@@ -1,5 +1,5 @@
 use crate::emmy::{emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation};
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::table_shape::{FieldInfo, TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::{extract_string_literal, node_text};
@@ -64,8 +64,8 @@ fn extract_single_field(
     shape: &mut TableShape,
     depth: usize,
 ) {
-    let value_node = field_node.child_by_field_name("value");
-    let key_node = field_node.child_by_field_name("key");
+    let value_node = field_node.child_by_field(field::VALUE);
+    let key_node = field_node.child_by_field(field::KEY);
 
     match key_node {
         // `name = value` — key is an identifier → named field.

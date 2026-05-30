@@ -22,7 +22,7 @@
 //! known to the summary, we still emit it at top level under its full
 //! dotted name so users aren't surprised by a missing symbol.
 
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use std::collections::{HashMap, HashSet};
 
 use tower_lsp_server::ls_types::*;
@@ -272,7 +272,7 @@ impl<'a> OutlineBuilder<'a> {
         node: tree_sitter::Node,
         source: &[u8],
     ) -> Option<DocumentSymbol> {
-        let Some(name_node) = node.child_by_field_name("name") else {
+        let Some(name_node) = node.child_by_field(field::NAME) else {
             return None;
         };
         let full_name = node_text(name_node, source).to_string();
@@ -326,7 +326,7 @@ impl<'a> OutlineBuilder<'a> {
         node: tree_sitter::Node,
         source: &[u8],
     ) -> Option<DocumentSymbol> {
-        let Some(name_node) = node.child_by_field_name("name") else {
+        let Some(name_node) = node.child_by_field(field::NAME) else {
             return None;
         };
         let name = node_text(name_node, source).to_string();
@@ -361,10 +361,10 @@ impl<'a> OutlineBuilder<'a> {
             return self.local_declaration_symbols(node, source);
         }
 
-        let Some(names_node) = node.child_by_field_name("names") else {
+        let Some(names_node) = node.child_by_field(field::NAMES) else {
             return Vec::new();
         };
-        let values_node = node.child_by_field_name("values");
+        let values_node = node.child_by_field(field::VALUES);
         let mut symbols = Vec::new();
         for i in 0..names_node.named_child_count() {
             let Some(id_node) = names_node.named_child(i as u32) else {
@@ -408,7 +408,7 @@ impl<'a> OutlineBuilder<'a> {
         node: tree_sitter::Node,
         source: &[u8],
     ) -> Vec<DocumentSymbol> {
-        let Some(names_node) = node.child_by_field_name("names") else {
+        let Some(names_node) = node.child_by_field(field::NAMES) else {
             return Vec::new();
         };
         let mut symbols = Vec::new();
@@ -442,7 +442,7 @@ impl<'a> OutlineBuilder<'a> {
     }
 
     fn visit_assignment(&mut self, node: tree_sitter::Node, source: &[u8]) {
-        let Some(left) = node.child_by_field_name("left") else {
+        let Some(left) = node.child_by_field(field::LEFT) else {
             return;
         };
         let Some(first_var) = left.named_child(0) else {
@@ -473,7 +473,7 @@ impl<'a> OutlineBuilder<'a> {
         self.top
             .push(self.variable_symbol(name, None, node, first_var, source));
         if self.includes_anonymous_functions() {
-            if let Some(right) = node.child_by_field_name("right") {
+            if let Some(right) = node.child_by_field(field::RIGHT) {
                 let mut nested = Vec::new();
                 self.collect_anonymous_function_symbols(right, source, &mut nested);
                 self.top.extend(nested);
@@ -489,7 +489,7 @@ impl<'a> OutlineBuilder<'a> {
         if !self.includes_anonymous_functions() {
             return None;
         }
-        let left = node.child_by_field_name("left")?;
+        let left = node.child_by_field(field::LEFT)?;
         let first_var = left.named_child(0)?;
         if has_dotted_or_subscript_form(first_var) {
             return None;
@@ -499,7 +499,7 @@ impl<'a> OutlineBuilder<'a> {
             return None;
         }
         let value = node
-            .child_by_field_name("right")
+            .child_by_field(field::RIGHT)
             .and_then(|right| right.named_child(0))
             .filter(|n| n.is_kind(kind::FUNCTION_DEFINITION))?;
 
@@ -728,10 +728,10 @@ impl<'a> OutlineBuilder<'a> {
         source: &[u8],
         out: &mut Vec<DocumentSymbol>,
     ) {
-        let Some(names_node) = node.child_by_field_name("names") else {
+        let Some(names_node) = node.child_by_field(field::NAMES) else {
             return;
         };
-        let values_node = node.child_by_field_name("values");
+        let values_node = node.child_by_field(field::VALUES);
         for i in 0..names_node.named_child_count() {
             let Some(id_node) = names_node.named_child(i as u32) else {
                 continue;
@@ -769,7 +769,7 @@ impl<'a> OutlineBuilder<'a> {
         let Some(body) = find_named_child_kind(node, "function_body") else {
             return Vec::new();
         };
-        let Some(params) = body.child_by_field_name("parameters") else {
+        let Some(params) = body.child_by_field(field::PARAMETERS) else {
             return Vec::new();
         };
         let mut symbols = Vec::new();
@@ -815,12 +815,12 @@ impl<'a> OutlineBuilder<'a> {
         let mut symbols = Vec::new();
         match node.syntax_kind() {
             kind::FOR_NUMERIC_STATEMENT => {
-                if let Some(name_node) = node.child_by_field_name("name") {
+                if let Some(name_node) = node.child_by_field(field::NAME) {
                     self.push_for_variable_symbol(node, name_node, source, &mut symbols);
                 }
             }
             kind::FOR_GENERIC_STATEMENT => {
-                if let Some(names_node) = node.child_by_field_name("names") {
+                if let Some(names_node) = node.child_by_field(field::NAMES) {
                     for i in 0..names_node.named_child_count() {
                         if let Some(id_node) = names_node.named_child(i as u32) {
                             if id_node.is_kind(kind::IDENTIFIER) {
@@ -913,9 +913,9 @@ fn split_function_name(full: &str) -> (Option<String>, Option<String>) {
 /// True if the `variable` node at `node` has the nested form
 /// `object.field` or `object[index]`. Bare identifiers return false.
 fn has_dotted_or_subscript_form(node: tree_sitter::Node) -> bool {
-    node.child_by_field_name("object").is_some()
-        || node.child_by_field_name("field").is_some()
-        || node.child_by_field_name("index").is_some()
+    node.child_by_field(field::OBJECT).is_some()
+        || node.child_by_field(field::FIELD).is_some()
+        || node.child_by_field(field::INDEX).is_some()
 }
 
 fn find_named_child_kind<'tree>(

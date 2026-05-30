@@ -2,7 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation,
 };
 use crate::lua_symbol::get_lua_symbol;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::table_shape::{TableShape, MAX_TABLE_SHAPE_DEPTH};
 use crate::type_system::*;
 use crate::util::node_text;
@@ -26,8 +26,8 @@ pub(super) fn infer_expression_type(
         return TypeFact::Unknown;
     }
     if node.kind_name() == "field_expression"
-        && node.child_by_field_name("object").is_some()
-        && node.child_by_field_name("field").is_some()
+        && node.child_by_field(field::OBJECT).is_some()
+        && node.child_by_field(field::FIELD).is_some()
     {
         return infer_field_expression_type(ctx, node, depth);
     }
@@ -55,8 +55,8 @@ pub(super) fn infer_expression_type(
             let mut returns = Vec::new();
             let mut emmy_annotated = false;
 
-            if let Some(body) = node.child_by_field_name("body") {
-                if let Some(param_list) = body.child_by_field_name("parameters") {
+            if let Some(body) = node.child_by_field(field::BODY) {
+                if let Some(param_list) = body.child_by_field(field::PARAMETERS) {
                     extract_ast_params(&mut params, param_list, ctx.source);
                 }
             }
@@ -101,7 +101,7 @@ pub(super) fn infer_expression_type(
             // "no return value" by writing e.g. `---@param x number`
             // without a `---@return`.
             if returns.is_empty() && !emmy_annotated {
-                if let Some(body) = node.child_by_field_name("body") {
+                if let Some(body) = node.child_by_field(field::BODY) {
                     collect_return_types(ctx, body, &mut returns, 0);
                 }
             }
@@ -112,8 +112,8 @@ pub(super) fn infer_expression_type(
         kind::FUNCTION_CALL => infer_call_return_type(ctx, node, depth),
 
         kind::VARIABLE
-            if node.child_by_field_name("object").is_some()
-                && node.child_by_field_name("field").is_some() =>
+            if node.child_by_field(field::OBJECT).is_some()
+                && node.child_by_field(field::FIELD).is_some() =>
         {
             infer_field_expression_type(ctx, node, depth)
         }
@@ -150,7 +150,7 @@ pub(super) fn infer_expression_type(
 /// Uses a lightweight inference that handles literals and local variable
 /// lookups without requiring `&mut BuildContext`.
 fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> Vec<TypeFact> {
-    let Some(args) = call_node.child_by_field_name("arguments") else {
+    let Some(args) = call_node.child_by_field(field::ARGUMENTS) else {
         return Vec::new();
     };
     crate::util::extract_call_arg_nodes(args, ctx.source)
@@ -204,8 +204,8 @@ fn function_return_with_call_args(
 /// unification (e.g. `identity("abc")` → `T = string`).
 fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
     if node.kind_name() == "field_expression"
-        && node.child_by_field_name("object").is_some()
-        && node.child_by_field_name("field").is_some()
+        && node.child_by_field(field::OBJECT).is_some()
+        && node.child_by_field(field::FIELD).is_some()
     {
         return infer_field_expression_type(ctx, node, 0);
     }
@@ -215,8 +215,8 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
         kind::TRUE | kind::FALSE => TypeFact::Known(KnownType::Boolean),
         kind::NIL => TypeFact::Known(KnownType::Nil),
         kind::VARIABLE
-            if node.child_by_field_name("object").is_some()
-                && node.child_by_field_name("field").is_some() =>
+            if node.child_by_field(field::OBJECT).is_some()
+                && node.child_by_field(field::FIELD).is_some() =>
         {
             infer_field_expression_type(ctx, node, 0)
         }
@@ -246,7 +246,7 @@ fn infer_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> Ty
 }
 
 fn infer_operator_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::Node) -> TypeFact {
-    if let Some(op_node) = node.child_by_field_name("operator") {
+    if let Some(op_node) = node.child_by_field(field::OPERATOR) {
         let op = node_text(op_node, ctx.source);
         match op {
             "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
@@ -257,12 +257,12 @@ fn infer_operator_arg_type_lightweight(ctx: &BuildContext, node: tree_sitter::No
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" => {
-                if let Some(right) = node.child_by_field_name("right") {
+                if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_arg_type_lightweight(ctx, right);
                 }
             }
             "or" => {
-                if let Some(left) = node.child_by_field_name("left") {
+                if let Some(left) = node.child_by_field(field::LEFT) {
                     return infer_arg_type_lightweight(ctx, left);
                 }
             }
@@ -308,10 +308,10 @@ fn infer_table_array_element_type_lightweight(
                 continue;
             }
             // Only handle positional entries (no key)
-            if field_node.child_by_field_name("key").is_some() {
+            if field_node.child_by_field(field::KEY).is_some() {
                 return TypeFact::Unknown; // has named keys, not a pure array
             }
-            if let Some(val) = field_node.child_by_field_name("value") {
+            if let Some(val) = field_node.child_by_field(field::VALUE) {
                 let val_type = infer_arg_type_lightweight(ctx, val);
                 if val_type == TypeFact::Unknown {
                     continue;
@@ -342,7 +342,7 @@ fn infer_call_return_type(
     node: tree_sitter::Node,
     depth: usize,
 ) -> TypeFact {
-    let callee = match node.child_by_field_name("callee") {
+    let callee = match node.child_by_field(field::CALLEE) {
         Some(c) => c,
         None => return TypeFact::Unknown,
     };
@@ -351,7 +351,7 @@ fn infer_call_return_type(
 
     // `require("mod")` → RequireRef stub
     if callee_text == "require" {
-        if let Some(args) = node.child_by_field_name("arguments") {
+        if let Some(args) = node.child_by_field(field::ARGUMENTS) {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_from_node(ctx, first_arg) {
                     return TypeFact::Stub(SymbolicStub::RequireRef {
@@ -364,7 +364,7 @@ fn infer_call_return_type(
     }
 
     // `obj:method()` → CallReturn(base_stub, method_name)
-    if let Some(method_node) = node.child_by_field_name("method") {
+    if let Some(method_node) = node.child_by_field(field::METHOD) {
         let method_name = node_text(method_node, ctx.source).to_string();
         let explicit_arg_types = collect_call_arg_types(ctx, node);
         let base_fact = infer_expression_type(ctx, callee, depth + 1);
@@ -430,8 +430,8 @@ fn infer_call_return_type(
     // `object` + `field` fields; `field_expression` is kept for forward
     // compatibility only.
     if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
-        if let Some(base) = callee.child_by_field_name("object") {
-            if let Some(field) = callee.child_by_field_name("field") {
+        if let Some(base) = callee.child_by_field(field::OBJECT) {
+            if let Some(field) = callee.child_by_field(field::FIELD) {
                 let base_text = node_text(base, ctx.source);
                 let func_name = node_text(field, ctx.source).to_string();
                 let explicit_arg_types = collect_call_arg_types(ctx, node);
@@ -545,11 +545,11 @@ fn infer_field_expression_type(
     node: tree_sitter::Node,
     depth: usize,
 ) -> TypeFact {
-    let base = match node.child_by_field_name("object") {
+    let base = match node.child_by_field(field::OBJECT) {
         Some(b) => b,
         None => return TypeFact::Unknown,
     };
-    let field = match node.child_by_field_name("field") {
+    let field = match node.child_by_field(field::FIELD) {
         Some(f) => f,
         None => return TypeFact::Unknown,
     };
@@ -577,8 +577,8 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
     }
 
     if (base.is_kind(kind::VARIABLE) || base.kind_name() == "field_expression")
-        && base.child_by_field_name("object").is_some()
-        && base.child_by_field_name("field").is_some()
+        && base.child_by_field(field::OBJECT).is_some()
+        && base.child_by_field(field::FIELD).is_some()
     {
         return infer_field_expression_type(ctx, base, depth);
     }
@@ -598,7 +598,7 @@ fn infer_field_base_type(ctx: &BuildContext, base: tree_sitter::Node, depth: usi
 }
 
 fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: usize) -> TypeFact {
-    if let Some(op_node) = node.child_by_field_name("operator") {
+    if let Some(op_node) = node.child_by_field(field::OPERATOR) {
         let op = node_text(op_node, ctx.source);
         match op {
             "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
@@ -611,12 +611,12 @@ fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: u
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" => {
-                if let Some(right) = node.child_by_field_name("right") {
+                if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_expression_type(ctx, right, depth + 1);
                 }
             }
             "or" => {
-                if let Some(left) = node.child_by_field_name("left") {
+                if let Some(left) = node.child_by_field(field::LEFT) {
                     return infer_expression_type(ctx, left, depth + 1);
                 }
             }

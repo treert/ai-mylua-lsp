@@ -1,5 +1,5 @@
 use crate::scope::ScopeTree;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::util::{node_text, LineIndex};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -180,13 +180,13 @@ fn is_field_or_method(node: tree_sitter::Node) -> bool {
     if let Some(parent) = node.parent() {
         match parent.syntax_kind() {
             kind::VARIABLE => {
-                parent.child_by_field_name("field").map(|n| n.id()) == Some(node.id())
+                parent.child_by_field(field::FIELD).map(|n| n.id()) == Some(node.id())
             }
             kind::FUNCTION_CALL => {
-                parent.child_by_field_name("method").map(|n| n.id()) == Some(node.id())
+                parent.child_by_field(field::METHOD).map(|n| n.id()) == Some(node.id())
             }
             kind::FUNCTION_NAME => parent.child(0).map(|n| n.id()) != Some(node.id()),
-            kind::FIELD => parent.child_by_field_name("key").map(|n| n.id()) == Some(node.id()),
+            kind::FIELD => parent.child_by_field(field::KEY).map(|n| n.id()) == Some(node.id()),
             _ => false,
         }
     } else {

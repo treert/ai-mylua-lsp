@@ -1,4 +1,4 @@
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use std::collections::HashMap;
 
 use crate::type_system::FunctionSummaryId;
@@ -53,14 +53,14 @@ fn collect_calls_in_scope(
     match node.syntax_kind() {
         kind::FUNCTION_DECLARATION | kind::LOCAL_FUNCTION_DECLARATION => {
             let name = node
-                .child_by_field_name("name")
+                .child_by_field(field::NAME)
                 .map(|n| node_text(n, source).to_string())
                 .unwrap_or_default();
             let id = function_node_to_id
                 .get(&(node.start_byte(), node.end_byte()))
                 .copied()
                 .or_else(|| name_to_id.get(&name).copied());
-            if let Some(body) = node.child_by_field_name("body") {
+            if let Some(body) = node.child_by_field(field::BODY) {
                 collect_calls_in_scope(
                     body,
                     source,
@@ -93,7 +93,7 @@ fn collect_calls_in_scope(
             } else {
                 (caller_name, caller_id)
             };
-            if let Some(body) = node.child_by_field_name("body") {
+            if let Some(body) = node.child_by_field(field::BODY) {
                 collect_calls_in_scope(
                     body,
                     source,
@@ -148,8 +148,8 @@ fn infer_anon_caller_name(node: tree_sitter::Node, source: &[u8]) -> Option<Stri
     let stmt = enclosing_statement_for_function_expr(node)?;
     match stmt.syntax_kind() {
         kind::LOCAL_DECLARATION => {
-            let names = stmt.child_by_field_name("names")?;
-            let values = stmt.child_by_field_name("values")?;
+            let names = stmt.child_by_field(field::NAMES)?;
+            let values = stmt.child_by_field(field::VALUES)?;
             let index = rhs_index_of(values, node)?;
             let id = names.named_child(index as u32)?;
             if id.is_kind(kind::IDENTIFIER) {
@@ -159,8 +159,8 @@ fn infer_anon_caller_name(node: tree_sitter::Node, source: &[u8]) -> Option<Stri
             }
         }
         kind::ASSIGNMENT_STATEMENT => {
-            let left = stmt.child_by_field_name("left")?;
-            let right = stmt.child_by_field_name("right")?;
+            let left = stmt.child_by_field(field::LEFT)?;
+            let right = stmt.child_by_field(field::RIGHT)?;
             let index = rhs_index_of(right, node)?;
             let first = left.named_child(index as u32)?;
             // Return the full LHS text (supports `Foo.m` / `m[1]` / bare id).

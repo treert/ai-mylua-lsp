@@ -1,5 +1,5 @@
 use super::type_compat::{infer_return_literal_type, is_type_compatible};
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, TypeFact};
 use crate::util::LineIndex;
 use tower_lsp_server::ls_types::*;
@@ -77,7 +77,7 @@ fn inspect_function_returns(
         return;
     }
 
-    let body = fun.child_by_field_name("body");
+    let body = fun.child_by_field(field::BODY);
     let Some(body) = body else { return };
 
     let mut returns: Vec<tree_sitter::Node> = Vec::new();

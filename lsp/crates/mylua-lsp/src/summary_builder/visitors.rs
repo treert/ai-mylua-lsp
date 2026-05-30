@@ -5,7 +5,7 @@ use crate::emmy::{
 use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol};
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
-use crate::syntax_kind::{kind, NodeKindExt, SyntaxKind};
+use crate::syntax_kind::{field, kind, NodeKindExt, SyntaxKind};
 use crate::table_shape::{FieldInfo, TableShape};
 use crate::type_system::*;
 use crate::types::DefKind;
@@ -216,7 +216,7 @@ fn visit_nested_block_inner(
     // Register for-loop variables into scope
     match node.syntax_kind() {
         kind::FOR_NUMERIC_STATEMENT => {
-            if let Some(name_node) = node.child_by_field_name("name") {
+            if let Some(name_node) = node.child_by_field(field::NAME) {
                 let db = name_node.start_byte();
                 ctx.add_scoped_decl(ScopeDecl {
                     name: node_text(name_node, ctx.source).into(),
@@ -232,7 +232,7 @@ fn visit_nested_block_inner(
             }
         }
         kind::FOR_GENERIC_STATEMENT => {
-            if let Some(names_node) = node.child_by_field_name("names") {
+            if let Some(names_node) = node.child_by_field(field::NAMES) {
                 for i in 0..names_node.named_child_count() {
                     if let Some(id_node) = names_node.named_child(i as u32) {
                         if id_node.is_kind(kind::IDENTIFIER) {
@@ -343,11 +343,11 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // Phase 2: consume pending_class_name — bind the first local to the class
     let mut pending_class = ctx.pending_class_name.take();
 
-    let names_node = match node.child_by_field_name("names") {
+    let names_node = match node.child_by_field(field::NAMES) {
         Some(n) => n,
         None => return,
     };
-    let values_node = node.child_by_field_name("values");
+    let values_node = node.child_by_field(field::VALUES);
 
     let name_count = names_node.named_child_count();
 
@@ -436,7 +436,7 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
             }
 
             let (type_fact, function_expr_body) = if val.is_kind(kind::FUNCTION_DEFINITION) {
-                let body = val.child_by_field_name("body");
+                let body = val.child_by_field(field::BODY);
                 let func_id = ctx.alloc_function_id();
                 let fs = build_function_summary(ctx, &name, node, body, false);
                 let params = fs.signature.params.clone();
@@ -560,10 +560,10 @@ fn extract_call_return_types(
     // when `obj` is also a top-level function registered in
     // `function_summaries`. Mirror `infer_call_return_type`'s method
     // branch and bail out unambiguously.
-    if call_node.child_by_field_name("method").is_some() {
+    if call_node.child_by_field(field::METHOD).is_some() {
         return None;
     }
-    let callee = call_node.child_by_field_name("callee")?;
+    let callee = call_node.child_by_field(field::CALLEE)?;
     // Only bare identifier callees are statically resolvable here;
     // dotted calls (`mod.f()`) and subscript calls fall through the
     // resolver as CallReturn stubs without direct access to the full
@@ -687,11 +687,11 @@ fn try_extract_require<'a>(
     if !value_node.is_kind(kind::FUNCTION_CALL) {
         return None;
     }
-    let callee = value_node.child_by_field_name("callee")?;
+    let callee = value_node.child_by_field(field::CALLEE)?;
     if node_text(callee, ctx.source) != "require" {
         return None;
     }
-    let args = value_node.child_by_field_name("arguments")?;
+    let args = value_node.child_by_field(field::ARGUMENTS)?;
     let first_arg = args.named_child(0)?;
     // Unwrap expression_list wrapper if present, then extract string content.
     let string_node = if first_arg.is_kind(kind::EXPRESSION_LIST) {
@@ -709,12 +709,12 @@ fn try_extract_require<'a>(
 // ---------------------------------------------------------------------------
 
 fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    let name_node = match node.child_by_field_name("name") {
+    let name_node = match node.child_by_field(field::NAME) {
         Some(n) => n,
         None => return,
     };
     let name = node_text(name_node, ctx.source).to_string();
-    let body = node.child_by_field_name("body");
+    let body = node.child_by_field(field::BODY);
 
     let func_id = ctx.alloc_function_id();
     let fs = build_function_summary(ctx, &name, node, body, false);
@@ -753,12 +753,12 @@ fn visit_local_function(ctx: &mut BuildContext, node: tree_sitter::Node) {
 }
 
 fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    let name_node = match node.child_by_field_name("name") {
+    let name_node = match node.child_by_field(field::NAME) {
         Some(n) => n,
         None => return,
     };
     let name = node_text(name_node, ctx.source).to_string();
-    let body = node.child_by_field_name("body");
+    let body = node.child_by_field(field::BODY);
 
     let func_id = ctx.alloc_function_id();
     let fs = build_function_summary(ctx, &name, node, body, false);
@@ -940,7 +940,7 @@ fn build_function_summary(
     let mut has_ast_param_list = false;
 
     if let Some(b) = body {
-        if let Some(param_list) = b.child_by_field_name("parameters") {
+        if let Some(param_list) = b.child_by_field(field::PARAMETERS) {
             has_ast_param_list = true;
             extract_ast_params(&mut params, param_list, ctx.source);
         }
@@ -1225,11 +1225,11 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
     // Phase 2: consume pending_class_name for global assignment binding
     let pending_class = ctx.pending_class_name.take();
 
-    let left = match node.child_by_field_name("left") {
+    let left = match node.child_by_field(field::LEFT) {
         Some(n) => n,
         None => return,
     };
-    let right = node.child_by_field_name("right");
+    let right = node.child_by_field(field::RIGHT);
 
     for i in 0..left.named_child_count() {
         let var_node = match left.named_child(i as u32) {
@@ -1462,7 +1462,7 @@ fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<Dotted
         if !current.is_kind(kind::VARIABLE) {
             return None;
         }
-        let field = match current.child_by_field_name("field") {
+        let field = match current.child_by_field(field::FIELD) {
             Some(f) => f,
             None => {
                 // Innermost: a `variable` with a single `identifier` child.
@@ -1480,7 +1480,7 @@ fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<Dotted
                 return None;
             }
         };
-        let object = current.child_by_field_name("object")?;
+        let object = current.child_by_field(field::OBJECT)?;
         fields_rev.push(node_text(field, source).to_string());
         current = object;
     }
@@ -1675,12 +1675,12 @@ fn visit_anonymous_function_definitions_in_node(ctx: &mut BuildContext, node: tr
 }
 
 fn visit_anonymous_function_definition(ctx: &mut BuildContext, node: tree_sitter::Node) {
-    let Some(body) = node.child_by_field_name("body") else {
+    let Some(body) = node.child_by_field(field::BODY) else {
         return;
     };
 
     let mut params = Vec::new();
-    if let Some(param_list) = body.child_by_field_name("parameters") {
+    if let Some(param_list) = body.child_by_field(field::PARAMETERS) {
         extract_ast_params(&mut params, param_list, ctx.source);
     }
 
@@ -1757,7 +1757,7 @@ fn visit_function_body(
     }
 
     // Register parameters from the function_body's parameter list
-    if let Some(param_list) = func_body.child_by_field_name("parameters") {
+    if let Some(param_list) = func_body.child_by_field(field::PARAMETERS) {
         register_params_into_scope(ctx, param_list, params);
     }
 

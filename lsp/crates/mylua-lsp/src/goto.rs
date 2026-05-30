@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::config::GotoStrategy;
 use crate::document::Document;
 use crate::resolver;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{
@@ -65,7 +65,7 @@ fn goto_definition_inner(
     if let Some(result) = walk_ancestors(ident_node, |p| {
         if matches!(p.kind_name(), "variable" | "field_expression") {
             let field_is_ident = p
-                .child_by_field_name("field")
+                .child_by_field(field::FIELD)
                 .map(|f| f.id() == ident_node.id())
                 .unwrap_or(false);
             if field_is_ident {
@@ -77,7 +77,7 @@ fn goto_definition_inner(
         // goto jumps to the method's definition site.
         if p.is_kind(kind::FUNCTION_CALL) {
             let method_is_ident = p
-                .child_by_field_name("method")
+                .child_by_field(field::METHOD)
                 .map(|m| m.id() == ident_node.id())
                 .unwrap_or(false);
             if method_is_ident {
@@ -294,8 +294,8 @@ fn goto_variable_field(
         return resolved_to_goto(resolved);
     }
 
-    let base_node = var_node.child_by_field_name("object")?;
-    let name_node = var_node.child_by_field_name("field")?;
+    let base_node = var_node.child_by_field(field::OBJECT)?;
+    let name_node = var_node.child_by_field(field::FIELD)?;
     goto_field_or_method(base_node, name_node, source, uri_id, &doc.scope_tree, index)
 }
 
@@ -310,8 +310,8 @@ fn goto_method_call(
     index: &WorkspaceAggregation,
 ) -> Option<GotoDefinitionResponse> {
     let source = doc.source();
-    let base_node = call_node.child_by_field_name("callee")?;
-    let name_node = call_node.child_by_field_name("method")?;
+    let base_node = call_node.child_by_field(field::CALLEE)?;
+    let name_node = call_node.child_by_field(field::METHOD)?;
     if let Some((root_node, mut fields)) = extract_field_chain(base_node, source) {
         fields.push(node_text(name_node, source).to_string());
         let root_fact = crate::type_inference::infer_node_type_in_file_id(
@@ -370,7 +370,7 @@ fn try_label_goto(
     if !goto_stmt.is_kind(kind::GOTO_STATEMENT) {
         return None;
     }
-    let goto_name = goto_stmt.child_by_field_name("name")?;
+    let goto_name = goto_stmt.child_by_field(field::NAME)?;
     if goto_name.id() != ident_node.id() {
         return None;
     }
@@ -439,7 +439,7 @@ fn find_label_in_block<'a>(
     loop {
         let child = cursor.node();
         if child.is_kind(kind::LABEL_STATEMENT) {
-            if let Some(name_node) = child.child_by_field_name("name") {
+            if let Some(name_node) = child.child_by_field(field::NAME) {
                 if node_text(name_node, source) == target_name {
                     return Some(name_node);
                 }
@@ -483,17 +483,17 @@ fn try_require_goto(
     if !p.is_kind(kind::LOCAL_DECLARATION) {
         return None;
     }
-    let values = p.child_by_field_name("values")?;
+    let values = p.child_by_field(field::VALUES)?;
     let first_val = values.named_child(idx_in_names)?;
     if !first_val.is_kind(kind::FUNCTION_CALL) {
         return None;
     }
-    let callee = first_val.child_by_field_name("callee")?;
+    let callee = first_val.child_by_field(field::CALLEE)?;
     let callee_text = node_text(callee, doc.source());
     if callee_text != "require" {
         return None;
     }
-    let args = first_val.child_by_field_name("arguments")?;
+    let args = first_val.child_by_field(field::ARGUMENTS)?;
     let arg = args.named_child(0)?;
 
     // Unwrap expression_list wrapper if present, then extract string content.

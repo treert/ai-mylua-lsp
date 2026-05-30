@@ -3,7 +3,7 @@ use crate::config::ReferencesStrategy;
 use crate::document::{Document, DocumentLookup};
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{find_node_at_position, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -354,20 +354,20 @@ fn try_identify_field(
     let (base_node, field_name) = match parent.kind_name() {
         // `obj.field` — ident is the `field` child
         "variable" | "field_expression" => {
-            let field_child = parent.child_by_field_name("field")?;
+            let field_child = parent.child_by_field(field::FIELD)?;
             if field_child.id() != ident_node.id() {
                 return None;
             }
-            let object = parent.child_by_field_name("object")?;
+            let object = parent.child_by_field(field::OBJECT)?;
             (object, node_text(ident_node, source).to_string())
         }
         // `obj:method()` — ident is the `method` child
         "function_call" => {
-            let method_child = parent.child_by_field_name("method")?;
+            let method_child = parent.child_by_field(field::METHOD)?;
             if method_child.id() != ident_node.id() {
                 return None;
             }
-            let callee = parent.child_by_field_name("callee")?;
+            let callee = parent.child_by_field(field::CALLEE)?;
             (callee, node_text(ident_node, source).to_string())
         }
         // `function M.foo()` / `function M:foo()` — ident is non-first in function_name
@@ -541,25 +541,25 @@ fn verify_field(
 
     let base_node = match parent.kind_name() {
         "variable" | "field_expression" => {
-            let Some(field_child) = parent.child_by_field_name("field") else {
+            let Some(field_child) = parent.child_by_field(field::FIELD) else {
                 return false;
             };
             if field_child.id() != node.id() {
                 return false;
             }
-            match parent.child_by_field_name("object") {
+            match parent.child_by_field(field::OBJECT) {
                 Some(obj) => obj,
                 None => return false,
             }
         }
         "function_call" => {
-            let Some(method_child) = parent.child_by_field_name("method") else {
+            let Some(method_child) = parent.child_by_field(field::METHOD) else {
                 return false;
             };
             if method_child.id() != node.id() {
                 return false;
             }
-            match parent.child_by_field_name("callee") {
+            match parent.child_by_field(field::CALLEE) {
                 Some(c) => c,
                 None => return false,
             }
@@ -743,22 +743,22 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
     };
     match parent.kind_name() {
         "variable" | "field_expression" => parent
-            .child_by_field_name("field")
+            .child_by_field(field::FIELD)
             .is_some_and(|f| f.id() == node.id()),
         "function_call" => parent
-            .child_by_field_name("method")
+            .child_by_field(field::METHOD)
             .is_some_and(|m| m.id() == node.id()),
         "function_name" => {
             let first_child = parent.child(0);
             first_child.map(|fc| fc.id() != node.id()).unwrap_or(false)
         }
         "field" => parent
-            .child_by_field_name("key")
+            .child_by_field(field::KEY)
             .is_some_and(|k| k.id() == node.id()),
         "label_statement" | "goto_statement" => true,
         "attribute_name_list" | "name_list" => true,
         "local_function_declaration" => parent
-            .child_by_field_name("name")
+            .child_by_field(field::NAME)
             .is_some_and(|n| n.id() == node.id()),
         "attribute" => true,
         _ => false,

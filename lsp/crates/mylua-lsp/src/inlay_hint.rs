@@ -19,7 +19,7 @@
 //! Hints emitted outside the requested `params.range` are skipped —
 //! clients typically request viewport-scoped results.
 
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use tower_lsp_server::ls_types::*;
 
 use crate::aggregation::WorkspaceAggregation;
@@ -141,7 +141,7 @@ fn collect_parameter_name_hints(
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
-    let Some(args) = call.child_by_field_name("arguments") else {
+    let Some(args) = call.child_by_field(field::ARGUMENTS) else {
         return;
     };
 
@@ -223,7 +223,7 @@ fn collect_variable_type_hints(
     out: &mut Vec<InlayHint>,
     line_index: &LineIndex,
 ) {
-    let Some(names) = decl.child_by_field_name("names") else {
+    let Some(names) = decl.child_by_field(field::NAMES) else {
         return;
     };
     // Skip if user explicitly annotated with `---@type ...` above.

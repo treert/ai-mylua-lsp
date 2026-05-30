@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
 use crate::lua_builtins::LUA_KEYWORDS;
 use crate::resolver;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_inference;
 use crate::uri_id::{resolve_uri, UriId};
 use crate::util::{node_text, walk_ancestors};
@@ -196,7 +196,7 @@ fn is_inside_require_call(string_node: tree_sitter::Node, source: &[u8]) -> bool
     walk_ancestors(string_node, |p| {
         if p.is_kind(kind::FUNCTION_CALL) {
             let callee_is_require = p
-                .child_by_field_name("callee")
+                .child_by_field(field::CALLEE)
                 .map(|callee| node_text(callee, source) == "require")
                 .unwrap_or(false);
             Some(callee_is_require)
@@ -305,28 +305,24 @@ fn find_base_expression_node(
     }
     let mut n = root.descendant_for_byte_range(end_byte - 1, end_byte - 1)?;
     while let Some(parent) = n.parent() {
-        if parent.end_byte() == end_byte && is_base_expr_kind(parent.kind_name()) {
+        if parent.end_byte() == end_byte && is_base_expr_node(parent) {
             n = parent;
             continue;
         }
         break;
     }
-    if is_base_expr_kind(n.kind_name()) {
+    if is_base_expr_node(n) {
         Some(n)
     } else {
         None
     }
 }
 
-fn is_base_expr_kind(kind: &str) -> bool {
+fn is_base_expr_node(node: tree_sitter::Node) -> bool {
     matches!(
-        kind,
-        "variable"
-            | "field_expression"
-            | "function_call"
-            | "identifier"
-            | "parenthesized_expression"
-    )
+        node.syntax_kind(),
+        kind::VARIABLE | kind::FUNCTION_CALL | kind::IDENTIFIER | kind::PARENTHESIZED_EXPRESSION
+    ) || node.kind_name() == "field_expression"
 }
 
 // ---------------------------------------------------------------------------

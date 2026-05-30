@@ -10,7 +10,7 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::scope::ScopeTree;
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, TypeFact};
 
 use crate::uri_id::UriId;
@@ -41,8 +41,8 @@ pub(crate) fn infer_node_type_in_file_id(
     match node.kind_name() {
         "variable" | "field_expression" => {
             if let (Some(object), Some(field)) = (
-                node.child_by_field_name("object"),
-                node.child_by_field_name("field"),
+                node.child_by_field(field::OBJECT),
+                node.child_by_field(field::FIELD),
             ) {
                 let base_fact =
                     infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
@@ -59,8 +59,8 @@ pub(crate) fn infer_node_type_in_file_id(
             // the base's shape `array_element_type` so chains like
             // `a[1].field` can continue with a real element type.
             if let (Some(object), Some(_index_node)) = (
-                node.child_by_field_name("object"),
-                node.child_by_field_name("index"),
+                node.child_by_field(field::OBJECT),
+                node.child_by_field(field::INDEX),
             ) {
                 let base_fact =
                     infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
@@ -137,7 +137,7 @@ fn infer_operator_type_in_file_id(
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> TypeFact {
-    if let Some(op_node) = node.child_by_field_name("operator") {
+    if let Some(op_node) = node.child_by_field(field::OPERATOR) {
         let op = node_text(op_node, source);
         match op {
             "+" | "-" | "*" | "/" | "//" | "%" | "^" => {
@@ -148,12 +148,12 @@ fn infer_operator_type_in_file_id(
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" => {
-                if let Some(right) = node.child_by_field_name("right") {
+                if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_node_type_in_file_id(right, source, uri_id, scope_tree, index);
                 }
             }
             "or" => {
-                if let Some(left) = node.child_by_field_name("left") {
+                if let Some(left) = node.child_by_field(field::LEFT) {
                     return infer_node_type_in_file_id(left, source, uri_id, scope_tree, index);
                 }
             }
@@ -196,10 +196,10 @@ fn infer_table_array_element_type(constructor: tree_sitter::Node) -> TypeFact {
                 continue;
             }
             // Only handle positional entries (no key)
-            if field_node.child_by_field_name("key").is_some() {
+            if field_node.child_by_field(field::KEY).is_some() {
                 return TypeFact::Unknown; // has named keys, not a pure array
             }
-            if let Some(val) = field_node.child_by_field_name("value") {
+            if let Some(val) = field_node.child_by_field(field::VALUE) {
                 let val_type = match val.syntax_kind() {
                     kind::NUMBER => TypeFact::Known(crate::type_system::KnownType::Number),
                     kind::STRING => TypeFact::Known(crate::type_system::KnownType::String),
@@ -235,7 +235,7 @@ fn collect_call_arg_types_in_file_id(
     scope_tree: &ScopeTree,
     index: &WorkspaceAggregation,
 ) -> Vec<TypeFact> {
-    let Some(args) = call_node.child_by_field_name("arguments") else {
+    let Some(args) = call_node.child_by_field(field::ARGUMENTS) else {
         return Vec::new();
     };
     crate::util::extract_call_arg_nodes(args, source)
@@ -261,14 +261,14 @@ fn infer_call_return_fact(
 ) -> TypeFact {
     use crate::type_system::{KnownType, SymbolicStub};
 
-    let callee = match node.child_by_field_name("callee") {
+    let callee = match node.child_by_field(field::CALLEE) {
         Some(c) => c,
         None => return TypeFact::Unknown,
     };
 
     // `require("mod")` — note callee is a plain identifier.
     if callee.is_kind(kind::IDENTIFIER) && node_text(callee, source) == "require" {
-        if let Some(args) = node.child_by_field_name("arguments") {
+        if let Some(args) = node.child_by_field(field::ARGUMENTS) {
             if let Some(first_arg) = args.named_child(0) {
                 if let Some(module_path) = extract_string_literal(first_arg, source) {
                     return TypeFact::Stub(SymbolicStub::RequireRef {
@@ -281,7 +281,7 @@ fn infer_call_return_fact(
     }
 
     // `obj:m()` — grammar sets `method` field on the call node itself.
-    if let Some(method_node) = node.child_by_field_name("method") {
+    if let Some(method_node) = node.child_by_field(field::METHOD) {
         let method_name = node_text(method_node, source).to_string();
         let base_fact = infer_node_type_in_file_id(callee, source, uri_id, scope_tree, index);
         let generic_args = generic_args_from_call_base(&base_fact);
@@ -321,8 +321,8 @@ fn infer_call_return_fact(
     // Dotted call `mod.f()` — callee is a `variable` with `object`+`field`.
     if callee.is_kind(kind::VARIABLE) || callee.kind_name() == "field_expression" {
         if let (Some(base_node), Some(field_node)) = (
-            callee.child_by_field_name("object"),
-            callee.child_by_field_name("field"),
+            callee.child_by_field(field::OBJECT),
+            callee.child_by_field(field::FIELD),
         ) {
             let func_name = node_text(field_node, source).to_string();
             let base_fact =

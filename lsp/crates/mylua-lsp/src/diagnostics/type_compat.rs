@@ -1,4 +1,4 @@
-use crate::syntax_kind::{kind, NodeKindExt};
+use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, SymbolicStub, TypeFact};
 use crate::util::node_text;
 
@@ -53,7 +53,7 @@ fn infer_operator_type_with<F>(
 where
     F: FnMut(tree_sitter::Node) -> TypeFact,
 {
-    if let Some(op_node) = node.child_by_field_name("operator") {
+    if let Some(op_node) = node.child_by_field(field::OPERATOR) {
         let op = if source.is_empty() {
             op_node.kind_name()
         } else {
@@ -68,12 +68,12 @@ where
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" | "word_and" => {
-                if let Some(right) = node.child_by_field_name("right") {
+                if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_child(right);
                 }
             }
             "or" | "word_or" => {
-                if let Some(left) = node.child_by_field_name("left") {
+                if let Some(left) = node.child_by_field(field::LEFT) {
                     return infer_child(left);
                 }
             }
