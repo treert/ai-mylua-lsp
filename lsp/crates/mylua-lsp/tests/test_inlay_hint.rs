@@ -29,10 +29,10 @@ fn label(h: &tower_lsp_server::ls_types::InlayHint) -> String {
 }
 
 #[test]
-fn inlay_hints_disabled_by_default() {
-    // Master enable defaults off — asking with `enable=false` should
-    // return empty regardless of the rest.
+fn inlay_hints_disabled_by_config() {
+    // Asking with `enable=false` should return empty regardless of the rest.
     let src = "local function foo(a, b) end\nfoo(1, 2)\n";
+
     let (doc, uri, mut agg) = setup_single_file(src, "a.lua");
     let hints = inlay_hint::inlay_hints(
         &doc,

@@ -1,6 +1,7 @@
 # `tests/lua-root2` — 第二工作区（跨 workspace 场景）
 
-本目录与 [`../lua-root`](../lua-root) 一起被 [`../mylua-tests.code-workspace`](../mylua-tests.code-workspace) 同时挂载，专门用于验证 **多 workspace folder + `indexMode = merged`** 下的行为：
+本目录与 [`../lua-root`](../lua-root) 一起被 [`../mylua-tests.code-workspace`](../mylua-tests.code-workspace) 同时挂载，专门用于验证 **多 workspace folder 的固定 merged 合并索引** 行为：
+
 
 * 跨 workspace `require`
 * 跨 workspace 全局定义 / goto definition / workspace symbol

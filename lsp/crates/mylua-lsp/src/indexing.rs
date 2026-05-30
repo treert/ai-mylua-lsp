@@ -13,9 +13,9 @@ use tower_lsp_server::ls_types::*;
 use tower_lsp_server::Client;
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::config;
 use crate::config::LspConfig;
 use crate::diagnostic_scheduler;
+
 use crate::diagnostics;
 use crate::document::Document;
 use crate::memory_profile;
@@ -187,25 +187,17 @@ pub async fn run_workspace_scan(
     index_state: Arc<Mutex<IndexState>>,
     started_at: std::time::Instant,
 ) {
-    let (require_config, workspace_config, index_mode, slow_parse_keep_tree_threshold_ms) = {
+    let (require_config, workspace_config, slow_parse_keep_tree_threshold_ms) = {
         let cfg = config.lock().unwrap();
         (
             cfg.require.clone(),
             cfg.workspace.clone(),
-            cfg.workspace.index_mode.clone(),
             cfg.performance.slow_parse_keep_tree_threshold_ms,
         )
     };
 
-    if index_mode == config::IndexMode::Isolated && roots.len() > 1 {
-        lsp_log!(
-            "[mylua-lsp] WARNING: indexMode 'isolated' is not yet implemented; \
-             falling back to 'merged' for {} workspace roots",
-            roots.len()
-        );
-    }
-
     // ── Phase 1: Scan ──────────────────────────────────────────────
+
     let phase1_started = std::time::Instant::now();
     send_index_phase(&client, "scanning", "Scanning workspace…", 0, 0).await;
 

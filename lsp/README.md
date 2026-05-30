@@ -57,15 +57,12 @@ lsp/
 ## 构建与测试
 
 ```bash
-# 前置：确保 grammar 已生成
-cd grammar && npx tree-sitter generate
-
-# 构建
-cd lsp && cargo build
-
-# 运行测试
-cd lsp && cargo test --tests
+# 从仓库根目录执行
+(cd grammar && npx tree-sitter generate)
+(cd lsp && cargo build)
+(cd lsp && cargo test --tests)
 ```
+
 
 ## CLI 工具：`lua-perf`
 

@@ -14,13 +14,9 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
-    inputs:
-      targets:
-        description: 'Comma-separated VS Code target list (e.g. darwin-arm64,linux-x64). Empty = all matrix targets.'
-        required: false
-        default: ''
 
 permissions:
+
   contents: write   # Needed for `actions/upload-artifact` and the
                     # `softprops/action-gh-release` step below.
 

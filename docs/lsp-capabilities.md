@@ -7,10 +7,11 @@
 | 能力 | 说明 |
 |------|------|
 | 文档同步 | Incremental sync + tree-sitter 增量 reparse |
-| 位置编码 | UTF-16 code unit，中文/emoji 正确对齐 |
-| 配置体系 | `initializationOptions` + `didChangeConfiguration` 下发 |
-| `runtime.version` | 支持 `5.1`/`5.2`/`5.3`/`5.4`/`luajit`，影响内置标识符集合和诊断 |
+| 位置编码 | 优先协商 UTF-8，客户端不支持时回退 UTF-16；中文/emoji 正确对齐 |
+| 配置体系 | `initializationOptions` + `didChangeConfiguration` 下发；VS Code 扩展在配置变更后提示重启 LSP |
+| `runtime.version` | 支持 `5.3`/`5.4`，影响内置标识符集合和诊断 |
 | `workspace.library` | 外部库路径解析为额外 scan root，库文件强制 `is_meta = true`，不产生诊断 |
+
 | 内置 stdlib | 扩展侧自动注入 `<extensionPath>/assets/lua<version>/` 的 stub 文件 |
 
 ## 导航
@@ -67,9 +68,11 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - `active_parameter` 感知嵌套括号与字符串
 
 ### inlayHint
-两类虚拟标签（均 opt-in，`inlayHint.enable` 默认 off）：
+两类虚拟标签：`mylua.inlayHint.enable` 默认 on，`parameterNames` 默认 on，`variableTypes` 默认 off。
+
 
 | 类型 | 行为 | 跳过条件 |
+
 |------|------|----------|
 | `parameterNames` | 实参前加 `a:` 标签 | 实参名与形参名相同、变参、method 的 self |
 | `variableTypes` | 变量后加 `: type` 标签 | 已有 `@type` 注解、Unknown/Table/Function/Nil 类型 |
@@ -127,11 +130,15 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 ### 语义诊断
 
+`mylua.diagnostics.enable=false` 会关闭语义诊断；语法诊断继续保留。
+
 | 诊断 | 配置键 | 默认 |
+
 |------|--------|------|
 | 未定义全局变量 | `undefinedGlobal` | Warning |
-| Emmy 类型未知字段 | `unknownField` | Warning |
+| Emmy 类型未知字段 | `emmyUnknownField` | Warning |
 | Table shape 未知字段 | `luaFieldError`/`luaFieldWarning` | Warning |
+
 | 类型不匹配 | `emmyTypeMismatch` | Warning |
 | 重复 table key | `duplicateTableKey` | Warning |
 | 未使用 local | `unusedLocal` | Hint |

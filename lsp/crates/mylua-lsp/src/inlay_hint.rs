@@ -1,7 +1,9 @@
 //! `textDocument/inlayHint` — virtual labels inserted into the
 //! source by the client without actually modifying the document.
 //!
-//! Two categories are supported (both opt-in via config):
+//! Two categories are supported; parameter names are enabled by default,
+//! while variable types are opt-in via config:
+
 //!
 //! - **Parameter names** (`inlayHint.parameterNames = true`): at a
 //!   call site `foo(1, 2)`, show `a:` / `b:` before each positional

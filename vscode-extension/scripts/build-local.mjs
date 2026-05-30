@@ -15,7 +15,8 @@
  *   npm run build:local        # or: node scripts/build-local.mjs
  *
  * Output:
- *   vscode-extension/mylua-<target>-<version>.vsix
+ *   vscode-extension/mylua-lsp-<target>-<version>.vsix
+
  *
  * This only produces a .vsix for the **current** host. To cover
  * another OS you need a machine/CI runner of that OS — see

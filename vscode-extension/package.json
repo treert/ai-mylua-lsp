@@ -78,9 +78,16 @@
           "additionalProperties": false,
           "markdownDescription": "Path to the mylua-lsp executable. Two forms are accepted:\n\n- **string** — one path applied to all platforms (backwards compatible).\n- **object** — per-platform overrides keyed by Node.js `process.platform`, e.g.\n  ```json\n  { \"darwin\": \"/abs/mac/mylua-lsp\", \"win32\": \"C:/tools/mylua-lsp.exe\" }\n  ```\n\nWhen empty, the extension locates the binary automatically: production builds load `<extension>/server/<bin>`; the Extension Development Host (F5 debug) bypasses `server/` and loads `<extension>/../lsp/target/debug/<bin>` directly so freshly `cargo build`ed changes take effect without re-running `npm run prepackage`."
         },
+        "mylua.server.autoRestartOnConfigChange": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically restart the MyLua language server after MyLua settings change. When disabled, the extension shows a restart prompt instead."
+        },
+
         "mylua.debug.fileLog": {
           "type": "boolean",
           "default": false,
+
           "description": "Write debug log to .vscode/mylua-lsp.log in the workspace."
         },
         "mylua.runtime.version": {
@@ -112,14 +119,9 @@
           "default": ["**/.*", "**/node_modules"],
           "description": "Glob patterns for files to exclude from workspace indexing."
         },
-        "mylua.workspace.indexMode": {
-          "type": "string",
-          "enum": ["merged", "isolated"],
-          "default": "merged",
-          "description": "Multi-root workspace strategy: merge all roots or isolate per root."
-        },
         "mylua.workspace.library": {
           "type": "array",
+
           "items": { "type": "string" },
           "default": [],
           "markdownDescription": "Additional directories to index alongside the workspace, typically for Lua stdlib stubs or third-party EmmyLua annotation packages. Each entry may be an absolute path, a `~/…` path (expanded against `$HOME`), or a path relative to the first workspace root. Files reached via these roots are indexed read-only: they contribute globals / types to hover, goto, completion, and require resolution, but their own diagnostics are suppressed."
@@ -138,10 +140,11 @@
         "mylua.diagnostics.enable": {
           "type": "boolean",
           "default": true,
-          "description": "Enable or disable all diagnostics."
+          "description": "Enable or disable semantic diagnostics. Syntax diagnostics are always reported."
         },
         "mylua.diagnostics.undefinedGlobal": {
           "type": "string",
+
           "enum": ["error", "warning", "hint", "off"],
           "default": "warning",
           "description": "Severity for undefined global variable diagnostics."
@@ -210,9 +213,27 @@
           ],
           "description": "Scope of semantic diagnostics publishing."
         },
+        "mylua.inlayHint.enable": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable MyLua inlay hints."
+        },
+
+        "mylua.inlayHint.parameterNames": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show parameter name inlay hints before call arguments."
+        },
+        "mylua.inlayHint.variableTypes": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show inferred type inlay hints after local variable names."
+        },
+
         "mylua.documentSymbol.detailLevel": {
           "type": "string",
           "enum": ["compact", "functions", "allDeclarations", "anonymousFunctions"],
+
           "default": "compact",
           "enumDescriptions": [
             "Show the existing compact outline: file-level declarations plus class fields and methods.",

@@ -9,7 +9,42 @@ import {
 
 let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
+let clientNotificationDisposable: vscode.Disposable | undefined;
 let readyNotified = false;
+let restartInProgress = false;
+let restartPromptPending = false;
+
+const RESTART_RELEVANT_CONFIG_KEYS = [
+  'mylua.server.path',
+  'mylua.debug.fileLog',
+  'mylua.runtime.version',
+  'mylua.runtime.topKeyword',
+  'mylua.require.aliases',
+  'mylua.workspace.include',
+  'mylua.workspace.exclude',
+  'mylua.workspace.library',
+  'mylua.workspace.useBundledStdlib',
+  'mylua.performance.slowParseKeepTreeThresholdMs',
+  'mylua.diagnostics.enable',
+  'mylua.diagnostics.undefinedGlobal',
+  'mylua.diagnostics.emmyTypeMismatch',
+  'mylua.diagnostics.emmyUnknownField',
+  'mylua.diagnostics.luaFieldError',
+  'mylua.diagnostics.luaFieldWarning',
+  'mylua.diagnostics.duplicateTableKey',
+  'mylua.diagnostics.unusedLocal',
+  'mylua.diagnostics.argumentCountMismatch',
+  'mylua.diagnostics.argumentTypeMismatch',
+  'mylua.diagnostics.returnMismatch',
+  'mylua.diagnostics.scope',
+  'mylua.inlayHint.enable',
+  'mylua.inlayHint.parameterNames',
+  'mylua.inlayHint.variableTypes',
+  'mylua.documentSymbol.detailLevel',
+  'mylua.gotoDefinition.strategy',
+  'mylua.references.strategy',
+];
+
 
 type IndexStatusParams = {
   state: 'indexing' | 'diagnosing' | 'ready';
@@ -83,10 +118,10 @@ function collectLspConfig(
     workspace: {
       include: cfg.get('workspace.include'),
       exclude: cfg.get('workspace.exclude'),
-      indexMode: cfg.get('workspace.indexMode'),
       library,
     },
     performance: {
+
       slowParseKeepTreeThresholdMs: cfg.get('performance.slowParseKeepTreeThresholdMs'),
     },
     diagnostics: {
@@ -111,6 +146,11 @@ function collectLspConfig(
     },
     references: {
       strategy: cfg.get('references.strategy'),
+    },
+    inlayHint: {
+      enable: cfg.get('inlayHint.enable'),
+      parameterNames: cfg.get('inlayHint.parameterNames'),
+      variableTypes: cfg.get('inlayHint.variableTypes'),
     },
     debug: {
       fileLog: cfg.get('debug.fileLog'),
@@ -177,6 +217,109 @@ function renderStatus(status: IndexStatusParams): void {
   statusBarItem.show();
 }
 
+function createLanguageClient(
+  context: vscode.ExtensionContext,
+  luaFileWatcher: vscode.FileSystemWatcher,
+): LanguageClient {
+  const serverPath = getServerPath(context);
+  const serverOptions: ServerOptions = {
+    run: { command: serverPath },
+    debug: { command: serverPath },
+  };
+  const clientOptions: LanguageClientOptions = {
+    documentSelector: [{ scheme: 'file', language: 'lua' }],
+    initializationOptions: collectLspConfig(context),
+    synchronize: {
+      fileEvents: luaFileWatcher,
+    },
+  };
+  const next = new LanguageClient(
+    'mylua-lsp',
+    'MyLua Language Server',
+    serverOptions,
+    clientOptions,
+  );
+  clientNotificationDisposable = next.onNotification(
+    'mylua/indexStatus',
+    (params: IndexStatusParams) => renderStatus(params),
+  );
+  return next;
+}
+
+function handleClientStartError(err: unknown): void {
+  if (!statusBarItem) return;
+  statusBarItem.text = '⚠️mylua';
+  const msg = err instanceof Error ? err.message : String(err);
+  statusBarItem.tooltip = `MyLua: failed to start (${msg}) — click to open settings`;
+}
+
+async function restartLanguageClient(
+  context: vscode.ExtensionContext,
+  luaFileWatcher: vscode.FileSystemWatcher,
+): Promise<void> {
+  if (restartInProgress) return;
+  restartInProgress = true;
+  readyNotified = false;
+  if (statusBarItem) {
+    statusBarItem.text = '💛restarting…';
+    statusBarItem.tooltip = 'MyLua: restarting language server…';
+  }
+  const oldClient = client;
+  client = undefined;
+  clientNotificationDisposable?.dispose();
+  clientNotificationDisposable = undefined;
+  try {
+    await oldClient?.stop();
+    const next = createLanguageClient(context, luaFileWatcher);
+    client = next;
+    await next.start();
+  } catch (err: unknown) {
+    handleClientStartError(err);
+  } finally {
+    restartInProgress = false;
+  }
+}
+
+function affectsRestartRelevantConfig(e: vscode.ConfigurationChangeEvent): boolean {
+  return RESTART_RELEVANT_CONFIG_KEYS.some((key) => e.affectsConfiguration(key));
+}
+
+async function handleConfigurationChange(
+  context: vscode.ExtensionContext,
+  luaFileWatcher: vscode.FileSystemWatcher,
+  e: vscode.ConfigurationChangeEvent,
+): Promise<void> {
+  if (!client || restartInProgress || !affectsRestartRelevantConfig(e)) return;
+  const autoRestart = vscode.workspace
+    .getConfiguration('mylua')
+    .get<boolean>('server.autoRestartOnConfigChange') ?? false;
+  if (autoRestart) {
+    await restartLanguageClient(context, luaFileWatcher);
+    return;
+  }
+
+  try {
+    await client.sendNotification('workspace/didChangeConfiguration', {
+      settings: collectLspConfig(context),
+    });
+  } catch {
+    // Best-effort only; the explicit restart prompt below is authoritative.
+  }
+
+  if (restartPromptPending) return;
+  restartPromptPending = true;
+  const restart = '重启 LSP';
+  const choice = await vscode.window.showInformationMessage(
+    'MyLua 配置已更新，重启 LSP 后可确保所有配置完全生效。',
+    restart,
+    '稍后',
+  );
+  restartPromptPending = false;
+  if (choice === restart) {
+    await restartLanguageClient(context, luaFileWatcher);
+  }
+}
+
 export function activate(context: vscode.ExtensionContext) {
   statusBarItem = vscode.window.createStatusBarItem(
     vscode.StatusBarAlignment.Right,
@@ -201,59 +344,22 @@ export function activate(context: vscode.ExtensionContext) {
   // unload, so `deactivate` does not need to dispose explicitly.
   context.subscriptions.push(statusBarItem);
 
-  const serverPath = getServerPath(context);
+  const luaFileWatcher = vscode.workspace.createFileSystemWatcher('**/*.lua');
+  context.subscriptions.push(luaFileWatcher);
 
-  const serverOptions: ServerOptions = {
-    run: { command: serverPath },
-    debug: { command: serverPath },
-  };
-
-  const clientOptions: LanguageClientOptions = {
-    documentSelector: [{ scheme: 'file', language: 'lua' }],
-    initializationOptions: collectLspConfig(context),
-    synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher('**/*.lua'),
-    },
-  };
-
-  client = new LanguageClient(
-    'mylua-lsp',
-    'MyLua Language Server',
-    serverOptions,
-    clientOptions,
-  );
-
-  // Register the notification handler BEFORE start() to avoid any
-  // race where an early `mylua/indexStatus` could fire before a
-  // post-start `.then()` callback runs. `vscode-languageclient`
-  // buffers handler registrations until the connection is up.
-  context.subscriptions.push(
-    client.onNotification(
-      'mylua/indexStatus',
-      (params: IndexStatusParams) => renderStatus(params),
-    ),
-  );
+  client = createLanguageClient(context, luaFileWatcher);
 
   context.subscriptions.push(
     vscode.workspace.onDidChangeConfiguration((e) => {
-      if (e.affectsConfiguration('mylua') && client) {
-        client.sendNotification('workspace/didChangeConfiguration', {
-          settings: collectLspConfig(context),
-        });
-      }
+      void handleConfigurationChange(context, luaFileWatcher, e);
     }),
   );
 
-  client.start().catch((err: unknown) => {
-    if (statusBarItem) {
-      statusBarItem.text = '⚠️mylua';
-      const msg = err instanceof Error ? err.message : String(err);
-      statusBarItem.tooltip = `MyLua: failed to start (${msg}) — click to open settings`;
-    }
-  });
+  client.start().catch(handleClientStartError);
 }
 
 export function deactivate(): Thenable<void> | undefined {
+  clientNotificationDisposable?.dispose();
   return client?.stop();
 }
 

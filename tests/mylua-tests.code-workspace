@@ -12,6 +12,7 @@
 		"mylua.diagnostics.enable": true,
 		"mylua.diagnostics.scope": "full",
 		"mylua.diagnostics.argumentCountMismatch": "warning",
-		"mylua.diagnostics.argumentTypeMismatch": "warning"
+		"mylua.diagnostics.argumentTypeMismatch": "warning",
+		"mylua.inlayHint.variableTypes": true
 	}
 }

@@ -118,9 +118,8 @@ impl Default for RequireConfig {
 pub struct WorkspaceConfig {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
-    #[serde(rename = "indexMode")]
-    pub index_mode: IndexMode,
     /// Additional directories to index alongside the user's workspace
+
     /// roots. Intended for Lua stdlib stubs (bundled with the VS Code
     /// extension) and optional third-party annotation packages.
     ///
@@ -149,17 +148,9 @@ impl Default for WorkspaceConfig {
         Self {
             include: vec!["**/*.lua".to_string()],
             exclude: vec!["**/.*".to_string(), "**/node_modules".to_string()],
-            index_mode: IndexMode::Merged,
             library: Vec::new(),
         }
     }
-}
-
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum IndexMode {
-    Merged,
-    Isolated,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -168,6 +159,7 @@ pub struct DiagnosticsConfig {
     pub enable: bool,
     #[serde(rename = "undefinedGlobal")]
     pub undefined_global: DiagnosticSeverityOption,
+
     #[serde(rename = "emmyTypeMismatch")]
     pub emmy_type_mismatch: DiagnosticSeverityOption,
     #[serde(rename = "emmyUnknownField")]
@@ -280,14 +272,14 @@ pub struct InlayHintConfig {
 impl Default for InlayHintConfig {
     fn default() -> Self {
         Self {
-            // All three default off — inlay hints can feel cluttered
-            // for users who don't expect them. Clients that want
-            // them send `initializationOptions.inlayHint.enable =
-            // true` to opt in.
-            enable: false,
+            // Parameter-name hints are useful by default and less noisy
+            // than inferred variable type hints. Clients can still turn
+            // each category on/off via initializationOptions.inlayHint.*.
+            enable: true,
             parameter_names: true,
-            variable_types: true,
+            variable_types: false,
         }
+
     }
 }
 
@@ -374,6 +366,16 @@ mod tests {
     }
 
     #[test]
+    fn inlay_hint_defaults_to_parameter_names_only() {
+        let cfg = LspConfig::default();
+
+        assert!(cfg.inlay_hint.enable);
+        assert!(cfg.inlay_hint.parameter_names);
+        assert!(!cfg.inlay_hint.variable_types);
+    }
+
+    #[test]
+
     fn document_symbol_detail_level_reads_all_declarations_from_json() {
         let cfg = LspConfig::from_value(serde_json::json!({
             "documentSymbol": {
