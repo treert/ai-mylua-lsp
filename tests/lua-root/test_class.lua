@@ -12,3 +12,19 @@ XMod = {
 }
 
 local xx = XMod.ClassX1.parent.name
+
+
+---@class PartClass
+---@field public name string
+---@field public age number
+local PartClass = {}
+
+function PartClass:get_name()
+    return self.name
+end
+
+---@type PartClass
+local part = PartClass:New()
+
+part.name = "123"
+part.age = 123

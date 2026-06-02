@@ -59,3 +59,11 @@ print(module1.internat.Config_Internat_Id)
 
 local _ = utils.mgrs.MiscMgr4.m_misc_id
 local _ = utils.mgrs.MiscMgr4:miscFunc()
+
+---@type PartClass
+local PartClass
+
+local part = PartClass:New()
+part.name = "123"
+part.age = 123
+part.id = 123
