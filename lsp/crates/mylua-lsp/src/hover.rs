@@ -2,7 +2,7 @@ use crate::aggregation::WorkspaceAggregation;
 use crate::document::{Document, DocumentLookup};
 use crate::emmy::{
     collect_preceding_comments, collect_trailing_comment, collect_trailing_emmy_text,
-    is_comment_separator_line, parse_emmy_comments, EmmyAnnotation,
+    is_comment_separator_line, parse_emmy_comments, EmmyAnnotation, EmmyType,
 };
 use crate::resolver;
 use crate::syntax_kind::{field, kind, NodeKindExt};
@@ -26,6 +26,7 @@ pub fn hover(
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
+    let render_ctx = HoverRenderContext::new(index, all_docs);
     let byte_offset = doc
         .line_index()
         .position_to_byte_offset(doc.source(), position)?;
@@ -151,7 +152,12 @@ pub fn hover(
             type_info
         );
         let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
-        return build_hover_for_definition(&def, all_docs, type_info.as_deref(), Some(hover_range));
+        return build_hover_for_definition(
+            &def,
+            render_ctx,
+            type_info.as_deref(),
+            Some(hover_range),
+        );
     }
 
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`).
@@ -212,7 +218,7 @@ pub fn hover(
         let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
         return build_hover_for_definition(
             &synth_def,
-            all_docs,
+            render_ctx,
             Some(&type_info),
             Some(hover_range),
         );
@@ -235,6 +241,32 @@ struct MergedEmmyTypeView<'a> {
     summary: &'a crate::summary::DocumentSummary,
     source_uri_id: UriId,
     fields: Vec<MergedEmmyField<'a>>,
+}
+
+struct HoverRenderContext<'a, D: DocumentLookup> {
+    index: &'a WorkspaceAggregation,
+    all_docs: &'a D,
+}
+
+#[derive(Clone, Copy)]
+enum HoverTypeLinkSource {
+    Definition,
+    Field,
+    Parameter,
+}
+
+impl<D: DocumentLookup> Copy for HoverRenderContext<'_, D> {}
+
+impl<D: DocumentLookup> Clone for HoverRenderContext<'_, D> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
+
+impl<'a, D: DocumentLookup> HoverRenderContext<'a, D> {
+    fn new(index: &'a WorkspaceAggregation, all_docs: &'a D) -> Self {
+        Self { index, all_docs }
+    }
 }
 
 struct MergedEmmyField<'a> {
@@ -742,7 +774,7 @@ fn hover_table_constructor_field(
 
     build_hover_for_definition(
         &synth_def,
-        all_docs,
+        HoverRenderContext::new(index, all_docs),
         type_info.as_deref(),
         Some(hover_range),
     )
@@ -863,7 +895,7 @@ fn build_field_chain_hover(
         let hover_range = line_index.ts_node_to_range(name_node, source);
         return build_hover_for_definition(
             &synth_def,
-            all_docs,
+            HoverRenderContext::new(index, all_docs),
             Some(&type_display),
             Some(hover_range),
         );
@@ -876,16 +908,18 @@ fn build_field_chain_hover(
         name_node,
         source,
         line_index,
+        HoverRenderContext::new(index, all_docs),
     )
 }
 
-fn fallback_field_hover(
+fn fallback_field_hover<D: DocumentLookup>(
     kind_label: &str,
     field_name: &str,
     type_display: &str,
     name_node: tree_sitter::Node,
     source: &[u8],
     line_index: &LineIndex,
+    ctx: HoverRenderContext<'_, D>,
 ) -> Option<Hover> {
     let mut code_lines = Vec::new();
     if type_display != "unknown" {
@@ -895,7 +929,17 @@ fn fallback_field_hover(
 
     let mut parts = Vec::new();
     parts.push(lua_code_block(&code_lines));
-    parts.push(format!("*{}*", kind_label));
+    parts.push(kind_label_parts(
+        kind_label,
+        None,
+        type_origin_link_for_hover_type(
+            &[],
+            Some(type_display),
+            HoverTypeLinkSource::Definition,
+            &HashSet::new(),
+            ctx,
+        ),
+    ));
 
     Some(Hover {
         contents: HoverContents::Markup(MarkupContent {
@@ -941,11 +985,35 @@ fn simple_type_info(type_info: Option<&str>) -> Option<&str> {
     type_info.filter(|ti| *ti != "unknown" && !ti.contains('\n'))
 }
 
-fn kind_label_with_origin(kind_label: &str, def: &crate::types::Definition) -> String {
-    match definition_origin_link(def) {
-        Some(origin) => format!("*{}* · {}", kind_label, origin),
-        None => format!("*{}*", kind_label),
+fn kind_label_with_origin_and_type<D: DocumentLookup>(
+    kind_label: &str,
+    def: &crate::types::Definition,
+    annotations: &[EmmyAnnotation],
+    type_info: Option<&str>,
+    source: HoverTypeLinkSource,
+    generic_names: &HashSet<String>,
+    ctx: HoverRenderContext<'_, D>,
+) -> String {
+    kind_label_parts(
+        kind_label,
+        definition_origin_link(def),
+        type_origin_link_for_hover_type(annotations, type_info, source, generic_names, ctx),
+    )
+}
+
+fn kind_label_parts(
+    kind_label: &str,
+    origin: Option<String>,
+    type_origin: Option<String>,
+) -> String {
+    let mut parts = vec![format!("*{}*", kind_label)];
+    if let Some(origin) = origin {
+        parts.push(origin);
     }
+    if let Some(type_origin) = type_origin {
+        parts.push(format!("type {}", type_origin));
+    }
+    parts.join(" · ")
 }
 
 fn type_definition_kind_label_with_origin(
@@ -970,12 +1038,159 @@ fn type_definition_origin_link(
     view: &MergedEmmyTypeView<'_>,
     all_docs: &impl DocumentLookup,
 ) -> Option<String> {
+    let line_one_based = type_definition_origin_line(view, all_docs)?;
+    origin_link(view.summary.uri.as_str(), line_one_based)
+}
+
+fn type_definition_origin_target(
+    view: &MergedEmmyTypeView<'_>,
+    all_docs: &impl DocumentLookup,
+) -> Option<String> {
+    let line_one_based = type_definition_origin_line(view, all_docs)?;
+    Some(origin_link_target(view.summary.uri.as_str(), line_one_based))
+}
+
+fn type_definition_origin_line(
+    view: &MergedEmmyTypeView<'_>,
+    all_docs: &impl DocumentLookup,
+) -> Option<u32> {
     let def_doc = all_docs.get_document_by_id(view.source_uri_id)?;
     let source_range = view.td.name_range.as_ref().unwrap_or(&view.td.range);
     let position = def_doc
         .line_index()
         .byte_offset_to_position(def_doc.source(), source_range.start_byte)?;
-    origin_link(view.summary.uri.as_str(), position.line.saturating_add(1))
+    Some(position.line.saturating_add(1))
+}
+
+fn type_origin_link_for_hover_type<D: DocumentLookup>(
+    annotations: &[EmmyAnnotation],
+    type_info: Option<&str>,
+    source: HoverTypeLinkSource,
+    generic_names: &HashSet<String>,
+    ctx: HoverRenderContext<'_, D>,
+) -> Option<String> {
+    let type_name = hover_type_name_from_annotations(annotations, source, generic_names)
+        .or_else(|| hover_type_name_from_type_info(type_info, generic_names))?;
+    let view = merged_emmy_type_view(&type_name, ctx.index)?;
+    type_definition_origin_target(&view, ctx.all_docs)
+        .map(|target| format!("[{}]({})", escape_markdown_link_text(&type_name), target))
+}
+
+fn hover_type_name_from_annotations(
+    annotations: &[EmmyAnnotation],
+    source: HoverTypeLinkSource,
+    generic_names: &HashSet<String>,
+) -> Option<String> {
+    for ann in annotations {
+        let type_name = match (source, ann) {
+            (HoverTypeLinkSource::Definition, EmmyAnnotation::Class { name, .. })
+            | (HoverTypeLinkSource::Definition, EmmyAnnotation::Alias { name, .. })
+            | (HoverTypeLinkSource::Definition, EmmyAnnotation::Enum { name }) => {
+                Some(name.clone())
+            }
+            (HoverTypeLinkSource::Definition, EmmyAnnotation::Type { type_expr, .. })
+            | (HoverTypeLinkSource::Field, EmmyAnnotation::Type { type_expr, .. })
+            | (HoverTypeLinkSource::Field, EmmyAnnotation::Field { type_expr, .. })
+            | (HoverTypeLinkSource::Parameter, EmmyAnnotation::Param { type_expr, .. }) => {
+                top_level_named_emmy_type(type_expr, generic_names)
+            }
+            _ => None,
+        };
+        if let Some(name) = type_name {
+            return Some(name);
+        }
+    }
+    None
+}
+
+fn hover_type_name_from_type_info(
+    type_info: Option<&str>,
+    generic_names: &HashSet<String>,
+) -> Option<String> {
+    let type_info = simple_type_info(type_info)?;
+    top_level_named_emmy_type(&crate::emmy::parse_type_from_str(type_info), generic_names)
+}
+
+fn top_level_named_emmy_type(
+    type_expr: &EmmyType,
+    generic_names: &HashSet<String>,
+) -> Option<String> {
+    match type_expr {
+        EmmyType::Named { name, .. } => {
+            if !is_builtin_type_name(name) && !generic_names.contains(name) {
+                Some(name.clone())
+            } else {
+                None
+            }
+        }
+        EmmyType::Union(types) => top_level_named_union_type(types, generic_names),
+        EmmyType::Optional(inner) => top_level_named_emmy_type(inner, generic_names),
+        EmmyType::Function { .. }
+        | EmmyType::Array(_)
+        | EmmyType::Table(_)
+        | EmmyType::Literal(_)
+        | EmmyType::Variadic(_)
+        | EmmyType::Unknown => None,
+    }
+}
+
+fn top_level_named_union_type(
+    types: &[EmmyType],
+    generic_names: &HashSet<String>,
+) -> Option<String> {
+    let mut named = None;
+    for ty in types {
+        if is_nil_type(ty) {
+            continue;
+        }
+        let name = top_level_named_emmy_type(ty, generic_names)?;
+        if named.as_ref().is_some_and(|existing| existing != &name) {
+            return None;
+        }
+        named = Some(name);
+    }
+    named
+}
+
+fn is_nil_type(type_expr: &EmmyType) -> bool {
+    match type_expr {
+        EmmyType::Literal(value) => value == "nil",
+        EmmyType::Named { name, .. } => name == "nil",
+        _ => false,
+    }
+}
+
+fn generic_type_names(annotations: &[EmmyAnnotation]) -> HashSet<String> {
+    let mut names = HashSet::new();
+    for ann in annotations {
+        match ann {
+            EmmyAnnotation::Generic { params } => {
+                names.extend(params.iter().map(|param| param.name.clone()));
+            }
+            EmmyAnnotation::Class { generic_params, .. } => {
+                names.extend(generic_params.iter().map(|param| param.name.clone()));
+            }
+            _ => {}
+        }
+    }
+    names
+}
+
+fn is_builtin_type_name(name: &str) -> bool {
+    matches!(
+        name,
+        "any"
+            | "nil"
+            | "boolean"
+            | "number"
+            | "integer"
+            | "string"
+            | "table"
+            | "function"
+            | "thread"
+            | "userdata"
+            | "self"
+    )
 }
 
 fn origin_link(uri: &str, line_one_based: u32) -> Option<String> {
@@ -1210,13 +1425,13 @@ fn code_lines_for_field_definition(
     code_lines
 }
 
-fn build_hover_for_definition(
+fn build_hover_for_definition<D: DocumentLookup>(
     def: &crate::types::Definition,
-    all_docs: &impl DocumentLookup,
+    ctx: HoverRenderContext<'_, D>,
     type_info: Option<&str>,
     hover_range: Option<Range>,
 ) -> Option<Hover> {
-    let doc = all_docs.get_document_by_id(def.uri_id)?;
+    let doc = ctx.all_docs.get_document_by_id(def.uri_id)?;
     let source = doc.source();
 
     let def_start_byte = def.range.start_byte;
@@ -1231,20 +1446,20 @@ fn build_hover_for_definition(
 
     if let Some(emmy_line) = find_enclosing_emmy_line(def_node) {
         if let Some(hover) =
-            build_hover_for_emmy_field(def, emmy_line, source, type_info, hover_range)
+            build_hover_for_emmy_field(def, emmy_line, source, type_info, hover_range, ctx)
         {
             return Some(hover);
         }
     }
 
     if let Some(field_node) = find_enclosing_table_field(def_node) {
-        return build_hover_for_table_field(def, field_node, source, type_info, hover_range);
+        return build_hover_for_table_field(def, field_node, source, type_info, hover_range, ctx);
     }
 
     let stmt_node = find_enclosing_statement(def_node);
 
     if def.kind == DefKind::Parameter {
-        return build_hover_for_parameter(def, stmt_node, source, type_info, hover_range);
+        return build_hover_for_parameter(def, stmt_node, source, type_info, hover_range, ctx);
     }
 
     let comment_lines = collect_preceding_comments(stmt_node, source);
@@ -1277,7 +1492,15 @@ fn build_hover_for_definition(
         def_line,
         type_info,
     )));
-    parts.push(kind_label_with_origin(kind_label, def));
+    parts.push(kind_label_with_origin_and_type(
+        kind_label,
+        def,
+        &annotations,
+        type_info,
+        HoverTypeLinkSource::Definition,
+        &generic_type_names(&annotations),
+        ctx,
+    ));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1303,12 +1526,13 @@ fn build_hover_for_definition(
     })
 }
 
-fn build_hover_for_emmy_field(
+fn build_hover_for_emmy_field<D: DocumentLookup>(
     def: &crate::types::Definition,
     emmy_line: tree_sitter::Node,
     source: &[u8],
     type_info: Option<&str>,
     hover_range: Option<Range>,
+    ctx: HoverRenderContext<'_, D>,
 ) -> Option<Hover> {
     let line_text = node_text(emmy_line, source).to_string();
     let field_annotations: Vec<_> = parse_emmy_comments(&line_text)
@@ -1318,6 +1542,10 @@ fn build_hover_for_emmy_field(
     if field_annotations.is_empty() {
         return None;
     }
+    let mut generic_annotations =
+        parse_emmy_comments(&collect_preceding_comments(emmy_line, source).join("\n"));
+    generic_annotations.extend(field_annotations.iter().cloned());
+    let generic_names = generic_type_names(&generic_annotations);
 
     let mut parts = Vec::new();
     parts.push(lua_code_block(&code_lines_for_field_definition(
@@ -1325,7 +1553,15 @@ fn build_hover_for_emmy_field(
         def.name.to_string(),
         type_info,
     )));
-    parts.push(kind_label_with_origin("field", def));
+    parts.push(kind_label_with_origin_and_type(
+        "field",
+        def,
+        &field_annotations,
+        type_info,
+        HoverTypeLinkSource::Field,
+        &generic_names,
+        ctx,
+    ));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1342,12 +1578,13 @@ fn build_hover_for_emmy_field(
     })
 }
 
-fn build_hover_for_parameter(
+fn build_hover_for_parameter<D: DocumentLookup>(
     def: &crate::types::Definition,
     stmt_node: tree_sitter::Node,
     source: &[u8],
     type_info: Option<&str>,
     hover_range: Option<Range>,
+    ctx: HoverRenderContext<'_, D>,
 ) -> Option<Hover> {
     let comment_lines = collect_preceding_comments(stmt_node, source);
     let comment_text = comment_lines.join("\n");
@@ -1355,6 +1592,7 @@ fn build_hover_for_parameter(
     if let Some(trailing_emmy) = collect_trailing_emmy_text(stmt_node, source) {
         annotations.extend(parse_emmy_comments(&trailing_emmy));
     }
+    let generic_names = generic_type_names(&annotations);
     let parameter_annotations: Vec<_> = annotations
         .into_iter()
         .filter(|ann| {
@@ -1371,7 +1609,15 @@ fn build_hover_for_parameter(
         def.name.to_string(),
         type_info,
     )));
-    parts.push(kind_label_with_origin("parameter", def));
+    parts.push(kind_label_with_origin_and_type(
+        "parameter",
+        def,
+        &parameter_annotations,
+        type_info,
+        HoverTypeLinkSource::Parameter,
+        &generic_names,
+        ctx,
+    ));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1407,12 +1653,13 @@ fn definition_doc_text_at_byte(doc: &Document, byte: usize) -> String {
     extract_doc_lines(&comment_lines)
 }
 
-fn build_hover_for_table_field(
+fn build_hover_for_table_field<D: DocumentLookup>(
     def: &crate::types::Definition,
     field_node: tree_sitter::Node,
     source: &[u8],
     type_info: Option<&str>,
     hover_range: Option<Range>,
+    ctx: HoverRenderContext<'_, D>,
 ) -> Option<Hover> {
     let comment_lines = collect_table_field_preceding_comments(field_node, source);
     let trailing = collect_table_field_trailing_comment(field_node, source);
@@ -1434,7 +1681,15 @@ fn build_hover_for_table_field(
         def_line,
         type_info,
     )));
-    parts.push(kind_label_with_origin("field", def));
+    parts.push(kind_label_with_origin_and_type(
+        "field",
+        def,
+        &annotations,
+        type_info,
+        HoverTypeLinkSource::Field,
+        &generic_type_names(&annotations),
+        ctx,
+    ));
 
     if let Some(ti) = type_info {
         if simple_type_info(Some(ti)).is_none() && ti != "unknown" {
@@ -1707,7 +1962,11 @@ fn find_enclosing_table_field(node: tree_sitter::Node) -> Option<tree_sitter::No
 mod tests {
     use super::*;
     use crate::lua_symbol::intern_lua_symbol;
-    use crate::summary::{CallSite, DocumentSummary, FunctionSummary, GlobalContribution};
+    use crate::document::DocumentStoreView;
+    use crate::summary::{
+        CallSite, DocumentSummary, FunctionSummary, GlobalContribution, TypeDefinition,
+        TypeDefinitionKind,
+    };
     use crate::type_system::{FunctionSummaryId, ParamInfo};
     use crate::types::{DefKind, Definition};
     use crate::uri_id::intern_uri;
@@ -1897,6 +2156,146 @@ mod tests {
         assert_eq!(
             definition_origin_link(&def).as_deref(),
             Some("[foo(bar).lua](file:///test/foo%28bar%29.lua#L7)")
+        );
+    }
+
+    #[test]
+    fn kind_label_appends_type_definition_origin_link() {
+        let source = "---@class PartClass\nlocal PartClass = {}\n";
+        let uri: Uri = "file:///test/test.lua".parse().unwrap();
+        let uri_id = intern_uri(&uri);
+        let doc = Document {
+            lua_source: crate::util::LuaSource::new(source.to_string()),
+            tree: None,
+            scope_tree: crate::scope::ScopeTree::from_scopes(Vec::new()),
+            last_diagnostic_signature: None,
+        };
+        let mut documents = HashMap::new();
+        documents.insert(uri_id, doc);
+        let all_docs = DocumentStoreView::new(&documents);
+
+        let summary = DocumentSummary {
+            uri: uri.clone(),
+            global_contributions: Vec::<GlobalContribution>::new(),
+            function_summaries: HashMap::new(),
+            function_name_index: HashMap::new(),
+            type_definitions: vec![TypeDefinition {
+                name: intern_lua_symbol("PartClass"),
+                kind: TypeDefinitionKind::Class,
+                parents: Vec::new(),
+                fields: Vec::new(),
+                alias_type: None,
+                generic_params: Vec::new(),
+                range: ByteRange {
+                    start_byte: 0,
+                    end_byte: 18,
+                    start_row: 0,
+                    end_row: 0,
+                    start_col: 0,
+                    end_col: 18,
+                },
+                name_range: Some(ByteRange {
+                    start_byte: 10,
+                    end_byte: 19,
+                    start_row: 0,
+                    end_row: 0,
+                    start_col: 10,
+                    end_col: 19,
+                }),
+                anchor_shape_id: None,
+            }],
+            table_shapes: HashMap::new(),
+            module_return_type: None,
+            module_return_range: None,
+            signature_fingerprint: 0,
+            call_sites: Vec::<CallSite>::new(),
+            is_meta: false,
+            meta_name: None,
+        };
+        let mut index = WorkspaceAggregation::new();
+        index.build_initial(vec![(uri_id, summary)]);
+        let ctx = HoverRenderContext::new(&index, &all_docs);
+        let def = Definition {
+            name: "part".to_string(),
+            kind: DefKind::LocalVariable,
+            range: ByteRange::default(),
+            selection_range: ByteRange {
+                start_row: 1,
+                ..ByteRange::default()
+            },
+            uri_id,
+            uri,
+        };
+        let annotations = parse_emmy_comments("---@type PartClass");
+
+        assert_eq!(
+            kind_label_with_origin_and_type(
+                "local variable",
+                &def,
+                &annotations,
+                None,
+                HoverTypeLinkSource::Definition,
+                &HashSet::new(),
+                ctx
+            )
+            .as_str(),
+            "*local variable* · [test.lua](file:///test/test.lua#L2) · type [PartClass](file:///test/test.lua#L1)"
+        );
+    }
+
+    #[test]
+    fn type_link_extraction_ignores_function_param_annotations_for_definition_hover() {
+        let annotations = parse_emmy_comments("---@param req Request");
+
+        assert_eq!(
+            hover_type_name_from_annotations(
+                &annotations,
+                HoverTypeLinkSource::Definition,
+                &HashSet::new()
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn type_link_extraction_ignores_nested_function_component_types() {
+        assert_eq!(
+            hover_type_name_from_type_info(Some("fun(req: Request): Response"), &HashSet::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn type_link_extraction_ignores_class_generic_field_type() {
+        let annotations = parse_emmy_comments(
+            "---@class Box<T>\n\
+             ---@field value T",
+        );
+        let generic_names = generic_type_names(&annotations);
+
+        assert_eq!(
+            hover_type_name_from_annotations(
+                &annotations,
+                HoverTypeLinkSource::Field,
+                &generic_names,
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn type_link_extraction_ignores_mixed_named_builtin_union() {
+        assert_eq!(
+            hover_type_name_from_type_info(Some("Request|string"), &HashSet::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn type_link_extraction_ignores_array_component_type() {
+        assert_eq!(
+            hover_type_name_from_type_info(Some("Request[]"), &HashSet::new()),
+            None
         );
     }
 
