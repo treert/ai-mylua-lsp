@@ -7,7 +7,7 @@ use crate::emmy::{
 use crate::resolver;
 use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{
-    format_resolved_type, format_signature, FunctionSignature, KnownType, TypeFact,
+    format_resolved_type, format_signature, FunctionSignature, KnownType, SymbolicStub, TypeFact,
 };
 use crate::types::DefKind;
 use crate::uri_id::{resolve_uri, UriId};
@@ -266,6 +266,7 @@ fn merged_emmy_type_view<'a>(
             }
         }
     }
+    fields.sort_by_key(|merged_field| emmy_type_hover_field_rank(&merged_field.field.type_fact));
 
     let (td, summary, source_uri_id) = primary?;
     Some(MergedEmmyTypeView {
@@ -274,6 +275,29 @@ fn merged_emmy_type_view<'a>(
         source_uri_id,
         fields,
     })
+}
+
+fn emmy_type_hover_field_rank(fact: &TypeFact) -> u8 {
+    if is_function_like_field_type(fact) {
+        1
+    } else {
+        0
+    }
+}
+
+fn is_function_like_field_type(fact: &TypeFact) -> bool {
+    match fact {
+        TypeFact::Known(KnownType::Function(_) | KnownType::FunctionRef(_)) => true,
+        TypeFact::Union(types) => types.iter().any(is_function_like_field_type),
+        TypeFact::Stub(SymbolicStub::TypeRef { .. })
+        | TypeFact::Stub(SymbolicStub::RequireRef { .. })
+        | TypeFact::Stub(SymbolicStub::GlobalRef { .. })
+        | TypeFact::Stub(SymbolicStub::FieldOf { .. })
+        | TypeFact::Stub(SymbolicStub::CallReturn { .. })
+        | TypeFact::Stub(SymbolicStub::FunctionCallReturn { .. })
+        | TypeFact::Known(_)
+        | TypeFact::Unknown => false,
+    }
 }
 
 fn build_hover_for_type_definition(

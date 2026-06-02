@@ -1829,6 +1829,7 @@ fn hover_type_name_merges_fields_from_split_class_candidates() {
         "part_annotation.lua",
         r#"--- High priority class docs
 ---@class PartClass
+---@field New fun(self: PartClass): PartClass
 ---@field id number
 ---@field name string
 local PartClass = {}
@@ -1839,6 +1840,7 @@ local PartClass = {}
         r#"--- Low priority class docs
 ---@class PartClass
 ---@field name integer
+---@field getId fun(self: PartClass): number
 ---@field age number
 local PartClass = {}
 "#,
@@ -1870,6 +1872,12 @@ local PartClass
         text,
     );
     assert!(
+        text.contains("---@field New fun(self: PartClass): PartClass")
+            && text.contains("---@field getId fun(self: PartClass): number"),
+        "type hover should include function fields from all split candidates, got:\n{}",
+        text,
+    );
+    assert!(
         text.contains("---@field age number"),
         "type hover should include fields from lower-priority split candidates, got:\n{}",
         text,
@@ -1888,9 +1896,15 @@ local PartClass
     let id_pos = text.find("---@field id number").unwrap();
     let name_pos = text.find("---@field name string").unwrap();
     let age_pos = text.find("---@field age number").unwrap();
+    let new_pos = text
+        .find("---@field New fun(self: PartClass): PartClass")
+        .unwrap();
+    let get_id_pos = text
+        .find("---@field getId fun(self: PartClass): number")
+        .unwrap();
     assert!(
-        id_pos < name_pos && name_pos < age_pos,
-        "merged fields should keep candidate priority order, got:\n{}",
+        id_pos < name_pos && name_pos < age_pos && age_pos < new_pos && new_pos < get_id_pos,
+        "merged fields should keep data fields before function fields while preserving priority order within each group, got:\n{}",
         text,
     );
 }
