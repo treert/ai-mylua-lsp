@@ -15,6 +15,7 @@ use crate::util::{
     extract_field_chain, find_node_at_position, node_text, percent_decode, walk_ancestors,
     LineIndex,
 };
+use std::collections::HashSet;
 use std::fmt::Write;
 use tower_lsp_server::ls_types::*;
 
@@ -225,35 +226,68 @@ fn hover_type_name(
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
+    let view = merged_emmy_type_view(name, index)?;
+    build_hover_for_type_definition(&view, all_docs)
+}
+
+struct MergedEmmyTypeView<'a> {
+    td: &'a crate::summary::TypeDefinition,
+    summary: &'a crate::summary::DocumentSummary,
+    source_uri_id: UriId,
+    fields: Vec<MergedEmmyField<'a>>,
+}
+
+struct MergedEmmyField<'a> {
+    field: &'a crate::summary::TypeFieldDef,
+    summary: &'a crate::summary::DocumentSummary,
+}
+
+fn merged_emmy_type_view<'a>(
+    name: &str,
+    index: &'a WorkspaceAggregation,
+) -> Option<MergedEmmyTypeView<'a>> {
     let candidates = index.type_candidates(name)?;
-    let candidate = candidates.first()?;
-    index.summary_by_id(candidate.source_uri_id())?;
-    let summary = index.summary_by_id(candidate.source_uri_id())?;
+    let mut primary = None;
+    let mut fields = Vec::new();
+    let mut seen_fields = HashSet::new();
 
-    for td in &summary.type_definitions {
-        if td.name != name {
-            continue;
+    for candidate in candidates {
+        let summary = index.summary_by_id(candidate.source_uri_id())?;
+        for td in &summary.type_definitions {
+            if td.name != name {
+                continue;
+            }
+
+            primary.get_or_insert((td, summary, candidate.source_uri_id()));
+            for field in &td.fields {
+                if seen_fields.insert(field.name) {
+                    fields.push(MergedEmmyField { field, summary });
+                }
+            }
         }
-
-        return build_hover_for_type_definition(td, summary, candidate.source_uri_id(), all_docs);
     }
 
-    None
+    let (td, summary, source_uri_id) = primary?;
+    Some(MergedEmmyTypeView {
+        td,
+        summary,
+        source_uri_id,
+        fields,
+    })
 }
 
 fn build_hover_for_type_definition(
-    td: &crate::summary::TypeDefinition,
-    summary: &crate::summary::DocumentSummary,
-    source_uri_id: UriId,
+    view: &MergedEmmyTypeView<'_>,
     all_docs: &impl DocumentLookup,
 ) -> Option<Hover> {
+    let td = view.td;
     let mut code_lines = Vec::new();
     match td.kind {
         crate::summary::TypeDefinitionKind::Alias => {
             let alias_display = td
                 .alias_type
                 .as_ref()
-                .map(|t| format_type_fact_for_hover(t, summary))
+                .map(|t| format_type_fact_for_hover(t, view.summary))
                 .unwrap_or_else(|| "unknown".to_string());
             code_lines.push(format!("---@alias {} {}", td.name, alias_display));
         }
@@ -274,11 +308,16 @@ fn build_hover_for_type_definition(
             }
         }
     }
-    for field in &td.fields {
+    for merged_field in &view.fields {
+        let field = merged_field.field;
         code_lines.push(format!(
             "---@field {} {}",
             field.name,
-            format_type_fact_for_class_field_hover(&field.type_fact, summary, td.name.as_str())
+            format_type_fact_for_class_field_hover(
+                &field.type_fact,
+                merged_field.summary,
+                td.name.as_str()
+            )
         ));
     }
 
@@ -290,7 +329,7 @@ fn build_hover_for_type_definition(
     };
     parts.push(format!("*{}*", kind_label));
 
-    if let Some(def_doc) = all_docs.get_document_by_id(source_uri_id) {
+    if let Some(def_doc) = all_docs.get_document_by_id(view.source_uri_id) {
         let doc_text = definition_doc_text_at_byte(def_doc, td.range.start_byte);
         if !doc_text.is_empty() {
             parts.push(doc_text);

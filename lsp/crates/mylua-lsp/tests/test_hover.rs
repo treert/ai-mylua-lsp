@@ -1824,6 +1824,78 @@ local current
 }
 
 #[test]
+fn hover_type_name_merges_fields_from_split_class_candidates() {
+    let annotation = (
+        "part_annotation.lua",
+        r#"--- High priority class docs
+---@class PartClass
+---@field id number
+---@field name string
+local PartClass = {}
+"#,
+    );
+    let implementation = (
+        "part.lua",
+        r#"--- Low priority class docs
+---@class PartClass
+---@field name integer
+---@field age number
+local PartClass = {}
+"#,
+    );
+    let usage = (
+        "main.lua",
+        r#"---@type PartClass
+local PartClass
+"#,
+    );
+    let (docs, agg, _parser) = setup_workspace(&[implementation, annotation, usage]);
+    let uri = make_uri("main.lua");
+    let uri_id = intern_uri(&uri);
+    let doc = docs.get(&uri_id).unwrap();
+
+    let result = hover::hover(
+        doc,
+        uri_id,
+        pos(0, 9),
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on split Emmy type name should succeed");
+    let text = hover_content_string(&result);
+
+    assert!(
+        text.contains("---@field id number"),
+        "type hover should include fields from the highest-priority candidate, got:\n{}",
+        text,
+    );
+    assert!(
+        text.contains("---@field age number"),
+        "type hover should include fields from lower-priority split candidates, got:\n{}",
+        text,
+    );
+    assert!(
+        text.contains("---@field name string") && !text.contains("---@field name integer"),
+        "duplicate fields should keep the highest-priority definition, got:\n{}",
+        text,
+    );
+    assert!(
+        text.contains("High priority class docs") && !text.contains("Low priority class docs"),
+        "type hover should keep primary docs from the highest-priority candidate, got:\n{}",
+        text,
+    );
+
+    let id_pos = text.find("---@field id number").unwrap();
+    let name_pos = text.find("---@field name string").unwrap();
+    let age_pos = text.find("---@field age number").unwrap();
+    assert!(
+        id_pos < name_pos && name_pos < age_pos,
+        "merged fields should keep candidate priority order, got:\n{}",
+        text,
+    );
+}
+
+#[test]
 fn hover_alias_type_name_formats_inline_table_fields() {
     let src = r#"---@alias Vec2 { x: number, y: number }
 
