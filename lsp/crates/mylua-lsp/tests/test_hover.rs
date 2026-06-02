@@ -92,6 +92,33 @@ print(abc)"#;
 }
 
 #[test]
+fn hover_type_name_shows_definition_origin_link() {
+    let src = r#"---@class OriginClass
+---@field value number
+local x = nil
+---@type OriginClass
+local y = x"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "origin_type_hover.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 10),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let hover = result.expect("hover should return a result for type name `OriginClass`");
+    let content = hover_content_string(&hover);
+    assert!(
+        content.contains("*class* · [origin_type_hover.lua](file:///test/origin_type_hover.lua#L1)"),
+        "hover should show type definition origin link, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_table_literal() {
     let src = r#"local abcd = {
     anumber = 1,

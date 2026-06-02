@@ -351,7 +351,9 @@ fn build_hover_for_type_definition(
         crate::summary::TypeDefinitionKind::Alias => "alias",
         crate::summary::TypeDefinitionKind::Enum => "enum",
     };
-    parts.push(format!("*{}*", kind_label));
+    parts.push(type_definition_kind_label_with_origin(
+        kind_label, view, all_docs,
+    ));
 
     if let Some(def_doc) = all_docs.get_document_by_id(view.source_uri_id) {
         let doc_text = definition_doc_text_at_byte(def_doc, td.range.start_byte);
@@ -946,24 +948,49 @@ fn kind_label_with_origin(kind_label: &str, def: &crate::types::Definition) -> S
     }
 }
 
+fn type_definition_kind_label_with_origin(
+    kind_label: &str,
+    view: &MergedEmmyTypeView<'_>,
+    all_docs: &impl DocumentLookup,
+) -> String {
+    match type_definition_origin_link(view, all_docs) {
+        Some(origin) => format!("*{}* · {}", kind_label, origin),
+        None => format!("*{}*", kind_label),
+    }
+}
+
 fn definition_origin_link(def: &crate::types::Definition) -> Option<String> {
-    let uri = def.uri.as_str();
+    origin_link(
+        def.uri.as_str(),
+        def.selection_range.start_row.saturating_add(1),
+    )
+}
+
+fn type_definition_origin_link(
+    view: &MergedEmmyTypeView<'_>,
+    all_docs: &impl DocumentLookup,
+) -> Option<String> {
+    let def_doc = all_docs.get_document_by_id(view.source_uri_id)?;
+    let source_range = view.td.name_range.as_ref().unwrap_or(&view.td.range);
+    let position = def_doc
+        .line_index()
+        .byte_offset_to_position(def_doc.source(), source_range.start_byte)?;
+    origin_link(view.summary.uri.as_str(), position.line.saturating_add(1))
+}
+
+fn origin_link(uri: &str, line_one_based: u32) -> Option<String> {
     let raw_filename = uri.rsplit('/').next()?.split('?').next().unwrap_or("");
     if raw_filename.is_empty() {
         return None;
     }
 
     let filename = escape_markdown_link_text(&percent_decode(raw_filename));
-    let target = definition_link_target(def);
+    let target = origin_link_target(uri, line_one_based);
     Some(format!("[{}]({})", filename, target))
 }
 
-fn definition_link_target(def: &crate::types::Definition) -> String {
-    escape_markdown_link_target(&format!(
-        "{}#L{}",
-        def.uri.as_str(),
-        def.selection_range.start_row + 1
-    ))
+fn origin_link_target(uri: &str, line_one_based: u32) -> String {
+    escape_markdown_link_target(&format!("{}#L{}", uri, line_one_based))
 }
 
 fn escape_markdown_link_target(target: &str) -> String {
