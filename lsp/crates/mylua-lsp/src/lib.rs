@@ -410,7 +410,7 @@ impl Backend {
     }
 
     pub(crate) fn index_file_from_disk(&self, path: &std::path::Path) -> Option<(UriId, bool)> {
-        let text = match std::fs::read_to_string(path) {
+        let text = match crate::util::read_file_as_utf8(path) {
             Ok(t) => t,
             Err(_) => return None,
         };

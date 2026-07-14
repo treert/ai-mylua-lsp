@@ -129,7 +129,7 @@ fn run_perf_breakdown(
     path: &str,
     summary_output: &SummaryOutput,
 ) {
-    let text = match std::fs::read_to_string(path) {
+    let text = match mylua_lsp::util::read_file_as_utf8(Path::new(path)) {
         Ok(t) => t,
         Err(e) => {
             eprintln!("[ERROR] cannot read '{}': {}", path, e);

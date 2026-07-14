@@ -445,7 +445,10 @@ impl LanguageServer for Backend {
             // overwrite fresher buffer content with stale disk.
             let lock = self.edit_lock_for(&uri);
             let _guard = lock.lock().await;
-            match tokio::fs::read_to_string(&path).await {
+            match tokio::task::spawn_blocking({
+                let path = path.clone();
+                move || crate::util::read_file_as_utf8(&path)
+            }).await.unwrap_or_else(|e| Err(std::io::Error::new(std::io::ErrorKind::Other, e))) {
                 Ok(text) => {
                     // Fast path: if the current indexed content
                     // already matches disk, this close is just a

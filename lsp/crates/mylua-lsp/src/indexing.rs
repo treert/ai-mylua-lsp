@@ -362,10 +362,10 @@ pub async fn run_workspace_scan(
                 .par_iter()
                 .filter_map(|(path, uri, uri_id)| {
                     let file_started = std::time::Instant::now();
-                    let text = match std::fs::read_to_string(path) {
+                    let text = match crate::util::read_file_as_utf8(path) {
                         Ok(t) => t,
                         Err(e) => {
-                            lsp_log!("[scan] skipping non-UTF-8 or unreadable file: {} ({})", path.display(), e);
+                            lsp_log!("[scan] skipping unreadable file: {} ({})", path.display(), e);
                             return None;
                         }
                     };

@@ -2,7 +2,53 @@ use crate::syntax_kind::{field, kind, NodeKindExt};
 use serde::{Deserialize, Serialize};
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
+use std::path::Path;
 use tower_lsp_server::ls_types::*;
+
+/// Read a file into a UTF-8 `String`, transparently handling BOM and
+/// UTF-16 encoding:
+///
+/// 1. UTF-8 with BOM (`EF BB BF`): strips the BOM prefix.
+/// 2. UTF-16 LE with BOM (`FF FE`): decodes UTF-16 LE → UTF-8.
+/// 3. UTF-16 BE with BOM (`FE FF`): decodes UTF-16 BE → UTF-8.
+/// 4. No BOM: treated as plain UTF-8.
+pub fn read_file_as_utf8(path: &Path) -> std::io::Result<String> {
+    let bytes = std::fs::read(path)?;
+
+    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8(bytes[3..].to_vec())
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e));
+    }
+
+    if bytes.starts_with(&[0xFF, 0xFE]) {
+        return decode_utf16_le(&bytes[2..]);
+    }
+
+    if bytes.starts_with(&[0xFE, 0xFF]) {
+        return decode_utf16_be(&bytes[2..]);
+    }
+
+    String::from_utf8(bytes)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+fn decode_utf16_le(bytes: &[u8]) -> std::io::Result<String> {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16(&units)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+fn decode_utf16_be(bytes: &[u8]) -> std::io::Result<String> {
+    let units: Vec<u16> = bytes
+        .chunks_exact(2)
+        .map(|c| u16::from_be_bytes([c[0], c[1]]))
+        .collect();
+    String::from_utf16(&units)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
 
 pub fn hash_bytes(data: &[u8]) -> u64 {
     let mut hasher = DefaultHasher::new();
