@@ -2,7 +2,7 @@
   "name": "mylua-lsp",
   "displayName": "My Lua Lsp",
   "description": "My Lua language support with EmmyLua annotations",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "publisher": "onemore",
   "repository": {
     "type": "git",
@@ -143,7 +143,7 @@
             "**/.*",
             "**/node_modules"
           ],
-          "description": "Glob patterns for files to exclude from workspace indexing."
+          "markdownDescription": "Glob patterns for files/directories to exclude from workspace indexing. A directory pattern like `**/foo` automatically also excludes all files under it (equivalent to adding `**/foo/**`)."
         },
         "mylua.workspace.library": {
           "type": "array",

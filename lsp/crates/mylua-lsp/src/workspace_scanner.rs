@@ -13,9 +13,14 @@ pub struct FileFilter {
 
 impl FileFilter {
     pub fn from_config(config: &WorkspaceConfig) -> Self {
+        let mut exclude_expanded: Vec<String> = Vec::with_capacity(config.exclude.len() * 2);
+        for pat in &config.exclude {
+            exclude_expanded.push(pat.clone());
+            exclude_expanded.push(format!("{}/**", pat));
+        }
         Self {
             include: build_globset(&config.include),
-            exclude: build_globset(&config.exclude),
+            exclude: build_globset(&exclude_expanded),
         }
     }
 
@@ -620,5 +625,30 @@ mod tests {
         // intended to resolve user-relative library paths).
         let out = resolve_library_roots(&["stubs".to_string()], &[]);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn exclude_pattern_without_trailing_glob_also_rejects_children() {
+        let config = WorkspaceConfig {
+            include: vec!["**/*.lua".into()],
+            exclude: vec!["**/Plugins/LetsGo/Script".into()],
+            ..Default::default()
+        };
+        let filter = FileFilter::from_config(&config);
+
+        assert!(!filter.accepts("Plugins/LetsGo/Script"), "dir itself");
+        assert!(!filter.accepts("Plugins/LetsGo/Script/foo.lua"), "direct child");
+        assert!(!filter.accepts("Plugins/LetsGo/Script/sub/bar.lua"), "nested child");
+        assert!(filter.accepts("Plugins/LetsGo/Other/foo.lua"), "unrelated path");
+    }
+
+    #[test]
+    fn default_exclude_dot_pattern_rejects_children() {
+        let config = WorkspaceConfig::default();
+        let filter = FileFilter::from_config(&config);
+
+        assert!(!filter.accepts(".git"), "dir itself");
+        assert!(!filter.accepts(".git/objects/pack/foo.lua"), "nested child");
+        assert!(filter.accepts("src/main.lua"), "normal file");
     }
 }
