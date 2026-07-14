@@ -362,7 +362,13 @@ pub async fn run_workspace_scan(
                 .par_iter()
                 .filter_map(|(path, uri, uri_id)| {
                     let file_started = std::time::Instant::now();
-                    let text = std::fs::read_to_string(path).ok()?;
+                    let text = match std::fs::read_to_string(path) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            lsp_log!("[scan] skipping non-UTF-8 or unreadable file: {} ({})", path.display(), e);
+                            return None;
+                        }
+                    };
                     let is_library = library_uris.contains(&uri);
 
                     let lua_source = util::LuaSource::new(text);
