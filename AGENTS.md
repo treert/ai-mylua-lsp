@@ -7,6 +7,16 @@
 1. **在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`AGENTS.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
 2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档（跨文件索引见 [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md)），避免文档与代码脱节。
 
+## 开发规范（必须遵守）
+
+> 以下规则为硬性约束，违反会导致大量无关文件被改动，**任何情况下都不得跳过**。
+
+### Rust 禁止格式化
+
+- **禁止**运行任何 Rust 格式化命令，包括 `cargo fmt`、`rustfmt`、IDE format、批量格式化脚本。
+- Rust 改动必须保持局部既有格式；只允许为本次改动手工调整必要缩进/换行。
+- 如果误触格式化，**必须先恢复所有纯格式化改动**，再继续汇报或提交。
+
 ## 文档同步（强制）
 
 - 新增/删除/重构 LSP 能力（如 semantic tokens、completion、diagnostics）→ 同一次提交更新 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
