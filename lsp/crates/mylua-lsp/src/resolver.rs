@@ -92,7 +92,16 @@ pub fn resolve_field_chain(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(ResolveCtx::new(owner_uri_id), base_fact, fields, agg, false)
+    let mut visited = HashSet::new();
+    resolve_field_chain_inner(
+        ResolveCtx::new(owner_uri_id),
+        base_fact,
+        fields,
+        agg,
+        false,
+        0,
+        &mut visited,
+    )
 }
 
 /// UriId-aware variant of `resolve_field_chain` for bases that are
@@ -116,7 +125,16 @@ pub(crate) fn resolve_field_chain_prefix_in_file_id(
     fields: &[String],
     agg: &WorkspaceAggregation,
 ) -> ResolvedType {
-    resolve_field_chain_inner(ResolveCtx::new(uri_id), base_fact, fields, agg, true)
+    let mut visited = HashSet::new();
+    resolve_field_chain_inner(
+        ResolveCtx::new(uri_id),
+        base_fact,
+        fields,
+        agg,
+        true,
+        0,
+        &mut visited,
+    )
 }
 
 /// Shared core of field-chain resolution. `ctx` carries the file that owns
@@ -127,14 +145,27 @@ fn resolve_field_chain_inner(
     fields: &[String],
     agg: &WorkspaceAggregation,
     preserve_tail_resolved_location: bool,
+    depth: usize,
+    visited: &mut HashSet<String>,
 ) -> ResolvedType {
+    if depth > MAX_RESOLVE_DEPTH {
+        return ResolvedType::unknown(ctx);
+    }
+
     if let TypeFact::Union(types) = base_fact {
         let mut resolved_types = Vec::new();
         let mut best_location: Option<(ByteRange, UriId)> = None;
         let mut first_owner = None;
         for t in types {
-            let result =
-                resolve_field_chain_inner(ctx, t, fields, agg, preserve_tail_resolved_location);
+            let result = resolve_field_chain_inner(
+                ctx,
+                t,
+                fields,
+                agg,
+                preserve_tail_resolved_location,
+                depth + 1,
+                visited,
+            );
             if result.type_fact != TypeFact::Unknown {
                 first_owner.get_or_insert(result.owner_uri_id);
                 if best_location.is_none() {
@@ -150,7 +181,6 @@ fn resolve_field_chain_inner(
         return resolved_union_field(ctx, resolved_types, best_location, first_owner);
     }
 
-    let mut visited = HashSet::new();
     let mut current = ResolvedType::from_fact(ctx, base_fact.clone());
 
     // When the base itself is a nested FieldOf stub (e.g. the scope tree
@@ -160,7 +190,15 @@ fn resolve_field_chain_inner(
     // Without this, the loop below sees an unresolved FieldOf stub as
     // `current` and `resolve_field_access` fails for the same reason.
     if let Some((inner_base, inner_fields)) = flatten_field_of_chain(base_fact) {
-        let pre = resolve_field_chain_inner(ctx, &inner_base, &inner_fields, agg, false);
+        let pre = resolve_field_chain_inner(
+            ctx,
+            &inner_base,
+            &inner_fields,
+            agg,
+            false,
+            depth + 1,
+            visited,
+        );
         if pre.type_fact != TypeFact::Unknown {
             current = pre;
         }
@@ -174,7 +212,14 @@ fn resolve_field_chain_inner(
             TypeFact::Known(KnownType::Table(shape_id)) => {
                 resolve_table_field(current_ctx, *shape_id, field, agg)
             }
-            _ => resolve_field_access(current_ctx, &current.type_fact, field, agg, 0, &mut visited),
+            _ => resolve_field_access(
+                current_ctx,
+                &current.type_fact,
+                field,
+                agg,
+                depth + 1,
+                visited,
+            ),
         };
 
         if result.type_fact == TypeFact::Unknown && result.def_location.is_none() {
@@ -186,8 +231,8 @@ fn resolve_field_chain_inner(
                     current_ctx,
                     &qualified,
                     agg,
-                    0,
-                    &mut visited,
+                    depth + 1,
+                    visited,
                     !is_chain_tail || preserve_tail_resolved_location,
                 );
                 if resolved.type_fact != TypeFact::Unknown || resolved.def_location.is_some() {
@@ -455,7 +500,15 @@ fn resolve_stub(
 
         SymbolicStub::FieldOf { base, field } => {
             let field_name = field.to_string();
-            resolve_field_chain_inner(ctx, base, std::slice::from_ref(&field_name), agg, false)
+            resolve_field_chain_inner(
+                ctx,
+                base,
+                std::slice::from_ref(&field_name),
+                agg,
+                false,
+                depth + 1,
+                visited,
+            )
         }
     };
 

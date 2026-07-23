@@ -576,6 +576,58 @@ print(mm_1.a1)
 }
 
 #[test]
+fn cyclic_global_field_reference_does_not_overflow() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{SymbolicStub, TypeFact};
+
+    // `A = A.b` registers the global `A` with a
+    // `FieldOf { GlobalRef("A"), "b" }` type fact. Resolving `A` follows
+    // that stub straight back to `A`, forming a cycle through
+    // `resolve_stub(FieldOf)` -> `resolve_field_chain_inner`. Before the
+    // depth/visited fix this re-entered with a fresh `visited` set and no
+    // depth guard, recursing without bound and overflowing the tokio
+    // worker stack right after workspace indexing.
+    let src = "A = A.b\n";
+    let (_doc, uri, agg) = setup_single_file(src, "cyclic_global.lua");
+    let uri_id = summary_id_by_uri(&agg, &uri);
+
+    let fact = TypeFact::Stub(SymbolicStub::GlobalRef { name: "A".into() });
+    let resolved = resolver::resolve_type(uri_id, &fact, &agg);
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Unknown),
+        "cyclic global reference should resolve to Unknown, got: {}",
+        resolved.type_fact
+    );
+
+    // Exercise the `FieldOf` stub entry point directly — the exact path
+    // `resolve_stub(FieldOf)` now delegates to `resolve_field_chain_inner`.
+    let cyclic_fact = TypeFact::Stub(SymbolicStub::FieldOf {
+        base: Box::new(TypeFact::Stub(SymbolicStub::GlobalRef { name: "A".into() })),
+        field: "b".into(),
+    });
+    let resolved = resolver::resolve_type(uri_id, &cyclic_fact, &agg);
+    assert!(
+        matches!(resolved.type_fact, TypeFact::Unknown),
+        "cyclic FieldOf stub should resolve to Unknown, got: {}",
+        resolved.type_fact
+    );
+
+    // A mutual cycle across two globals (`A` -> field of `B`, `B` -> field
+    // of `A`) mirrors the cross-module references that triggered the crash
+    // on large real-world workspaces.
+    let src2 = "A = B.x\nB = A.y\n";
+    let (_doc, uri2, agg2) = setup_single_file(src2, "cyclic_global_mutual.lua");
+    let uri_id2 = summary_id_by_uri(&agg2, &uri2);
+    let fact_a = TypeFact::Stub(SymbolicStub::GlobalRef { name: "A".into() });
+    let resolved_a = resolver::resolve_type(uri_id2, &fact_a, &agg2);
+    assert!(
+        matches!(resolved_a.type_fact, TypeFact::Unknown),
+        "mutual cyclic global reference should resolve to Unknown, got: {}",
+        resolved_a.type_fact
+    );
+}
+
+#[test]
 fn lua_field_error_on_closed_table() {
     let src = r#"
 local t = { name = "hello", age = 10 }
