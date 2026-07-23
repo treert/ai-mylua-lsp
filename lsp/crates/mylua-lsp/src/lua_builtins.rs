@@ -79,7 +79,7 @@ const LUAJIT_EXTRA: &[&str] = &["bit", "jit", "ffi", "unpack"];
 /// `version` string (as configured in `mylua.runtime.version`).
 /// Recognized values: `"5.1"`, `"5.2"`, `"5.3"`, `"5.4"`, `"luajit"`
 /// (case-insensitive). Any unrecognized string falls back to Lua 5.3
-/// (matching the project baseline documented in `ai-readme.md`).
+/// (matching the project baseline documented in `AGENTS.md`).
 ///
 /// The returned set is produced fresh on each call from static
 /// constants — this is a cold path (called once per diagnostics /

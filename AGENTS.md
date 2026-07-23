@@ -1,11 +1,35 @@
-# AI 会话入口（必读）
+# AGENTS.md
 
 **本文件面向 AI 助手与人类协作者：在新对话或接手本仓库时，请先阅读本文，再按需深入 `docs/` 目录。**
 
 ## 强制规则（给 AI）
 
-1. **在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`ai-readme.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
+1. **在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`AGENTS.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
 2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档（跨文件索引见 [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md)），避免文档与代码脱节。
+
+## 文档同步（强制）
+
+- 新增/删除/重构 LSP 能力（如 semantic tokens、completion、diagnostics）→ 同一次提交更新本文件「已实现 LSP 能力」列表
+- 改变架构或数据流（如索引策略、模块边界）→ 同一次提交更新 `docs/architecture.md` 相关章节
+- 改变实现路线或阶段完成状态 → 更新 `docs/implementation-roadmap.md`
+
+不需要更新文档的场景：bug 修复（不改变功能描述）、纯重构（对外行为不变）、配置微调。
+
+## 完成代码修改后
+
+功能性改动完成后、告知用户之前：
+
+1. `cd lsp && cargo build`（零 error）
+2. 涉及 TS：`cd vscode-extension && npm run compile`
+3. 调用 code-reviewer 子代理
+
+跳过：单行修改、注释/文档、配置微调。
+
+## Gotchas
+
+- 改 `grammar.js` 后必须先 `tree-sitter generate` 再 `cargo build`
+- 平台二进制名：win32 → `mylua-lsp.exe`，其他 → `mylua-lsp`
+- 多平台发布走 `.github/workflows/release.yml`
 
 ## 项目目标
 

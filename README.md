@@ -2,7 +2,7 @@
 
 Lua 5.3+ 语言支持：**自研 Tree-sitter 文法**、**独立 LSP**、**VS Code 扩展**，以 **Monorepo** 管理。
 
-- 协作与 AI 必读：[ai-readme.md](ai-readme.md)
+- 协作与 AI 必读：[AGENTS.md](AGENTS.md)
 - 需求与架构：[docs/README.md](docs/README.md)
 
 ## 布局
