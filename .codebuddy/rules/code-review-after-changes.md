@@ -1,7 +1,11 @@
 ---
-# Please note: Do not modify the header of this document. If modified, CodeBuddy (Internal Edition) will apply the default logic settings.
-type: always
+description: 
+alwaysApply: false
+enabled: false
+updatedAt: 2026-07-23T12:30:57.775Z
+provider: 
 ---
+
 # 代码修改后自动 Review
 
 每次完成一组**功能性代码修改**后（即将告知用户"完成"之前），必须执行以下流程。

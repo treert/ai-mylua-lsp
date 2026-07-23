@@ -5,7 +5,7 @@ model: hy3-preview-ioa
 readonly: true
 tools: list_dir, search_file, search_content, read_file, read_lints, web_search
 agentMode: agentic
-enabled: true
+enabled: false
 enabledAutoRun: true
 ---
 # 代码审查员规范
