@@ -1,7 +1,7 @@
 use crate::aggregation::WorkspaceAggregation;
 use crate::resolver;
 use crate::syntax_kind::{field, kind, NodeKindExt};
-use crate::type_system::{KnownType, SymbolicStub, TypeFact};
+use crate::type_system::{KnownType, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
@@ -245,8 +245,12 @@ fn field_global_prefixes(
 ) -> Vec<String> {
     let mut prefixes = Vec::new();
 
-    if let Some(prefix) = semantic_global_prefix(base_fact, fields, index) {
-        prefixes.push(prefix);
+    for prefix in resolver::global_prefixes_for_fact(base_fact, index) {
+        let mut segments = vec![prefix];
+        if fields.len() > 1 {
+            segments.extend(fields[..fields.len() - 1].iter().cloned());
+        }
+        push_simple_prefix(&mut prefixes, segments.join("."));
     }
 
     let mut segments = vec![node_text(base_node, source).to_string()];
@@ -256,31 +260,6 @@ fn field_global_prefixes(
     push_simple_prefix(&mut prefixes, segments.join("."));
 
     prefixes
-}
-
-fn semantic_global_prefix(
-    base_fact: &TypeFact,
-    fields: &[String],
-    index: &WorkspaceAggregation,
-) -> Option<String> {
-    let base_name = match base_fact {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.to_string()),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
-            resolver::resolve_require_global_name(module_path, index)
-        }
-        _ => None,
-    }?;
-
-    let mut segments = vec![base_name];
-    if fields.len() > 1 {
-        segments.extend(fields[..fields.len() - 1].iter().cloned());
-    }
-    let prefix = segments.join(".");
-    if is_simple_dotted_prefix(&prefix) {
-        Some(prefix)
-    } else {
-        None
-    }
 }
 
 fn push_simple_prefix(prefixes: &mut Vec<String>, prefix: String) {

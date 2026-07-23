@@ -466,6 +466,116 @@ end
 }
 
 #[test]
+fn local_alias_to_global_env_field_resolves_extensions() {
+    use mylua_lsp::resolver;
+    use mylua_lsp::type_system::{KnownType, TypeFact};
+
+    let src = r#"
+_G.gg = {}
+gg.a1 = 1
+local mm = _G.gg
+mm.m1 = 11
+print(mm.a1)
+print(mm.m1)
+local mm_1 = gg
+mm_1.mm1 = 111
+print(mm_1.mm1)
+print(mm_1.m1)
+print(mm_1.a1)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "global_env_local_alias.lua");
+    let uri_id = summary_id_by_uri(&agg, &uri);
+    let mm_fact = doc
+        .scope_tree
+        .resolve_type(src.len() - 1, "mm")
+        .expect("mm type")
+        .clone();
+
+    let mm_1_fact = doc
+        .scope_tree
+        .resolve_type(src.len() - 1, "mm_1")
+        .expect("mm_1 type")
+        .clone();
+
+    assert!(
+        agg.global_shard.contains_key("gg"),
+        "`_G.gg = ...` must define bare global `gg`"
+    );
+    assert!(
+        agg.global_shard.contains_key("gg.m1"),
+        "`mm.m1 = ...` should register shared global field `gg.m1`"
+    );
+    assert!(
+        agg.global_shard.contains_key("gg.mm1"),
+        "`mm_1.mm1 = ...` should register shared global field `gg.mm1`"
+    );
+
+    for (label, fact, field) in [
+        ("mm.a1", &mm_fact, "a1"),
+        ("mm.m1", &mm_fact, "m1"),
+        ("mm_1.mm1", &mm_1_fact, "mm1"),
+        ("mm_1.m1", &mm_1_fact, "m1"),
+        ("mm_1.a1", &mm_1_fact, "a1"),
+    ] {
+        let resolved = resolver::resolve_field_chain_in_file_id(
+            uri_id,
+            fact,
+            &[field.to_string()],
+            &agg,
+        );
+        assert!(
+            matches!(resolved.type_fact, TypeFact::Known(KnownType::Number)),
+            "`{}` should resolve through global table alias, got: {}",
+            label,
+            resolved.type_fact
+        );
+    }
+
+    let mm_fields = resolver::get_fields_for_type_id(uri_id, &mm_fact, &agg);
+    assert!(
+        mm_fields.iter().any(|field| field.name == "a1")
+            && mm_fields.iter().any(|field| field.name == "m1"),
+        "completion fields for `mm` should include `a1` and `m1`, got: {:?}",
+        mm_fields
+    );
+    let mm_1_fields = resolver::get_fields_for_type_id(uri_id, &mm_1_fact, &agg);
+    assert!(
+        mm_1_fields.iter().any(|field| field.name == "a1")
+            && mm_1_fields.iter().any(|field| field.name == "m1")
+            && mm_1_fields.iter().any(|field| field.name == "mm1"),
+        "completion fields for `mm_1` should include `a1`, `m1` and `mm1`, got: {:?}",
+        mm_1_fields
+    );
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        uri_id,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        !diags
+            .iter()
+            .any(|d| d.message.contains("Undefined global 'gg'")),
+        "global defined through _G must not be flagged. diags={:?}",
+        diags
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "global table aliases should not emit unknown-field diagnostics, got: {:?}",
+        unknown
+    );
+}
+
+#[test]
 fn lua_field_error_on_closed_table() {
     let src = r#"
 local t = { name = "hello", age = 10 }

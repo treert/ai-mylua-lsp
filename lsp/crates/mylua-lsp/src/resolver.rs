@@ -166,13 +166,7 @@ fn resolve_field_chain_inner(
         }
     }
 
-    let mut global_prefix = match base_fact {
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => Some(name.to_string()),
-        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
-            resolve_require_global_name(module_path, agg)
-        }
-        _ => None,
-    };
+    let mut global_prefixes = global_prefixes_for_fact(base_fact, agg);
 
     for (idx, field) in fields.iter().enumerate() {
         let current_ctx = ResolveCtx::new(current.owner_uri_id);
@@ -184,10 +178,11 @@ fn resolve_field_chain_inner(
         };
 
         if result.type_fact == TypeFact::Unknown && result.def_location.is_none() {
-            if let Some(ref prefix) = global_prefix {
+            let is_chain_tail = idx + 1 == fields.len();
+            let mut fallback = None;
+            for prefix in &global_prefixes {
                 let qualified = format!("{}.{}", prefix, field);
-                let is_chain_tail = idx + 1 == fields.len();
-                let fallback = try_global_shard_qualified(
+                let resolved = try_global_shard_qualified(
                     current_ctx,
                     &qualified,
                     agg,
@@ -195,20 +190,24 @@ fn resolve_field_chain_inner(
                     &mut visited,
                     !is_chain_tail || preserve_tail_resolved_location,
                 );
-                if fallback.type_fact != TypeFact::Unknown || fallback.def_location.is_some() {
-                    current = fallback;
-                    global_prefix = Some(qualified);
-                    continue;
+                if resolved.type_fact != TypeFact::Unknown || resolved.def_location.is_some() {
+                    fallback = Some(resolved);
+                    break;
                 }
+            }
+            if let Some(resolved) = fallback {
+                current = resolved;
+                extend_global_prefixes(&mut global_prefixes, field);
+                continue;
             }
         }
 
         current = result;
 
         if current.type_fact == TypeFact::Unknown {
-            global_prefix = None;
+            global_prefixes.clear();
         } else {
-            global_prefix = global_prefix.map(|p| format!("{}.{}", p, field));
+            extend_global_prefixes(&mut global_prefixes, field);
         }
     }
 
@@ -270,6 +269,53 @@ fn flatten_field_of_chain(fact: &TypeFact) -> Option<(TypeFact, Vec<String>)> {
     }
 }
 
+pub(crate) fn global_prefixes_for_fact(fact: &TypeFact, agg: &WorkspaceAggregation) -> Vec<String> {
+    let mut prefixes = Vec::new();
+    match fact {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
+            push_global_prefix(&mut prefixes, name.to_string());
+        }
+        TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
+            if let Some(name) = resolve_require_global_name(module_path, agg) {
+                push_global_prefix(&mut prefixes, name);
+            }
+        }
+        _ => {
+            if let Some((base, fields)) = flatten_field_of_chain(fact) {
+                for base_prefix in global_prefixes_for_fact(&base, agg) {
+                    let prefix = if fields.is_empty() {
+                        base_prefix.clone()
+                    } else {
+                        format!("{}.{}", base_prefix, fields.join("."))
+                    };
+                    push_global_prefix(&mut prefixes, prefix);
+                    if base_prefix == "_G" && !fields.is_empty() {
+                        push_global_prefix(&mut prefixes, fields.join("."));
+                    }
+                }
+            }
+        }
+    }
+    prefixes
+}
+
+fn push_global_prefix(prefixes: &mut Vec<String>, prefix: String) {
+    if !prefix.is_empty() && !prefixes.contains(&prefix) {
+        prefixes.push(prefix);
+    }
+}
+
+fn extend_global_prefixes(prefixes: &mut Vec<String>, field: &str) {
+    let add_global_env_alias = prefixes.iter().any(|prefix| prefix == "_G");
+    for prefix in prefixes.iter_mut() {
+        prefix.push('.');
+        prefix.push_str(field);
+    }
+    if add_global_env_alias {
+        push_global_prefix(prefixes, field.to_string());
+    }
+}
+
 /// Get completable fields for a type (for dot-completion).
 ///
 /// `source_uri_hint` provides the file where the base expression lives,
@@ -293,8 +339,8 @@ pub fn get_fields_for_type_id(
     // table-extension globals (e.g. `UE4.Foo`) are included even though
     // they live in global_shard rather than in a table shape.
     let mut global_prefix_fields = Vec::new();
-    if let TypeFact::Stub(SymbolicStub::GlobalRef { name }) = fact {
-        if let Some(node) = agg.global_shard.get_node(name) {
+    for prefix in global_prefixes_for_fact(fact, agg) {
+        if let Some(node) = agg.global_shard.get_node(&prefix) {
             for (child_name, child_node) in &node.children {
                 if let Some(c) = child_node.candidates.first() {
                     let is_func = is_function_type(&c.type_fact)
@@ -408,7 +454,8 @@ fn resolve_stub(
         } => resolve_function_call_return(ctx, func_name, call_arg_types, agg, depth, visited),
 
         SymbolicStub::FieldOf { base, field } => {
-            resolve_field_access(ctx, base, field, agg, depth, visited)
+            let field_name = field.to_string();
+            resolve_field_chain_inner(ctx, base, std::slice::from_ref(&field_name), agg, false)
         }
     };
 

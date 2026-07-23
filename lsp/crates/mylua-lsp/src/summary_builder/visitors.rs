@@ -877,6 +877,9 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
 
     // Global function: colon→dot normalization for both index and contribution.
     let normalized = name.replace(':', ".");
+    let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
+    let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
+    let selection_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
     ctx.function_name_index
         .insert(intern_lua_symbol(&normalized), func_id);
 
@@ -885,10 +888,24 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     ctx.global_contributions.push(GlobalContribution {
         name: intern_lua_symbol(&normalized),
         kind: GlobalContributionKind::Function,
-        type_fact: TypeFact::Known(KnownType::FunctionRef(func_id)),
-        range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
-        selection_range: ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+        type_fact: type_fact.clone(),
+        range,
+        selection_range,
     });
+
+    if let Some(chain) = function_name_dotted_chain(&normalized) {
+        if let Some(alias) = global_env_alias_for_chain(&chain) {
+            ctx.function_name_index
+                .insert(intern_lua_symbol(&alias), func_id);
+            ctx.global_contributions.push(GlobalContribution {
+                name: intern_lua_symbol(&alias),
+                kind: GlobalContributionKind::Function,
+                type_fact,
+                range,
+                selection_range,
+            });
+        }
+    }
 }
 
 /// Add a field to an `@class` TypeDefinition. Skips if:
@@ -1394,10 +1411,27 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 //       a likely user bug and we MUST NOT surface the
                 //       junk path through `global_shard` (the local `a`
                 //       is not a global).
-                if ctx
+                let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
+                let selection_range = ctx.line_index.ts_node_to_byte_range(var_node, ctx.source);
+                let local_global_prefixes = ctx
                     .resolve_visible_in_build_scopes(&chain.base_name, var_node.start_byte())
-                    .is_some()
-                {
+                    .map(|decl| {
+                        decl.type_fact
+                            .as_ref()
+                            .map(global_prefixes_for_build_fact)
+                            .unwrap_or_default()
+                    });
+                if let Some(global_prefixes) = local_global_prefixes {
+                    for prefix in global_prefixes {
+                        let name = format!("{}.{}", prefix, chain.fields.join("."));
+                        ctx.global_contributions.push(GlobalContribution {
+                            name: intern_lua_symbol(&name),
+                            kind: GlobalContributionKind::TableExtension,
+                            type_fact: type_fact.clone(),
+                            range,
+                            selection_range,
+                        });
+                    }
                     continue;
                 }
 
@@ -1405,10 +1439,25 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 ctx.global_contributions.push(GlobalContribution {
                     name: intern_lua_symbol(&name),
                     kind: GlobalContributionKind::TableExtension,
-                    type_fact,
-                    range: ctx.line_index.ts_node_to_byte_range(node, ctx.source),
-                    selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
+                    type_fact: type_fact.clone(),
+                    range,
+                    selection_range,
                 });
+
+                if let Some(alias) = global_env_alias_for_chain(&chain) {
+                    let kind = if chain.fields.len() == 1 {
+                        GlobalContributionKind::Variable
+                    } else {
+                        GlobalContributionKind::TableExtension
+                    };
+                    ctx.global_contributions.push(GlobalContribution {
+                        name: intern_lua_symbol(&alias),
+                        kind,
+                        type_fact,
+                        range,
+                        selection_range,
+                    });
+                }
             }
             _ => {}
         }
@@ -1440,6 +1489,69 @@ impl DottedChain {
             s.push_str(f);
         }
         s
+    }
+}
+
+fn global_env_alias_for_chain(chain: &DottedChain) -> Option<String> {
+    if chain.base_name == "_G" && !chain.fields.is_empty() {
+        Some(chain.fields.join("."))
+    } else {
+        None
+    }
+}
+
+fn global_prefixes_for_build_fact(fact: &TypeFact) -> Vec<String> {
+    let mut prefixes = Vec::new();
+    match fact {
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
+            push_global_prefix_for_build(&mut prefixes, name.to_string());
+        }
+        TypeFact::Stub(SymbolicStub::FieldOf { .. }) => {
+            if let Some((base, fields)) = flatten_field_of_build_fact(fact) {
+                for base_prefix in global_prefixes_for_build_fact(&base) {
+                    let prefix = if fields.is_empty() {
+                        base_prefix.clone()
+                    } else {
+                        format!("{}.{}", base_prefix, fields.join("."))
+                    };
+                    push_global_prefix_for_build(&mut prefixes, prefix);
+                    if base_prefix == "_G" && !fields.is_empty() {
+                        push_global_prefix_for_build(&mut prefixes, fields.join("."));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+    prefixes
+}
+
+fn flatten_field_of_build_fact(fact: &TypeFact) -> Option<(TypeFact, Vec<String>)> {
+    let TypeFact::Stub(SymbolicStub::FieldOf { base, field }) = fact else {
+        return None;
+    };
+    let mut fields = vec![field.to_string()];
+    let mut current = base.as_ref();
+    loop {
+        match current {
+            TypeFact::Stub(SymbolicStub::FieldOf {
+                base: inner_base,
+                field: inner_field,
+            }) => {
+                fields.push(inner_field.to_string());
+                current = inner_base.as_ref();
+            }
+            _ => {
+                fields.reverse();
+                return Some((current.clone(), fields));
+            }
+        }
+    }
+}
+
+fn push_global_prefix_for_build(prefixes: &mut Vec<String>, prefix: String) {
+    if !prefix.is_empty() && !prefixes.contains(&prefix) {
+        prefixes.push(prefix);
     }
 }
 
