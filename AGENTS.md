@@ -9,7 +9,7 @@
 
 ## 文档同步（强制）
 
-- 新增/删除/重构 LSP 能力（如 semantic tokens、completion、diagnostics）→ 同一次提交更新本文件「已实现 LSP 能力」列表
+- 新增/删除/重构 LSP 能力（如 semantic tokens、completion、diagnostics）→ 同一次提交更新 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
 - 改变架构或数据流（如索引策略、模块边界）→ 同一次提交更新 `docs/architecture.md` 相关章节
 - 改变实现路线或阶段完成状态 → 更新 `docs/implementation-roadmap.md`
 
@@ -67,82 +67,15 @@ ai-mylua-lsp/
 | C — 全功能 LSP | ✅ 完成 | 30+ LSP 能力，全工作区索引 |
 | D — VS Code Extension | ✅ 完成 | TextMate 着色 + LSP 客户端 + 打包发布 |
 
-## 已实现 LSP 能力一览
+## 功能索引
 
-> 详细实现描述见 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
-
-**基础**：initialize / shutdown / 文档同步（Incremental）/ 位置编码（UTF-16）/ 配置体系 / 外部库索引（`workspace.library`）
-
-**导航**：goto definition / goto declaration / goto typeDefinition / references / rename / callHierarchy / documentLink
-
-**信息展示**：hover / signatureHelp / inlayHint
-
-**符号与大纲**：documentSymbol / workspace/symbol
-
-**语法着色**：semantic tokens（full / range / delta）
-
-**编辑器辅助**：completion（+ resolve）/ selectionRange / foldingRange / documentHighlight
-
-**诊断**：语法诊断 / 语义诊断（undefinedGlobal / emmyUnknownField / emmyTypeMismatch / duplicateTableKey / unusedLocal / argumentCount / argumentType / returnMismatch / paramAnnotation）/ `---@meta` 元文件 / `---@diagnostic` 抑制
-
-
-**EmmyLua 注解**：完整类型表达式 / @class / @field / @param / @return / @type / @alias / @enum / @generic / @overload / self 泛型绑定 / 多返回值
-
-**自定义通知**：`mylua/indexStatus`（索引 / 诊断进度）
-
-## Grammar — Tree-sitter 解析器
-
-| 文件 | 说明 |
-|------|------|
-| [`grammar/grammar.js`](grammar/grammar.js) | Tree-sitter 文法：15 种语句、12 级优先级表达式 |
-| [`grammar/src/scanner.c`](grammar/src/scanner.c) | 外部扫描器：短/长字符串、注释、shebang |
-| [`grammar/test/corpus/`](grammar/test/corpus/) | 36 个回归测试 |
-| [`grammar/lua.bnf`](grammar/lua.bnf) | Lua 5.3+/5.4 EBNF |
-| [`grammar/emmy.bnf`](grammar/emmy.bnf) | EmmyLua 注解子语法 |
-
-命令：`cd grammar && npm install && npx tree-sitter generate && npx tree-sitter test`
-
-## LSP — Rust 语言服务器
-
-**技术栈**：Rust + `tower-lsp-server` 0.23 + `tree-sitter` 0.26 + `tokio`。
-
-> 能力实现细节见 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
-> 索引架构见 [`docs/index-architecture.md`](docs/index-architecture.md)
-> 性能分析见 [`docs/performance-analysis.md`](docs/performance-analysis.md)
-
-**关键架构特性**：
-- **索引状态机**：`Initializing` → `ModuleMapReady` → `Ready`，5 阶段冷启动流水线：scan → 立即填充 module_index（`document_link` 可用）→ rayon 全量并行 parse → 原子 `build_initial` 构建全局索引 → Ready；`mylua/indexStatus` 通知携带 `phase` 字段（scanning / module_map_ready / parsing / merging）
-- **模块解析**：固定规则（全路径小写 + `.` 分隔 + `init.lua` 特殊处理），last-segment 索引 + 最长后缀匹配，O(1) 查找无 fallback；`require.aliases` 支持最长前缀别名替换
-- **增量解析**：tree-sitter `tree.edit` + `parse(new, Some(old))`
-- **并发安全**：per-URI `edit_locks`，锁顺序 `edit_locks` → `open_uris` → `documents` → `index` → `scheduler.inner`
-- **诊断调度**：`DiagnosticScheduler` 统一管理，公共 300ms debounce 后按 scope 主动收集候选，排序规则为已修改（最近优先）→ 已打开 → 未打开
-- **文件过滤**：`workspace.include` / `workspace.exclude` glob
-
-命令：
-- 构建：`cd lsp && cargo build`
-- 测试：`cd lsp && cargo test --tests`（460+ 条测试）
-
-> 测试清单见 [`docs/testing.md`](docs/testing.md)
-
-## VS Code Extension
-
-> 详细说明见 [`docs/vscode-extension.md`](docs/vscode-extension.md)
-
-**核心功能**：LSP 客户端 + TextMate 语法着色 + 索引状态 StatusBar + 内置 stdlib stubs
-
-命令：
-- 构建：`cd vscode-extension && npm install && npm run compile`
-- 调试：F5 启动 Extension Development Host
-- 打包：`cd vscode-extension && npm run build:local`
-
-## 测试
-
-> 完整测试清单见 [`docs/testing.md`](docs/testing.md)
-
-- **集成测试**：31 个测试文件，460+ 条测试，覆盖所有 LSP 能力
-- **手工端到端**：`tests/lua-root/` + `tests/lua-root2/`（多 workspace 场景）
-- **启动方式**：`.cursor/scripts/test-extension.sh`（macOS/Linux）或 `.cursor/scripts/test-extension.ps1`（Windows）
-
-## 文档索引
+| 模块 | 说明 | 详细文档 |
+|------|------|---------|
+| Grammar | Tree-sitter 文法 + 外部扫描器 | [`grammar/`](grammar/) |
+| LSP 能力 | 30+ 能力（导航/着色/诊断/EmmyLua 注解等） | [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md) |
+| 索引架构 | 冷启动流水线、模块解析、并发安全 | [`docs/index-architecture.md`](docs/index-architecture.md) |
+| 性能分析 | 5 万文件级目标与瓶颈 | [`docs/performance-analysis.md`](docs/performance-analysis.md) |
+| VS Code 扩展 | TextMate 着色 + LSP 客户端 | [`docs/vscode-extension.md`](docs/vscode-extension.md) |
+| 测试 | 460+ 条集成测试 | [`docs/testing.md`](docs/testing.md) |
 
 完整文档目录见 [`docs/README.md`](docs/README.md)。
