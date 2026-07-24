@@ -768,21 +768,23 @@ impl LanguageServer for Backend {
                     loc.range.end.character
                 );
             }
-            Some(GotoDefinitionResponse::Array(locs)) => {
-                for (i, loc) in locs.iter().enumerate() {
+            Some(GotoDefinitionResponse::Link(links)) => {
+                lsp_log!("[goto] result: Link ({} links)", links.len());
+                for (i, link) in links.iter().enumerate() {
                     lsp_log!(
-                        "[goto] result[{}]: {:?} {}:{}-{}:{}",
+                        "[goto]   [{}]: {:?} {}:{}-{}:{}",
                         i,
-                        loc.uri,
-                        loc.range.start.line,
-                        loc.range.start.character,
-                        loc.range.end.line,
-                        loc.range.end.character
+                        link.target_uri,
+                        link.target_range.start.line,
+                        link.target_range.start.character,
+                        link.target_range.end.line,
+                        link.target_range.end.character
                     );
                 }
             }
-            Some(GotoDefinitionResponse::Link(_)) => {
-                lsp_log!("[goto] result: Link");
+            Some(GotoDefinitionResponse::Array(_)) => {
+                // apply_goto_strategy no longer produces Array; kept for
+                // exhaustive match on the LSP type.
             }
             None => {
                 lsp_log!("[goto] result: None");

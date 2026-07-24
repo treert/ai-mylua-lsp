@@ -7,10 +7,19 @@ use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 use tower_lsp_server::ls_types::GotoDefinitionResponse;
 
-fn single_loc(resp: &GotoDefinitionResponse) -> &tower_lsp_server::ls_types::Location {
+fn single_loc(resp: &GotoDefinitionResponse) -> tower_lsp_server::ls_types::Location {
     match resp {
-        GotoDefinitionResponse::Scalar(loc) => loc,
-        GotoDefinitionResponse::Array(v) if !v.is_empty() => &v[0],
+        GotoDefinitionResponse::Scalar(loc) => loc.clone(),
+        GotoDefinitionResponse::Array(v) if !v.is_empty() => v[0].clone(),
+        GotoDefinitionResponse::Link(v) if !v.is_empty() => {
+            // For type-definition tests, the expected "jump target" is
+            // the anchor statement range (target_range), not the
+            // identifier token (target_selection_range).
+            tower_lsp_server::ls_types::Location {
+                uri: v[0].target_uri.clone(),
+                range: v[0].target_range,
+            }
+        }
         _ => panic!("expected at least one location, got {:?}", resp),
     }
 }

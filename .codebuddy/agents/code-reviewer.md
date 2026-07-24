@@ -5,7 +5,7 @@ model: inherit
 readonly: true
 tools: list_dir, search_file, search_content, read_file, read_lints, web_search
 agentMode: agentic
-enabled: false
+enabled: true
 enabledAutoRun: true
 ---
 # 代码审查员规范

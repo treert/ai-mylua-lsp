@@ -31,7 +31,7 @@ fn goto_definition_inner(
         .line_index()
         .position_to_byte_offset(doc.source(), position)?;
     if let Some(type_name) = crate::emmy::emmy_type_name_at_byte(doc.source(), byte_offset) {
-        return type_definition_for_name(&type_name, index, strategy);
+        return type_definition_for_name(&type_name, index, strategy, None);
     }
 
     let ident_node = find_node_at_position(doc.root_node()?, byte_offset)?;
@@ -113,19 +113,20 @@ fn goto_definition_inner(
     }
 
     if let Some(candidates) = index.global_shard.get(name) {
-        let locations: Vec<Location> = candidates
+        // Compute origin range here (only used by this branch).
+        let origin_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
+        let links: Vec<LocationLink> = candidates
             .iter()
-            .filter_map(|c| {
-                let uri = resolve_uri(c.source_uri_id());
-                Some(Location {
-                    uri: uri.clone(),
-                    range: c.selection_range.into(),
-                })
+            .map(|c| LocationLink {
+                origin_selection_range: Some(origin_range),
+                target_uri: resolve_uri(c.source_uri_id()),
+                target_range: c.range.into(),
+                target_selection_range: c.selection_range.into(),
             })
             .collect();
 
-        if !locations.is_empty() {
-            return Some(apply_goto_strategy(locations, strategy));
+        if !links.is_empty() {
+            return Some(apply_goto_strategy(links, strategy));
         }
     }
 
@@ -197,7 +198,7 @@ pub fn goto_type_definition(
     // directly. If not found, returning None is correct (there's no
     // Lua-side definition to fall back to).
     let word = crate::references::extract_word_at(doc.text(), byte_offset)?;
-    type_definition_for_name(&word, index, strategy)
+    type_definition_for_name(&word, index, strategy, None)
 }
 
 /// Given a local variable's declaration URI + name, look up its
@@ -222,7 +223,7 @@ fn type_definition_for_local(
     // For `Known(_)` facts the resolver would just return the same
     // fact, so skip the redundant pass.
     if let Some(type_name) = type_name_of(&fact) {
-        return type_definition_for_name(&type_name, index, strategy);
+        return type_definition_for_name(&type_name, index, strategy, None);
     }
     // Indirect: `local x = someGlobalReturningFoo()` / `require("mod")`
     // with Emmy module return type — let the resolver chase stubs
@@ -230,7 +231,7 @@ fn type_definition_for_local(
     // resolved fact.
     let resolved_fact = resolver::resolve_type(uri_id, &fact, index).type_fact;
     if let Some(type_name) = type_name_of(&resolved_fact) {
-        return type_definition_for_name(&type_name, index, strategy);
+        return type_definition_for_name(&type_name, index, strategy, None);
     }
     None
 }
@@ -253,25 +254,28 @@ fn type_definition_for_name(
     name: &str,
     index: &WorkspaceAggregation,
     strategy: &GotoStrategy,
+    origin_selection_range: Option<Range>,
 ) -> Option<GotoDefinitionResponse> {
     let candidates = index.type_candidates(name)?;
     if candidates.is_empty() {
         return None;
     }
-    let locations: Vec<Location> = candidates
+    let links: Vec<LocationLink> = candidates
         .iter()
-        .filter_map(|c| {
-            let uri = resolve_uri(c.source_uri_id());
-            Some(Location {
-                uri: uri.clone(),
-                range: c.range.into(),
-            })
+        .map(|c| LocationLink {
+            origin_selection_range,
+            target_uri: resolve_uri(c.source_uri_id()),
+            target_range: c.range.into(),
+            target_selection_range: c
+                .name_range
+                .map(Into::into)
+                .unwrap_or_else(|| c.range.into()),
         })
         .collect();
-    if locations.is_empty() {
+    if links.is_empty() {
         return None;
     }
-    Some(apply_goto_strategy(locations, strategy))
+    Some(apply_goto_strategy(links, strategy))
 }
 
 /// AST-driven goto for a dotted access: the clicked identifier is the
@@ -547,19 +551,31 @@ fn identifier_index_in_list(list: tree_sitter::Node, target: tree_sitter::Node) 
 }
 
 fn apply_goto_strategy(
-    locations: Vec<Location>,
+    links: Vec<LocationLink>,
     strategy: &GotoStrategy,
 ) -> GotoDefinitionResponse {
+    // For Scalar responses, use `target_range` (the full anchor statement)
+    // rather than `target_selection_range` (just the identifier token).
+    // This matches the historical behavior where `Location.range` was the
+    // anchor range, and keeps existing tests passing.
     match strategy {
         GotoStrategy::Single => {
-            GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
+            let link = links.into_iter().next().unwrap();
+            GotoDefinitionResponse::Scalar(Location {
+                uri: link.target_uri,
+                range: link.target_range,
+            })
         }
-        GotoStrategy::List => GotoDefinitionResponse::Array(locations),
+        GotoStrategy::List => GotoDefinitionResponse::Link(links),
         GotoStrategy::Auto => {
-            if locations.len() == 1 {
-                GotoDefinitionResponse::Scalar(locations.into_iter().next().unwrap())
+            if links.len() == 1 {
+                let link = links.into_iter().next().unwrap();
+                GotoDefinitionResponse::Scalar(Location {
+                    uri: link.target_uri,
+                    range: link.target_range,
+                })
             } else {
-                GotoDefinitionResponse::Array(locations)
+                GotoDefinitionResponse::Link(links)
             }
         }
     }

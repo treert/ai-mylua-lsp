@@ -1,5 +1,7 @@
-UE = {}
+-- gg_test = 3
+gg_test = 3
 
+UE = {}
 
 ---@class T1
 ---@field t1 number

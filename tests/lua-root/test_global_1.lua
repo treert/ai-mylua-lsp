@@ -1,6 +1,8 @@
+-- gg_test = 1
+gg_test = 1
+
 -- define a global variable gg
 _G.gg = {}
-
 
 -- gg.a1 = 1
 gg.a1 = 1

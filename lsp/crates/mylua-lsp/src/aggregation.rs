@@ -785,6 +785,352 @@ mod tests {
 
     fn assert_symbol(_: LuaSymbol) {}
 
+    fn make_summary_with_global(
+        uri: tower_lsp_server::ls_types::Uri,
+        global_names: &[&str],
+    ) -> DocumentSummary {
+        use crate::summary::GlobalContribution;
+        let contributions: Vec<GlobalContribution> = global_names
+            .iter()
+            .map(|name| GlobalContribution {
+                name: intern_lua_symbol(name),
+                kind: GlobalContributionKind::Variable,
+                type_fact: TypeFact::Unknown,
+                range: byte_range(),
+                selection_range: byte_range(),
+            })
+            .collect();
+        DocumentSummary {
+            uri,
+            global_contributions: contributions,
+            function_summaries: HashMap::new(),
+            function_name_index: HashMap::new(),
+            type_definitions: vec![],
+            table_shapes: HashMap::new(),
+            module_return_type: None,
+            module_return_range: None,
+            signature_fingerprint: 0,
+            call_sites: vec![],
+            is_meta: false,
+            meta_name: None,
+        }
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_after_build_initial() {
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+        let n2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal2.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+        let n2_id = intern_uri(&n2_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        // Insert in arbitrary order — sort must be independent of insert order.
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"])),
+            (n2_id, make_summary_with_global(n2_uri.clone(), &["Foo"])),
+        ]);
+
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation candidate should be first after build_initial"
+        );
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_after_upsert_normal() {
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+        let n2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal2.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+        let n2_id = intern_uri(&n2_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"])),
+            (n2_id, make_summary_with_global(n2_uri.clone(), &["Foo"])),
+        ]);
+
+        // Simulate editing a normal file.
+        agg.upsert_summary(n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"]));
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation candidate should be first after upserting normal file"
+        );
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_after_upsert_annotation() {
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+        let n2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal2.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+        let n2_id = intern_uri(&n2_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"])),
+            (n2_id, make_summary_with_global(n2_uri.clone(), &["Foo"])),
+        ]);
+
+        // Simulate editing the annotation file itself.
+        agg.upsert_summary(ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"]));
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation candidate should be first after upserting annotation file"
+        );
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_after_upsert_new_file() {
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+        let n3_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal3.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+        let n3_id = intern_uri(&n3_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"])),
+        ]);
+
+        // Simulate a brand-new file (first upsert, not in summaries yet).
+        agg.upsert_summary(n3_id, make_summary_with_global(n3_uri.clone(), &["Foo"]));
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation candidate should be first after upserting new file"
+        );
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_during_cold_start_upserts() {
+        // Simulate the cold-start window: files upserted one-by-one
+        // (no build_initial). Each upsert must keep annotation first.
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+        let n2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal2.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+        let n2_id = intern_uri(&n2_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        // Insert normal first, then annotation, then another normal.
+        agg.upsert_summary(n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"]));
+        agg.upsert_summary(ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"]));
+        agg.upsert_summary(n2_id, make_summary_with_global(n2_uri.clone(), &["Foo"]));
+
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(candidates.len(), 3);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation should be first during cold-start upserts"
+        );
+    }
+
+    #[test]
+    fn annotation_path_ranks_first_in_type_shard() {
+        use crate::summary::{TypeDefinition, TypeDefinitionKind};
+
+        fn make_summary_with_type(
+            uri: tower_lsp_server::ls_types::Uri,
+            type_name: &str,
+        ) -> DocumentSummary {
+            DocumentSummary {
+                uri,
+                global_contributions: vec![],
+                function_summaries: HashMap::new(),
+                function_name_index: HashMap::new(),
+                type_definitions: vec![TypeDefinition {
+                    name: intern_lua_symbol(type_name),
+                    kind: TypeDefinitionKind::Class,
+                    parents: vec![],
+                    fields: vec![],
+                    alias_type: None,
+                    generic_params: vec![],
+                    range: byte_range(),
+                    name_range: None,
+                    anchor_shape_id: None,
+                }],
+                table_shapes: HashMap::new(),
+                module_return_type: None,
+                module_return_range: None,
+                signature_fingerprint: 0,
+                call_sites: vec![],
+                is_meta: false,
+                meta_name: None,
+            }
+        }
+
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_type(n1_uri.clone(), "MyType")),
+            (ann_id, make_summary_with_type(ann_uri.clone(), "MyType")),
+        ]);
+
+        let candidates = agg
+            .type_candidates("MyType")
+            .expect("MyType candidates");
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation type candidate should be first"
+        );
+
+        // Upsert normal file — annotation should stay first.
+        agg.upsert_summary(n1_id, make_summary_with_type(n1_uri.clone(), "MyType"));
+        let candidates = agg.type_candidates("MyType").expect("MyType candidates");
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation type candidate should stay first after upsert normal"
+        );
+    }
+
+    #[test]
+    fn ue4_annotation_ranks_first_with_real_paths() {
+        // Reproduce the user's exact scenario: UE4 defined in 5 files,
+        // one under UEAnnotation/, four under Content/.
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///D%3A/NCDevelop/NC_Shell/UEAnnotation/LuaComment/UE4.lua"
+                .parse()
+                .unwrap();
+        let l1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///D%3A/NCDevelop/NC_Shell/Content/LetsGo/Script/StartUp/UnLua.lua"
+                .parse()
+                .unwrap();
+        let l2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///D%3A/NCDevelop/NC_Shell/Content/LetsGo/Script/UnLua.lua"
+                .parse()
+                .unwrap();
+        let ls1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///D%3A/NCDevelop/NC_Shell/Content/LetsGoSDK/Script/Boot/UnLua.lua"
+                .parse()
+                .unwrap();
+        let ls2_uri: tower_lsp_server::ls_types::Uri =
+            "file:///D%3A/NCDevelop/NC_Shell/Content/LetsGoSDK/Script/StartUp/UnLua.lua"
+                .parse()
+                .unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let l1_id = intern_uri(&l1_uri);
+        let l2_id = intern_uri(&l2_uri);
+        let ls1_id = intern_uri(&ls1_uri);
+        let ls2_id = intern_uri(&ls2_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        // Insert in the order a workspace scan might produce (Content first).
+        agg.build_initial(vec![
+            (l1_id, make_summary_with_global(l1_uri.clone(), &["UE4"])),
+            (l2_id, make_summary_with_global(l2_uri.clone(), &["UE4"])),
+            (ls1_id, make_summary_with_global(ls1_uri.clone(), &["UE4"])),
+            (ls2_id, make_summary_with_global(ls2_uri.clone(), &["UE4"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["UE4"])),
+        ]);
+
+        let candidates = agg.global_shard.get("UE4").expect("UE4 candidates");
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "UEAnnotation should be first after build_initial"
+        );
+
+        // Now simulate editing one of the Content files (upsert).
+        agg.upsert_summary(l2_id, make_summary_with_global(l2_uri.clone(), &["UE4"]));
+        let candidates = agg.global_shard.get("UE4").expect("UE4 candidates");
+        assert_eq!(candidates.len(), 5);
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "UEAnnotation should still be first after upserting Content file"
+        );
+    }
+
+    #[test]
+    fn build_initial_after_cold_start_upsert_deduplicates_and_sorts() {
+        // Cold-start window: file upserted via did_open before the
+        // workspace scan's build_initial runs. build_initial must clear
+        // shards (no duplicate candidates) and still sort correctly.
+        let ann_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/annotation/test.lua".parse().unwrap();
+        let n1_uri: tower_lsp_server::ls_types::Uri =
+            "file:///proj/normal1.lua".parse().unwrap();
+
+        let ann_id = intern_uri(&ann_uri);
+        let n1_id = intern_uri(&n1_uri);
+
+        let mut agg = WorkspaceAggregation::new();
+        // Simulate did_open during cold-start: upsert before build_initial.
+        agg.upsert_summary(n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"]));
+        // Workspace scan completes — build_initial includes the upserted file.
+        agg.build_initial(vec![
+            (n1_id, make_summary_with_global(n1_uri.clone(), &["Foo"])),
+            (ann_id, make_summary_with_global(ann_uri.clone(), &["Foo"])),
+        ]);
+
+        let candidates = agg.global_shard.get("Foo").expect("Foo candidates");
+        assert_eq!(
+            candidates.len(),
+            2,
+            "no duplicate candidates after build_initial"
+        );
+        assert_eq!(
+            candidates[0].source_uri_id(),
+            ann_id,
+            "annotation should be first after build_initial following cold-start upsert"
+        );
+    }
+
     #[test]
     fn long_lived_aggregation_names_use_symbols_but_queries_stay_string_facing() {
         let uri = "file:///aggregation_symbols.lua".parse().unwrap();

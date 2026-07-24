@@ -227,6 +227,10 @@ fn walk_lua_files_jwalk(base: &Path, filter: &FileFilter) -> Vec<PathBuf> {
 
     let walker = WalkDir::new(base)
         .skip_hidden(false) // we handle hidden dirs via our own exclude globs
+        // Follow symlinks/junctions so directories reached through a
+        // link (e.g. `UEAnnotation/LuaComment -> …`) are indexed too.
+        // jwalk detects link cycles via file-id, so this cannot loop.
+        .follow_links(true)
         .process_read_dir(move |_depth, _path, _state, children| {
             children.retain(|entry_result| {
                 let Ok(entry) = entry_result.as_ref() else {

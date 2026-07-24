@@ -234,6 +234,38 @@ function createLanguageClient(
     synchronize: {
       fileEvents: luaFileWatcher,
     },
+    middleware: {
+      provideDefinition: async (document, position, token, next) => {
+        // TEMP-DISABLED: QuickPick ordering workaround disabled for investigation.
+        // VS Code's built-in peek view sorts multi-candidate `Location[]` and
+        // `LocationLink[]` by URI, destroying the server's `UriPriority` order.
+        // Uncomment the block below to re-enable the QuickPick workaround.
+        /*
+        const result = await next(document, position, token);
+        if (!result || !Array.isArray(result) || result.length <= 1) {
+          return result;
+        }
+
+        const items = result.map((item: any) => {
+          // LocationLink uses targetUri/targetRange; Location uses uri/range.
+          const uri = item.targetUri ?? item.uri;
+          const range = item.targetRange ?? item.range;
+          return {
+            label: path.basename(uri.fsPath),
+            description: vscode.workspace.asRelativePath(uri),
+            detail: `Line ${range.start.line + 1}`,
+            item,
+          };
+        });
+
+        const picked = await vscode.window.showQuickPick(items, {
+          placeHolder: `Select a definition (${items.length} candidates)`,
+        });
+        return picked ? [picked.item] : undefined;
+        */
+        return next(document, position, token);
+      },
+    },
   };
   const next = new LanguageClient(
     'mylua-lsp',

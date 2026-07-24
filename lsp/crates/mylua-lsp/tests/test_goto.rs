@@ -4,6 +4,90 @@ use mylua_lsp::config::GotoStrategy;
 use mylua_lsp::goto;
 use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
+use tower_lsp_server::ls_types::GotoDefinitionResponse;
+
+#[test]
+fn goto_multi_candidate_returns_links_in_uri_priority_order() {
+    // Two files define the same global; the one under `annotation/`
+    // must sort first (UriPriority::annotation_key), and the response
+    // must be `Link` (not `Array`) so VS Code preserves server order.
+    let (docs, mut agg, _) = setup_workspace(&[
+        ("annotation/stub.lua", "GLOBAL_X = 1\n"),
+        ("game/logic.lua", "GLOBAL_X = 2\n"),
+        ("main.lua", "print(GLOBAL_X)\n"),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main doc");
+
+    let result = goto::goto_definition(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(0, 8),
+        &mut agg,
+        &GotoStrategy::Auto,
+    )
+    .expect("multi-candidate goto should resolve");
+
+    match result {
+        GotoDefinitionResponse::Link(links) => {
+            assert_eq!(links.len(), 2, "expected 2 candidates");
+            assert!(
+                links[0].target_uri.path().as_str().contains("annotation"),
+                "annotation candidate must be first, got {:?}",
+                links[0].target_uri,
+            );
+            assert!(
+                links[1].target_uri.path().as_str().contains("game"),
+                "game candidate must be second, got {:?}",
+                links[1].target_uri,
+            );
+            assert!(
+                links[0].origin_selection_range.is_some(),
+                "origin_selection_range must be set for global goto"
+            );
+            // target_range covers the full assignment statement;
+            // target_selection_range covers just the identifier.
+            assert!(
+                links[0].target_range != links[0].target_selection_range,
+                "target_range should differ from target_selection_range"
+            );
+        }
+        other => panic!("expected Link for multi-candidate Auto, got {:?}", other),
+    }
+}
+
+#[test]
+fn goto_list_strategy_single_candidate_returns_link() {
+    // `List` strategy with a single candidate must still return `Link`
+    // (not `Scalar`), because the caller explicitly asked for a list.
+    let (docs, mut agg, _) = setup_workspace(&[
+        ("annotation/stub.lua", "GLOBAL_X = 1\n"),
+        ("main.lua", "print(GLOBAL_X)\n"),
+    ]);
+    let main_uri = make_uri("main.lua");
+    let main_doc = docs.get(&intern_uri(&main_uri)).expect("main doc");
+
+    let result = goto::goto_definition(
+        main_doc,
+        intern_uri(&main_uri),
+        pos(0, 8),
+        &mut agg,
+        &GotoStrategy::List,
+    )
+    .expect("goto should resolve");
+
+    match result {
+        GotoDefinitionResponse::Link(links) => {
+            assert_eq!(links.len(), 1, "expected 1 candidate");
+            assert!(
+                links[0].target_uri.path().as_str().contains("annotation"),
+                "annotation candidate must be first, got {:?}",
+                links[0].target_uri,
+            );
+        }
+        other => panic!("expected Link for List strategy, got {:?}", other),
+    }
+}
 
 #[test]
 fn goto_unresolved_dotted_field_does_not_fallback_to_bare_global_name() {
