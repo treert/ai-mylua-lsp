@@ -205,7 +205,17 @@ pub fn find_references_by_uri_id(
                     for candidate in candidates {
                         locations.push(ReferenceLocation {
                             uri_id: candidate.source_uri_id(),
-                            range: candidate.range.into(),
+                            // Prefer the type-name token (e.g. `Foo` in
+                            // `---@class Foo`) over the full anchor
+                            // statement range. The anchor range (e.g. the
+                            // whole `Foo = {}` assignment) would collide
+                            // with the `global_shard` declaration on the
+                            // same line but with a different span, defeating
+                            // deduplication and producing a duplicate entry.
+                            range: candidate
+                                .name_range
+                                .unwrap_or(candidate.range)
+                                .into(),
                         });
                     }
                 }

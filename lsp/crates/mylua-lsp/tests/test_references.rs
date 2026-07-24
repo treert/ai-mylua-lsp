@@ -846,3 +846,60 @@ fn references_scan_comments_toggle_excludes_plain_comments_when_disabled() {
         off_in_use[0].range.start.line,
     );
 }
+
+#[test]
+fn references_type_name_no_duplicate_on_assignment_line() {
+    // Regression: for a `---@class Foo` followed by `Foo = {}`, clicking on
+    // `Foo` in the assignment used to return the assignment line TWICE — once
+    // from the type candidate (whose `range` spans the whole `Foo = {}`
+    // statement) and once from the global shard (whose `selection_range` is
+    // just the `Foo` identifier). The two spans differ so deduplication did
+    // not collapse them. The type candidate now exposes `name_range` (the
+    // `Foo` token inside `---@class Foo`) and references uses that, which
+    // deduplicates against the Emmy-annotation scan of the same line.
+    let src = "---@class TestCls1\nTestCls1 = {}\n\nlocal xx = nil ---@type TestCls1\nlocal yy = xx -- just write TestCls1 name here\n";
+    let (doc, uri, agg) = setup_single_file(src, "test_class.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    // Click on `TestCls1` in `TestCls1 = {}` (line 1, col 0)
+    let locs = references::find_references(
+        doc,
+        intern_uri(&uri),
+        pos(1, 0),
+        true,
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+        &ReferencesConfig::default(),
+    )
+    .expect("should find references for TestCls1");
+
+    // The assignment line (line 1) must appear exactly once.
+    let line1_count = locs.iter().filter(|l| l.range.start.line == 1).count();
+    assert_eq!(
+        line1_count, 1,
+        "assignment line should appear exactly once, got {}: {:?}",
+        line1_count, locs,
+    );
+
+    // And the single hit on line 1 must be the `TestCls1` identifier only
+    // (char 0..8), not the whole `TestCls1 = {}` statement.
+    let line1 = locs.iter().find(|l| l.range.start.line == 1).unwrap();
+    assert_eq!(
+        (line1.range.start.character, line1.range.end.character),
+        (0, 8),
+        "line 1 hit should span only `TestCls1`, got {:?}",
+        line1.range,
+    );
+
+    // Sanity: the @class header (line 0), @type usage (line 3) and the
+    // plain-comment mention (line 4) are all present exactly once.
+    for expected_line in [0u32, 3, 4] {
+        let count = locs.iter().filter(|l| l.range.start.line == expected_line).count();
+        assert_eq!(
+            count, 1,
+            "line {} should appear exactly once, got {}: {:?}",
+            expected_line, count, locs,
+        );
+    }
+}

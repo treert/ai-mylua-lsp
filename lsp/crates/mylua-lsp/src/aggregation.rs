@@ -375,6 +375,12 @@ pub struct TypeCandidate {
     pub kind: crate::summary::TypeDefinitionKind,
     source_uri_id: UriId,
     pub range: ByteRange,
+    /// Range of just the type name token (e.g. `Foo` within
+    /// `---@class Foo`). Falls back to `range` when absent. Used by
+    /// `find_references` so a type-name declaration highlights the name
+    /// itself rather than the whole anchor statement (which would
+    /// collide with the matching `global_shard` entry on the same line).
+    pub name_range: Option<ByteRange>,
 }
 
 impl TypeCandidate {
@@ -519,6 +525,7 @@ impl WorkspaceAggregation {
                         kind: td.kind.clone(),
                         source_uri_id: *uri_id,
                         range: td.range,
+                        name_range: td.name_range,
                     });
                 }
             }
@@ -588,6 +595,7 @@ impl WorkspaceAggregation {
                 kind: td.kind.clone(),
                 source_uri_id: uri_id,
                 range: td.range,
+                name_range: td.name_range,
             });
             candidates.sort_by_cached_key(|c| {
                 summary_priorities
@@ -803,6 +811,7 @@ mod tests {
             kind: TypeDefinitionKind::Class,
             source_uri_id: uri_id,
             range: byte_range(),
+            name_range: None,
         };
         assert_symbol(type_candidate.name);
 
@@ -831,6 +840,7 @@ mod tests {
                 kind: TypeDefinitionKind::Class,
                 source_uri_id: uri_id,
                 range: byte_range(),
+                name_range: None,
             }],
         );
         agg.global_shard.push_candidate(
