@@ -308,12 +308,23 @@ pub enum GotoStrategy {
 #[serde(default)]
 pub struct ReferencesConfig {
     pub strategy: ReferencesStrategy,
+    /// Whether to scan plain (non-`---@`) comments for occurrences of a
+    /// registered Emmy type name when collecting references.
+    ///
+    /// When `true` (default), a type name mentioned in an ordinary
+    /// `-- ...` comment is reported as a reference — matching the
+    /// historical behavior. Set to `false` to only match type names
+    /// inside `---@` annotation lines, reducing false positives from
+    /// prose comments that merely mention a type in passing.
+    #[serde(rename = "scanComments")]
+    pub scan_comments: bool,
 }
 
 impl Default for ReferencesConfig {
     fn default() -> Self {
         Self {
             strategy: ReferencesStrategy::Best,
+            scan_comments: true,
         }
     }
 }

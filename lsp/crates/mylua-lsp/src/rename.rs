@@ -1,5 +1,5 @@
 use crate::aggregation::WorkspaceAggregation;
-use crate::config::ReferencesStrategy;
+use crate::config::{ReferencesConfig, ReferencesStrategy};
 use crate::document::{Document, DocumentLookup};
 use crate::lua_builtins::LUA_KEYWORDS;
 use crate::references;
@@ -42,6 +42,7 @@ pub fn rename(
     new_name: &str,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
+    ref_config: &ReferencesConfig,
 ) -> RenameResult {
     if !is_valid_lua_identifier(new_name) {
         return Err("New name is not a valid Lua identifier");
@@ -50,6 +51,14 @@ pub fn rename(
         return Err("New name collides with a Lua keyword");
     }
 
+    // rename must cover every candidate → force the Merge strategy, but
+    // still honor the user's `scanComments` preference so plain-comment
+    // type-name occurrences are renamed consistently with what
+    // `find references` reports.
+    let merge_config = ReferencesConfig {
+        strategy: ReferencesStrategy::Merge,
+        scan_comments: ref_config.scan_comments,
+    };
     let locations = match references::find_references(
         doc,
         uri_id,
@@ -57,7 +66,7 @@ pub fn rename(
         true,
         index,
         all_docs,
-        &ReferencesStrategy::Merge,
+        &merge_config,
     ) {
         Some(locs) => locs,
         None => return Ok(None),

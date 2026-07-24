@@ -1,6 +1,6 @@
 mod test_helpers;
 
-use mylua_lsp::config::ReferencesStrategy;
+use mylua_lsp::config::ReferencesConfig;
 use mylua_lsp::references;
 use mylua_lsp::uri_id::intern_uri;
 use std::collections::HashMap;
@@ -23,7 +23,7 @@ local x = abc + 1"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
     assert!(result.is_some(), "should find references for `abc`");
     let locs = result.unwrap();
@@ -52,7 +52,7 @@ end"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
     assert!(result.is_some(), "should find references for `param`");
     let locs = result.unwrap();
@@ -78,7 +78,7 @@ fn references_no_result_for_keyword() {
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
     // Should not panic; result may be None
     let _ = result;
@@ -102,7 +102,7 @@ fn references_local_rebind_does_not_claim_outer_rhs() {
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find references for inner x");
 
@@ -154,7 +154,7 @@ fn references_shadowed_outer_not_claimed_by_inner() {
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find references for outer x");
 
@@ -247,7 +247,7 @@ Bar = {}"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("references should resolve for Emmy class name");
 
@@ -331,7 +331,7 @@ fn references_emmy_type_word_boundary() {
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .unwrap_or_default();
 
@@ -358,7 +358,7 @@ print(myvar)"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
     let without_decl = references::find_references(
         doc,
@@ -367,7 +367,7 @@ print(myvar)"#;
         false,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
 
     if let (Some(with), Some(without)) = (with_decl, without_decl) {
@@ -430,7 +430,7 @@ print(b.name)"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find field references for hp");
 
@@ -479,7 +479,7 @@ player.hp = 100"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find cross-file field references for hp");
 
@@ -515,7 +515,7 @@ other.foo = 2"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     );
     // Should return Some (can still be a global identity or produce empty
     // results) — the key assertion is it must NOT panic and must NOT include
@@ -588,7 +588,7 @@ d.legs = 4"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find field references for legs");
 
@@ -660,7 +660,7 @@ end"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find references for method bbb on local class");
 
@@ -732,7 +732,7 @@ end"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find references for hello from declaration");
 
@@ -744,7 +744,7 @@ end"#;
         true,
         &agg,
         &mylua_lsp::document::DocumentStoreView::new(&docs),
-        &ReferencesStrategy::Best,
+        &ReferencesConfig::default(),
     )
     .expect("should find references for hello from usage");
 
@@ -766,5 +766,83 @@ end"#;
     assert_eq!(
         from_decl, from_usage,
         "references from declaration and usage should match",
+    );
+}
+
+#[test]
+fn references_scan_comments_toggle_excludes_plain_comments_when_disabled() {
+    // `references.scanComments` controls whether plain (non-`---@`)
+    // comments are scanned for registered Emmy type names. When on
+    // (default), a type name in an ordinary `-- ...` comment counts
+    // as a reference; when off, only `---@` annotation lines match.
+    use mylua_lsp::config::ReferencesStrategy;
+
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("def.lua", "---@class Foo\nFoo = {}"),
+        (
+            "use.lua",
+            "---@type Foo\nlocal a = nil\n-- this is a Foo comment\n",
+        ),
+    ]);
+    let def_uri = make_uri("def.lua");
+    let use_uri = make_uri("use.lua");
+    let def_doc = docs.get(&intern_uri(&def_uri)).unwrap();
+    let view = mylua_lsp::document::DocumentStoreView::new(&docs);
+
+    let cfg_on = ReferencesConfig {
+        strategy: ReferencesStrategy::Best,
+        scan_comments: true,
+    };
+    let cfg_off = ReferencesConfig {
+        strategy: ReferencesStrategy::Best,
+        scan_comments: false,
+    };
+
+    // Click on `Foo` in its `---@class Foo` header (line 0, col 10).
+    let locs_on = references::find_references(
+        def_doc,
+        intern_uri(&def_uri),
+        pos(0, 10),
+        true,
+        &agg,
+        &view,
+        &cfg_on,
+    )
+    .expect("references should resolve for Emmy class name");
+    let locs_off = references::find_references(
+        def_doc,
+        intern_uri(&def_uri),
+        pos(0, 10),
+        true,
+        &agg,
+        &view,
+        &cfg_off,
+    )
+    .expect("references should resolve for Emmy class name");
+
+    let on_in_use: Vec<_> = locs_on.iter().filter(|l| l.uri == use_uri).collect();
+    let off_in_use: Vec<_> = locs_off.iter().filter(|l| l.uri == use_uri).collect();
+
+    // use.lua layout:
+    //   line 0: `---@type Foo`        -> EMMY_LINE, always matched
+    //   line 2: `-- this is a Foo …`  -> COMMENT, only matched when scan_comments on
+    assert!(
+        on_in_use.len() >= 2,
+        "scan_comments=true should match both @type Foo and the plain comment, got {}: {:?}",
+        on_in_use.len(),
+        on_in_use,
+    );
+    assert_eq!(
+        off_in_use.len(),
+        1,
+        "scan_comments=false should match only the @type Foo line, got {}: {:?}",
+        off_in_use.len(),
+        off_in_use,
+    );
+    // The surviving match must be the @type line (line 0), not the comment.
+    assert_eq!(
+        off_in_use[0].range.start.line, 0,
+        "remaining match should be the @type Foo line, got line {}",
+        off_in_use[0].range.start.line,
     );
 }

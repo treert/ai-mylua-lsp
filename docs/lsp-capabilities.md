@@ -36,6 +36,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - EmmyLua 注解内的类型名引用（`@type`/`@param`/`@return`/`@class : Parent` 等）
 - 点击注解内类型名也能触发
 - 声明包含策略可配置（`references.strategy`: Best/Merge/Select）
+- `references.scanComments`（默认 `true`）：是否在普通注释（非 `---@`）里扫描已注册 Emmy 类型名。关闭后仅匹配 `---@` 注解行内的类型名，减少散文注释的误报。rename 跟随同一开关
 
 ### rename
 - 单文件 local + 全工作区全局（含 prepareRename）

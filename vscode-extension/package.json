@@ -343,6 +343,11 @@
           ],
           "default": "best",
           "description": "Multi-candidate references: 'best' uses top candidate, 'merge' unions all, 'select' prompts."
+        },
+        "mylua.references.scanComments": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When finding references to an Emmy type name, also match occurrences inside plain (non-`---@`) comments. When enabled (default), a type name mentioned in an ordinary `-- ...` comment is reported as a reference. Disable to only match type names inside `---@` annotation lines, reducing false positives from prose comments."
         }
       }
     }

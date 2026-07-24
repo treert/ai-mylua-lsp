@@ -28,3 +28,10 @@ local part = PartClass:New()
 
 part.name = "123"
 part.age = 123
+
+
+---@class TestCls1
+TestCls1 = {}
+
+local xx = nil ---@type TestCls1
+local yy = xx -- just write TestCls1 name here

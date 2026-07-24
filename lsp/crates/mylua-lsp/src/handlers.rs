@@ -906,7 +906,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
-        let ref_strategy = self.config.lock().unwrap().references.strategy.clone();
+        let ref_config = self.config.lock().unwrap().references.clone();
         Ok(references::find_references(
             doc,
             uri_id,
@@ -914,7 +914,7 @@ impl LanguageServer for Backend {
             include_declaration,
             &idx,
             &DocumentStoreView::new(&docs),
-            &ref_strategy,
+            &ref_config,
         ))
     }
 
@@ -946,6 +946,7 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let idx = self.index.lock().unwrap();
+        let ref_config = self.config.lock().unwrap().references.clone();
         match rename::rename(
             doc,
             uri_id,
@@ -953,6 +954,7 @@ impl LanguageServer for Backend {
             &params.new_name,
             &idx,
             &DocumentStoreView::new(&docs),
+            &ref_config,
         ) {
             Ok(edit) => Ok(edit),
             Err(msg) => Err(tower_lsp_server::jsonrpc::Error {

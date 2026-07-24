@@ -1,5 +1,6 @@
 {
     "mylua.debug.fileLog": true,
     "mylua.diagnostics.enable": true,
-    "mylua.diagnostics.scope": "full"
+    "mylua.diagnostics.scope": "full",
+    "mylua.references.scanComments": false
 }

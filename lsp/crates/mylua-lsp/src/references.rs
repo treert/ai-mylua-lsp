@@ -1,5 +1,5 @@
 use crate::aggregation::WorkspaceAggregation;
-use crate::config::ReferencesStrategy;
+use crate::config::{ReferencesConfig, ReferencesStrategy};
 use crate::document::{Document, DocumentLookup};
 use crate::resolver;
 use crate::resolver::ResolvedLocation;
@@ -49,7 +49,7 @@ pub fn find_references(
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
-    strategy: &ReferencesStrategy,
+    config: &ReferencesConfig,
 ) -> Option<Vec<Location>> {
     find_references_by_uri_id(
         doc,
@@ -58,7 +58,7 @@ pub fn find_references(
         include_declaration,
         index,
         all_docs,
-        strategy,
+        config,
     )
     .map(|hits| {
         hits.into_iter()
@@ -77,7 +77,7 @@ pub fn find_references_by_uri_id(
     include_declaration: bool,
     index: &WorkspaceAggregation,
     all_docs: &impl DocumentLookup,
-    strategy: &ReferencesStrategy,
+    config: &ReferencesConfig,
 ) -> Option<Vec<ReferenceLocation>> {
     let byte_offset = doc
         .line_index()
@@ -122,7 +122,7 @@ pub fn find_references_by_uri_id(
         Identity::Global { name } => {
             // Declarations
             if include_declaration {
-                collect_global_declarations(name, index, strategy, &mut locations);
+                collect_global_declarations(name, index, &config.strategy, &mut locations);
             }
             // Scan all files
             all_docs.for_each_document_id(|doc_uri_id, file_doc| {
@@ -145,7 +145,12 @@ pub fn find_references_by_uri_id(
             // Also scan Emmy annotations for references to this name
             // (e.g. if it's also a type name)
             if index.contains_type(name.as_str()) {
-                collect_emmy_type_references(name, all_docs, &mut locations);
+                collect_emmy_type_references(
+                    name,
+                    all_docs,
+                    config.scan_comments,
+                    &mut locations,
+                );
             }
         }
         Identity::Field {
@@ -208,7 +213,7 @@ pub fn find_references_by_uri_id(
             // Also include global_shard entries (the runtime value assignment)
             if include_declaration {
                 if let Some(candidates) = index.global_shard.get(name.as_str()) {
-                    match strategy {
+                    match &config.strategy {
                         ReferencesStrategy::Best => {
                             if let Some(best) = candidates.first() {
                                 {
@@ -250,7 +255,12 @@ pub fn find_references_by_uri_id(
                 }
             });
             // Emmy annotation text matches (type names in comments)
-            collect_emmy_type_references(name, all_docs, &mut locations);
+            collect_emmy_type_references(
+                name,
+                all_docs,
+                config.scan_comments,
+                &mut locations,
+            );
         }
     }
 
@@ -778,6 +788,7 @@ fn is_non_reference_position(node: tree_sitter::Node) -> bool {
 fn collect_emmy_type_references(
     type_name: &str,
     all_docs: &impl DocumentLookup,
+    scan_comments: bool,
     locations: &mut Vec<ReferenceLocation>,
 ) {
     all_docs.for_each_document_id(|doc_uri_id, doc| {
@@ -793,6 +804,7 @@ fn collect_emmy_type_references(
             doc_uri_id,
             locations,
             doc.line_index(),
+            scan_comments,
         );
     });
 }
@@ -804,18 +816,35 @@ fn scan_type_in_comments(
     uri_id: UriId,
     locations: &mut Vec<ReferenceLocation>,
     line_index: &LineIndex,
+    scan_comments: bool,
 ) {
     let node = cursor.node();
     match node.syntax_kind() {
-        kind::EMMY_LINE | kind::COMMENT => {
+        kind::EMMY_LINE => {
             emit_type_matches_in_node(node, type_name, source, uri_id, locations, line_index);
+            return;
+        }
+        kind::COMMENT => {
+            // Plain (non-`---@`) comments are only scanned when the user
+            // opts in via `references.scanComments` (default: true).
+            if scan_comments {
+                emit_type_matches_in_node(node, type_name, source, uri_id, locations, line_index);
+            }
             return;
         }
         _ => {}
     }
     if cursor.goto_first_child() {
         loop {
-            scan_type_in_comments(cursor, type_name, source, uri_id, locations, line_index);
+            scan_type_in_comments(
+                cursor,
+                type_name,
+                source,
+                uri_id,
+                locations,
+                line_index,
+                scan_comments,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }

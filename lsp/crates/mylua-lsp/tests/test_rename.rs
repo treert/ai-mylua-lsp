@@ -1,5 +1,6 @@
 mod test_helpers;
 
+use mylua_lsp::config::ReferencesConfig;
 use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::rename;
 use mylua_lsp::uri_id::intern_uri;
@@ -41,7 +42,7 @@ fn rename_local_variable() {
     let view = DocumentStoreView::new(&docs);
     let doc = docs.get(&uri_id).unwrap();
 
-    let result = rename::rename(doc, uri_id, pos(0, 6), "xx", &agg, &view)
+    let result = rename::rename(doc, uri_id, pos(0, 6), "xx", &agg, &view, &ReferencesConfig::default())
         .expect("rename ok")
         .expect("should produce an edit");
     let edits = collect_edits(&result);
@@ -59,11 +60,11 @@ fn rename_rejects_invalid_new_name() {
     let doc = docs.get(&uri_id).unwrap();
 
     // Starts with digit
-    assert!(rename::rename(doc, uri_id, pos(0, 6), "1bad", &agg, &view).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "1bad", &agg, &view, &ReferencesConfig::default()).is_err());
     // Contains space
-    assert!(rename::rename(doc, uri_id, pos(0, 6), "bad name", &agg, &view).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "bad name", &agg, &view, &ReferencesConfig::default()).is_err());
     // Lua keyword
-    assert!(rename::rename(doc, uri_id, pos(0, 6), "local", &agg, &view).is_err());
+    assert!(rename::rename(doc, uri_id, pos(0, 6), "local", &agg, &view, &ReferencesConfig::default()).is_err());
 }
 
 #[test]
@@ -77,7 +78,7 @@ fn rename_global_function_across_files() {
     let doc = docs.get(&a_uri_id).unwrap();
 
     // Click on `helper` in the declaration
-    let result = rename::rename(doc, a_uri_id, pos(0, 10), "utility", &agg, &view)
+    let result = rename::rename(doc, a_uri_id, pos(0, 10), "utility", &agg, &view, &ReferencesConfig::default())
         .expect("rename ok")
         .expect("should produce edit");
     let edits = collect_edits(&result);
@@ -104,7 +105,7 @@ fn rename_emmy_class_updates_all_annotation_refs() {
     let doc = docs.get(&a_uri_id).unwrap();
 
     // Click `Foo` in its `@class Foo` declaration — line 0, col 11.
-    let result = rename::rename(doc, a_uri_id, pos(0, 11), "Gadget", &agg, &view)
+    let result = rename::rename(doc, a_uri_id, pos(0, 11), "Gadget", &agg, &view, &ReferencesConfig::default())
         .expect("rename ok")
         .expect("should produce edit for Emmy class");
     let edits = collect_edits(&result);
@@ -148,7 +149,7 @@ fn rename_emmy_class_field_in_annotation() {
     let doc = docs.get(&a_uri_id).unwrap();
 
     // Click on `bar` in `---@field bar integer` — line 1, col 10.
-    let maybe = rename::rename(doc, a_uri_id, pos(1, 10), "value", &agg, &view).expect("rename ok");
+    let maybe = rename::rename(doc, a_uri_id, pos(1, 10), "value", &agg, &view, &ReferencesConfig::default()).expect("rename ok");
 
     // Emmy @field renames may or may not be fully supported yet
     // (references scanning looks for identifier tokens in the AST,

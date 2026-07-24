@@ -43,6 +43,7 @@ const RESTART_RELEVANT_CONFIG_KEYS = [
   'mylua.documentSymbol.detailLevel',
   'mylua.gotoDefinition.strategy',
   'mylua.references.strategy',
+  'mylua.references.scanComments',
 ];
 
 
@@ -146,6 +147,7 @@ function collectLspConfig(
     },
     references: {
       strategy: cfg.get('references.strategy'),
+      scanComments: cfg.get('references.scanComments'),
     },
     inlayHint: {
       enable: cfg.get('inlayHint.enable'),
