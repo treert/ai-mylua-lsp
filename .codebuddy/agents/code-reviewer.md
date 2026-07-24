@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: 代码审查员。在代码修改完成后自动调用，审查代码质量、正确性和性能。也可在用户提到 review、审查代码、检查 bug 时调用。
-model: hy3-preview-ioa
+model: inherit
 readonly: true
 tools: list_dir, search_file, search_content, read_file, read_lints, web_search
 agentMode: agentic
