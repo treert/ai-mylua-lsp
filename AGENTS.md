@@ -25,22 +25,6 @@
 
 不需要更新文档的场景：bug 修复（不改变功能描述）、纯重构（对外行为不变）、配置微调。
 
-## 完成代码修改后
-
-功能性改动完成后、告知用户之前：
-
-1. `cd lsp && cargo build`（零 error）
-2. 涉及 TS：`cd vscode-extension && npm run compile`
-3. 调用 code-reviewer 子代理
-
-跳过：单行修改、注释/文档、配置微调。
-
-## Gotchas
-
-- 改 `grammar.js` 后必须先 `tree-sitter generate` 再 `cargo build`
-- 平台二进制名：win32 → `mylua-lsp.exe`，其他 → `mylua-lsp`
-- 多平台发布走 `.github/workflows/release.yml`
-
 ## 项目目标
 
 实现 lua vscode 插件，支持语法高亮，语义跳转，hover tips, 诊断，outline 等功能。
