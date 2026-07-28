@@ -442,11 +442,25 @@ fn resolve_recursive(
         TypeFact::Unknown => ResolvedType::unknown(ctx),
 
         TypeFact::Union(types) => {
-            let resolved: Vec<TypeFact> = types
-                .iter()
-                .map(|t| resolve_recursive(ctx, t, agg, depth + 1, visited).type_fact)
-                .collect();
-            ResolvedType::from_fact(ctx, TypeFact::Union(resolved))
+            // Dedup resolved members: distinct stubs (e.g. `CallReturn{f1}`
+            // vs `CallReturn{f2}`) may resolve to the same type, and without
+            // dedup the hover would show `ClassA1 | ClassA1`. Mirrors the
+            // `!resolved_types.contains(...)` idiom used by the field-chain
+            // resolution paths; collapse a single distinct member back to a
+            // bare type (no degenerate `Union([x])`).
+            let mut resolved: Vec<TypeFact> = Vec::with_capacity(types.len());
+            for t in types {
+                let r = resolve_recursive(ctx, t, agg, depth + 1, visited).type_fact;
+                if !resolved.contains(&r) {
+                    resolved.push(r);
+                }
+            }
+            let fact = match resolved.len() {
+                0 => TypeFact::Unknown,
+                1 => resolved.into_iter().next().unwrap(),
+                _ => TypeFact::Union(resolved),
+            };
+            ResolvedType::from_fact(ctx, fact)
         }
 
         TypeFact::Stub(stub) => resolve_stub(ctx, stub, agg, depth, visited),

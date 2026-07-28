@@ -80,3 +80,28 @@ local MiscManager = utils.locals.MiscManager
 local ret1 = MiscManager.m_misc_id
 local ret3 = MiscManager.miscFunc()
 local ret4 = MiscManager:miscMethod()
+
+---@class TestMgr
+local TestMgr = {}
+
+---@return ClassA1
+function TestMgr:f1() 
+    return {}
+end
+
+function TestMgr:f2() 
+    return self:f1()
+end
+
+function TestMgr:test_f()
+    if self.f1 then
+        return self:f1()
+    else
+        return self:f2()
+    end
+end
+
+---@type TestMgr
+utils.TestMgr = {}
+
+local abc = utils.TestMgr:test_f()

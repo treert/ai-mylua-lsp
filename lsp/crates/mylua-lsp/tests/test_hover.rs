@@ -3790,6 +3790,61 @@ ClassA1 = {}
 }
 
 #[test]
+fn hover_return_union_dedups_equivalent_resolved_types() {
+    // `test_f` has two return paths (`self:f1()` and `self:f2()`); both
+    // ultimately resolve to `ClassA1`. During single-file build each path
+    // produces a distinct `CallReturn` stub (func_name `f1` vs `f2`), so
+    // `merge_types` cannot dedup them — the union is only collapsible
+    // after cross-call resolution. The resolved hover type must not show
+    // a duplicated `ClassA1 | ClassA1`.
+    let src = r#"---@class ClassA1
+ClassA1 = {}
+---@class TestMgr
+local TestMgr = {}
+---@return ClassA1
+function TestMgr:f1()
+    return {}
+end
+function TestMgr:f2()
+    return self:f1()
+end
+function TestMgr:test_f()
+    if self.f1 then
+        return self:f1()
+    else
+        return self:f2()
+    end
+end
+---@type TestMgr
+utils.TestMgr = {}
+local abc = utils.TestMgr:test_f()
+print(abc)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "test_return_union_dedup.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(21, 8),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let hover = result.expect("hover on `abc` should return a result");
+    let content = hover_content_string(&hover);
+    assert!(
+        content.contains("---@type ClassA1"),
+        "hover should mention ClassA1, got: {}",
+        content
+    );
+    assert!(
+        !content.contains("ClassA1 | ClassA1"),
+        "hover should not show duplicated ClassA1 union, got: {}",
+        content
+    );
+}
+
+#[test]
 fn hover_emmy_comment_unmarked_description_words_do_not_resolve_as_types() {
     let src = r#"---@class BaseCls
 BaseCls = {}
