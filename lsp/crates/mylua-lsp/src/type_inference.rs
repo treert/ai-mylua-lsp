@@ -8,7 +8,7 @@
 //! avoid circular / unnatural dependencies.
 
 use crate::aggregation::WorkspaceAggregation;
-use crate::resolver;
+use crate::resolver::{self, ResolveCtx, ResolvedType};
 use crate::scope::ScopeTree;
 use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, TypeFact};
@@ -127,6 +127,53 @@ pub(crate) fn infer_node_type_in_file_id(
         }
         _ => TypeFact::Unknown,
     }
+}
+
+/// Like `infer_node_type_in_file_id` but returns a full `ResolvedType`,
+/// preserving the owning file (`owner_uri_id`) of per-file values such as
+/// `KnownType::Table(shape_id)`.
+///
+/// `infer_node_type_in_file_id` returns only the `TypeFact`, discarding the
+/// owner. For dotted access (`a.b.c`) resolved via `resolve_field_chain_*`,
+/// the resulting `Known(Table(shape_id))` may belong to a *different* file
+/// than the one where inference runs (e.g. a global table defined elsewhere).
+/// Losing the owner makes downstream lookups (completion, hover, …) query the
+/// wrong file's summary for the per-file shape id and silently fail. This
+/// variant threads the owner through for the dotted-access case.
+pub(crate) fn infer_node_type_resolved_in_file_id(
+    node: tree_sitter::Node,
+    source: &[u8],
+    uri_id: UriId,
+    scope_tree: &ScopeTree,
+    index: &WorkspaceAggregation,
+) -> ResolvedType {
+    // Dotted access `variable { object, field }`: resolve the field chain
+    // directly so the per-file `TableShapeId` owner is preserved instead of
+    // being collapsed back to `uri_id`.
+    if node.is_kind(kind::VARIABLE) {
+        if let (Some(object), Some(field)) = (
+            node.child_by_field(field::OBJECT),
+            node.child_by_field(field::FIELD),
+        ) {
+            let base_fact =
+                infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
+            let field_name = node_text(field, source).to_string();
+            return resolver::resolve_field_chain_in_file_id(
+                uri_id,
+                &base_fact,
+                &[field_name],
+                index,
+            );
+        }
+    }
+    // Everything else (plain identifiers, subscripts, calls, literals, …)
+    // yields stubs or literals scoped to the current file; stubs are
+    // re-resolved later and re-derive any cross-file owner on their own.
+    let ctx = ResolveCtx::new(uri_id);
+    ResolvedType::from_fact(
+        ctx,
+        infer_node_type_in_file_id(node, source, uri_id, scope_tree, index),
+    )
 }
 
 fn infer_operator_type_in_file_id(

@@ -36,7 +36,7 @@ impl ResolvedType {
         }
     }
 
-    fn from_fact(ctx: ResolveCtx, fact: TypeFact) -> Self {
+    pub(crate) fn from_fact(ctx: ResolveCtx, fact: TypeFact) -> Self {
         Self {
             type_fact: fact,
             def_location: None,
@@ -58,12 +58,12 @@ impl ResolvedType {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct ResolveCtx {
+pub(crate) struct ResolveCtx {
     owner_uri_id: UriId,
 }
 
 impl ResolveCtx {
-    fn new(owner_uri_id: UriId) -> Self {
+    pub(crate) fn new(owner_uri_id: UriId) -> Self {
         Self { owner_uri_id }
     }
 }

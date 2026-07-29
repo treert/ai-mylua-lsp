@@ -272,3 +272,31 @@ fn complete_empty_prefix_no_panic() {
     // Should not panic; may return keywords/locals
     let _ = items;
 }
+
+#[test]
+fn complete_global_table_fields_cross_file() {
+    // Regression: a global table `UE4.ERangeBoundTypes = { ... }` defined in
+    // one file must be completable from a DIFFERENT file. Previously the
+    // per-file `TableShapeId` was looked up in the wrong file (the file
+    // where completion was triggered) because the resolved owner uri was
+    // discarded, so cross-file dot completion fell back to global/keyword
+    // candidates instead of the table's actual fields.
+    let defs = "UE4.ERangeBoundTypes = {\n  Exclusive = 0,\n  Inclusive = 1,\n  Open = 2,\n}\n";
+    let usage = "local x = UE4.ERangeBoundTypes.";
+    let (docs, mut agg, _parser) = setup_workspace(&[("defs.lua", defs), ("usage.lua", usage)]);
+
+    let usage_uri = make_uri("usage.lua");
+    let usage_uri_id = intern_uri(&usage_uri);
+    let doc = docs.get(&usage_uri_id).expect("usage doc should be indexed");
+    // cursor right after the trailing dot (line 0, col 31)
+    let items = completion::complete(doc, usage_uri_id, pos(0, 31), &mut agg);
+    let labels: Vec<&str> = items.iter().map(|i| i.label.as_str()).collect();
+    for expected in &["Exclusive", "Inclusive", "Open"] {
+        assert!(
+            labels.contains(expected),
+            "cross-file dot completion should include `{}`, got: {:?}",
+            expected,
+            labels,
+        );
+    }
+}

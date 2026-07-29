@@ -246,7 +246,7 @@ fn try_dot_completion_ast(
     // Find the AST node representing the base expression — the node ending
     // exactly at `base_end`.
     let base_node = find_base_expression_node(doc.root_node()?, base_end)?;
-    let base_fact = type_inference::infer_node_type_in_file_id(
+    let base_resolved = type_inference::infer_node_type_resolved_in_file_id(
         base_node,
         bytes,
         uri_id,
@@ -254,7 +254,13 @@ fn try_dot_completion_ast(
         index,
     );
 
-    let fields = resolver::get_fields_for_type_id(uri_id, &base_fact, index);
+    // Use the resolved owner (the file that owns the per-file `TableShapeId`)
+    // rather than the completion file: a global table defined in another file
+    // resolves to `Known(Table(shape_id))` whose shape lives in that other
+    // file's summary. Using `uri_id` here would look up the shape in the wrong
+    // file and silently drop the table's fields.
+    let fields =
+        resolver::get_fields_for_type_id(base_resolved.owner_uri_id, &base_resolved.type_fact, index);
     if fields.is_empty() {
         return None;
     }
