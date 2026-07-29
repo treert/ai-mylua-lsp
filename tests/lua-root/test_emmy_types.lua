@@ -17,3 +17,5 @@ local TypeC = class("TypeC")
 
 print(TypeC.m_cc)
 print(TypeC.__class_name)
+
+local x = UE4.ERangeBoundTypes.Exclusive
