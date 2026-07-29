@@ -903,3 +903,49 @@ fn references_type_name_no_duplicate_on_assignment_line() {
         );
     }
 }
+
+#[test]
+fn references_global_table_field_cross_file() {
+    // Regression: `find_references` on a field of a global table defined in
+    // another file used to return an empty list. The immediate object base
+    // (`UE4.ERangeBoundTypes`) resolved to a per-file `TableShapeId` whose
+    // owner was discarded, so the field could not be identified cross-file.
+    let def_src = "UE4.ERangeBoundTypes = {\n  Exclusive = 0,\n  Inclusive = 1,\n  Open = 2,\n}\n";
+    let use_src = "local x = UE4.ERangeBoundTypes.Inclusive\n";
+    let (docs, agg, _parser) = setup_workspace(&[("defs.lua", def_src), ("usage.lua", use_src)]);
+    let use_uri = make_uri("usage.lua");
+    let use_uri_id = intern_uri(&use_uri);
+    let def_uri = make_uri("defs.lua");
+    let use_doc = docs.get(&use_uri_id).unwrap();
+
+    // Click on `Inclusive` in the usage file (line 0, col 35 — inside the
+    // field name).
+    let locs = references::find_references(
+        use_doc,
+        use_uri_id,
+        pos(0, 35),
+        true,
+        &agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+        &ReferencesConfig::default(),
+    );
+
+    let locs = locs.expect("cross-file references on a global table field should resolve");
+    assert!(
+        !locs.is_empty(),
+        "cross-file references should be non-empty (was silently empty before the fix), got: {:?}",
+        locs,
+    );
+    // The usage site in the referencing file must be among the results.
+    assert!(
+        locs.iter().any(|l| l.uri == use_uri),
+        "references should include the usage site in usage.lua, got: {:?}",
+        locs,
+    );
+    // The declaration site in the defining file must also be reachable.
+    assert!(
+        locs.iter().any(|l| l.uri == def_uri),
+        "references should include the declaration site in defs.lua, got: {:?}",
+        locs,
+    );
+}

@@ -442,16 +442,17 @@ fn try_identify_field(
         _ => return None,
     };
 
-    // Infer base type and resolve the field
-    let base_fact = crate::type_inference::infer_node_type_in_file_id(
+    // Infer base type and resolve the field. Use the owner-preserving unified
+    // entry so a cross-file global table's per-file `TableShapeId` is looked
+    // up in its defining file, not the trigger file.
+    let resolved = crate::type_inference::infer_and_resolve_field_chain_in_file_id(
         base_node,
         source,
         uri_id,
         &doc.scope_tree,
+        &[field_name.clone()],
         index,
     );
-    let resolved =
-        resolver::resolve_field_chain_in_file_id(uri_id, &base_fact, &[field_name.clone()], index);
 
     let location = resolved.def_location?;
 
@@ -633,13 +634,14 @@ fn verify_field(
         _ => return false,
     };
 
-    // Infer base type → resolve field → compare declaration location
-    let base_fact = crate::type_inference::infer_node_type_in_file_id(
-        base_node, source, doc_uri_id, scope_tree, index,
-    );
-    let resolved = resolver::resolve_field_chain_in_file_id(
+    // Infer base type → resolve field → compare declaration location. Use the
+    // owner-preserving unified entry so cross-file global table fields resolve
+    // to the correct definition location instead of silently returning Unknown.
+    let resolved = crate::type_inference::infer_and_resolve_field_chain_in_file_id(
+        base_node,
+        source,
         doc_uri_id,
-        &base_fact,
+        scope_tree,
         &[field_name.to_string()],
         index,
     );

@@ -176,6 +176,28 @@ pub(crate) fn infer_node_type_resolved_in_file_id(
     )
 }
 
+/// Unified entry for "infer a dotted base, then resolve a field chain on it".
+///
+/// Combines [`infer_node_type_resolved_in_file_id`] (which preserves the
+/// per-file `TableShapeId` owner) with [`resolver::resolve_field_chain_in_file_id`].
+/// Prefer this over the manual `infer_node_type_in_file_id` +
+/// `resolve_field_chain_in_file_id(uri_id, …)` pair: that pair silently loses
+/// the owner for dotted-access bases whose table shape lives in another file,
+/// breaking cross-file field resolution (completion / references of a global
+/// table's fields defined elsewhere).
+pub(crate) fn infer_and_resolve_field_chain_in_file_id(
+    base_node: tree_sitter::Node,
+    source: &[u8],
+    uri_id: UriId,
+    scope_tree: &ScopeTree,
+    fields: &[String],
+    index: &WorkspaceAggregation,
+) -> ResolvedType {
+    let base =
+        infer_node_type_resolved_in_file_id(base_node, source, uri_id, scope_tree, index);
+    resolver::resolve_field_chain_in_file_id(base.owner_uri_id, &base.type_fact, fields, index)
+}
+
 fn infer_operator_type_in_file_id(
     node: tree_sitter::Node,
     source: &[u8],
