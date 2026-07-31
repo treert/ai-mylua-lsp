@@ -191,7 +191,30 @@ x.foo
     // 不 panic 即通过
 }
 
-/// 收集单文件的 semantic diagnostics（用于诊断测试）。
+#[test]
+fn custom_require_dotted_function_definition() {
+    // function utils.custom_require(module_name) — dotted definition
+    let main_src = r#"--- @customrequire param=module_name mgr_abc module_abc
+function utils.custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    local module = require(module_path)
+    return module
+end
+
+local a = utils.custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("module_abc/abc_mgr.lua", ABC_MGR_SRC), ("main.lua", main_src)]);
+
+    let main_uri = make_uri("main.lua");
+    // hover `a` 在 line 7, col 6 — 应解析为 abc_mgr 表类型
+    let md = hover_markdown(&docs, &mut agg, &main_uri, 7, 6);
+    eprintln!("[DBG test] dotted def hover md='{}'", md);
+    assert!(md.contains("table"), "dotted def: a should resolve to table, got: {:?}", md);
+}
+
 fn collect_diags(src: &str, filename: &str) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, filename);
     let diag_config = DiagnosticsConfig::default();

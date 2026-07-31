@@ -369,6 +369,27 @@ fn infer_call_return_type(
         return TypeFact::Unknown;
     }
 
+    // @customrequire function: generate FunctionCallReturn stub (with raw_string_args)
+    // so the resolver can intercept at call sites and resolve via RequireRef.
+    // This must run before the dotted-callee handling below, which would
+    // otherwise wrap the call as a CallReturn stub and skip the custom-require
+    // path entirely. Works for both `custom_require("foo")` (global) and
+    // `utils.custom_require("foo")` (dotted) — the latter is keyed in
+    // function_name_index as "utils.custom_require".
+    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
+        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
+            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                if fs.custom_require.is_some() {
+                    return TypeFact::Stub(SymbolicStub::FunctionCallReturn {
+                        func_name: callee_text.into(),
+                        call_arg_types: collect_call_arg_types(ctx, node),
+                        raw_string_args: collect_raw_string_args(ctx, node),
+                    });
+                }
+            }
+        }
+    }
+
     // `obj:method()` → CallReturn(base_stub, method_name)
     if let Some(method_node) = node.child_by_field(field::METHOD) {
         let method_name = node_text(method_node, ctx.source).to_string();
@@ -485,25 +506,6 @@ fn infer_call_return_type(
                     call_arg_types: explicit_arg_types,
                     generic_args,
                 });
-            }
-        }
-    }
-
-    // @customrequire function: generate FunctionCallReturn stub (with raw_string_args)
-    // so the resolver can intercept at call sites and resolve via RequireRef.
-    // This must run before the direct-return short-circuits below, which would
-    // otherwise resolve the call to the function's literal return type (Unknown
-    // for require-by-variable bodies) and skip the custom-require path entirely.
-    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
-        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
-            if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                if fs.custom_require.is_some() {
-                    return TypeFact::Stub(SymbolicStub::FunctionCallReturn {
-                        func_name: callee_text.into(),
-                        call_arg_types: collect_call_arg_types(ctx, node),
-                        raw_string_args: collect_raw_string_args(ctx, node),
-                    });
-                }
             }
         }
     }
