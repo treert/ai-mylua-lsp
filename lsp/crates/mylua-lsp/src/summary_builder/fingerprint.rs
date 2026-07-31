@@ -138,13 +138,25 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
         SymbolicStub::FunctionCallReturn {
             func_name,
             call_arg_types,
-            raw_string_args: _,
+            raw_string_args,
         } => {
             "function_call_return".hash(hasher);
             func_name.hash(hasher);
             call_arg_types.len().hash(hasher);
             for arg in call_arg_types {
                 hash_type_fact(arg, hasher);
+            }
+            raw_string_args.len().hash(hasher);
+            for arg in raw_string_args {
+                match arg {
+                    Some(s) => {
+                        1u8.hash(hasher);
+                        s.hash(hasher);
+                    }
+                    None => {
+                        0u8.hash(hasher);
+                    }
+                }
             }
         }
         SymbolicStub::GlobalRef { name } => {
@@ -188,6 +200,26 @@ pub(super) fn compute_signature_fingerprint(ctx: &BuildContext) -> u64 {
         if let Some(fs) = ctx.function_summaries.get(id) {
             fs.generic_params.hash(&mut hasher);
             fs.signature_fingerprint.hash(&mut hasher);
+            match &fs.custom_require {
+                Some(spec) => {
+                    1u8.hash(&mut hasher);
+                    spec.param_name.hash(&mut hasher);
+                    spec.param_index.hash(&mut hasher);
+                    match &spec.transform {
+                        Some(t) => {
+                            1u8.hash(&mut hasher);
+                            t.pattern.hash(&mut hasher);
+                            t.template.hash(&mut hasher);
+                        }
+                        None => {
+                            0u8.hash(&mut hasher);
+                        }
+                    }
+                }
+                None => {
+                    0u8.hash(&mut hasher);
+                }
+            }
         }
     }
 
