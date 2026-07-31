@@ -24,9 +24,11 @@
 //!   the callee must be the literal identifier `require`.
 
 use crate::syntax_kind::{field, kind, NodeKindExt};
+use regex::Regex;
 use tower_lsp_server::ls_types::{DocumentLink, Range, Uri};
 
 use crate::aggregation::WorkspaceAggregation;
+use crate::type_system::{KnownType, TypeFact};
 use crate::uri_id::resolve_uri;
 use crate::util::{node_text, LineIndex};
 
@@ -56,12 +58,14 @@ fn collect_recursive(
     if node.is_kind(kind::FUNCTION_CALL) {
         if let Some((string_node, module_path)) = extract_require_argument(node, source) {
             if let Some(target) = resolve_module_target(index, &module_path) {
-                // Narrow the link range to the string *contents*
-                // (inside the quotes) when we can, so a click on the
-                // quotes themselves doesn't feel off; fall back to
-                // the full string node range if we can't find quote
-                // bytes (e.g. malformed string that tree-sitter still
-                // produced as `string` via error recovery).
+                let link_range = content_range_inside_quotes(string_node, source, line_index)
+                    .unwrap_or_else(|| line_index.ts_node_to_range(string_node, source));
+                out.push(document_link(link_range, target));
+            }
+        } else if let Some((string_node, module_path)) =
+            extract_custom_require_argument(node, source, index)
+        {
+            if let Some(target) = resolve_module_target(index, &module_path) {
                 let link_range = content_range_inside_quotes(string_node, source, line_index)
                     .unwrap_or_else(|| line_index.ts_node_to_range(string_node, source));
                 out.push(document_link(link_range, target));
@@ -147,6 +151,57 @@ fn extract_require_argument<'tree>(
         return Some((first, path));
     }
     None
+}
+
+/// When `call.callee` is a function annotated with `@customrequire`,
+/// extract the string argument at the declared `param_index` and apply
+/// the regex transform (if any) to produce the real module path.
+///
+/// Looks up the callee in `global_shard` → resolves `FunctionRef` →
+/// reads `FunctionSummary.custom_require`. Returns `None` when the
+/// callee is not a custom-require function, the argument is not a
+/// string literal, or the transform fails.
+fn extract_custom_require_argument<'tree>(
+    call: tree_sitter::Node<'tree>,
+    source: &[u8],
+    index: &WorkspaceAggregation,
+) -> Option<(tree_sitter::Node<'tree>, String)> {
+    let callee = call.child_by_field(field::CALLEE)?;
+    let callee_text = node_text(callee, source);
+
+    // Look up in global_shard (global functions only; local
+    // custom_require functions are not reachable here).
+    let candidates = index.global_shard.get(&callee_text)?;
+    let candidate = candidates.first()?;
+
+    // Resolve to FunctionRef to access the FunctionSummary.
+    let func_id = match &candidate.type_fact {
+        TypeFact::Known(KnownType::FunctionRef(id)) => *id,
+        _ => return None,
+    };
+    let owner_uri_id = candidate.source_uri_id();
+    let summary = index.summary_by_id(owner_uri_id)?;
+    let fs = summary.function_summaries.get(&func_id)?;
+    let spec = fs.custom_require.as_ref()?;
+
+    // Extract the string argument at param_index.
+    let args = call.child_by_field(field::ARGUMENTS)?;
+    let arg_nodes = crate::util::extract_call_arg_nodes(args, source);
+    let string_node = arg_nodes.get(spec.param_index as usize)?;
+    if !string_node.is_kind(kind::STRING) {
+        return None;
+    }
+    let raw = parse_module_path_from_string(*string_node, source)?;
+
+    // Apply transform (if any).
+    let module_path = match &spec.transform {
+        None => raw,
+        Some(transform) => {
+            let re = Regex::new(&transform.pattern).ok()?;
+            re.replace_all(&raw, &transform.template).into_owned()
+        }
+    };
+    Some((*string_node, module_path))
 }
 
 /// Extract the module path text from a short-quoted string literal.

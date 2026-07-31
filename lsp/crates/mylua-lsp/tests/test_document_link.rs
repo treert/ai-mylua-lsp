@@ -178,3 +178,135 @@ fn document_link_multi_require_each_get_link() {
         links
     );
 }
+
+#[test]
+fn document_link_custom_require_literal_replace() {
+    // @customrequire with gsub transform: "mgr_abc.abc_mgr" → "module_abc.abc_mgr"
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("module_abc/abc_mgr.lua", "return { x = 1 }\n"),
+        (
+            "main.lua",
+            "---@customrequire param=module_name mgr_abc module_abc\n\
+             function custom_require(module_name)\n\
+                 return require(module_name)\n\
+             end\n\
+             local a = custom_require(\"mgr_abc.abc_mgr\")\n",
+        ),
+    ]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
+    let links = document_link::document_links(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &agg,
+        doc.line_index(),
+    );
+    assert_eq!(
+        links.len(),
+        1,
+        "custom_require call should produce 1 link, got: {:?}",
+        links,
+    );
+    let target = links[0].target.as_ref().expect("link must have target");
+    let target_str = target.to_string();
+    assert!(
+        target_str.ends_with("module_abc/abc_mgr.lua"),
+        "target should point at module_abc/abc_mgr.lua (after transform), got: {}",
+        target_str,
+    );
+}
+
+#[test]
+fn document_link_custom_require_no_transform() {
+    // @customrequire without transform: arg used directly as module path
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("module_abc/abc_mgr.lua", "return { x = 1 }\n"),
+        (
+            "main.lua",
+            "---@customrequire param=module_name\n\
+             function direct_require(module_name)\n\
+                 return require(module_name)\n\
+             end\n\
+             local m = direct_require(\"module_abc.abc_mgr\")\n",
+        ),
+    ]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
+    let links = document_link::document_links(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &agg,
+        doc.line_index(),
+    );
+    assert_eq!(
+        links.len(),
+        1,
+        "direct_require call should produce 1 link, got: {:?}",
+        links,
+    );
+    let target = links[0].target.as_ref().expect("link must have target");
+    let target_str = target.as_str();
+    assert!(
+        target_str.ends_with("module_abc/abc_mgr.lua"),
+        "target should point at module_abc/abc_mgr.lua, got: {:?}",
+        target,
+    );
+}
+
+#[test]
+fn document_link_custom_require_ignores_non_string_arg() {
+    // Variable arg: no string literal → no link
+    let (docs, agg, _parser) = setup_workspace(&[
+        ("module_abc/abc_mgr.lua", "return { x = 1 }\n"),
+        (
+            "main.lua",
+            "---@customrequire param=module_name mgr_abc module_abc\n\
+             function custom_require(module_name)\n\
+                 return require(module_name)\n\
+             end\n\
+             local prefix = \"mgr_abc.abc_mgr\"\n\
+             local a = custom_require(prefix)\n",
+        ),
+    ]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
+    let links = document_link::document_links(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &agg,
+        doc.line_index(),
+    );
+    assert!(
+        links.is_empty(),
+        "non-string arg should not produce a link, got: {:?}",
+        links,
+    );
+}
+
+#[test]
+fn document_link_custom_require_ignores_unresolved_module() {
+    // Transform produces a path that doesn't resolve → no link
+    let (docs, agg, _parser) = setup_workspace(&[
+        (
+            "main.lua",
+            "---@customrequire param=module_name mgr_abc module_abc\n\
+             function custom_require(module_name)\n\
+                 return require(module_name)\n\
+             end\n\
+             local a = custom_require(\"mgr_abc.nonexistent\")\n",
+        ),
+    ]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main.lua opened");
+    let links = document_link::document_links(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &agg,
+        doc.line_index(),
+    );
+    assert!(
+        links.is_empty(),
+        "unresolved module after transform should not produce a link, got: {:?}",
+        links,
+    );
+}
