@@ -955,6 +955,7 @@ fn build_function_summary(
     let mut func_generic_params = Vec::new();
     let mut vararg_param = None;
     let mut has_ast_param_list = false;
+    let mut custom_require_spec: Option<crate::emmy::EmmyAnnotation> = None;
 
     if let Some(b) = body {
         if let Some(param_list) = b.child_by_field(field::PARAMETERS) {
@@ -1000,6 +1001,12 @@ fn build_function_summary(
             EmmyAnnotation::Generic { params: gparams } => {
                 for gp in gparams {
                     func_generic_params.push(gp.name.clone());
+                }
+            }
+            EmmyAnnotation::CustomRequire { .. } => {
+                // 只取第一个；多个 @customrequire 注解时忽略其余
+                if custom_require_spec.is_none() {
+                    custom_require_spec = Some(ann.clone());
                 }
             }
             _ => {}
@@ -1066,6 +1073,44 @@ fn build_function_summary(
     };
     let fingerprint = hash_function_signature(&sig);
 
+    // 解析 @customrequire 注解：根据 param_name 在签名中查找位置索引
+    let custom_require = match custom_require_spec {
+        Some(crate::emmy::EmmyAnnotation::CustomRequire {
+            param_name,
+            pattern,
+            template,
+        }) => {
+            let param_index = params
+                .iter()
+                .position(|p| p.name.as_str() == param_name.as_str())
+                .map(|i| i as u32);
+            match param_index {
+                Some(idx) => {
+                    let transform = match (pattern, template) {
+                        (Some(p), Some(t)) => {
+                            if p.is_empty() {
+                                None
+                            } else {
+                                Some(crate::type_system::ModulePathTransform {
+                                    pattern: p,
+                                    template: t,
+                                })
+                            }
+                        }
+                        _ => None,
+                    };
+                    Some(crate::type_system::CustomRequireSpec {
+                        param_name: crate::lua_symbol::intern_lua_symbol(&param_name),
+                        param_index: idx,
+                        transform,
+                    })
+                }
+                None => None, // param_name 在参数列表中找不到 → 静默降级
+            }
+        }
+        _ => None,
+    };
+
     FunctionSummary {
         name: intern_lua_symbol(name),
         signature: sig,
@@ -1077,7 +1122,7 @@ fn build_function_summary(
             .iter()
             .map(|param| intern_lua_symbol(param))
             .collect(),
-        custom_require: None,
+        custom_require,
     }
 }
 
