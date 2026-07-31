@@ -510,6 +510,7 @@ fn resolve_stub(
         SymbolicStub::FunctionCallReturn {
             func_name,
             call_arg_types,
+            raw_string_args: _,
         } => resolve_function_call_return(ctx, func_name, call_arg_types, agg, depth, visited),
 
         SymbolicStub::FieldOf { base, field } => {

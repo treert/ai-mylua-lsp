@@ -79,6 +79,11 @@ pub enum SymbolicStub {
         func_name: LuaSymbol,
         #[serde(default)]
         call_arg_types: Vec<TypeFact>,
+        /// 每个位置参数的原始字符串字面量值。
+        /// 仅当调用实参是字符串字面量时为 Some；变量/表达式时为 None。
+        /// 用于 @customrequire 解析：取参数字符串值做 transform 后转 RequireRef。
+        #[serde(default)]
+        raw_string_args: Vec<Option<String>>,
     },
 
     /// Reference to a global name, resolved via GlobalShard.
@@ -106,6 +111,28 @@ pub struct ParamInfo {
     pub type_fact: TypeFact,
     #[serde(default)]
     pub optional: bool,
+}
+
+/// 解析后的 @customrequire 注解规格。标记函数某个参数为 module 路径参数，
+/// 并可选地附带 regex 变换规则，使调用处 `custom_require("foo")` 的返回值
+/// 等价于 `require(transform("foo"))`。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CustomRequireSpec {
+    /// 标记为 module 路径的参数名（如 "module_name"）
+    pub param_name: LuaSymbol,
+    /// 参数在签名中的位置索引（构建期填充，便于 O(1) 取值）
+    pub param_index: u32,
+    /// 变换规则；None 表示直接用原值
+    pub transform: Option<ModulePathTransform>,
+}
+
+/// regex 变换规则。序列化时存源字符串，解析期使用时编译并缓存。
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ModulePathTransform {
+    /// regex 源字符串（Rust regex crate 语法）
+    pub pattern: String,
+    /// 替换模板，`$1`/`$2`/... 是捕获组占位符，其余字符全部字面量
+    pub template: String,
 }
 
 impl FunctionSignature {

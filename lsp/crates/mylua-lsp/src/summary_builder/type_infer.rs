@@ -525,6 +525,7 @@ fn infer_call_return_type(
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
+        raw_string_args: Vec::new(),
     })
 }
 

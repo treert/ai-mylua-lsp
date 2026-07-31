@@ -138,6 +138,7 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
         SymbolicStub::FunctionCallReturn {
             func_name,
             call_arg_types,
+            raw_string_args: _,
         } => {
             "function_call_return".hash(hasher);
             func_name.hash(hasher);
