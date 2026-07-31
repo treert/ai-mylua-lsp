@@ -2009,6 +2009,7 @@ mod tests {
                 emmy_annotated: true,
                 overloads: Vec::new(),
                 generic_params: Vec::new(),
+                custom_require: None,
             },
         );
         DocumentSummary {

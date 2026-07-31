@@ -1077,6 +1077,7 @@ fn build_function_summary(
             .iter()
             .map(|param| intern_lua_symbol(param))
             .collect(),
+        custom_require: None,
     }
 }
 

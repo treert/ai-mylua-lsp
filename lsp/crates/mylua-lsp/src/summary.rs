@@ -114,6 +114,10 @@ pub struct FunctionSummary {
     /// Empty for non-generic functions. Used by the resolver to perform
     /// call-site generic argument inference (unification).
     pub generic_params: Vec<LuaSymbol>,
+    /// 当函数标注了 `@customrequire` 时存在。
+    /// 标记该函数为类 require 封装：返回值解析为目标 module 的类型。
+    #[serde(default)]
+    pub custom_require: Option<crate::type_system::CustomRequireSpec>,
 }
 
 /// An Emmy type definition (`---@class`, `---@alias`, `---@enum`).
@@ -218,6 +222,7 @@ mod tests {
             emmy_annotated: false,
             overloads: Vec::new(),
             generic_params: vec![intern_lua_symbol("T")],
+            custom_require: None,
         };
         assert_symbol(function_summary.name);
         assert_symbol(function_summary.generic_params[0]);
