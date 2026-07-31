@@ -529,6 +529,17 @@ fn infer_call_return_type(
                 let func_name = node_text(field, ctx.source).to_string();
                 let explicit_arg_types = collect_call_arg_types(ctx, node);
                 let base_fact = infer_expression_type(ctx, base, depth + 1);
+                // Fallback: if base resolves to Unknown (e.g. global assigned
+                // inside a conditional block like `if not X then X = {...} end`),
+                // create a GlobalRef so the resolver can still try qualified
+                // global lookups (`X.func_name` in global_shard).
+                let base_fact = if matches!(base_fact, TypeFact::Unknown) {
+                    TypeFact::Stub(SymbolicStub::GlobalRef {
+                        name: base_text.to_string().into(),
+                    })
+                } else {
+                    base_fact
+                };
 
                 if let TypeFact::Known(KnownType::Table(shape_id)) = &base_fact {
                     if let Some(shape) = ctx.table_shapes.get(shape_id) {
