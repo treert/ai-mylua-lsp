@@ -389,6 +389,62 @@ end
 }
 
 #[test]
+fn repro_cross_file_conditional_global_custom_require() {
+    // 复现实际项目场景：
+    // - _CNPve 通过条件赋值定义（if not _CNPve then _CNPve = {...} end）
+    // - _CNPve.CNPveRequire 定义在 game_entry.lua
+    // - 在 caller.lua 中跨文件调用 _CNPve.CNPveRequire("Gameplay.target")
+    // - transform ^Gameplay\. 删除前缀 → "target"
+    let game_entry_src = r#"if not _CNPve then
+    _CNPve = {
+        FeatureName = "NC"
+    }
+end
+
+--- @brief require CNP 玩法 lua 模块；自动加上 Feature.NC.Script 前缀
+---@customrequire param=luaPath ^Gameplay\.
+--- @param luaPath string @相对 Feature.NC.Script 的 lua 路径
+--- @return any
+function _CNPve.CNPveRequire(luaPath)
+    local CNPveLuaPath = string.format("%s.%s", "Misc", luaPath)
+    return require(CNPveLuaPath)
+end
+"#;
+
+    let target_src = r#"local target = {}
+
+target.name = "target"
+target.version = "2.0.0"
+
+function target.test_print(...)
+    print("target", ...)
+end
+
+return target
+"#;
+
+    let caller_src = r#"require("game_entry")
+local a = _CNPve.CNPveRequire("Gameplay.target")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("game_entry.lua", game_entry_src),
+        ("target.lua", target_src),
+        ("caller.lua", caller_src),
+    ]);
+
+    let caller_uri = make_uri("caller.lua");
+    // hover `a`（line 1, col 6）— 应解析为 target 表
+    let md = hover_markdown(&docs, &mut agg, &caller_uri, 1, 6);
+    assert!(
+        md.contains("table"),
+        "cross-file conditional global custom require: a should resolve to table, got: {:?}",
+        md
+    );
+}
+
+#[test]
 fn custom_require_cross_file_dotted_definition() {
     // 跨文件 dotted 定义：function utils.custom_require 定义在 utils.lua，
     // 在 main.lua 中调用 utils.custom_require("...")

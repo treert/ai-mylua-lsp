@@ -919,7 +919,11 @@ fn resolve_call_return(
         };
 
         if let Some(ret) = return_type {
-            return resolve_recursive(base_ctx, &ret, agg, depth + 1, visited);
+            if !matches!(ret, TypeFact::Unknown) {
+                return resolve_recursive(base_ctx, &ret, agg, depth + 1, visited);
+            }
+            // ret is Unknown — continue to try qualified global lookup,
+            // which may find a cross-file definition with a custom_require spec.
         }
     }
 
