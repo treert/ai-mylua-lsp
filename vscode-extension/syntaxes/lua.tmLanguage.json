@@ -43,6 +43,7 @@
         { "include": "#emmy-diagnostic" },
         { "include": "#emmy-see" },
         { "include": "#emmy-version" },
+        { "include": "#emmy-customrequire" },
         { "include": "#emmy-other-tag" },
         { "include": "#emmy-alias-member" },
         { "include": "#emmy-doc-line" }
@@ -267,6 +268,28 @@
         {
           "match": ",",
           "name": "punctuation.separator.comma.lua"
+        }
+      ]
+    },
+
+    "emmy-customrequire": {
+      "begin": "(---\\s*)(@customrequire)\\s+(param)(=)([a-zA-Z_][a-zA-Z0-9_]*)",
+      "end": "$",
+      "beginCaptures": {
+        "1": { "name": "comment.line.documentation.lua" },
+        "2": { "name": "storage.type.annotation.lua" },
+        "3": { "name": "keyword.other.customrequire.lua" },
+        "4": { "name": "keyword.operator.assignment.lua" },
+        "5": { "name": "variable.parameter.lua" }
+      },
+      "name": "comment.line.documentation.lua",
+      "patterns": [
+        {
+          "match": "\\s*(\\S+)(?:\\s+(\\S.*))?",
+          "captures": {
+            "1": { "name": "string.regexp.customrequire-pattern.lua" },
+            "2": { "name": "string.unquoted.customrequire-template.lua" }
+          }
         }
       ]
     },
