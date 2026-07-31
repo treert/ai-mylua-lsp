@@ -10,6 +10,8 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [0.2.13] - 2026-07-31
+
 ### Added
 - 新增 `@customrequire` EmmyLua 注解，支持自定义类 require 函数。标记函数的某个参数为 module 路径参数，并可选地附带 regex 变换规则，使调用处返回值解析为目标 module 的返回类型。
 - `@customrequire` 注解行 TextMate 语法高亮：tag、`param` 关键字、参数名、regex pattern、template 分别着色。
