@@ -489,6 +489,25 @@ fn infer_call_return_type(
         }
     }
 
+    // @customrequire function: generate FunctionCallReturn stub (with raw_string_args)
+    // so the resolver can intercept at call sites and resolve via RequireRef.
+    // This must run before the direct-return short-circuits below, which would
+    // otherwise resolve the call to the function's literal return type (Unknown
+    // for require-by-variable bodies) and skip the custom-require path entirely.
+    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
+        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
+            if let Some(fs) = ctx.function_summaries.get(&func_id) {
+                if fs.custom_require.is_some() {
+                    return TypeFact::Stub(SymbolicStub::FunctionCallReturn {
+                        func_name: callee_text.into(),
+                        call_arg_types: collect_call_arg_types(ctx, node),
+                        raw_string_args: collect_raw_string_args(ctx, node),
+                    });
+                }
+            }
+        }
+    }
+
     // Simple local/global function call. Prefer the scoped binding so
     // block-local function expressions do not leak through the file-wide map.
     if let Some(decl) = ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte()) {
@@ -539,6 +558,7 @@ fn infer_call_return_type(
         }
     }
 
+    eprintln!("[DBG infer] FunctionCallReturn stub for func='{}'", callee_text);
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
