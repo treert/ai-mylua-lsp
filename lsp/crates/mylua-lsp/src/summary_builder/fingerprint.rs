@@ -139,6 +139,7 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
             func_name,
             call_arg_types,
             raw_string_args,
+            func_id,
         } => {
             "function_call_return".hash(hasher);
             func_name.hash(hasher);
@@ -156,6 +157,15 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
                     None => {
                         0u8.hash(hasher);
                     }
+                }
+            }
+            match func_id {
+                Some(id) => {
+                    1u8.hash(hasher);
+                    id.0.hash(hasher);
+                }
+                None => {
+                    0u8.hash(hasher);
                 }
             }
         }

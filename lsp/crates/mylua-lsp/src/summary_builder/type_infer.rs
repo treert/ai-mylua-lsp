@@ -343,6 +343,71 @@ fn call_base_generic_args(fact: &TypeFact) -> Vec<TypeFact> {
     }
 }
 
+/// Lookup a function ID for a callee that may be annotated with @customrequire.
+///
+/// Checks scope_tree first (covers `local function foo()` and `local foo = function() end`),
+/// then falls back to function_name_index (covers global `function foo()` and
+/// dotted `function utils.foo()`).
+///
+/// Returns the function ID only if the callee resolves to a `FunctionRef`;
+/// `None` otherwise.
+/// For dotted callees like `M.custom_require` where `M` is a local table:
+/// resolve the base table shape, look up the field's type_fact, and if it's
+/// a FunctionRef, return the function summary id.
+fn lookup_dotted_local_member_custom_require(
+    ctx: &BuildContext,
+    callee: tree_sitter::Node,
+) -> Option<crate::type_system::FunctionSummaryId> {
+    let base = callee.child_by_field(field::OBJECT)?;
+    let field_node = callee.child_by_field(field::FIELD)?;
+    let base_text = node_text(base, ctx.source);
+    let field_text = node_text(field_node, ctx.source);
+
+    // Resolve base variable via scope_tree
+    let decl = ctx.resolve_visible_in_build_scopes(base_text, base.start_byte())?;
+    let base_fact = decl.type_fact.as_ref()?;
+    let shape_id = match base_fact {
+        TypeFact::Known(KnownType::Table(sid)) => *sid,
+        _ => return None,
+    };
+    let shape = ctx.table_shapes.get(&shape_id)?;
+    let field_info = shape.get_field(field_text)?;
+    match &field_info.type_fact {
+        TypeFact::Known(KnownType::FunctionRef(fid)) => Some(*fid),
+        _ => None,
+    }
+}
+
+fn lookup_custom_require_func(
+    ctx: &BuildContext,
+    callee: tree_sitter::Node,
+    callee_text: &str,
+) -> Option<crate::type_system::FunctionSummaryId> {
+    // 1. scope_tree (local function / local var = function)
+    if let Some(decl) = ctx.resolve_visible_in_build_scopes(callee_text, callee.start_byte()) {
+        if let Some(TypeFact::Known(KnownType::FunctionRef(func_id))) = &decl.type_fact {
+            return Some(*func_id);
+        }
+    }
+    // 2. function_name_index (global function / dotted definition)
+    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
+        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
+            return Some(func_id);
+        }
+    }
+    // 3. dotted callee on local table: M.custom_require where M is local
+    //    Resolve base table shape, then look up field's function summary.
+    if callee.is_kind(kind::VARIABLE)
+        && callee.child_by_field(field::OBJECT).is_some()
+        && callee.child_by_field(field::FIELD).is_some()
+    {
+        if let Some(fs_id) = lookup_dotted_local_member_custom_require(ctx, callee) {
+            return Some(fs_id);
+        }
+    }
+    None
+}
+
 fn infer_call_return_type(
     ctx: &mut BuildContext,
     node: tree_sitter::Node,
@@ -373,19 +438,20 @@ fn infer_call_return_type(
     // so the resolver can intercept at call sites and resolve via RequireRef.
     // This must run before the dotted-callee handling below, which would
     // otherwise wrap the call as a CallReturn stub and skip the custom-require
-    // path entirely. Works for both `custom_require("foo")` (global) and
-    // `utils.custom_require("foo")` (dotted) — the latter is keyed in
-    // function_name_index as "utils.custom_require".
-    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
-        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
-            if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                if fs.custom_require.is_some() {
-                    return TypeFact::Stub(SymbolicStub::FunctionCallReturn {
-                        func_name: callee_text.into(),
-                        call_arg_types: collect_call_arg_types(ctx, node),
-                        raw_string_args: collect_raw_string_args(ctx, node),
-                    });
-                }
+    // path entirely.
+    //
+    // Lookup order:
+    //   1. scope_tree (covers `local function foo()` and `local foo = function() end`)
+    //   2. function_name_index (covers global `function foo()` and dotted `function utils.foo()`)
+    if let Some(cr_func_id) = lookup_custom_require_func(ctx, callee, callee_text) {
+        if let Some(fs) = ctx.function_summaries.get(&cr_func_id) {
+            if fs.custom_require.is_some() {
+                return TypeFact::Stub(SymbolicStub::FunctionCallReturn {
+                    func_name: callee_text.into(),
+                    call_arg_types: collect_call_arg_types(ctx, node),
+                    raw_string_args: collect_raw_string_args(ctx, node),
+                    func_id: Some(cr_func_id),
+                });
             }
         }
     }
@@ -564,6 +630,7 @@ fn infer_call_return_type(
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
         raw_string_args: collect_raw_string_args(ctx, node),
+        func_id: None,
     })
 }
 

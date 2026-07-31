@@ -84,6 +84,12 @@ pub enum SymbolicStub {
         /// 用于 @customrequire 解析：取参数字符串值做 transform 后转 RequireRef。
         #[serde(default)]
         raw_string_args: Vec<Option<String>>,
+        /// 当 callee 是已知函数时，直接携带函数 ID，
+        /// 让 resolver 能查到局部函数的 FunctionSummary（无需 global_shard）。
+        /// None 时 resolver 回退到 global_shard 查找。
+        /// owner 文件隐式为调用处所在文件（ResolveCtx.uri_id）。
+        #[serde(default)]
+        func_id: Option<FunctionSummaryId>,
     },
 
     /// Reference to a global name, resolved via GlobalShard.

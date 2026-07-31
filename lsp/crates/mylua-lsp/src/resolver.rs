@@ -68,6 +68,10 @@ impl ResolveCtx {
     pub(crate) fn new(owner_uri_id: UriId) -> Self {
         Self { owner_uri_id }
     }
+
+    pub(crate) fn owner_uri_id(&self) -> UriId {
+        self.owner_uri_id
+    }
 }
 
 /// Resolve a `TypeFact` (which may contain stubs) to a fully resolved type
@@ -513,11 +517,13 @@ fn resolve_stub(
             func_name,
             call_arg_types,
             raw_string_args,
+            func_id,
         } => resolve_function_call_return(
             ctx,
             func_name,
             call_arg_types,
             raw_string_args,
+            func_id,
             agg,
             depth,
             visited,
@@ -605,10 +611,36 @@ fn resolve_function_call_return(
     func_name: &str,
     call_arg_types: &[TypeFact],
     raw_string_args: &[Option<String>],
+    func_id: &Option<FunctionSummaryId>,
     agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
+    // 优先用 stub 携带的 func_id 直接查 FunctionSummary
+    // （覆盖局部函数、local var = function 等不在 global_shard 的场景）
+    // owner 文件隐式为调用处所在文件（ctx.uri_id）
+    if let Some(fid) = func_id {
+        if let Some(summary) = agg.summary_by_id(ctx.owner_uri_id()) {
+            if let Some(fs) = summary.function_summaries.get(fid) {
+                // Custom require 拦截
+                if let Some(spec) = &fs.custom_require {
+                    if let Some(module_path) =
+                        try_resolve_custom_require_module(spec, raw_string_args)
+                    {
+                        return resolve_require(ctx, &module_path, agg, depth + 1, visited);
+                    }
+                    return ResolvedType::unknown(ctx);
+                }
+                // 非 custom require：直接取返回值
+                if let Some(ret) = function_return_with_call_args(fs, call_arg_types) {
+                    return resolve_recursive(ctx, &ret, agg, depth + 1, visited);
+                }
+                return ResolvedType::unknown(ctx);
+            }
+        }
+    }
+
+    // 回退到 global_shard 查找（全局函数）
     let candidate = match agg.global_shard.get(func_name) {
         Some(candidates) if !candidates.is_empty() => candidates[0].clone(),
         _ => return ResolvedType::unknown(ctx),

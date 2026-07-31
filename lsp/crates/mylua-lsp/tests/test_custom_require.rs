@@ -215,6 +215,74 @@ a.version
     assert!(md.contains("table"), "dotted def: a should resolve to table, got: {:?}", md);
 }
 
+#[test]
+fn custom_require_local_function_definition() {
+    // local function custom_require(module_name) — 局部函数定义
+    let main_src = r#"--- @customrequire param=module_name mgr_abc module_abc
+local function custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    local module = require(module_path)
+    return module
+end
+
+local a = custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("module_abc/abc_mgr.lua", ABC_MGR_SRC), ("main.lua", main_src)]);
+
+    let main_uri = make_uri("main.lua");
+    let md = hover_markdown(&docs, &mut agg, &main_uri, 7, 6);
+    assert!(md.contains("table") || md.contains("abc_mgr"), "local func def: a should resolve to table, got: {:?}", md);
+}
+
+#[test]
+fn custom_require_local_table_member_function() {
+    // local M = {}; function M.custom_require(module_name) — 局部表的成员函数
+    let main_src = r#"local M = {}
+
+--- @customrequire param=module_name mgr_abc module_abc
+function M.custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    local module = require(module_path)
+    return module
+end
+
+local a = M.custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("module_abc/abc_mgr.lua", ABC_MGR_SRC), ("main.lua", main_src)]);
+
+    let main_uri = make_uri("main.lua");
+    let md = hover_markdown(&docs, &mut agg, &main_uri, 9, 6);
+    assert!(md.contains("table"), "local table member func: a should resolve to table, got: {:?}", md);
+}
+
+#[test]
+fn custom_require_local_assigned_function() {
+    // local custom_require = function(module_name) ... end — 局部变量赋值函数表达式
+    let main_src = r#"--- @customrequire param=module_name mgr_abc module_abc
+local custom_require = function(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    local module = require(module_path)
+    return module
+end
+
+local a = custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) =
+        setup_workspace(&[("module_abc/abc_mgr.lua", ABC_MGR_SRC), ("main.lua", main_src)]);
+
+    let main_uri = make_uri("main.lua");
+    let md = hover_markdown(&docs, &mut agg, &main_uri, 7, 6);
+    assert!(md.contains("table"), "local assigned func: a should resolve to table, got: {:?}", md);
+}
+
 fn collect_diags(src: &str, filename: &str) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
     let (doc, uri, mut agg) = setup_single_file(src, filename);
     let diag_config = DiagnosticsConfig::default();

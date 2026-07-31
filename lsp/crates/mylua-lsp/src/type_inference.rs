@@ -473,6 +473,7 @@ fn infer_call_return_fact(
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types_in_file_id(node, source, uri_id, scope_tree, index),
         raw_string_args: Vec::new(),
+        func_id: None,
     })
 }
 
