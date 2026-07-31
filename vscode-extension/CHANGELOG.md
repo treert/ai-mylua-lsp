@@ -14,11 +14,9 @@ MyLua LSP 扩展的版本变更记录。
 - 新增 `@customrequire` EmmyLua 注解，支持自定义类 require 函数。标记函数的某个参数为 module 路径参数，并可选地附带 regex 变换规则，使调用处返回值解析为目标 module 的返回类型。
 - `@customrequire` 注解行 TextMate 语法高亮：tag、`param` 关键字、参数名、regex pattern、template 分别着色。
 - `@customrequire` 调用处的字符串参数支持 documentLink 点击跳转（与 `require` 一致）。
-- 支持全局函数、dotted 全局函数（`utils.custom_require`）、局部函数（`local function`）、局部变量赋值（`local f = function`）、局部表成员（`local M={}; function M.f`）等所有常见定义方式。
+- `@customrequire` 注解诊断：regex 编译失败、param_name 不匹配函数参数时给出 Warning。
+- 支持全局函数、dotted 全局函数（`utils.custom_require`）、局部函数（`local function`）、局部变量赋值（`local f = function`）、局部表成员（`local M={}; function M.f`）、条件赋值全局变量（`if not X then X = {} end`）等所有常见定义方式。
 - 支持同文件和跨文件调用场景。
-
-### Fixed
-- `@customrequire` 注解解析容错：多个空格/制表符分隔 pattern 和 template 时正确解析，不再因多空格导致 template 带前导空格。
 
 ## [0.2.12] - 2026-07-29
 
