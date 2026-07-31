@@ -7,6 +7,8 @@ use crate::type_system::*;
 use crate::uri_id::UriId;
 use crate::util::ByteRange;
 
+use regex::Regex;
+
 const MAX_RESOLVE_DEPTH: usize = 32;
 
 /// Result of resolving a type, with optional source location for goto.
@@ -510,8 +512,16 @@ fn resolve_stub(
         SymbolicStub::FunctionCallReturn {
             func_name,
             call_arg_types,
-            raw_string_args: _,
-        } => resolve_function_call_return(ctx, func_name, call_arg_types, agg, depth, visited),
+            raw_string_args,
+        } => resolve_function_call_return(
+            ctx,
+            func_name,
+            call_arg_types,
+            raw_string_args,
+            agg,
+            depth,
+            visited,
+        ),
 
         SymbolicStub::FieldOf { base, field } => {
             let field_name = field.to_string();
@@ -594,6 +604,7 @@ fn resolve_function_call_return(
     ctx: ResolveCtx,
     func_name: &str,
     call_arg_types: &[TypeFact],
+    raw_string_args: &[Option<String>],
     agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
@@ -606,6 +617,25 @@ fn resolve_function_call_return(
     let owner_uri_id = candidate.source_uri_id();
     let owner_ctx = ResolveCtx::new(owner_uri_id);
     let resolved = resolve_recursive(owner_ctx, &candidate.type_fact, agg, depth + 1, visited);
+
+    // Custom require 拦截：若函数标注了 @customrequire，根据 raw_string_args
+    // 取参数字符串值，应用 transform 后转为 RequireRef 复用 resolve_require。
+    if let TypeFact::Known(KnownType::FunctionRef(fid)) = &resolved.type_fact {
+        if let Some(summary) = agg.summary_by_id(owner_uri_id) {
+            if let Some(fs) = summary.function_summaries.get(fid) {
+                if let Some(spec) = &fs.custom_require {
+                    if let Some(module_path) =
+                        try_resolve_custom_require_module(spec, raw_string_args)
+                    {
+                        return resolve_require(ctx, &module_path, agg, depth + 1, visited);
+                    }
+                    // 取不到字符串值或变换失败 → 降级 Unknown
+                    return ResolvedType::unknown(ctx);
+                }
+            }
+        }
+    }
+
     let ret = match &resolved.type_fact {
         TypeFact::Known(KnownType::Function(sig)) => sig.returns.first().cloned(),
         TypeFact::Known(KnownType::FunctionRef(fid)) => agg
@@ -619,6 +649,32 @@ fn resolve_function_call_return(
         return ResolvedType::unknown(owner_ctx);
     };
     resolve_recursive(owner_ctx, &ret, agg, depth + 1, visited)
+}
+
+/// 应用 custom require 的 regex 变换。
+/// 无 transform → 返回原值。
+/// 有 transform → 编译 regex（失败返回 None）→ replace_all。
+fn apply_custom_require_transform(
+    raw: &str,
+    transform: &crate::type_system::ModulePathTransform,
+) -> Option<String> {
+    // regex 编译失败 → 静默降级返回 None
+    let re = Regex::new(&transform.pattern).ok()?;
+    Some(re.replace_all(raw, &transform.template).into_owned())
+}
+
+/// 根据 CustomRequireSpec 从 raw_string_args 取参数值并应用变换。
+/// 返回 None 表示：参数索引越界、值是 None（非字符串字面量）、regex 编译失败。
+fn try_resolve_custom_require_module(
+    spec: &crate::type_system::CustomRequireSpec,
+    raw_string_args: &[Option<String>],
+) -> Option<String> {
+    let idx = spec.param_index as usize;
+    let raw = raw_string_args.get(idx).and_then(|v| v.as_ref())?;
+    match &spec.transform {
+        None => Some(raw.clone()),
+        Some(transform) => apply_custom_require_transform(raw, transform),
+    }
 }
 
 /// Fallback for `resolve_field_chain`: try a qualified name (e.g. `UE4.Foo`)
