@@ -154,6 +154,23 @@ fn collect_call_arg_types(ctx: &BuildContext, call_node: tree_sitter::Node) -> V
         .collect()
 }
 
+/// 收集调用实参的原始字符串字面量值。
+/// 对每个实参节点：是字符串字面量 → Some(value)，否则 → None。
+/// 顺序与 `collect_call_arg_types` 一致，按位置对应。
+/// 用于 @customrequire 解析：取参数字符串值做 transform 后转 RequireRef。
+fn collect_raw_string_args(
+    ctx: &BuildContext,
+    call_node: tree_sitter::Node,
+) -> Vec<Option<String>> {
+    let Some(args) = call_node.child_by_field(field::ARGUMENTS) else {
+        return Vec::new();
+    };
+    crate::util::extract_call_arg_nodes(args, ctx.source)
+        .into_iter()
+        .map(|arg| extract_string_from_node(ctx, arg))
+        .collect()
+}
+
 fn function_return_with_call_args_for_call(
     fs: &crate::summary::FunctionSummary,
     call_arg_types: &[TypeFact],
@@ -525,7 +542,7 @@ fn infer_call_return_type(
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
-        raw_string_args: Vec::new(),
+        raw_string_args: collect_raw_string_args(ctx, node),
     })
 }
 
