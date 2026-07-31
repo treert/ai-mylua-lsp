@@ -501,6 +501,7 @@ fn resolve_stub(
             is_method_call,
             generic_args,
             call_arg_types,
+            raw_string_args,
         } => resolve_call_return(
             ctx,
             base,
@@ -508,6 +509,7 @@ fn resolve_stub(
             *is_method_call,
             generic_args,
             call_arg_types,
+            raw_string_args,
             agg,
             depth,
             visited,
@@ -616,11 +618,17 @@ fn resolve_function_call_return(
     depth: usize,
     visited: &mut HashSet<String>,
 ) -> ResolvedType {
-    // 优先用 stub 携带的 func_id 直接查 FunctionSummary
-    // （覆盖局部函数、local var = function 等不在 global_shard 的场景）
-    // owner 文件隐式为调用处所在文件（ctx.uri_id）
+    // 优先用 stub 携带的 func_id 直接查 FunctionSummary。
+    // 跨文件全局函数：从 global_shard 获取定义文件 uri_id。
+    // 同文件局部函数（不在 global_shard）：回退到调用者文件 uri_id。
     if let Some(fid) = func_id {
-        if let Some(summary) = agg.summary_by_id(ctx.owner_uri_id()) {
+        let owner_uri_id = agg
+            .global_shard
+            .get(func_name)
+            .and_then(|c| c.first())
+            .map(|c| c.source_uri_id())
+            .unwrap_or_else(|| ctx.owner_uri_id());
+        if let Some(summary) = agg.summary_by_id(owner_uri_id) {
             if let Some(fs) = summary.function_summaries.get(fid) {
                 // Custom require 拦截
                 if let Some(spec) = &fs.custom_require {
@@ -758,6 +766,7 @@ fn resolve_call_return(
     is_method_call: bool,
     generic_args: &[TypeFact],
     call_arg_types: &[TypeFact],
+    raw_string_args: &[Option<String>],
     agg: &WorkspaceAggregation,
     depth: usize,
     visited: &mut HashSet<String>,
@@ -830,7 +839,22 @@ fn resolve_call_return(
                 .and_then(|fi| match &fi.type_fact {
                     TypeFact::Known(KnownType::Function(ref sig)) => sig.returns.first().cloned(),
                     TypeFact::Known(KnownType::FunctionRef(fid)) => {
-                        summary.function_summaries.get(fid).and_then(|fs| {
+                        let fs = summary.function_summaries.get(fid);
+                        // Custom require 拦截：字段是 custom require 函数
+                        if let Some(fs) = fs {
+                            if let Some(spec) = &fs.custom_require {
+                                if let Some(module_path) =
+                                    try_resolve_custom_require_module(spec, raw_string_args)
+                                {
+                                    return Some(
+                                        resolve_require(ctx, &module_path, agg, depth + 1, visited)
+                                            .type_fact,
+                                    );
+                                }
+                                return Some(TypeFact::Unknown);
+                            }
+                        }
+                        fs.and_then(|fs| {
                             function_return_with_call_args_for_call(
                                 fs,
                                 call_arg_types,
@@ -930,6 +954,15 @@ fn resolve_call_return(
                     let uri_id = resolved.source_uri_id();
                     if let Some(summary) = agg.summary_by_id(uri_id) {
                         if let Some(fs) = summary.function_summaries.get(fid) {
+                            // Custom require 拦截
+                            if let Some(spec) = &fs.custom_require {
+                                if let Some(module_path) =
+                                    try_resolve_custom_require_module(spec, raw_string_args)
+                                {
+                                    return resolve_require(ctx, &module_path, agg, depth + 1, visited);
+                                }
+                                return ResolvedType::unknown(ctx);
+                            }
                             if let Some(ret) = function_return_with_call_args_for_call(
                                 fs,
                                 call_arg_types,

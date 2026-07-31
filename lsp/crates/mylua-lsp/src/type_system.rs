@@ -71,6 +71,11 @@ pub enum SymbolicStub {
         /// generic params in the return type. Empty for non-generic bases.
         #[serde(default)]
         generic_args: Vec<TypeFact>,
+        /// 每个位置参数的原始字符串字面量值（与 call_arg_types 同序）。
+        /// 用于 @customrequire 解析：当 base.func 是 custom require 函数时，
+        /// 取参数字符串值做 transform 后转 RequireRef。
+        #[serde(default)]
+        raw_string_args: Vec<Option<String>>,
     },
 
     /// `local x = func_name(...)` where `func_name` is a global function.

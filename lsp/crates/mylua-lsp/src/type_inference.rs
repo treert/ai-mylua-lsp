@@ -383,6 +383,7 @@ fn infer_call_return_fact(
             is_method_call: true,
             call_arg_types,
             generic_args,
+            raw_string_args: Vec::new(),
         });
     }
 
@@ -404,6 +405,7 @@ fn infer_call_return_fact(
                 is_method_call: false,
                 call_arg_types,
                 generic_args,
+                raw_string_args: Vec::new(),
             });
         }
     }

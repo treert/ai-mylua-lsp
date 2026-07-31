@@ -515,6 +515,7 @@ fn infer_call_return_type(
             is_method_call: true,
             call_arg_types,
             generic_args,
+            raw_string_args: collect_raw_string_args(ctx, node),
         });
     }
 
@@ -571,6 +572,7 @@ fn infer_call_return_type(
                     is_method_call: false,
                     call_arg_types: explicit_arg_types,
                     generic_args,
+                    raw_string_args: collect_raw_string_args(ctx, node),
                 });
             }
         }

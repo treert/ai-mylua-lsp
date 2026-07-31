@@ -388,3 +388,57 @@ end
     );
 }
 
+#[test]
+fn custom_require_cross_file_dotted_definition() {
+    // 跨文件 dotted 定义：function utils.custom_require 定义在 utils.lua，
+    // 在 main.lua 中调用 utils.custom_require("...")
+    let utils_src = r#"--- @customrequire param=module_name mgr_abc module_abc
+function utils.custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    return require(module_path)
+end
+"#;
+
+    let main_src = r#"require("utils")
+local a = utils.custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("module_abc/abc_mgr.lua", ABC_MGR_SRC),
+        ("utils.lua", utils_src),
+        ("main.lua", main_src),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    // hover `a`（line 1, col 6）— 跨文件 dotted custom require 应解析为 abc_mgr 表
+    assert_hover_contains(&docs, &mut agg, &main_uri, 1, 6, "table");
+}
+
+#[test]
+fn custom_require_cross_file_global_definition() {
+    // 跨文件全局定义：function custom_require 定义在 loader.lua（global），
+    // 在 main.lua 中直接调用 custom_require("...")
+    let loader_src = r#"--- @customrequire param=module_name mgr_abc module_abc
+function custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    return require(module_path)
+end
+"#;
+
+    let main_src = r#"require("loader")
+local a = custom_require("mgr_abc.abc_mgr")
+a.version
+"#;
+
+    let (docs, mut agg, _parser) = setup_workspace(&[
+        ("module_abc/abc_mgr.lua", ABC_MGR_SRC),
+        ("loader.lua", loader_src),
+        ("main.lua", main_src),
+    ]);
+
+    let main_uri = make_uri("main.lua");
+    // hover `a`（line 1, col 6）— 跨文件全局 custom require 应解析为 abc_mgr 表
+    assert_hover_contains(&docs, &mut agg, &main_uri, 1, 6, "table");
+}
+

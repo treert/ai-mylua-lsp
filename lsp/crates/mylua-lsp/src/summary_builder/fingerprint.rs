@@ -121,6 +121,7 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
             is_method_call,
             call_arg_types,
             generic_args,
+            raw_string_args,
         } => {
             "call_return".hash(hasher);
             hash_type_fact(base, hasher);
@@ -133,6 +134,18 @@ fn hash_symbolic_stub(stub: &SymbolicStub, hasher: &mut impl Hasher) {
             generic_args.len().hash(hasher);
             for arg in generic_args {
                 hash_type_fact(arg, hasher);
+            }
+            raw_string_args.len().hash(hasher);
+            for arg in raw_string_args {
+                match arg {
+                    Some(s) => {
+                        1u8.hash(hasher);
+                        s.hash(hasher);
+                    }
+                    None => {
+                        0u8.hash(hasher);
+                    }
+                }
             }
         }
         SymbolicStub::FunctionCallReturn {
