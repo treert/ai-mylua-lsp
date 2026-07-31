@@ -160,13 +160,47 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 递归下降解析器，完整支持类型表达式语法（union `|`、optional `?`、array `[]`、generic `<T>`、`fun()` 函数类型、`{k:v}` table 类型）。
 
-支持的标签：`@class` / `@field` / `@param` / `@return` / `@type` / `@alias` / `@enum` / `@generic` / `@overload` / `@vararg` / `@deprecated` / `@async` / `@nodiscard` 等。
+支持的标签：`@class` / `@field` / `@param` / `@return` / `@type` / `@alias` / `@enum` / `@generic` / `@overload` / `@vararg` / `@deprecated` / `@async` / `@nodiscard` / `@customrequire` 等。
 
 关键特性：
 - 泛型参数替换（`EmmyGeneric`）
 - `@alias` 指向 inline table literal 时字段平铺进 `TypeDefinition.fields`
 - `self` 泛型绑定：`---@return self` 在方法定义上自动替换为所属 class 名
 - `fun(): A, B` 多返回值
+
+### `@customrequire` — 自定义 require 函数
+
+标记函数为类 `require` 的封装，使其返回值解析为目标 module 的返回类型。
+
+**语法：**
+
+```
+---@customrequire param=<name> [regex-pattern] [template]
+```
+
+- `param=<name>`：指定哪个参数是 module 路径参数（必填）
+- `regex-pattern`：Rust regex 语法的变换规则（可选）
+- `template`：替换模板，`$1`/`$2` 为捕获组占位符，其余字符字面量（可选）
+
+各部分以空格分隔；无 pattern/template 时直接用原参数值作为 require 路径。
+
+**示例：**
+
+```lua
+--- @customrequire param=module_name mgr_abc module_abc
+function custom_require(module_name)
+    local module_path = string.gsub(module_name, "mgr_abc", "module_abc")
+    return require(module_path)
+end
+
+local a = custom_require("mgr_abc.abc_mgr")
+-- a 解析为 module_abc.abc_mgr 的返回类型
+```
+
+**限制：**
+- 仅当调用实参是字符串字面量时生效（变量/表达式降级为 Unknown）
+- 不支持多条变换规则链式
+- 注解失效时静默降级，不生成诊断
 
 ## 自定义通知
 
