@@ -209,6 +209,14 @@ pub enum EmmyAnnotation {
     Meta {
         name: Option<String>,
     },
+    /// `@customrequire param=<name> [pattern] [template]` — 标记函数为
+    /// 类 require 的封装，使其返回值解析为目标 module 的返回类型。
+    /// `pattern`/`template` 均为 None 时直接用原参数值作为 module 路径。
+    CustomRequire {
+        param_name: String,
+        pattern: Option<String>,
+        template: Option<String>,
+    },
     Other {
         tag: String,
         text: String,
@@ -1208,6 +1216,7 @@ fn parse_annotation_line(text: &str) -> Option<EmmyAnnotation> {
             let name = tz.eat_qualified_name();
             Some(EmmyAnnotation::Meta { name })
         }
+        "customrequire" => parse_ann_customrequire(&mut tz),
         _ => Some(EmmyAnnotation::Other {
             tag,
             text: tz.rest_as_string(),
@@ -1466,6 +1475,49 @@ fn parse_ann_generic(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
 fn parse_ann_overload(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     let fun_type = parse_fun_type(tz);
     Some(EmmyAnnotation::Overload { fun_type })
+}
+
+/// `@customrequire param=<name> [regex-pattern] [template]`
+///
+/// 解析规则：
+/// - 必须以 `param` 字面量开头，后跟 `=`（tokenizer 静默跳过 `=`），再跟参数名
+/// - 余下文本取 `rest_as_string()` 原始源文本（保留 `^`、`\`、`$` 等字符）
+/// - 按首个空格切分 pattern / template：
+///   - 无空格且非空 → 只有 pattern，template 为空串
+///   - 无空格且空 → 无 pattern/template
+///   - 有空格 → 空格前为 pattern，空格后全部为 template
+fn parse_ann_customrequire(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
+    let first = tz.eat_name()?;
+    if first != "param" {
+        return None;
+    }
+    // `=` 字符被 tokenizer 静默跳过（catch-all 分支），直接吃下一个 Name
+    let param_name = tz.eat_name()?;
+    // rest_as_string 返回原始源文本，regex 元字符能正确保留
+    let rest = tz.rest_as_string();
+    let rest = rest.trim();
+    match rest.find(' ') {
+        None => {
+            if rest.is_empty() {
+                Some(EmmyAnnotation::CustomRequire {
+                    param_name,
+                    pattern: None,
+                    template: None,
+                })
+            } else {
+                Some(EmmyAnnotation::CustomRequire {
+                    param_name,
+                    pattern: Some(rest.to_string()),
+                    template: Some(String::new()),
+                })
+            }
+        }
+        Some(idx) => Some(EmmyAnnotation::CustomRequire {
+            param_name,
+            pattern: Some(rest[..idx].to_string()),
+            template: Some(rest[idx + 1..].to_string()),
+        }),
+    }
 }
 
 fn is_type_start_keyword(s: &str) -> bool {
@@ -3124,5 +3176,78 @@ mod tests {
             }
             _ => panic!("expected Class"),
         }
+    }
+}
+
+#[cfg(test)]
+mod customrequire_parse_tests {
+    use super::*;
+
+    #[test]
+    fn parse_no_transform() {
+        let anns = parse_emmy_comments("---@customrequire param=module_name");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern, &None);
+                assert_eq!(template, &None);
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_literal_replace() {
+        let anns = parse_emmy_comments("---@customrequire param=module_name mgr_abc module_abc");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("mgr_abc"));
+                assert_eq!(template.as_deref(), Some("module_abc"));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_regex_with_capture() {
+        let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr\\.(\\w+)$ module_$1");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("^mgr\\.(\\w+)$"));
+                assert_eq!(template.as_deref(), Some("module_$1"));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_pattern_only_empty_template() {
+        let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr_\\.");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("^mgr_\\."));
+                assert_eq!(template.as_deref(), Some(""));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_missing_param_keyword() {
+        let anns = parse_emmy_comments("---@customrequire foo=module_name");
+        assert_eq!(anns.len(), 0);
+    }
+
+    #[test]
+    fn parse_rejects_missing_param_name() {
+        let anns = parse_emmy_comments("---@customrequire param");
+        assert_eq!(anns.len(), 0);
     }
 }
