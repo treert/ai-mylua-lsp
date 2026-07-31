@@ -67,3 +67,7 @@ local part = PartClass:New()
 part.name = "123"
 part.age = 123
 part.id = 123
+
+local a = utils.custom_require("mgr_abc.abc_mgr")
+
+a.test_print(a.version)
