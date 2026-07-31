@@ -1,5 +1,7 @@
 mod test_helpers;
 
+use mylua_lsp::config::DiagnosticsConfig;
+use mylua_lsp::diagnostics;
 use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::hover;
 use test_helpers::*;
@@ -188,3 +190,110 @@ x.foo
     let _md = hover_markdown(&docs, &mut agg, &main_uri, 5, 6);
     // 不 panic 即通过
 }
+
+/// 收集单文件的 semantic diagnostics（用于诊断测试）。
+fn collect_diags(src: &str, filename: &str) -> Vec<tower_lsp_server::ls_types::Diagnostic> {
+    let (doc, uri, mut agg) = setup_single_file(src, filename);
+    let diag_config = DiagnosticsConfig::default();
+    diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &diag_config,
+        doc.line_index(),
+    )
+}
+
+#[test]
+fn custom_require_warning_on_regex_compile_failure() {
+    // A: regex 编译失败 → Warning
+    let src = r#"--- @customrequire param=module_name [unclosed(
+function bad_regex(module_name)
+    return require(module_name)
+end
+"#;
+    let diags = collect_diags(src, "bad_regex.lua");
+    let regex_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("regex pattern") && d.message.contains("failed to compile"))
+        .collect();
+    assert_eq!(
+        regex_diags.len(),
+        1,
+        "expected 1 regex-compile-failure warning, got {:?}",
+        diags
+    );
+    assert_eq!(
+        regex_diags[0].severity,
+        Some(tower_lsp_server::ls_types::DiagnosticSeverity::WARNING)
+    );
+}
+
+#[test]
+fn custom_require_warning_on_unknown_param_name() {
+    // B: param_name 在参数列表找不到 → Warning
+    let src = r#"--- @customrequire param=foo mgr_abc module_abc
+function custom_require(module_name)
+    return require(module_name)
+end
+"#;
+    let diags = collect_diags(src, "unknown_param.lua");
+    let param_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("@customrequire param 'foo'")
+            && d.message.contains("does not match"))
+        .collect();
+    assert_eq!(
+        param_diags.len(),
+        1,
+        "expected 1 param-mismatch warning, got {:?}",
+        diags
+    );
+    assert_eq!(
+        param_diags[0].severity,
+        Some(tower_lsp_server::ls_types::DiagnosticSeverity::WARNING)
+    );
+}
+
+#[test]
+fn custom_require_no_warning_on_valid_annotation() {
+    // 合法注解：param_name 匹配 + regex 合法 → 无 custom require 相关诊断
+    let src = r#"--- @customrequire param=module_name ^mgr_abc module_abc
+function custom_require(module_name)
+    return require(module_name)
+end
+"#;
+    let diags = collect_diags(src, "valid.lua");
+    let cr_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("@customrequire"))
+        .collect();
+    assert!(
+        cr_diags.is_empty(),
+        "valid @customrequire should not produce diagnostics, got {:?}",
+        cr_diags
+    );
+}
+
+#[test]
+fn custom_require_no_warning_when_no_transform() {
+    // 无变换规则：无 regex，不应有 regex 失败诊断
+    let src = r#"--- @customrequire param=module_name
+function direct_require(module_name)
+    return require(module_name)
+end
+"#;
+    let diags = collect_diags(src, "no_transform.lua");
+    let cr_diags: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("@customrequire"))
+        .collect();
+    assert!(
+        cr_diags.is_empty(),
+        "no-transform @customrequire should not produce diagnostics, got {:?}",
+        cr_diags
+    );
+}
+

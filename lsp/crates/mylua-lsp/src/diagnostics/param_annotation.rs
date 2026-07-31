@@ -1,6 +1,7 @@
 use crate::syntax_kind::{field, kind, NodeKindExt};
 use std::collections::HashSet;
 
+use regex::Regex;
 use tower_lsp_server::ls_types::*;
 
 use crate::emmy::{parse_emmy_comments, EmmyAnnotation};
@@ -30,19 +31,61 @@ pub(super) fn check_param_annotation_diagnostics(
         };
         for line in collect_preceding_emmy_lines(anchor, source, line_index) {
             for ann in parse_emmy_comments(&line.text) {
-                let EmmyAnnotation::Param { name, .. } = ann else {
-                    continue;
-                };
-                if lua_params.contains(&name) {
-                    continue;
+                match ann {
+                    EmmyAnnotation::Param { name, .. } => {
+                        if lua_params.contains(&name) {
+                            continue;
+                        }
+                        diagnostics.push(Diagnostic {
+                            range: line.range,
+                            severity: Some(DiagnosticSeverity::WARNING),
+                            source: Some("mylua".to_string()),
+                            message: format!(
+                                "@param '{}' does not match any Lua parameter",
+                                name,
+                            ),
+                            ..Default::default()
+                        });
+                    }
+                    EmmyAnnotation::CustomRequire {
+                        param_name,
+                        pattern,
+                        template: _,
+                    } => {
+                        // B: param_name 在参数列表找不到 → Warning
+                        if !lua_params.contains(&param_name) {
+                            diagnostics.push(Diagnostic {
+                                range: line.range,
+                                severity: Some(DiagnosticSeverity::WARNING),
+                                source: Some("mylua".to_string()),
+                                message: format!(
+                                    "@customrequire param '{}' does not match any Lua parameter",
+                                    param_name,
+                                ),
+                                ..Default::default()
+                            });
+                            continue;
+                        }
+                        // A: regex 编译失败 → Warning
+                        if let Some(p) = &pattern {
+                            if !p.is_empty() {
+                                if Regex::new(p).is_err() {
+                                    diagnostics.push(Diagnostic {
+                                        range: line.range,
+                                        severity: Some(DiagnosticSeverity::WARNING),
+                                        source: Some("mylua".to_string()),
+                                        message: format!(
+                                            "@customrequire regex pattern {:?} failed to compile",
+                                            p,
+                                        ),
+                                        ..Default::default()
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    _ => {}
                 }
-                diagnostics.push(Diagnostic {
-                    range: line.range,
-                    severity: Some(DiagnosticSeverity::WARNING),
-                    source: Some("mylua".to_string()),
-                    message: format!("@param '{}' does not match any Lua parameter", name,),
-                    ..Default::default()
-                });
             }
         }
     }
