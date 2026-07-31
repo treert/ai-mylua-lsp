@@ -1496,28 +1496,24 @@ fn parse_ann_customrequire(tz: &mut Tokenizer) -> Option<EmmyAnnotation> {
     // rest_as_string 返回原始源文本，regex 元字符能正确保留
     let rest = tz.rest_as_string();
     let rest = rest.trim();
-    match rest.find(' ') {
-        None => {
-            if rest.is_empty() {
-                Some(EmmyAnnotation::CustomRequire {
-                    param_name,
-                    pattern: None,
-                    template: None,
-                })
-            } else {
-                Some(EmmyAnnotation::CustomRequire {
-                    param_name,
-                    pattern: Some(rest.to_string()),
-                    template: Some(String::new()),
-                })
-            }
-        }
-        Some(idx) => Some(EmmyAnnotation::CustomRequire {
+    if rest.is_empty() {
+        // 无变换规则
+        return Some(EmmyAnnotation::CustomRequire {
             param_name,
-            pattern: Some(rest[..idx].to_string()),
-            template: Some(rest[idx + 1..].to_string()),
-        }),
+            pattern: None,
+            template: None,
+        });
     }
+    // 按首个空白序列分割 pattern 和 template（支持任意数量空格/制表符）。
+    // 注意：pattern 本身不能含空白（空格是分隔符），需要匹配空格请用 \s。
+    let mut iter = rest.splitn(2, |c: char| c.is_whitespace());
+    let pattern_str = iter.next().unwrap_or("");
+    let template_str = iter.next().map(|s| s.trim_start()).unwrap_or("");
+    Some(EmmyAnnotation::CustomRequire {
+        param_name,
+        pattern: Some(pattern_str.to_string()),
+        template: Some(template_str.to_string()),
+    })
 }
 
 fn is_type_start_keyword(s: &str) -> bool {
@@ -3228,6 +3224,51 @@ mod customrequire_parse_tests {
     #[test]
     fn parse_pattern_only_empty_template() {
         let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr_\\.");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("^mgr_\\."));
+                assert_eq!(template.as_deref(), Some(""));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_multiple_spaces_between_pattern_and_template() {
+        // 两个空格分隔 pattern 和 template（用户的实际样例）
+        let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr_abc  module_abc");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("^mgr_abc"));
+                assert_eq!(template.as_deref(), Some("module_abc"));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_tab_as_separator() {
+        // 制表符也应作为分隔符
+        let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr_abc\tmodule_abc");
+        assert_eq!(anns.len(), 1);
+        match &anns[0] {
+            EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
+                assert_eq!(param_name, "module_name");
+                assert_eq!(pattern.as_deref(), Some("^mgr_abc"));
+                assert_eq!(template.as_deref(), Some("module_abc"));
+            }
+            other => panic!("expected CustomRequire, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn parse_trailing_whitespace_after_pattern() {
+        // pattern 后尾随空格但无 template → template 为空串
+        let anns = parse_emmy_comments("---@customrequire param=module_name ^mgr_\\.   ");
         assert_eq!(anns.len(), 1);
         match &anns[0] {
             EmmyAnnotation::CustomRequire { param_name, pattern, template } => {
