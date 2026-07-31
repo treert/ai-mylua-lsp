@@ -558,7 +558,6 @@ fn infer_call_return_type(
         }
     }
 
-    eprintln!("[DBG infer] FunctionCallReturn stub for func='{}'", callee_text);
     TypeFact::Stub(SymbolicStub::FunctionCallReturn {
         func_name: callee_text.into(),
         call_arg_types: collect_call_arg_types(ctx, node),
