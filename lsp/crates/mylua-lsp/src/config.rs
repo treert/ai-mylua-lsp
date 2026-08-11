@@ -141,6 +141,16 @@ pub struct WorkspaceConfig {
     /// semantics (is_meta / empty diagnostics) take precedence only
     /// for URIs that originated from the library walk.
     pub library: Vec<String>,
+    /// Path segments (case-insensitive) that boost a URI's definition
+    /// candidate priority. When multiple files define the same symbol,
+    /// files whose path contains any of these segments win over others.
+    /// Useful for marking annotation/stub directories.
+    ///
+    /// Defaults to `["annotation"]`. Changes require a server restart to
+    /// apply to already-interned URIs (priority is computed once at
+    /// intern time and cached).
+    #[serde(rename = "priorityKeyword")]
+    pub priority_keyword: Vec<String>,
 }
 
 impl Default for WorkspaceConfig {
@@ -149,6 +159,7 @@ impl Default for WorkspaceConfig {
             include: vec!["**/*.lua".to_string()],
             exclude: vec!["**/.*".to_string(), "**/node_modules".to_string()],
             library: Vec::new(),
+            priority_keyword: vec!["annotation".to_string()],
         }
     }
 }

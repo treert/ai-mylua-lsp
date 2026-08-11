@@ -24,6 +24,7 @@ const RESTART_RELEVANT_CONFIG_KEYS = [
   'mylua.workspace.exclude',
   'mylua.workspace.library',
   'mylua.workspace.useBundledStdlib',
+  'mylua.workspace.priorityKeyword',
   'mylua.performance.slowParseKeepTreeThresholdMs',
   'mylua.diagnostics.enable',
   'mylua.diagnostics.undefinedGlobal',
@@ -120,6 +121,7 @@ function collectLspConfig(
       include: cfg.get('workspace.include'),
       exclude: cfg.get('workspace.exclude'),
       library,
+      priorityKeyword: cfg.get('workspace.priorityKeyword'),
     },
     performance: {
 

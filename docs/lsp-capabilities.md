@@ -11,6 +11,7 @@
 | 配置体系 | `initializationOptions` + `didChangeConfiguration` 下发；VS Code 扩展在配置变更后提示重启 LSP |
 | `runtime.version` | 支持 `5.3`/`5.4`，影响内置标识符集合和诊断 |
 | `workspace.library` | 外部库路径解析为额外 scan root，库文件强制 `is_meta = true`，不产生诊断 |
+| `workspace.priorityKeyword` | 路径片段（大小写不敏感）列表，默认 `["annotation"]`；当多个文件定义同名符号时，路径含这些片段的文件优先级更高。修改后需重启 LSP 才能对已索引文件生效 |
 
 | 内置 stdlib | 扩展侧自动注入 `<extensionPath>/assets/lua<version>/` 的 stub 文件 |
 

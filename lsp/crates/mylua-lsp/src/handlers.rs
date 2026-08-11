@@ -25,7 +25,7 @@ use crate::selection_range;
 use crate::semantic_tokens;
 use crate::signature_help;
 use crate::symbols;
-use crate::uri_id::intern_uri;
+use crate::uri_id::{intern_uri, set_priority_keywords};
 use crate::workspace_scanner;
 use crate::workspace_symbol;
 use crate::{
@@ -73,6 +73,7 @@ impl LanguageServer for Backend {
             // column-0 keywords emit TOP_WORD_* for error front-loading;
             // when `false` (default), they emit normal WORD_*.
             tree_sitter_mylua::set_top_keyword_default_disabled(!cfg.runtime.top_keyword);
+            set_priority_keywords(cfg.workspace.priority_keyword.clone());
             *self.config.lock().unwrap() = cfg;
         }
 
@@ -583,6 +584,10 @@ impl LanguageServer for Backend {
         // different parse mode than the resident ScopeTree / index. Keep
         // the parser mode pinned after initialize; a restart/full re-index
         // is required for parser-affecting runtime changes.
+        // `priority_keyword` is also pinned: UriPriority is computed
+        // once at intern time and cached, so mid-session changes need
+        // a restart to take effect on all URIs.
+        set_priority_keywords(cfg.workspace.priority_keyword.clone());
         *self.config.lock().unwrap() = cfg;
     }
 

@@ -158,6 +158,16 @@
           "default": true,
           "markdownDescription": "When enabled, the extension auto-injects the bundled Lua stdlib stubs (`<extension>/assets/lua<version>/`) into `#mylua.workspace.library#`, so `print`, `string.format`, `table.concat`, etc. have hover / goto / signature help without any user configuration. Disable only if you want to supply your own complete stdlib annotations via `#mylua.workspace.library#`. The version selected follows `#mylua.runtime.version#`."
         },
+        "mylua.workspace.priorityKeyword": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "annotation"
+          ],
+          "markdownDescription": "Path segments (case-insensitive) that boost a URI's definition candidate priority. When multiple files define the same symbol, files whose path contains any of these segments win over others. Useful for marking annotation/stub directories. Defaults to `[\"annotation\"]`. Changing this requires a server restart to take effect."
+        },
         "mylua.performance.slowParseKeepTreeThresholdMs": {
           "type": "integer",
           "minimum": 0,

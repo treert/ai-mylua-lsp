@@ -71,3 +71,5 @@ part.id = 123
 local a = utils.custom_require("mgr_abc.abc_mgr")
 
 a.test_print(a.version)
+
+print("test_priority", UE4.test_priority)

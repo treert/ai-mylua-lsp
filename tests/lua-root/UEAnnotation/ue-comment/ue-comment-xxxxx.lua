@@ -23,5 +23,7 @@ UE4.ERangeBoundTypes = {
   Open = 2, -- The bound is open.
 }
 
+--- define in UEAnnotaion/ue-comment/ue-comment-xxxxx.lua
+UE4.test_priority = 1
 
 local x = UE4.ERangeBoundTypes.Inclusive

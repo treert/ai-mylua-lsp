@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{OnceLock, RwLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use tower_lsp_server::ls_types::Uri;
 
@@ -44,6 +44,32 @@ pub struct UriPriority {
 }
 
 static URI_REGISTRY: OnceLock<UriRegistry> = OnceLock::new();
+
+static PRIORITY_KEYWORDS: OnceLock<RwLock<Arc<Vec<String>>>> = OnceLock::new();
+
+/// Update the process-global priority keyword list.
+///
+/// Called from `initialize` / `did_change_configuration`. Because
+/// `UriPriority` is computed once at intern time and cached, a
+/// mid-session change only affects URIs interned *after* the call —
+/// a full restart is required for it to apply workspace-wide.
+pub(crate) fn set_priority_keywords(keywords: Vec<String>) {
+    let cell = PRIORITY_KEYWORDS
+        .get_or_init(|| RwLock::new(Arc::new(vec!["annotation".to_string()])));
+    let lowered: Vec<String> = keywords
+        .iter()
+        .map(|kw| kw.to_ascii_lowercase())
+        .collect();
+    *cell.write().unwrap() = Arc::new(lowered);
+}
+
+fn priority_keywords() -> Arc<Vec<String>> {
+    PRIORITY_KEYWORDS
+        .get_or_init(|| RwLock::new(Arc::new(vec!["annotation".to_string()])))
+        .read()
+        .unwrap()
+        .clone()
+}
 
 /// Intern a URI into the process-global append-only registry.
 pub fn intern_uri(uri: &Uri) -> UriId {
@@ -158,7 +184,11 @@ impl UriPriority {
 
     fn from_path(path: &str) -> Self {
         let lower = path.to_ascii_lowercase();
-        let annotation_count = lower.matches("annotation").count();
+        let keywords = priority_keywords();
+        let annotation_count: usize = keywords
+            .iter()
+            .map(|kw| lower.matches(kw.as_str()).count())
+            .sum();
         let annotation_count = annotation_count.min(u16::MAX as usize) as u16;
         let depth = path.matches('/').count().min(u16::MAX as usize) as u16;
         let len = path.len().min(u32::MAX as usize) as u32;
