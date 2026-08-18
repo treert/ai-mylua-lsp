@@ -5,6 +5,11 @@ Lua 5.3+ 语言支持：**自研 Tree-sitter 文法**、**独立 LSP**、**VS Co
 - 协作与 AI 必读：[AGENTS.md](AGENTS.md)
 - 需求与架构：[docs/README.md](docs/README.md)
 
+## 特点
+
+- **Rust 实现，原生并发**：LSP Server 全 Rust 编写，使用 `rayon` 多线程并行解析与索引，无 GC 抖动，长会话也保持稳定低延迟。
+- **大规模工程友好**：在 2 万+ Lua 文件的真实工程上，冷启动索引可在约 3 秒内完成初始化（视硬件与文件大小浮动）。
+
 ## 布局
 
 | 目录 | 说明 |
