@@ -109,7 +109,7 @@
             "5.4"
           ],
           "default": "5.4",
-          "description": "Assumed Lua runtime version. Affects the builtin identifier set used for `undefinedGlobal` suppression and the path of the bundled stdlib stubs auto-loaded via `mylua.workspace.useBundledStdlib`. If a bundled stub tree for the requested version does not exist, the extension falls back to the latest available bundled version (currently 5.4)."
+          "description": "Assumed Lua runtime version. Affects the builtin identifier set used for `undefinedGlobal` suppression and the path of the bundled stdlib stubs auto-loaded via `mylua.workspace.useBundledStdlib`. If a bundled stub tree for the requested version does not exist, the extension falls back to the latest available bundled version (currently only 5.4 is bundled)."
         },
         "mylua.runtime.topKeyword": {
           "type": "boolean",

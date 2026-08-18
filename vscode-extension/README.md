@@ -21,9 +21,6 @@ MyLua LSP 为 VS Code 提供 Lua 语言支持，内置 `mylua-lsp` 语言服务�
 
 ```jsonc
 {
-  // Lua 运行时版本；目前内置 stdlib stubs 默认覆盖 5.4
-  "mylua.runtime.version": "5.4",
-
   // 额外注解库，例如 LÖVE、OpenResty 或项目内部 SDK 的 EmmyLua stubs
   "mylua.workspace.library": ["./typings"],
 
