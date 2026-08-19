@@ -5,8 +5,9 @@ MyLua LSP 扩展的版本变更记录。
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
 <!-- 维护说明：发版前在下方 [Unreleased] 段追加条目，使用 Added / Changed / Fixed / Removed 小节，每条一行。
-     执行 `npm run release` 时会校验 [Unreleased] 非空，通过后自动把本段改名为 [版本号] - 日期，
-     并在顶部新开一个空 [Unreleased] 段。发布后请手动提交 CHANGELOG.md（或用 `--git` 自动提交）。 -->
+     执行 `npm run release` 时：若 package.json 版本与下方最新已发布版本不一致（新版本首发），校验 [Unreleased] 非空，
+     通过后自动把本段改名为 [版本号] - 日期，并在顶部新开一个空 [Unreleased] 段；若版本一致（同一版本多平台重复发布），
+     则跳过校验与改名，CHANGELOG 保持原样。发布后请手动提交 CHANGELOG.md（或用 `--git` 自动提交）。 -->
 
 ## [Unreleased]
 

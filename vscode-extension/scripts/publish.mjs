@@ -36,21 +36,57 @@ import {
   run,
 } from './lib/host-target.mjs';
 
+/// Numeric comparison of two `x.y.z` version strings (> 0 when a is newer).
+function compareVersions(a, b) {
+  const pa = a.split('.').map(Number);
+  const pb = b.split('.').map(Number);
+  for (let i = 0; i < 3; i += 1) {
+    if (pa[i] !== pb[i]) return pa[i] - pb[i];
+  }
+  return 0;
+}
+
+/// Latest released version in the CHANGELOG body, or null when no
+/// released section exists yet. Only real release headings
+/// (`## [x.y.z] - yyyy-mm-dd`) count — legacy summary headings
+/// like `## [0.1.7] ~ [0.2.7] — …` don't match. Sections are
+/// maintained newest-first, but we take the numeric max anyway to
+/// stay robust against manual reordering.
+function latestReleasedVersion(content) {
+  const re = /^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}[ \t]*\r?$/gm;
+  let latest = null;
+  for (const m of content.matchAll(re)) {
+    if (latest === null || compareVersions(m[1], latest) > 0) {
+      latest = m[1];
+    }
+  }
+  return latest;
+}
+
 /// Semi-automatic changelog bump: validate the [Unreleased] section
 /// is non-empty, then rename it to `[<version>] - <today>` and
 /// re-open a fresh empty [Unreleased] on top. The file edit lands
 /// before `vsce package` so the marketplace-published .vsix carries
-/// the updated Changelog tab. The git commit + tag happen later,
-/// only after `vsce publish` succeeds (skip with --no-git).
+/// the updated Changelog tab. The git commit happens later, only
+/// after `vsce publish` succeeds (opt in with --git).
+///
+/// Multi-platform releases run this script once per target with the
+/// SAME package.json version. When that version already equals the
+/// latest released section in the CHANGELOG, this is a re-run for
+/// another platform: skip the bump entirely (no [Unreleased]
+/// requirement, no file edit).
 ///
 /// Validation guards (all fail fast BEFORE any build work):
 ///   - CHANGELOG.md must exist next to package.json.
-///   - It must contain a `## [Unreleased]` heading.
+///   - Unless this is a same-version re-run (see above), it must
+///     contain a `## [Unreleased]` heading.
 ///   - That section must have at least one real entry (HTML
 ///     comments are ignored). An empty Unreleased aborts release
 ///     unless --force-changelog is passed.
 ///   - The target `## [<version>] - <date>` heading must not already
 ///     exist (prevents double-releasing the same version).
+///
+/// Returns true when the CHANGELOG was modified, false when skipped.
 function bumpChangelog(version) {
   const changelogPath = join(extensionRoot, 'CHANGELOG.md');
   if (!existsSync(changelogPath)) {
@@ -64,6 +100,17 @@ function bumpChangelog(version) {
   const releasedHeader = `## [${version}] - ${today}`;
 
   const content = readFileSync(changelogPath, 'utf8');
+
+  // Same-version re-run guard: multi-platform releases execute this
+  // script once per target with an unchanged package.json version.
+  // When that version is already the latest released section below,
+  // this run only ships another platform — require no [Unreleased]
+  // entries and leave the CHANGELOG untouched.
+  const latest = latestReleasedVersion(content);
+  if (latest === version) {
+    console.log(`[publish] CHANGELOG latest release is already [${version}] — same-version re-run, skipping changelog bump.`);
+    return false;
+  }
 
   if (content.includes(releasedHeader)) {
     console.error(`[publish] CHANGELOG.md already contains "${releasedHeader}".`);
@@ -110,6 +157,7 @@ function bumpChangelog(version) {
   writeFileSync(changelogPath, newContent);
 
   console.log(`[publish] CHANGELOG: [Unreleased] -> [${version}] - ${today}`);
+  return true;
 }
 
 const pkg = JSON.parse(readFileSync(join(extensionRoot, 'package.json'), 'utf8'));
@@ -137,8 +185,10 @@ console.log(`[publish] version   : ${pkg.version}`);
 console.log('--------------------------------------------------');
 
 // Fail fast on an empty/missing changelog BEFORE we spend time
-// building the Rust server and packaging the .vsix.
-bumpChangelog(pkg.version);
+// building the Rust server and packaging the .vsix. Returns false
+// (no-op) when package.json's version already matches the latest
+// CHANGELOG release — i.e. a multi-platform re-run.
+const changelogBumped = bumpChangelog(pkg.version);
 
 ensureRustTarget(triple);
 buildLspRelease(triple);
@@ -162,8 +212,12 @@ run(`npx @vscode/vsce publish --packagePath "${vsixPath}"`, { cwd: extensionRoot
 // — you commit the renamed CHANGELOG.md yourself. Pass --git to
 // have the script auto-commit it instead (useful in CI).
 if (process.argv.includes('--git')) {
-  run(`git add CHANGELOG.md`, { cwd: repoRoot });
-  run(`git commit -m "chore(changelog): release ${pkg.version}"`, { cwd: repoRoot });
+  if (!changelogBumped) {
+    console.log('[publish] --git set but CHANGELOG was not modified; skipping commit.');
+  } else {
+    run(`git add vscode-extension/CHANGELOG.md`, { cwd: repoRoot });
+    run(`git commit -m "chore(changelog): release ${pkg.version}"`, { cwd: repoRoot });
+  }
 }
 
 console.log('');
