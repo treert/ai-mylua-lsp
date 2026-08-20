@@ -1,6 +1,8 @@
 use std::collections::HashMap;
 use std::mem;
 
+use memory_stats::memory_stats;
+
 use crate::aggregation::WorkspaceAggregation;
 use crate::document::Document;
 use crate::lua_symbol;
@@ -47,6 +49,18 @@ pub fn enabled() -> bool {
     std::env::var("MYLUA_MEM_PROFILE")
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false)
+}
+
+/// Current resident memory (working set / RSS) of this process, in
+/// bytes. Feeds the `memory_bytes` field of `mylua/indexStatus` so the
+/// VS Code status-bar tooltip can show a live server memory figure.
+///
+/// Delegates to the `memory-stats` crate (Windows working set /
+/// Linux VmRSS / macOS resident_size). Returns `None` when the
+/// platform is unsupported or sampling fails — the client then omits
+/// the figure.
+pub fn process_memory_bytes() -> Option<u64> {
+    memory_stats().map(|stats| stats.physical_mem as u64)
 }
 
 pub fn log_document_profile(documents: &HashMap<UriId, Document>) {

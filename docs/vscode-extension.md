@@ -36,6 +36,7 @@
 
 - 索引中：`💛X/Y`（已索引/总数）
 - 索引完成：`💚mylua` + toast 通知（session 内仅一次）
+- tooltip 第二行显示 server 进程内存（如 `mem 7.3 GB`），由 `mylua/memoryStatus` 驱动（ready 后每 ~2 秒采样，变化 ≥ 1 MiB 才推送，内存平稳时不更新）
 - 点击 → 打开扩展配置页
 
 ## 开发

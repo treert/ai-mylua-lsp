@@ -24,7 +24,8 @@ use crate::summary_builder;
 use crate::uri_id::{intern_uri, resolve_uri, UriId};
 use crate::util;
 use crate::workspace_scanner;
-use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams, ParsedFile};
+use crate::{new_parser, IndexState, IndexStatusNotification, IndexStatusParams,
+    MemoryStatusNotification, MemoryStatusParams, ParsedFile};
 
 const MIN_SLOW_PARSE_KEEP_TREE_THRESHOLD_MS: u128 = 15;
 
@@ -568,6 +569,15 @@ pub(crate) fn start_diagnostic_consumer(
         let cl = client.clone();
         tokio::spawn(async move {
             let mut tracker = DiagnosticProgressTracker::new();
+            // Periodic server-memory refresh: sample the process RSS
+            // every 20 ticks (~2 s) and push a `mylua/memoryStatus`
+            // notification whenever it moved by ≥ 1 MiB since the
+            // last push. The extension keeps the latest value and
+            // appends it to the status-bar tooltip, so hovering the
+            // item always shows a reasonably fresh figure without
+            // spamming the connection at the loop's 10 Hz cadence.
+            let mut mem_tick: u32 = 0;
+            let mut last_memory: Option<u64> = None;
             loop {
                 tokio::time::sleep(Duration::from_millis(100)).await;
                 let index_state = *state.lock().unwrap();
@@ -580,6 +590,22 @@ pub(crate) fn start_diagnostic_consumer(
                 if let Some(status) = tracker.next_status(index_state, remaining, total) {
                     cl.send_notification::<IndexStatusNotification>(status)
                         .await;
+                }
+                mem_tick = mem_tick.wrapping_add(1);
+                if mem_tick % 20 == 0 {
+                    if let Some(bytes) = memory_profile::process_memory_bytes() {
+                        let changed = match last_memory {
+                            Some(prev) => bytes.abs_diff(prev) >= 1024 * 1024,
+                            None => true,
+                        };
+                        if changed {
+                            last_memory = Some(bytes);
+                            cl.send_notification::<MemoryStatusNotification>(
+                                MemoryStatusParams { memory_bytes: bytes },
+                            )
+                            .await;
+                        }
+                    }
                 }
             }
         });

@@ -214,3 +214,11 @@ local a = custom_require("mgr_abc.abc_mgr")
 
 `phase` 值：`scanning` / `module_map_ready` / `parsing` / `merging` / `diagnosing`。
 `elapsedMs` 仅在冷启动索引完成的 `ready` 时出现；`remaining` 用于后台诊断进度，采样到从非零变为 0 时 server 会发送一次 `ready`。
+
+### `mylua/memoryStatus`（server → client）
+
+```typescript
+{ memoryBytes: number }
+```
+
+server 进程常驻内存（working set / RSS）字节数，供扩展在状态栏 tooltip 显示。ready 之后 server 每 ~2 秒采样一次，仅当相比上次推送变化 ≥ 1 MiB 时才发送，因此内存平稳时可能长时间不推送。采样失败或平台不支持（非 Windows/Linux/macOS）时不发送。

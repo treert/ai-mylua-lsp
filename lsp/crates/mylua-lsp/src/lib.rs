@@ -130,6 +130,26 @@ impl Notification for IndexStatusNotification {
     const METHOD: &'static str = "mylua/indexStatus";
 }
 
+/// Custom notification `mylua/memoryStatus`: the server's resident
+/// memory figure, sampled after `ready` at a ~2 s cadence and pushed
+/// only when the value moved by ≥ 1 MiB since the last push. Kept as
+/// its own method (rather than a field on `mylua/indexStatus`) because
+/// it carries no indexing state; clients that don't know the method
+/// simply ignore it.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryStatusParams {
+    /// Server process resident memory (working set / RSS) in bytes.
+    pub memory_bytes: u64,
+}
+
+pub enum MemoryStatusNotification {}
+
+impl Notification for MemoryStatusNotification {
+    type Params = MemoryStatusParams;
+    const METHOD: &'static str = "mylua/memoryStatus";
+}
+
 pub struct Backend {
     pub(crate) client: Client,
     pub(crate) parser: Mutex<tree_sitter::Parser>,

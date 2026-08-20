@@ -11,6 +11,13 @@ let client: LanguageClient | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined;
 let clientNotificationDisposable: vscode.Disposable | undefined;
 let readyNotified = false;
+/// Base tooltip text for the current status-bar state, kept so a
+/// memory-only refresh can re-apply the tooltip without touching the
+/// status text (and without depending on a status notification having
+/// arrived first).
+let tooltipBase: string | undefined;
+/// Latest server memory figure (bytes) for the status-bar tooltip.
+let latestMemoryBytes: number | undefined;
 let restartInProgress = false;
 let restartPromptPending = false;
 
@@ -59,6 +66,11 @@ type IndexStatusParams = {
   message?: string;
   /** Remaining files awaiting background diagnostics. */
   remaining?: number;
+};
+
+/** `mylua/memoryStatus`: server process resident memory (bytes). */
+type MemoryStatusParams = {
+  memoryBytes: number;
 };
 
 /// Bundled stdlib fallback chain. Ordered newest→oldest so the most
@@ -167,11 +179,40 @@ function formatElapsed(ms: number): string {
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} 秒`;
 }
 
+function formatMemory(bytes: number): string {
+  const mib = bytes / (1024 * 1024);
+  if (mib >= 1024) return `${(mib / 1024).toFixed(1)} GB`;
+  return `${mib.toFixed(mib >= 100 ? 0 : 1)} MB`;
+}
+
+/// Applies `tooltipBase` (plus the memory line, when known) to the
+/// status-bar item. Callable on its own so a `mylua/memoryStatus`
+/// refresh never has to re-derive the status text.
+function applyTooltip(): void {
+  if (!statusBarItem) return;
+  const base = tooltipBase ?? 'MyLua: language server — click to open settings';
+  if (latestMemoryBytes === undefined) {
+    statusBarItem.tooltip = base;
+    return;
+  }
+  // Plain-string tooltips render as a single line; a second line
+  // needs MarkdownString. The trailing double space before `\n` is
+  // a markdown hard line break (compact, no blank line between).
+  const memoryLine = `mem ${formatMemory(latestMemoryBytes)}`;
+  statusBarItem.tooltip = new vscode.MarkdownString(`${base}  \n${memoryLine}`);
+}
+
+function setMemoryBytes(bytes: number): void {
+  latestMemoryBytes = bytes;
+  applyTooltip();
+}
+
 function renderStatus(status: IndexStatusParams): void {
   if (!statusBarItem) return;
+  let tooltip: string;
   if (status.state === 'ready') {
     statusBarItem.text = '💚mylua';
-    statusBarItem.tooltip = `MyLua: index ready (${status.total} files) — click to open settings`;
+    tooltip = `MyLua: index ready (${status.total} files) — click to open settings`;
     // Show the one-shot "索引完成" toast exactly once per session —
     // the server only emits a single `ready` with elapsed_ms, but
     // guard here too so a defensive re-emit doesn't spam the user.
@@ -197,27 +238,29 @@ function renderStatus(status: IndexStatusParams): void {
   } else if (status.state === 'diagnosing') {
     const r = status.remaining ?? 0;
     statusBarItem.text = `💚${r}`;
-    statusBarItem.tooltip = `MyLua: diagnosing files (${r} remaining) — click to open settings`;
+    tooltip = `MyLua: diagnosing files (${r} remaining) — click to open settings`;
   } else {
     const total = status.total;
     const phase = status.phase;
     if (phase === 'scanning') {
       statusBarItem.text = '💛scanning…';
-      statusBarItem.tooltip = 'MyLua: scanning workspace for Lua files… — click to open settings';
+      tooltip = 'MyLua: scanning workspace for Lua files… — click to open settings';
     } else if (phase === 'module_map_ready') {
       statusBarItem.text = `💛parsing ${total}`;
-      statusBarItem.tooltip = `MyLua: module map ready, parsing files (${total})… — click to open settings`;
+      tooltip = `MyLua: module map ready, parsing files (${total})… — click to open settings`;
     } else if (phase === 'merging') {
       statusBarItem.text = `💛merging ${total}`;
-      statusBarItem.tooltip = `MyLua: building global index (${total} files)… — click to open settings`;
+      tooltip = `MyLua: building global index (${total} files)… — click to open settings`;
     } else if (total > 0) {
       statusBarItem.text = `💛${status.indexed}/${total}`;
-      statusBarItem.tooltip = `MyLua: parsing files (${status.indexed}/${total}) — click to open settings`;
+      tooltip = `MyLua: parsing files (${status.indexed}/${total}) — click to open settings`;
     } else {
       statusBarItem.text = '💛mylua';
-      statusBarItem.tooltip = 'MyLua: indexing workspace… — click to open settings';
+      tooltip = 'MyLua: indexing workspace… — click to open settings';
     }
   }
+  tooltipBase = tooltip;
+  applyTooltip();
   statusBarItem.show();
 }
 
@@ -275,9 +318,17 @@ function createLanguageClient(
     serverOptions,
     clientOptions,
   );
-  clientNotificationDisposable = next.onNotification(
-    'mylua/indexStatus',
-    (params: IndexStatusParams) => renderStatus(params),
+  clientNotificationDisposable = vscode.Disposable.from(
+    next.onNotification('mylua/indexStatus', (params: IndexStatusParams) => {
+      renderStatus(params);
+    }),
+    next.onNotification('mylua/memoryStatus', (params: MemoryStatusParams) => {
+      // Memory-only refresh: never touches the status text, so it is
+      // safe whether or not a status notification arrived before it.
+      if (typeof params.memoryBytes === 'number') {
+        setMemoryBytes(params.memoryBytes);
+      }
+    }),
   );
   return next;
 }
@@ -296,6 +347,8 @@ async function restartLanguageClient(
   if (restartInProgress) return;
   restartInProgress = true;
   readyNotified = false;
+  tooltipBase = undefined;
+  latestMemoryBytes = undefined;
   if (statusBarItem) {
     statusBarItem.text = '💛restarting…';
     statusBarItem.tooltip = 'MyLua: restarting language server…';
