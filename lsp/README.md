@@ -81,9 +81,15 @@ cargo run --release --bin lua-perf -- file1.lua file2.lua  # 多文件
 cargo run --release --bin lua-perf -- --summary /path/to/file.lua
 cargo run --release --bin lua-perf -- --summary-out target/lua-summary /path/to/file.lua
 cargo run --release --bin lua-perf -- --summary-stdout /path/to/file.lua
+
+# 测量 tree-sitter tree 的每节点内存占用（RSS 差分）
+cargo run --release --bin lua-perf -- --mem /path/to/file.lua
+cargo run --release --bin lua-perf -- --mem --mem-repeats 64 /path/to/file.lua
 ```
 
 `--summary` 默认写入 `target/lua-summary/`，输出文件名由输入路径转义得到，例如 `tests/lua-root/diagnostics.lua` 会写为 `target/lua-summary/tests_lua-root_diagnostics.lua.summary.json`，避免多文件模式下同名覆盖。`--summary-out <dir>` 可指定目录；`--summary-stdout` 仅支持单个输入文件。
+
+`--mem` 额外输出 tree-sitter tree 的内存占用估算：先做一次丢弃的 warmup 解析（让解析器瞬时分配与首棵 tree 的堆块就位），再连续解析 N 次（默认 16，`--mem-repeats` 调整，须 ≥ 2）并保留全部 tree，取进程 RSS 差分除以保留的 tree 数与节点数，得到**每节点字节数**。小文件差分易受采样噪声影响，delta < 8 MiB 时会提示加大 `--mem-repeats`。
 
 ## 与 `grammar/` 的边界
 

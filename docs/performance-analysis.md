@@ -48,6 +48,9 @@
 | Summary / 索引 | ~150–300 MB |
 | **合计** | **~1.5–3 GB** |
 
+tree-sitter 单节点成本：实测约 **88–155 B/可见节点**（工作系数 ~100 B），
+逐字段分析与测量方法见 [`tree-sitter-node-memory.md`](tree-sitter-node-memory.md)。
+
 **不做 LRU 的理由**：当前目标是降低冷启动后未访问文件的 AST 常驻内存，同时保持实现简单。诊断后台扫描对缺失 AST 使用临时 parse，不写回 `Document`；`references` / `rename` 这类全量扫描会主动补齐所有文件 AST，这会牺牲部分内存收益，但避免引入 LRU tracker 与淘汰一致性问题。
 
 **明确不做**：documents LRU、Tree 分级驱逐、`ScopeTree` 懒加载。

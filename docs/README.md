@@ -14,5 +14,6 @@
 | [`testing.md`](testing.md) | 测试体系与测试清单 |
 | [`vscode-extension.md`](vscode-extension.md) | VS Code 扩展：结构、构建、运行时 |
 | [`performance-analysis.md`](performance-analysis.md) | 性能评估与优化路线 |
+| [`tree-sitter-node-memory.md`](tree-sitter-node-memory.md) | Tree-sitter 节点内存逐字段剖析与实测 |
 | [`keyword-scanner-design.md`](keyword-scanner-design.md) | Tree-sitter external scanner 设计 |
 | [`future-work.md`](future-work.md) | 后续待办与优化方向 |

@@ -1,13 +1,16 @@
 //! Standalone CLI tool for profiling Lua file parse performance.
 //!
 //! Usage:
-//!   cargo run --release --bin lua-perf -- [--summary] [--summary-out <dir>] [--summary-stdout] <file1.lua> [file2.lua ...]
+//!   cargo run --release --bin lua-perf -- [--summary] [--summary-out <dir>] [--summary-stdout]
+//!              [--mem [--mem-repeats <N>]] <file1.lua> [file2.lua ...]
 //!
 //! For each file, it measures:
 //!   - Phase 1: tree-sitter parse
 //!   - Phase 2: build_file_analysis (summary + scope tree)
 //! and prints a detailed breakdown with timing and percentages. With
 //! `--summary`, it also writes the DocumentSummary JSON for each input file.
+//! With `--mem`, it additionally estimates the tree-sitter tree's memory
+//! footprint per node via RSS delta (see `run_memory_breakdown`).
 
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -43,7 +46,7 @@ fn main() {
         .expect("failed to load mylua grammar");
 
     for path in &options.files {
-        run_perf_breakdown(&mut parser, path, &options.summary_output);
+        run_perf_breakdown(&mut parser, path, &options.summary_output, options.mem_repeats);
     }
 }
 
@@ -51,6 +54,9 @@ fn main() {
 struct CliOptions {
     files: Vec<String>,
     summary_output: SummaryOutput,
+    /// Tree memory measurement repeat count; `None` disables the
+    /// `--mem` breakdown.
+    mem_repeats: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,9 +66,13 @@ enum SummaryOutput {
     Stdout,
 }
 
+const DEFAULT_MEM_REPEATS: usize = 16;
+
 fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
     let mut files = Vec::new();
     let mut summary_output = SummaryOutput::None;
+    let mut mem_repeats: Option<usize> = None;
+    let mut mem_requested = false;
     let mut i = 0;
 
     while i < args.len() {
@@ -85,6 +95,24 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
                 summary_output = SummaryOutput::Stdout;
                 i += 1;
             }
+            "--mem" => {
+                mem_requested = true;
+                i += 1;
+            }
+            "--mem-repeats" => {
+                let raw = args
+                    .get(i + 1)
+                    .ok_or_else(|| "--mem-repeats requires a number".to_string())?;
+                let n: usize = raw
+                    .parse()
+                    .map_err(|_| format!("--mem-repeats expects a number, got '{}'", raw))?;
+                if n < 2 {
+                    return Err("--mem-repeats must be >= 2 (one warmup parse is discarded)".to_string());
+                }
+                mem_requested = true;
+                mem_repeats = Some(n);
+                i += 2;
+            }
             arg if arg.starts_with('-') => {
                 return Err(format!("unknown option '{}'", arg));
             }
@@ -95,9 +123,14 @@ fn parse_args(args: Vec<String>) -> Result<CliOptions, String> {
         }
     }
 
+    if mem_requested && mem_repeats.is_none() {
+        mem_repeats = Some(DEFAULT_MEM_REPEATS);
+    }
+
     Ok(CliOptions {
         files,
         summary_output,
+        mem_repeats,
     })
 }
 
@@ -113,21 +146,107 @@ fn ensure_summary_output_unset(current: &SummaryOutput, option: &str) -> Result<
 }
 
 fn print_usage() {
-    eprintln!("Usage: lua-perf [--summary | --summary-out <dir> | --summary-stdout] <file1.lua> [file2.lua ...]");
+    eprintln!("Usage: lua-perf [--summary | --summary-out <dir> | --summary-stdout] [--mem [--mem-repeats <N>]] <file1.lua> [file2.lua ...]");
     eprintln!();
     eprintln!("Profile the parse/analysis performance of Lua files.");
     eprintln!("Use --release for meaningful timings:");
     eprintln!("  cargo run --release --bin lua-perf -- path/to/file.lua");
     eprintln!("  cargo run --release --bin lua-perf -- --summary path/to/file.lua");
+    eprintln!("  cargo run --release --bin lua-perf -- --mem path/to/file.lua");
     eprintln!(
-        "  cargo run --release --bin lua-perf -- --summary-out target/lua-summary path/to/file.lua"
+        "  cargo run --release --bin lua-perf -- --mem --mem-repeats 64 path/to/file.lua"
     );
+}
+
+/// Estimate the tree-sitter tree's memory footprint per node via RSS
+/// delta:
+///
+/// 1. A warmup parse allocates and frees the parser's transient state
+///    (GLR stacks, error-recovery versions) plus one tree, so those
+///    heap blocks are already committed when the baseline is sampled.
+/// 2. `repeats` parses are then run with every tree kept alive in a
+///    `Vec` (pre-allocated, so its growth never pollutes the delta).
+/// 3. The first kept tree reuses the warmup's freed blocks, so the
+///    RSS delta measures the `repeats - 1` remaining trees — transient
+///    allocations of later parses likewise reuse the first parse's
+///    freed blocks instead of growing the footprint.
+///
+/// Result: `delta / ((repeats - 1) * nodes)` ≈ bytes per node, with
+/// allocator noise amortized across the batch. Small files yield tiny
+/// deltas; a warning is printed when the delta looks too close to
+/// sampling noise to trust.
+fn run_memory_breakdown(
+    parser: &mut tree_sitter::Parser,
+    text: &str,
+    repeats: usize,
+) {
+    eprintln!("[Memory] tree footprint ({} kept parses):", repeats);
+    let warmup = match parser.parse(text.as_bytes(), None) {
+        Some(tree) => tree,
+        None => {
+            eprintln!("  [ERROR] warmup parse failed");
+            return;
+        }
+    };
+    let nodes = warmup.root_node().descendant_count() as u64;
+    drop(warmup);
+
+    let mut trees: Vec<tree_sitter::Tree> = Vec::with_capacity(repeats);
+    let baseline = mylua_lsp::memory_profile::process_memory_bytes();
+    for _ in 0..repeats {
+        match parser.parse(text.as_bytes(), None) {
+            Some(tree) => trees.push(tree),
+            None => {
+                eprintln!("  [ERROR] parse failed mid-measurement");
+                return;
+            }
+        }
+    }
+    let after = mylua_lsp::memory_profile::process_memory_bytes();
+    // Keep `trees` alive until after the `after` sample was taken.
+    drop(trees);
+
+    eprintln!("  nodes per tree: {}", nodes);
+    let (Some(base), Some(now)) = (baseline, after) else {
+        eprintln!("  [WARN] memory sampling unavailable on this platform; cannot compute footprint");
+        return;
+    };
+    if now <= base {
+        eprintln!(
+            "  [WARN] RSS did not grow ({} → {}); result would be meaningless",
+            base,
+            now
+        );
+        return;
+    }
+    let delta = now - base;
+    let measured_trees = (repeats - 1) as u64;
+    let per_tree = delta as f64 / measured_trees as f64;
+    let per_node = per_tree / nodes as f64;
+
+    eprintln!(
+        "  total delta:   {} bytes ({:.1} MiB)",
+        delta,
+        delta as f64 / 1048576.0
+    );
+    eprintln!(
+        "  per tree:      {:.0} bytes ({:.1} MiB)",
+        per_tree,
+        per_tree / 1048576.0
+    );
+    eprintln!("  bytes per node: {:.1}", per_node);
+    if delta < 8 * 1024 * 1024 {
+        eprintln!(
+            "  [WARN] delta < 8 MiB — close to sampling noise; raise --mem-repeats for a trustworthy figure"
+        );
+    }
 }
 
 fn run_perf_breakdown(
     parser: &mut tree_sitter::Parser,
     path: &str,
     summary_output: &SummaryOutput,
+    mem_repeats: Option<usize>,
 ) {
     let text = match mylua_lsp::util::read_file_as_utf8(Path::new(path)) {
         Ok(t) => t,
@@ -158,6 +277,10 @@ fn run_perf_breakdown(
     let tree = parser.parse(text.as_bytes(), None).expect("parse failed");
     let parse_ms = t0.elapsed().as_millis();
     eprintln!("[Phase 1] tree-sitter parse:      {} ms", parse_ms);
+
+    if let Some(repeats) = mem_repeats {
+        run_memory_breakdown(parser, &text, repeats);
+    }
 
     let root = tree.root_node();
     eprintln!("  root node children: {}", root.child_count());
@@ -292,6 +415,54 @@ mod tests {
             options.summary_output,
             SummaryOutput::Directory(PathBuf::from("target/lua-summary"))
         );
+        assert_eq!(options.mem_repeats, None);
+    }
+
+    #[test]
+    fn parse_args_mem_defaults_to_sixteen_repeats() {
+        let options = parse_args(vec![
+            "--mem".to_string(),
+            "tests/lua-root/diagnostics.lua".to_string(),
+        ])
+        .expect("args should parse");
+
+        assert_eq!(options.mem_repeats, Some(16));
+    }
+
+    #[test]
+    fn parse_args_mem_repeats_overrides_default() {
+        let options = parse_args(vec![
+            "--mem-repeats".to_string(),
+            "64".to_string(),
+            "tests/lua-root/diagnostics.lua".to_string(),
+        ])
+        .expect("args should parse");
+
+        assert_eq!(options.mem_repeats, Some(64));
+    }
+
+    #[test]
+    fn parse_args_mem_repeats_rejects_one() {
+        let err = parse_args(vec![
+            "--mem-repeats".to_string(),
+            "1".to_string(),
+            "tests/lua-root/diagnostics.lua".to_string(),
+        ])
+        .expect_err("repeats < 2 should be rejected");
+
+        assert!(err.contains(">= 2"));
+    }
+
+    #[test]
+    fn parse_args_mem_repeats_rejects_garbage() {
+        let err = parse_args(vec![
+            "--mem-repeats".to_string(),
+            "abc".to_string(),
+            "tests/lua-root/diagnostics.lua".to_string(),
+        ])
+        .expect_err("non-numeric repeats should be rejected");
+
+        assert!(err.contains("expects a number"));
     }
 
     #[test]
