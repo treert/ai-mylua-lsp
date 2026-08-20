@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
+  <defs>
+    <radialGradient id="moon" cx="38%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#8a8aff"/>
+      <stop offset="45%" stop-color="#3333c4"/>
+      <stop offset="100%" stop-color="#0a0a66"/>
+    </radialGradient>
+    <radialGradient id="sat" cx="35%" cy="30%" r="80%">
+      <stop offset="0%" stop-color="#ffffff"/>
+      <stop offset="100%" stop-color="#d0d0dd"/>
+    </radialGradient>
+  </defs>
+  <circle cx="118" cy="138" r="94" fill="url(#moon)"/>
+  <circle cx="198" cy="58" r="30" fill="url(#sat)"/>
+  <text x="198" y="76" font-family="'Trebuchet MS', 'Segoe UI', Verdana, sans-serif" font-size="52" font-weight="bold" fill="#ff6d00" text-anchor="middle">M</text>
+  <text x="118" y="178" font-family="Arial, Helvetica, sans-serif" font-size="80" font-weight="bold" fill="#ffffff" text-anchor="middle">Lua</text>
+</svg>

@@ -11,6 +11,11 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [0.2.15] - 2026-08-19
+
+### Added
+- 新增扩展图标：深蓝月球 + 白色卫星，月球内白色 "Lua"、卫星内橙色 "M"（呼应 MyLua）。市场页显示 256×256 PNG（`assets/icon.png`），`.lua` 文件在资源管理器与编辑器标签页显示同设计 SVG 文件图标。设计源为 `assets/icon.svg`，PNG 由 `scripts/gen-icon.mjs` 光栅化生成。
+
 ## [0.2.14] - 2026-08-11
 
 ### Added
