@@ -11,6 +11,11 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [0.2.16] - 2026-08-20
+
+### Added
+- 状态栏 tooltip 新增 server 进程内存显示：悬停状态栏第二行显示 `mem X.X GB`。server 通过新增的自定义通知 `mylua/memoryStatus` 推送采样值（索引完成后每 ~2 秒采样，变化 ≥ 1 MiB 才更新，内存平稳时不刷新），支持 Windows / Linux / macOS。
+
 ## [0.2.15] - 2026-08-19
 
 ### Added
