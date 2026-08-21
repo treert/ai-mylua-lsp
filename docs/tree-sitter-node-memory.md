@@ -1,22 +1,28 @@
 # Tree-sitter 节点内存剖析
 
-> 基于 tree-sitter **0.26.8** 源码（`src/subtree.h`、`src/length.h`、`src/node.c`）逐字段分析，
-> 结合 `lua-perf --mem` 对本仓库文法（tree-sitter-mylua）的实测数据。
-> 结论适用于 64 位平台。
+> 基于 tree-sitter **0.26.8** 源码（`src/subtree.h`、`src/length.h`、`src/node.c`、
+> `src/subtree.c`、`src/alloc.c`）逐字段分析，结合 `lua-perf --mem`（RSS 口径）
+> 与 `ts_set_allocator` 劫持测量（分配器口径）对本仓库文法（tree-sitter-mylua）
+> 的实测数据。结论适用于 64 位平台。
 
 ---
 
-## TL;DR
+## 概要
 
 - tree-sitter 的"节点"（`Subtree`）不是统一大小的结构，而是 **tagged union**，三种形态：
-  - **inline 叶子**：8 字节，无独立分配（住在父节点的 children 数组里）
-  - **堆分配父节点**：80 字节头 + 子槽位数组，一次 malloc
-  - **外部 token**：80 字节头，无子槽位
+  - **inline 叶子**：8 字节，无独立分配（住在父节点的 children 数组里）；
+    本仓库文法 symbol 总数 147 < 256，**named token（identifier/number/关键字）同样 inline**
+  - **堆分配节点**：80 字节头 + 子槽位数组，一体 malloc（父节点、外部 token、错误节点）
+  - **外部 token**：80 字节头，无子槽位（注释、字符串内容等 7 类）
 - **节点不存储任何文本**。变量名、关键字、字符串内容一个字节都不复制，
   节点里只有结构、相对偏移和文法符号 id；文本永远只有源码那一份数据。
-- 本仓库实测：**88.9 – 154.0 B/可见节点**，工作数字 **~100 B**。
-- 拉高平均值的是两个因素：① 每个独立分配节点实付 ~96–112 B；
-  ② **隐藏规则节点不计入 `descendant_count` 但占足内存**（本文法有 29 个隐藏规则）。
+- **隐藏规则节点是内存大头之一**：`_expression`/`_primary_expression` 等
+  `_` 前缀规则（本文法 29 个）在树里**物理存在**（每个 88–96 B 堆块），
+  但 `descendant_count` **一个都不数**——可见节点数只是冰山一角
+  （实测数据表：18 万可见节点背后约 10.3 万个额外堆块）。
+- Windows LFH 堆粒度把分配请求再放大 **1.3–2 倍**（88/96 B 请求实付 ~128 B）。
+- 实测（RSS 口径）：**88.9 – 154.0 B/可见节点**，工作数字 **~100 B**；
+  分配器请求口径 **70.0 – 139.6 B/可见节点**（见 §7）。
 
 ---
 
@@ -139,27 +145,30 @@ EmmyLua 注解文件注释密度极高，这是注解文件每节点成本偏高
 
 ---
 
-## 5. 一行代码的账
+## 5. 一行代码的账（实证）
 
-```lua
-{id=12345, name="sword"}
-```
+以合成文件 `return 1,1,1,…`（400 个 number + 400 个逗号，806 个可见节点）
+为例，通过 `ts_set_allocator` 劫持 tree-sitter 的 C 侧分配器逐笔统计
+（测量手段见附录），**每对 (number, `,`) 的物理堆块**：
 
-| 节点 | 形态 | 实付（含堆开销） |
-|------|------|------|
-| table_constructor | 父（80 + 2×8 + ovh） | ~112 B |
-| field `id` | 父（80 + 3×8 + ovh） | ~112 B |
-| `id` / `=` / `12345` | inline 叶子 | 3 × 8 B（槽位，含在父分配里） |
-| field `name` | 父（80 + 3×8 + ovh） | ~112 B |
-| `name` / `=` | inline 叶子 | 2 × 8 B |
-| string | 父（80 + 1×8 + ovh） | ~96 B |
-| 字符串内容 | **外部 token** | ~96 B |
-| `,` 分隔符的隐藏规则包装 | 父（隐藏，不计入 descendant_count） | ~112 B |
-| **合计（10 个可见节点）** | | **~640 B ≈ 64 B/可见节点** |
+| 精确尺寸 | 块数/对 | 结构解释 |
+|---------|--------|---------|
+| 88 B（80 头 + 1 槽） | 1 | 单子隐藏包装（`_expression` 或 `_primary_expression`） |
+| 96 B（80 头 + 2 槽） | 2 | 双子节点（另一层隐藏包装 / 表达式列表链节点） |
+| **合计** | **280 B/对** | number 与逗号本身均 inline（各 8 B 槽位，已含在父块内） |
 
-数据表形态是语料里最便宜的；换成深嵌套表达式代码（每层
-`_expression → _prefix_expression → _primary_expression` 都是独立堆分配），
-实测可达 154 B/可见节点。
+即：**806 个可见节点 ↔ 约 1,205 个堆块**，每对 token 的包装成本
+280 B（分配器请求），Windows LFH 实付约 **2 倍**（RSS 口径 293.5 B/可见节点）。
+
+对照真实语料的 `descendant_count` 可见节点数与堆块数：
+
+| 样本 | 可见节点/树 | 堆块/树（88/96 B 为主） | 分配器口径 |
+|------|------------|------------------------|-----------|
+| 数据表 `table_BackpackItem_IndexTable.lua` | 180,280 | ~103,700 | 70.0 B/可见节点 |
+| 注释密集 `emmy_types.lua` | 493 | ~560 | 103.6 B/可见节点 |
+
+数据表结构浅（隐藏包装层少），代码/注解文件包装层深——这与 §6 的
+结论互相印证。
 
 ---
 
@@ -171,8 +180,14 @@ EmmyLua 注解文件注释密度极高，这是注解文件每节点成本偏高
 return ts_subtree_visible_descendant_count(self) + 1;   // node.c
 ```
 
-**只数可见节点**。而 grammar.js 中的隐藏规则（`_` 前缀）在树里是货真价实的
-父节点（80 B + 槽位 + 开销），却**一个都不计入** `descendant_count`。
+**只数可见节点**。而 grammar.js 中的隐藏规则（`_` 前缀）**物理上是货真价实的
+堆节点**（80 B 头 + 槽位），却因为 `visible = false`：
+- 不计入 `descendant_count`
+- 不出现在 `to_sexp()` / named 遍历里（**corpus 测试的 S 表达式因此"看不见"
+  它们，容易误以为隐藏规则不产生节点——这是本剖析一度踩过的坑**）
+- 不出现在普通 `child` 遍历里
+
+即：**隐藏节点占足内存，但所有基于节点数的统计都对它失明**。
 
 本仓库文法共 **29 个隐藏规则**，逐层包装的主力：
 
@@ -182,28 +197,60 @@ _block / _top_statement / _top_block / _function_declaration /
 _local_declaration / _if_statement / …（完整清单见 grammar/grammar.js）
 ```
 
-一条顶层 `local x = a.b.c` 的实际包装链：
+一条 `local x = a.b.c` 的 value 侧物理包装（named 视图只能看到
+`local_declaration → variable → identifier`）：
 
 ```
-_top_block → _top_statement → local_declaration → _expression(=)
-  → _prefix_expression → _prefix_expression → _primary_expression → identifier
+local_declaration
+└── values: expression_list
+    └── _expression            ← 88 B 堆块，不可见
+        └── _primary_expression  ← 88 B 堆块，不可见
+            └── _prefix_expression? ← 命中 prefix 时再加一层
+                └── variable（可见）
 ```
 
-可见节点可能只有 `local_declaration` + `identifier` 们，但隐藏的
-`_expression/_prefix_expression/_primary_expression` 每层都是一次
-~100 B 的堆分配。**表达式嵌套越深、左递归链越长，隐藏包装越多**——
-这解释了实测数据里"普通代码/注解文件（154/151 B）明显贵于数据表（89 B）"
-的现象：数据表结构浅，代码的表达式链深。
+**表达式嵌套越深、choice 层级越多，隐藏包装越多**——这解释了实测数据里
+"普通代码/注解文件（103.6 B 分配器口径）明显贵于数据表（70.0 B）"的现象：
+数据表结构浅，代码的表达式链深。token 本身（inline 8 B）反而是最便宜的部分。
 
 因此实测的"bytes per node"准确说是：
 
 ```
-实测 B/可见节点 = 每堆节点实付(~96–112 B) × (1 + 隐藏节点/可见节点比) + 槽位摊销
+实测 B/可见节点 = 堆块实付(88–104 B 请求 × LFH 1.3–2 倍) × 堆块数/可见节点数 + 槽位摊销
 ```
 
 ---
 
-## 7. 实测数据（`lua-perf --mem`）
+## 7. 实测数据
+
+### 7.1 测试背景（`profile-memory.py`，全工作区）
+
+一个大型真实 UE 游戏项目工作区（2026-08 实测，Windows，tree-sitter 0.26.8）。
+全工作区总量数据由 [`profile-memory.py`](../.cursor/scripts/profile-memory.py)
+采集——该脚本通过 Extension Development Host 启动完整 LSP，等待索引 Ready
+后汇总内存普查与 RSS 采样：
+
+| 项目 | 数值 |
+|------|------|
+| 文件总数 | 23,690 个（`.lua`） |
+| 文件总大小 | 246 MB（246.6 MiB 源码常驻） |
+| 全工作区可见节点总数 | 52,939,615（约 5,290 万） |
+| tree 相关内存（≈ 可见节点数 × ~100 B） | ~5 GB |
+| 全量保留 tree 时 LSP 进程 RSS | ~7.5 GB |
+
+> 注意：默认配置下冷启动不保留 tree（见 §8），profile-memory.py 的
+> `tree_nodes` 等指标会全部归零；需将
+> `mylua.performance.slowParseKeepTreeThresholdMs` 设为小于 15
+> （如 `0`）强制全保留后才能得到上表数据。
+
+语料形态构成：UE 导出数据表（`Export/pbin/lua/`、`Config/`，节点多、
+结构浅）+ UE 注解生成文件（`UEAnnotation.LuaComment/`，注释密度极高）+
+常规业务代码。
+
+### 7.2 单文件测量（`lua-perf --mem`）
+
+每节点成本系数由 lua-perf 对单文件独立测量，样本文件取自上述工作区
+（`emmy_types.lua` 除外，取自本仓库 `tests/lua-root/`）。
 
 测量方法：warmup 解析（丢弃，让瞬时堆块就位）→ 连续 N 次解析并保留全部
 tree → 进程 RSS 差分 ÷ (N−1) 棵树 ÷ 可见节点数。命令：
@@ -212,14 +259,15 @@ tree → 进程 RSS 差分 ÷ (N−1) 棵树 ÷ 可见节点数。命令：
 cargo run --release --bin lua-perf -- --mem --mem-repeats 8 /path/to/file.lua
 ```
 
-样本取自 23,692 文件的真实工作区（2026-08 实测，Windows，tree-sitter 0.26.8）：
+四组样本结果（RSS 口径 = `--mem` 输出；分配器口径 = `ts_set_allocator`
+劫持 C 侧 malloc 逐笔统计，不含堆粒度开销；两者之比即 LFH 放大系数）：
 
-| 样本 | 可见节点数 | 实付 B/可见节点 | 备注 |
-|------|-----------|----------------|------|
-| `PBMessageMap.lua`（PB 导出 map） | 632,152 | **100.7** | 大体量混合形态 |
-| `table_BackpackItem_IndexTable.lua`（纯数据表） | 180,280 | **88.9** | 结构浅，隐藏包装少 |
-| `Feature_SP-annotation.lua`（UE 注解生成） | 216,695 | **150.9** | 注释（外部 token）密度极高 |
-| `tests/lua-root/emmy_types.lua`（普通代码，400 repeats） | 493 | **154.0** | 表达式嵌套深 |
+| 样本 | 可见节点数 | RSS 口径 B/可见节点 | 分配器口径 B/可见节点 | LFH 放大 |
+|------|-----------|--------------------|---------------------|---------|
+| `PBMessageMap.lua`（PB 导出 map） | 632,152 | **100.7** | — | — |
+| `table_BackpackItem_IndexTable.lua`（纯数据表） | 180,280 | **88.9** | **70.0** | 1.27× |
+| `Feature_SP-annotation.lua`（UE 注解生成） | 216,695 | **150.9** | — | — |
+| `tests/lua-root/emmy_types.lua`（普通代码） | 493 | **154.0** | **103.6** | 1.49× |
 
 小文件差分易被采样噪声淹没（delta < 8 MiB 会告警），务必加大 `--mem-repeats`。
 
@@ -227,29 +275,45 @@ cargo run --release --bin lua-perf -- --mem --mem-repeats 8 /path/to/file.lua
 
 ## 8. 工作结论
 
-1. **~100 B/可见节点**是本仓库文法的稳健估算系数；精确预算按语料形态取
-   88–155 B 区间。
+1. **~100 B/可见节点**（RSS 口径）是本仓库文法的稳健估算系数；精确预算按
+   语料形态取 88–155 B 区间。其构成为：
+   `隐藏包装与父节点的堆块（88–104 B 请求）× 堆块/可见节点比 + LFH 粒度放大（1.3–2 倍）`。
 2. 全工作区保留 tree 的内存 ≈ `总可见节点数 × ~100 B`。
-   5.2 万个文件、5,290 万可见节点的语料 ≈ **5.3 GB**——
-   实测 LSP 全量保留时进程 RSS 7.5 GB，与"tree 5.3 GB + 基线 ~1.4 GB +
-   解析期水位"基本吻合。
+   §7.1 测试背景的语料按此折算 ≈ **5.3 GB**——实测全量保留时进程
+   RSS 7.5 GB，与"tree 5.3 GB + 基线 ~1.4 GB + 解析期水位"基本吻合。
+   折算到项目 5 万文件目标 ≈ **~11 GB**，全量常驻不可行，印证懒重建路线。
 3. 对本项目的直接推论：
    - "冷启动不保留 tree、按需懒重建"（见
      [`performance-analysis.md`](performance-analysis.md) §3）是内存的
      决定性策略，保住它就是省 5 GB 量级；
    - 自动生成的数据表 / 注解导出文件节点最多、每节点不便宜、又几乎
      不需要语义跳转——是最值得被 `slowParseKeepTreeThresholdMs` 淘汰、
-     或被 `mylua.workspace.exclude` 排除的语料。
+     或被 `mylua.workspace.exclude` 排除的语料；
+   - 若未来要压缩 tree 内存，文法侧减少 `_expression → _primary_expression`
+     这类多层 choice 包装（每层 88 B 堆块）是最大的可操作杠杆；
+     tree-sitter 运行时的 80 B 头与 LFH 粒度则不在本仓库控制范围内。
 
 ---
 
-## 附录：信息来源
+## 附录：信息来源与测量手段
 
 - 字段布局：tree-sitter 0.26.8 `src/subtree.h`（`SubtreeInlineData` /
   `SubtreeHeapData` / `ExternalScannerState`）、`src/length.h`（`Length`/`TSPoint`）、
-  `src/node.c`（`ts_node_descendant_count`）
+  `src/node.c`（`ts_node_descendant_count`）、`src/subtree.c`
+  （`ts_subtree_new_leaf` 的 inline 判定、`ts_subtree_new_node` 的一体分配）、
+  `src/alloc.c`（`ts_set_allocator` 分配器覆盖点）
 - 外部 token 清单：`grammar/grammar.js` `externals`；scanner 状态大小：
-  `grammar/src/scanner.c`（`ScannerState` 1 字节）
+  `grammar/src/scanner.c`（`ScannerState` 1 字节）；symbol 编号：
+  生成的 `grammar/src/parser.c`（`SYMBOL_COUNT 147`，全部 < 256，
+  named token 与匿名 token 混合编号）
 - 隐藏规则清单：`grammar/grammar.js` 中 `_` 前缀规则（29 个）
-- 实测：`lua-perf --mem`（实现见 `lsp/crates/mylua-lsp/src/bin/lua_perf.rs`，
-  采样依赖 `memory-stats` crate）
+- 实测：单文件每节点成本由 `lua-perf --mem` 测量（实现见
+  `lsp/crates/mylua-lsp/src/bin/lua_perf.rs`，采样依赖 `memory-stats` crate）；
+  全工作区总量（§7.1）由 `.cursor/scripts/profile-memory.py` 采集
+  （需配合 `slowParseKeepTreeThresholdMs < 15` 的全保留配置）
+- **分配器口径测量**（§5/§7 精确尺寸数据）：通过 `ts_set_allocator`
+  劫持 tree-sitter 的 C 侧 malloc/calloc/realloc/free，用
+  `ptr → size` 活跃表 + 精确尺寸直方图统计。**注意**：tree-sitter 的
+  C 分配不走 Rust 全局分配器（默认链到 CRT 的独立堆），因此
+  `#[global_allocator]` 计数与 `HeapWalk` 对它均无效；
+  `to_sexp()`/corpus S 表达式是 named 视图，看不到隐藏节点。
