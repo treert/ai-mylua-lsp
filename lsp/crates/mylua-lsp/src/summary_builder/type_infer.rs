@@ -17,6 +17,74 @@ use super::BuildContext;
 // Expression type inference (single-file)
 // ---------------------------------------------------------------------------
 
+/// Fact for the chunk-level `_ENV` — the global environment table.
+///
+/// `_ENV` is a lexical upvalue holding the current environment, **not** a
+/// global variable named `_ENV` (`_G._ENV` is nil). Modelling the default
+/// environment as the stdlib `_G` class means `local e = _ENV; e.some_global`
+/// resolves through the ordinary global namespace, and costs no new
+/// `TypeFact` variant.
+///
+/// Materialized as a real scope declaration by
+/// `visitors::declare_implicit_env`.
+pub(super) fn implicit_env_fact() -> TypeFact {
+    TypeFact::Known(KnownType::EmmyType(crate::lua_symbol::intern_lua_symbol(
+        "_G",
+    )))
+}
+
+/// True if `fact` denotes the global environment itself.
+///
+/// Two spellings reach here:
+/// - `EmmyType("_G")` — the implicit declaration's fact, and what the stdlib
+///   `---@class _G` resolves to;
+/// - `GlobalRef("_G")` — an explicit `local _ENV = _G`, where `_G` is a free
+///   name whose value *is* the global table.
+pub(super) fn is_global_env_fact(fact: &TypeFact) -> bool {
+    match fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => name == "_G",
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => name == "_G",
+        _ => false,
+    }
+}
+
+/// Base fact for treating a free name as `_ENV.<name>`, or `None` when the
+/// ordinary global path applies.
+///
+/// Every chunk declares `_ENV` (see `visitors::declare_implicit_env`), so the
+/// question is never *whether* `_ENV` resolves but *what it points at*:
+///
+/// - the global environment (the implicit declaration, or an explicit
+///   `local _ENV = _G`) → `None`, i.e. resolve the name as a plain global,
+///   which is the ordinary path;
+/// - anything else (`local _ENV = {}`, a `_ENV` parameter, `_ENV = t`) → the
+///   redirected table's fact, so the name becomes one of its fields.
+///
+/// Keying off the *value* rather than the mere presence of a declaration is
+/// what makes `local _ENV = _G` behave identically to the implicit case, as
+/// Lua does.
+///
+/// `name == "_ENV"` yields `None`: `_ENV` itself resolves through the scope
+/// tree, and wrapping it would build `FieldOf { base: _ENV, .. }` recursively.
+pub(super) fn env_field_base_fact(
+    ctx: &BuildContext,
+    name: &str,
+    offset: usize,
+) -> Option<TypeFact> {
+    if name == crate::lua_builtins::ENV_NAME {
+        return None;
+    }
+    let decl = ctx.resolve_visible_in_build_scopes(crate::lua_builtins::ENV_NAME, offset)?;
+    // An `_ENV` of unknown type (e.g. `local _ENV = some_factory()`) still
+    // redirects the name away from the global environment; `Unknown` keeps
+    // resolution silent instead of guessing at fields.
+    let fact = decl.type_fact.clone().unwrap_or(TypeFact::Unknown);
+    if is_global_env_fact(&fact) {
+        return None;
+    }
+    Some(fact)
+}
+
 pub(super) fn infer_expression_type(
     ctx: &mut BuildContext,
     node: tree_sitter::Node,
@@ -121,7 +189,22 @@ pub(super) fn infer_expression_type(
                     return tf.clone();
                 }
             }
-            // Otherwise it's a global reference stub
+            // Bare `_ENV` with no user declaration is the implicit
+            // chunk-level environment upvalue — the global table itself,
+            // never a global *variable* named `_ENV`.
+            if text == crate::lua_builtins::ENV_NAME {
+                return implicit_env_fact();
+            }
+            // A free name `x` is sugar for `_ENV.x`. With a user-declared
+            // `_ENV` in scope the read targets that table's field; otherwise
+            // `_ENV` is the implicit global environment and this is an
+            // ordinary global reference.
+            if let Some(env_fact) = env_field_base_fact(ctx, text, node.start_byte()) {
+                return TypeFact::Stub(SymbolicStub::FieldOf {
+                    base: Box::new(env_fact),
+                    field: text.into(),
+                });
+            }
             TypeFact::Stub(SymbolicStub::GlobalRef { name: text.into() })
         }
 

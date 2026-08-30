@@ -125,6 +125,17 @@ pub const LUA_KEYWORDS: &[&str] = &[
     "local", "nil", "not", "or", "repeat", "return", "then", "true", "until", "while",
 ];
 
+/// The name of the environment upvalue (Lua 5.2+).
+///
+/// Every chunk is compiled as a function whose first upvalue is `_ENV`, and
+/// a free name `x` is by definition sugar for `_ENV.x`. `_ENV` is therefore a
+/// *lexical* name, never a field of the global table (`_G._ENV` is nil) — so
+/// it is resolved through the scope tree and must never be registered as a
+/// global. When no user declaration is in scope, the implicit chunk-level
+/// `_ENV` is the global environment and free names resolve against it, which
+/// is the ordinary path.
+pub const ENV_NAME: &str = "_ENV";
+
 #[cfg(test)]
 mod tests {
     use super::*;

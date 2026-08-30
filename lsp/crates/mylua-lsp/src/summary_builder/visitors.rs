@@ -2,6 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, parse_type_from_str,
     EmmyAnnotation, EmmyType,
 };
+use crate::lua_builtins::ENV_NAME;
 use crate::lua_symbol::intern_lua_symbol;
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
@@ -22,8 +23,50 @@ use super::BuildContext;
 // Top-level visitor
 // ---------------------------------------------------------------------------
 
+/// Declare the implicit chunk-level `_ENV`, as if every file opened with
+/// `local _ENV = _G`.
+///
+/// Lua 5.2+ compiles each chunk into a function whose first upvalue is `_ENV`,
+/// and a free name `x` is by definition sugar for `_ENV.x`. Materializing that
+/// upvalue as a real scope declaration makes the scope tree the *single source
+/// of truth* for `_ENV`: every consumer that already asks "is this name a
+/// local?" — semantic tokens, hover, goto, completion, `undefinedGlobal` —
+/// answers correctly with no `_ENV`-specific branch of its own.
+///
+/// Without it, each of those layers had to special-case `_ENV` separately, and
+/// any layer that forgot fell back to "global variable" — which `_ENV` never
+/// is (`_G._ENV` is nil).
+///
+/// The declaration is zero-length at the very start of the chunk so it cannot
+/// be mistaken for user-written source, and it is typed as the stdlib `_G`
+/// class so that `local e = _ENV; e.some_global` resolves through the ordinary
+/// global namespace.
+fn declare_implicit_env(ctx: &mut BuildContext, root: tree_sitter::Node) {
+    let at = root.start_byte();
+    let range = crate::util::ByteRange {
+        start_byte: at,
+        end_byte: at,
+        start_row: 0,
+        start_col: 0,
+        end_row: 0,
+        end_col: 0,
+    };
+    ctx.add_scoped_decl(ScopeDecl {
+        name: ENV_NAME.into(),
+        kind: DefKind::LocalVariable,
+        decl_byte: at,
+        visible_after_byte: at,
+        range,
+        selection_range: range,
+        type_fact: Some(super::type_infer::implicit_env_fact()),
+        bound_class: None,
+        is_emmy_annotated: false,
+    });
+}
+
 pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
     ctx.push_scope(ScopeKind::File, root.start_byte(), root.end_byte());
+    declare_implicit_env(ctx, root);
 
     let mut cursor = root.walk();
     if !cursor.goto_first_child() {
@@ -1331,6 +1374,44 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             // Simple global: `foo = expr`
             kind::VARIABLE if var_node.child_count() == 1 => {
                 let name = node_text(var_node, ctx.source).to_string();
+
+                // `_ENV = expr` assigns the upvalue holding the current
+                // environment — it does NOT define a global named `_ENV`
+                // (`_G._ENV` is nil in Lua). Record it as a scope declaration
+                // visible only *after* the statement, so free names before
+                // this point still resolve against the previous environment
+                // while later ones use the new one.
+                //
+                // This must run BEFORE the "already a visible local" check
+                // below: every chunk declares `_ENV` implicitly, so that
+                // check would otherwise treat the write as a plain assignment
+                // to an existing local and skip the re-declaration entirely.
+                if name == ENV_NAME {
+                    let value_fact = value_node
+                        .map(|v| infer_expression_type(ctx, v, 0))
+                        .unwrap_or(TypeFact::Unknown);
+                    let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
+                    let selection_range =
+                        ctx.line_index.ts_node_to_byte_range(var_node, ctx.source);
+                    if let TypeFact::Known(KnownType::Table(shape_id)) = &value_fact {
+                        if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+                            shape.set_owner(ENV_NAME);
+                        }
+                    }
+                    ctx.add_scoped_decl(ScopeDecl {
+                        name: ENV_NAME.into(),
+                        kind: DefKind::LocalVariable,
+                        decl_byte: var_node.start_byte(),
+                        visible_after_byte: node.end_byte(),
+                        range,
+                        selection_range,
+                        type_fact: Some(value_fact),
+                        bound_class: None,
+                        is_emmy_annotated: false,
+                    });
+                    continue;
+                }
+
                 if ctx
                     .resolve_visible_in_build_scopes(&name, var_node.start_byte())
                     .is_some()
@@ -1389,6 +1470,25 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
                         shape.set_owner(&name);
                     }
+                }
+
+                // A free-name write `x = v` is really `_ENV.x = v`. When `_ENV`
+                // points somewhere other than the global environment, the
+                // target is that table — record a field write on its shape and
+                // emit no global contribution. `env_field_base_fact` returns
+                // `None` for the global environment (implicit, or an explicit
+                // `local _ENV = _G`), which keeps the ordinary global path.
+                if super::type_infer::env_field_base_fact(ctx, &name, var_node.start_byte())
+                    .is_some()
+                {
+                    register_nested_field_write(
+                        ctx,
+                        ENV_NAME,
+                        std::slice::from_ref(&name),
+                        type_fact,
+                        ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
+                    );
+                    continue;
                 }
 
                 ctx.global_contributions.push(GlobalContribution {
@@ -1559,6 +1659,14 @@ fn global_prefixes_for_build_fact(fact: &TypeFact) -> Vec<String> {
     match fact {
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
             push_global_prefix_for_build(&mut prefixes, name.to_string());
+        }
+        // The global environment (`_ENV` bound to the global table, or the
+        // stdlib `---@class _G`). Field writes through it target real globals;
+        // `GlobalShard` normalizes the resulting `_G.x` key down to bare `x`.
+        // Mirrors the `EmmyType("_G")` branch in
+        // `resolver::global_prefixes_for_fact`.
+        TypeFact::Known(KnownType::EmmyType(name)) if name == "_G" => {
+            push_global_prefix_for_build(&mut prefixes, "_G".to_string());
         }
         TypeFact::Stub(SymbolicStub::FieldOf { .. }) => {
             if let Some((base, fields)) = flatten_field_of_build_fact(fact) {

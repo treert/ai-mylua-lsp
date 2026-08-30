@@ -115,26 +115,54 @@ pub struct GlobalShard {
     uri_to_paths: HashMap<UriId, Vec<LuaSymbol>>,
 }
 
-/// Strip the redundant `_G.` prefix from a global path.
+/// Strip a redundant global-environment prefix (`_G.` / `_ENV.`) from a path.
 ///
-/// `_G` **is** the global environment table, so `_G.X` names the same global
-/// as bare `X` — and `_G._G.X` likewise, since `_G._G == _G`. Normalizing
-/// here, at the single entry point shared by every `GlobalShard` key
-/// operation, keeps the two spellings from splitting into duplicate entries
-/// and means callers never have to special-case `_G` when they build or
-/// query a path.
+/// Both spellings name the global environment, but they are **not**
+/// interchangeable, and the asymmetry is load-bearing:
+///
+/// - `_G` **is** a field of the global table that points back at it, so `_G.X`
+///   names the same global as bare `X`, and `_G.` may repeat
+///   (`_G._G.X == X`).
+/// - `_ENV` is a *lexical upvalue*, **not** a field of the global table
+///   (`_G._ENV` is nil). It is therefore only meaningful at the **head** of a
+///   path: `_ENV.X == X`, but `_G._ENV.X` and `_ENV._ENV.X` index nil at run
+///   time and must NOT collapse to `X`.
+///
+/// Hence `_ENV.` is stripped at most once and only at the head, before the
+/// `_G.` loop — the loop never runs back over an `_ENV.` that a `_G.` strip
+/// exposed:
+///
+/// | input           | output      |
+/// |-----------------|-------------|
+/// | `_ENV.x`        | `x`         |
+/// | `_ENV._G._G.x`  | `x`         |
+/// | `_G._ENV.x`     | `_ENV.x`    |
+/// | `_ENV._ENV.x`   | `_ENV.x`    |
+///
+/// The last two stay as un-resolvable pseudo-keys, which is exactly right:
+/// nothing registers them, so they neither resolve nor mask a real global.
 ///
 /// A bare `"_G"` is preserved: the bundled stdlib declares `_G` itself as a
 /// global (`---@class _G` + `_G = {}`), so that root must stay reachable.
+/// A bare `"_ENV"` is likewise left alone — it is resolved through the scope
+/// tree and never registered as a global.
 ///
-/// NOTE on shadowing: a *local* named `_G` (`local _G = {}`) shadows the
-/// global environment, and `_G.X` is then an ordinary table field. That case
-/// never reaches this function — a shadowed base resolves to a local table
-/// shape and is filtered out before any `global_shard` path is built. The one
-/// place that used to bypass that filter (the raw-text prefix fallback in
-/// `diagnostics::field_access`) now excludes `_G` explicitly.
+/// NOTE on shadowing: a local `_G` / `_ENV` (or an `_ENV = …` assignment)
+/// shadows the global environment, and `_G.X` / `_ENV.X` are then ordinary
+/// table fields. Those cases never reach this function — a shadowed base
+/// resolves to a local table shape and the field write is recorded on that
+/// shape instead of building a `global_shard` path. The one place that used to
+/// bypass that filter (the raw-text prefix fallback in
+/// `diagnostics::field_access`) excludes both names explicitly.
 pub(crate) fn normalize_global_path(path: &str) -> &str {
     let mut normalized = path;
+    // `_ENV.` — head only, at most once (it is an upvalue, not a table field).
+    if let Some(rest) = normalized.strip_prefix("_ENV.") {
+        if !rest.is_empty() {
+            normalized = rest;
+        }
+    }
+    // `_G.` — may repeat, since `_G._G == _G`.
     while let Some(rest) = normalized.strip_prefix("_G.") {
         if rest.is_empty() {
             break;

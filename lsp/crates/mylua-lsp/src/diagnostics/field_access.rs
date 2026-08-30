@@ -259,12 +259,13 @@ fn field_global_prefixes(
 
     // Raw-text fallback prefix. Unlike the fact-derived prefixes above, this
     // one is not backed by any scope resolution, so it must never claim the
-    // global environment: a shadowing `local _G = {}` would otherwise be
-    // treated as the global env and silently suppress unknown-field
-    // diagnostics on its members. The genuine global-env case is already
-    // covered by the fact-derived prefixes.
+    // global environment: a shadowing `local _G = {}` / `local _ENV = {}`
+    // would otherwise be treated as the global env and silently suppress
+    // unknown-field diagnostics on its members (`GlobalShard` normalizes both
+    // prefixes away, so the lookup would hit the real global). The genuine
+    // global-env case is already covered by the fact-derived prefixes.
     let base_text = node_text(base_node, source);
-    if base_text != "_G" {
+    if base_text != "_G" && base_text != crate::lua_builtins::ENV_NAME {
         let mut segments = vec![base_text.to_string()];
         if fields.len() > 1 {
             segments.extend(fields[..fields.len() - 1].iter().cloned());

@@ -16,6 +16,57 @@ use crate::type_system::{KnownType, TypeFact};
 use crate::uri_id::UriId;
 use crate::util::{extract_string_literal, node_text};
 
+/// Fact for the chunk-level `_ENV` — the global environment table.
+///
+/// Query-side counterpart of
+/// `summary_builder::type_infer::implicit_env_fact`; see that function for the
+/// rationale.
+pub(crate) fn implicit_env_fact() -> TypeFact {
+    TypeFact::Known(KnownType::EmmyType(crate::lua_symbol::intern_lua_symbol(
+        "_G",
+    )))
+}
+
+/// True if `fact` denotes the global environment itself.
+///
+/// Mirrors `summary_builder::type_infer::is_global_env_fact`: both the
+/// `EmmyType("_G")` form (implicit declaration / stdlib `---@class _G`) and the
+/// `GlobalRef("_G")` form (an explicit `local _ENV = _G`) count.
+fn is_global_env_fact(fact: &TypeFact) -> bool {
+    match fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => name == "_G",
+        TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name }) => name == "_G",
+        _ => false,
+    }
+}
+
+/// Base fact for treating a free name as `_ENV.<name>`, or `None` when the
+/// ordinary global path applies.
+///
+/// Query-side counterpart of
+/// `summary_builder::type_infer::env_field_base_fact` — see that function for
+/// the full rationale. Keys off *what `_ENV` points at*, not merely whether it
+/// resolves: the global environment (implicit, or an explicit
+/// `local _ENV = _G`) yields `None` so the name stays an ordinary global.
+pub(crate) fn env_field_base_fact_in_scope(
+    name: &str,
+    offset: usize,
+    scope_tree: &ScopeTree,
+) -> Option<TypeFact> {
+    if name == crate::lua_builtins::ENV_NAME {
+        return None;
+    }
+    scope_tree.resolve_decl(offset, crate::lua_builtins::ENV_NAME)?;
+    let fact = scope_tree
+        .resolve_type(offset, crate::lua_builtins::ENV_NAME)
+        .cloned()
+        .unwrap_or(TypeFact::Unknown);
+    if is_global_env_fact(&fact) {
+        return None;
+    }
+    Some(fact)
+}
+
 /// Recursively infer the type of an AST expression node.
 ///
 /// The mylua grammar uses `variable` nodes for both plain identifiers and
@@ -108,6 +159,24 @@ pub(crate) fn infer_node_type_in_file_id(
             let text = node_text(node, source);
             if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
                 return tf.clone();
+            }
+            // Bare `_ENV` with no user declaration is the implicit
+            // chunk-level environment upvalue — the global table itself,
+            // never a global *variable* named `_ENV`.
+            if text == crate::lua_builtins::ENV_NAME {
+                return implicit_env_fact();
+            }
+            // A free name `x` is sugar for `_ENV.x`. With a user-declared
+            // `_ENV` in scope the read targets that table's field; otherwise
+            // `_ENV` is the implicit global environment and this is an
+            // ordinary global reference. Mirrors
+            // `summary_builder::type_infer::env_field_base_fact`.
+            if let Some(env_fact) = env_field_base_fact_in_scope(text, node.start_byte(), scope_tree)
+            {
+                return TypeFact::Stub(crate::type_system::SymbolicStub::FieldOf {
+                    base: Box::new(env_fact),
+                    field: text.into(),
+                });
             }
             TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: text.into() })
         }

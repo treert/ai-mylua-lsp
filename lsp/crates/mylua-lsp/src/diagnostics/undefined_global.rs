@@ -72,7 +72,21 @@ pub(super) fn check_undefined_globals(
                 let name = node_text(node, source);
                 let byte_offset = node.start_byte();
                 let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
-                if !is_local && !builtins.contains(name) && !index.global_shard.contains_key(name) {
+                // A free name is `_ENV.name`. Once a user-declared `_ENV` is
+                // in scope the name is a field of that table, not a global,
+                // so "undefined global" no longer applies — whether the field
+                // exists is the field-access checker's business.
+                let env_redirected = crate::type_inference::env_field_base_fact_in_scope(
+                    name,
+                    byte_offset,
+                    scope_tree,
+                )
+                .is_some();
+                if !is_local
+                    && !env_redirected
+                    && !builtins.contains(name)
+                    && !index.global_shard.contains_key(name)
+                {
                     diagnostics.push(Diagnostic {
                         range: line_index.ts_node_to_range(node, source),
                         severity: Some(severity),
