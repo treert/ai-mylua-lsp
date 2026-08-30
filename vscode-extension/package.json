@@ -239,6 +239,17 @@
           "default": "warning",
           "description": "Severity for conservative Lua field warnings (e.g. unknown field on open table)."
         },
+        "mylua.diagnostics.envUnknownField": {
+          "type": "string",
+          "enum": [
+            "error",
+            "warning",
+            "hint",
+            "off"
+          ],
+          "default": "warning",
+          "description": "Severity for reading a name that the redirected `_ENV` does not provide (yet). Only fires when `_ENV` points at a table of fully known shape, and only on the chunk's top-level statements. A metatable, `rawset` or a dynamic-key write makes the shape non-exhaustive and silences the check."
+        },
         "mylua.diagnostics.duplicateTableKey": {
           "type": "string",
           "enum": [

@@ -22,6 +22,7 @@
 - `local x = require("mod")` 的 LHS 名称直接跳转到模块（含 `<const>`/`<close>` 属性偏移处理）
 - AST 驱动的任意深度 dotted field 跳转（`a.b.c`）
 - Emmy 类型名跳转（`type_shard`）
+- `_ENV` 重定向后的自由名跳转（解析为环境表的字段，见 [`lsp-semantic-spec.md` §1.3](lsp-semantic-spec.md)）
 - 多候选策略可配置（`gotoDefinition.strategy`: Auto/Single/List）
 
 ### goto declaration
@@ -36,6 +37,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - 单文件 local scope（shadowing 感知）+ 全工作区全局符号引用
 - EmmyLua 注解内的类型名引用（`@type`/`@param`/`@return`/`@class : Parent` 等）
 - 点击注解内类型名也能触发
+- `_ENV` 重定向后的自由名按环境表字段查找，区分环境边界（重绑前后的同名符号不合并）
 - 声明包含策略可配置（`references.strategy`: Best/Merge/Select）
 - `references.scanComments`（默认 `true`）：是否在普通注释（非 `---@`）里扫描已注册 Emmy 类型名。关闭后仅匹配 `---@` 注解行内的类型名，减少散文注释的误报。rename 跟随同一开关
 
@@ -61,6 +63,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - `@overload` 签名展示
 - 匿名函数绑定签名展示（`local f = function(a, b) end`）
 - `function a.b.c()` 中间段 identifier 不误报为函数 hover
+- `_ENV` 重定向后的自由名解析为环境表字段；环境形状未知时保持静默
 
 ### signatureHelp
 - 基于 `FunctionSummary` 的参数签名浮窗
@@ -138,6 +141,7 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 |------|--------|------|
 | 未定义全局变量 | `undefinedGlobal` | Warning |
+| 重定向 `_ENV` 的未定义字段 | `envUnknownField` | Warning |
 | Emmy 类型未知字段 | `emmyUnknownField` | Warning |
 | Table shape 未知字段 | `luaFieldError`/`luaFieldWarning` | Warning |
 
@@ -150,6 +154,8 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 | `@param` 名称不匹配 Lua 参数 | 内置 | Warning |
 
 `@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
+
+`envUnknownField` 与 `undefinedGlobal` 接力：环境被 `_ENV` 重定向后名字不再是全局，`undefinedGlobal` 退出，由 `envUnknownField` 判断该字段在新环境中是否存在（抑制码 `env-field`）。仅在 `_ENV` 指向**形状完全已知**的表、且读写均位于 chunk 顶层直线执行流时触发；`setmetatable` / `rawset` / 动态键会使形状不再穷尽而整体静默——因此内置库名（含 `_G`）**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。

@@ -5,35 +5,6 @@ use crate::util::{node_text, LineIndex};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 
-/// True if `function_name` contains any `.` or `:` separator — i.e.
-/// the form is `foo.bar(...)` / `foo:m(...)` rather than the bare
-/// `foo(...)`. In those cases the first identifier is a read of an
-/// existing table, not a global definition.
-fn function_name_has_path_separator(function_name: tree_sitter::Node) -> bool {
-    for i in 0..function_name.child_count() {
-        if let Some(child) = function_name.child(i as u32) {
-            if !child.is_named() && (child.is_kind(kind::DOT) || child.is_kind(kind::COLON)) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
-/// True if `ident` is the first (leftmost) identifier child of a
-/// `function_name` node — i.e. the base table name, not a field or
-/// method name.
-fn is_function_name_base(function_name: tree_sitter::Node, ident: tree_sitter::Node) -> bool {
-    for i in 0..function_name.child_count() {
-        if let Some(child) = function_name.child(i as u32) {
-            if child.is_kind(kind::IDENTIFIER) {
-                return child.id() == ident.id();
-            }
-        }
-    }
-    false
-}
-
 pub(super) fn check_undefined_globals(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
@@ -46,56 +17,29 @@ pub(super) fn check_undefined_globals(
 ) {
     let node = cursor.node();
 
-    if node.is_kind(kind::IDENTIFIER) {
-        if let Some(parent) = node.parent() {
-            let is_bare_var = parent.is_kind(kind::VARIABLE) && parent.child_count() == 1;
-            let is_definition = matches!(
-                parent.syntax_kind(),
-                kind::ATTRIBUTE_NAME_LIST | kind::NAME_LIST | kind::LABEL_STATEMENT
-            );
-            // `function_name` covers three forms with very different
-            // semantics w.r.t. the *base* identifier:
-            //   `function foo()`      → defines global `foo`
-            //   `function foo.bar()`  → assigns `foo.bar`, reads `foo`
-            //   `function foo:m()`    → assigns `foo.m`,    reads `foo`
-            // Only the bare form is a definition; the dotted / method
-            // forms require `foo` to already exist at runtime, so the
-            // base identifier must participate in the undefined-global
-            // check. Later identifiers (`bar`, `m`) are field writes —
-            // skip them.
-            let is_function_name_child = parent.is_kind(kind::FUNCTION_NAME);
-            let should_check_as_ref = is_bare_var
-                || (is_function_name_child
-                    && is_function_name_base(parent, node)
-                    && function_name_has_path_separator(parent));
-            if should_check_as_ref && !is_definition {
-                let name = node_text(node, source);
-                let byte_offset = node.start_byte();
-                let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
-                // A free name is `_ENV.name`. Once a user-declared `_ENV` is
-                // in scope the name is a field of that table, not a global,
-                // so "undefined global" no longer applies — whether the field
-                // exists is the field-access checker's business.
-                let env_redirected = crate::type_inference::env_field_base_fact_in_scope(
-                    name,
-                    byte_offset,
-                    scope_tree,
-                )
+    if node.is_kind(kind::IDENTIFIER) && super::free_name::is_free_name_reference(node) {
+        let name = node_text(node, source);
+        let byte_offset = node.start_byte();
+        let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
+        // A free name is `_ENV.name`. Once a user-declared `_ENV` is
+        // in scope the name is a field of that table, not a global,
+        // so "undefined global" no longer applies — whether the field
+        // exists is `diagnostics::env_field`'s business.
+        let env_redirected =
+            crate::type_inference::env_field_base_fact_in_scope(name, byte_offset, scope_tree)
                 .is_some();
-                if !is_local
-                    && !env_redirected
-                    && !builtins.contains(name)
-                    && !index.global_shard.contains_key(name)
-                {
-                    diagnostics.push(Diagnostic {
-                        range: line_index.ts_node_to_range(node, source),
-                        severity: Some(severity),
-                        source: Some("mylua".to_string()),
-                        message: format!("Undefined global '{}'", name),
-                        ..Default::default()
-                    });
-                }
-            }
+        if !is_local
+            && !env_redirected
+            && !builtins.contains(name)
+            && !index.global_shard.contains_key(name)
+        {
+            diagnostics.push(Diagnostic {
+                range: line_index.ts_node_to_range(node, source),
+                severity: Some(severity),
+                source: Some("mylua".to_string()),
+                message: format!("Undefined global '{}'", name),
+                ..Default::default()
+            });
         }
     }
 

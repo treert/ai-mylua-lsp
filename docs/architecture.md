@@ -78,6 +78,7 @@ flowchart TB
 ### 3.2 作用域与模块解析
 
 - **作用域**：遵守 Lua `local` / 块 / 闭包规则
+- **裸名解析单点**：`name_resolution::resolve_bare_name` 是「无限定标识符指向什么」的**唯一**实现（局部 → 重定向 `_ENV` 字段 → Emmy 类型名 → 全局），`goto` / `hover` / `references` 共用，各自只做呈现。新增裸名规则只应改此处——详见 [`lsp-semantic-spec.md` §1.6](lsp-semantic-spec.md)
 - **全局模型**：工作区采用「全局已加载」合并模型，不把可见性绑死在 require 链上
 - **require 解析**：`local xxx = require("…")` 静态解析为文件路径，绑定到目标文件 `return` 值
 - **模块路径**：全路径小写 + `.` 分隔 + `init.lua` 特殊处理，last-segment 索引 + 最长后缀匹配

@@ -948,6 +948,47 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
         return;
     }
 
+    // Reaching here means the base (or, for the bare form, the name itself) is
+    // not a visible local — a free name, i.e. `_ENV.<name>`. When `_ENV` is
+    // redirected the declaration belongs to that table, not the global one.
+    //
+    // The two spellings then part ways:
+    //
+    //   `function foo() end`     → ordinary sandbox code: it puts a function
+    //                              INTO the new environment, so redirect the
+    //                              write onto that table's shape, mirroring
+    //                              what `visit_assignment` does for the
+    //                              equivalent `foo = function() end`. Merely
+    //                              suppressing it would make the name vanish
+    //                              from the index entirely and break goto /
+    //                              hover / references on it.
+    //
+    //   `function Foo.f() end`   → requires `Foo` to already exist; the sandbox
+    //                              does not supply it, so at run time this
+    //                              indexes nil. Record nothing at all.
+    let is_dotted_name = name.contains('.') || name.contains(':');
+    let env_gate_name = name
+        .rsplit_once(':')
+        .or_else(|| name.rsplit_once('.'))
+        .map(|(base, _)| base)
+        .unwrap_or(name.as_str());
+    if !env_gate_name.contains('.')
+        && !env_gate_name.contains(':')
+        && super::type_infer::env_field_base_fact(ctx, env_gate_name, name_node.start_byte())
+            .is_some()
+    {
+        if !is_dotted_name {
+            register_nested_field_write(
+                ctx,
+                ENV_NAME,
+                std::slice::from_ref(&name),
+                TypeFact::Known(KnownType::FunctionRef(func_id)),
+                ctx.line_index.ts_node_to_byte_range(name_node, ctx.source),
+            );
+        }
+        return;
+    }
+
     // Global function: colon→dot normalization for both index and contribution.
     let normalized = name.replace(':', ".");
     let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
@@ -1600,6 +1641,29 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                             selection_range,
                         });
                     }
+                    continue;
+                }
+
+                // Reaching here means the base is NOT a visible local, so it is
+                // a free name — i.e. `_ENV.<base>`. When `_ENV` is redirected
+                // the base is a field of that table, which the sandbox does not
+                // define, so `base.field = v` indexes `nil` at run time:
+                // register nothing rather than export a global that cannot
+                // exist. Without this the bare-name gate above was trivially
+                // bypassed by writing `Foo.bar = 1`, and `_G.x = 1` leaked onto
+                // the bare key `x` (`GlobalShard` normalizes the `_G.` prefix
+                // away), polluting the whole workspace index.
+                //
+                // `_ENV.foo = 1` is unaffected: `env_field_base_fact` returns
+                // `None` for `_ENV` itself, so that spelling keeps normalizing
+                // down to the bare global `foo`.
+                if super::type_infer::env_field_base_fact(
+                    ctx,
+                    &chain.base_name,
+                    var_node.start_byte(),
+                )
+                .is_some()
+                {
                     continue;
                 }
 

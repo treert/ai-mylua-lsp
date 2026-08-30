@@ -3,7 +3,7 @@ use crate::resolver;
 use crate::syntax_kind::{field, kind, NodeKindExt};
 use crate::type_system::{KnownType, TypeFact};
 use crate::uri_id::UriId;
-use crate::util::{extract_field_chain, is_ancestor_or_equal, node_text, LineIndex};
+use crate::util::{extract_field_chain, node_text, LineIndex};
 use tower_lsp_server::ls_types::*;
 
 /// Shared context for field-access diagnostic collection, avoiding
@@ -47,29 +47,6 @@ pub(super) fn check_field_access_diagnostics(
     collect_field_diagnostics(&mut cursor, &mut ctx);
 }
 
-/// Returns true if `node` is (or is any descendant of) the left-hand side
-/// of an assignment statement. Walks ancestors so that chained LHS like
-/// `a.b.c = 1` — where the outer node is `variable` and an inner
-/// dotted `variable` node is not a direct child of `variable_list` —
-/// is still recognized as an assignment target and skipped by field
-/// diagnostics.
-
-fn is_assignment_target(node: tree_sitter::Node) -> bool {
-    let mut current = node;
-    while let Some(parent) = current.parent() {
-        if parent.is_kind(kind::ASSIGNMENT_STATEMENT) {
-            // `current` is always an ancestor of (or equal to) `node`,
-            // so `is_ancestor_or_equal(left, node)` already covers the
-            // `left == current` case.
-            return parent
-                .child_by_field(field::LEFT)
-                .is_some_and(|left| is_ancestor_or_equal(left, node));
-        }
-        current = parent;
-    }
-    false
-}
-
 fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut FieldDiagCtx) {
     let node = cursor.node();
 
@@ -77,7 +54,7 @@ fn collect_field_diagnostics(cursor: &mut tree_sitter::TreeCursor, ctx: &mut Fie
         && node.child_by_field(field::OBJECT).is_some()
         && node.child_by_field(field::FIELD).is_some();
 
-    if is_dotted && !is_assignment_target(node) {
+    if is_dotted && !super::free_name::is_assignment_target(node) {
         if let Some((base_node, fields)) = extract_field_chain(node, ctx.source) {
             check_dotted_field(ctx, node, base_node, &fields);
         }

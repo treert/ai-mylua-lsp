@@ -189,6 +189,24 @@ pub(super) fn infer_expression_type(
                     return tf.clone();
                 }
             }
+            // A free name `x` is sugar for `_ENV.x`. With `_ENV` redirected the
+            // read targets that table's field; otherwise `_ENV` is the implicit
+            // global environment and this is an ordinary global reference.
+            //
+            // This is checked BEFORE the built-in `_G` recognition below. `_G`
+            // is an ordinary field of the global table, so a redirected
+            // environment does not supply it either — after `_ENV = {}` the
+            // name `_G` is nil. Recognizing it unconditionally would let
+            // `_G.X` resolve past the sandbox to the real global, i.e. to a
+            // symbol unreachable at run time. `_ENV` itself is excluded inside
+            // `env_field_base_fact`, so this cannot recurse into a
+            // `FieldOf { base: _ENV, .. }`.
+            if let Some(env_fact) = env_field_base_fact(ctx, text, node.start_byte()) {
+                return TypeFact::Stub(SymbolicStub::FieldOf {
+                    base: Box::new(env_fact),
+                    field: text.into(),
+                });
+            }
             // Bare `_ENV` / `_G` denote the global environment table itself.
             //
             // `_ENV` is the implicit chunk-level environment upvalue (never a
@@ -204,16 +222,6 @@ pub(super) fn infer_expression_type(
                 || text == crate::lua_builtins::GLOBAL_TABLE_NAME
             {
                 return implicit_env_fact();
-            }
-            // A free name `x` is sugar for `_ENV.x`. With a user-declared
-            // `_ENV` in scope the read targets that table's field; otherwise
-            // `_ENV` is the implicit global environment and this is an
-            // ordinary global reference.
-            if let Some(env_fact) = env_field_base_fact(ctx, text, node.start_byte()) {
-                return TypeFact::Stub(SymbolicStub::FieldOf {
-                    base: Box::new(env_fact),
-                    field: text.into(),
-                });
             }
             TypeFact::Stub(SymbolicStub::GlobalRef { name: text.into() })
         }

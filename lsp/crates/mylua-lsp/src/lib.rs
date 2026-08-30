@@ -19,6 +19,7 @@ pub mod inlay_hint;
 pub mod lua_builtins;
 pub mod lua_symbol;
 pub mod memory_profile;
+pub(crate) mod name_resolution;
 pub mod references;
 pub mod rename;
 pub mod resolver;

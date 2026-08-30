@@ -74,13 +74,22 @@ pub(crate) fn env_field_base_fact_in_scope(
 /// and a `variable` wrapping one — and both must apply the same rules:
 ///
 /// 1. a visible local / parameter wins (ordinary scope resolution);
-/// 2. `_ENV` and `_G` denote the global environment table itself. `_ENV` is
+/// 2. a free name `x` is sugar for `_ENV.x`, so when `_ENV` points somewhere
+///    other than the global environment the name is a field of *that* table.
+///    This is checked **before** the built-in `_G` recognition below: `_G` is
+///    an ordinary field of the global table, so a redirected environment does
+///    not provide it either (`_ENV = {}` makes the name `_G` nil), and giving
+///    it an unconditional built-in meaning would let `_G.X` resolve straight
+///    past the sandbox to the real global — jumping to a symbol that is
+///    unreachable at run time. `_ENV` itself is excluded by
+///    `env_field_base_fact_in_scope`, so it cannot recurse into a
+///    `FieldOf { base: _ENV, .. }`;
+/// 3. `_ENV` and `_G` denote the global environment table itself. `_ENV` is
 ///    the environment upvalue (never a global *variable* — `_G._ENV` is nil);
 ///    `_G` is a real global whose value points back at the environment.
 ///    Hard-coding `_G` here, rather than relying on a stdlib `_G = {}` line,
 ///    keeps `_G.<field>` resolution independent of stub contents;
-/// 3. any other free name `x` is sugar for `_ENV.x` — a field of the
-///    redirected table when `_ENV` points elsewhere, otherwise a plain global.
+/// 4. any other free name is a plain global reference.
 ///
 /// Keeping this in one function is deliberate: the two node shapes previously
 /// each built their own `GlobalRef` stub, and a rule added to only one of them
@@ -94,14 +103,14 @@ fn infer_bare_name_fact(
     if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
         return tf.clone();
     }
-    if text == crate::lua_builtins::ENV_NAME || text == crate::lua_builtins::GLOBAL_TABLE_NAME {
-        return implicit_env_fact();
-    }
     if let Some(env_fact) = env_field_base_fact_in_scope(text, node.start_byte(), scope_tree) {
         return TypeFact::Stub(crate::type_system::SymbolicStub::FieldOf {
             base: Box::new(env_fact),
             field: text.into(),
         });
+    }
+    if text == crate::lua_builtins::ENV_NAME || text == crate::lua_builtins::GLOBAL_TABLE_NAME {
+        return implicit_env_fact();
     }
     TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: text.into() })
 }

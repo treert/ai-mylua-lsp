@@ -179,6 +179,16 @@ pub struct DiagnosticsConfig {
     pub lua_field_error: DiagnosticSeverityOption,
     #[serde(rename = "luaFieldWarning")]
     pub lua_field_warning: DiagnosticSeverityOption,
+    /// Reading a field the *redirected* `_ENV` does not have (yet).
+    ///
+    /// Only fires when `_ENV` points at a table whose shape is fully known,
+    /// and only for reads on the top-level straight-line flow of the chunk —
+    /// see `diagnostics::env_field`. Deliberately separate from
+    /// `undefinedGlobal`: inside a sandbox the name is a table field, not a
+    /// global, and users running heavily sandboxed code may want to silence
+    /// this category on its own.
+    #[serde(rename = "envUnknownField")]
+    pub env_unknown_field: DiagnosticSeverityOption,
     /// P2-3: report duplicate keys in a single `{ ... }` table
     /// constructor, e.g. `{ a = 1, a = 2 }`.
     #[serde(rename = "duplicateTableKey")]
@@ -216,6 +226,7 @@ impl Default for DiagnosticsConfig {
             emmy_unknown_field: DiagnosticSeverityOption::Warning,
             lua_field_error: DiagnosticSeverityOption::Warning,
             lua_field_warning: DiagnosticSeverityOption::Warning,
+            env_unknown_field: DiagnosticSeverityOption::Warning,
             duplicate_table_key: DiagnosticSeverityOption::Warning,
             unused_local: DiagnosticSeverityOption::Hint,
             argument_count_mismatch: DiagnosticSeverityOption::Off,

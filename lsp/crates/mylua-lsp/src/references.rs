@@ -34,6 +34,22 @@ enum Identity {
         field_name: String,
         location: ResolvedLocation,
     },
+    /// A bare name under a redirected `_ENV` — a field of the sandbox's
+    /// environment table (§1.3).
+    ///
+    /// Kept separate from `Field` because the occurrences to verify are *bare*
+    /// identifiers: `verify_field` inspects the parent node for a dotted /
+    /// method shape and rejects them. Identity is still the field's declaration
+    /// location, so the two share the "same declaration site" notion.
+    ///
+    /// This is what keeps the two environments in `g = 1; _ENV = {}; g = 2`
+    /// apart: each candidate is re-resolved at its own byte offset, and
+    /// `_ENV`'s position sensitivity means the pre- and post-redirect reads
+    /// land on different declarations.
+    EnvField {
+        field_name: String,
+        location: ResolvedLocation,
+    },
     /// An Emmy type name (e.g. `Foo` in `---@class Foo` or `---@type Foo`).
     TypeName { name: String },
 }
@@ -198,6 +214,53 @@ pub fn find_references_by_uri_id(
                 }
             });
         }
+        Identity::EnvField {
+            field_name,
+            location,
+        } => {
+            let target = *location;
+            if include_declaration {
+                locations.push(ReferenceLocation {
+                    uri_id: target.uri_id,
+                    range: target.range.into(),
+                });
+            }
+            // Scan every file: a sandbox environment can be a table defined
+            // elsewhere (`local _ENV = require("env")`), so occurrences are not
+            // confined to the clicked file.
+            all_docs.for_each_document_id(|doc_uri_id, file_doc| {
+                let source = file_doc.source();
+                for offset in find_word_occurrences(source, field_name) {
+                    let Some(node) = file_doc
+                        .root_node()
+                        .and_then(|root| find_identifier_at(root, offset, field_name.len()))
+                    else {
+                        continue;
+                    };
+                    if doc_uri_id == target.uri_id && node.start_byte() == target.range.start_byte {
+                        continue; // the declaration itself
+                    }
+                    if is_non_reference_position(node) {
+                        continue;
+                    }
+                    // Re-resolve at this occurrence's own offset — that is what
+                    // separates the pre- and post-redirect environments.
+                    if crate::name_resolution::env_field_location(
+                        node,
+                        source,
+                        doc_uri_id,
+                        &file_doc.scope_tree,
+                        index,
+                    ) == Some(target)
+                    {
+                        locations.push(ReferenceLocation {
+                            uri_id: doc_uri_id,
+                            range: file_doc.line_index().ts_node_to_range(node, source),
+                        });
+                    }
+                }
+            });
+        }
         Identity::TypeName { name } => {
             // Declarations from type_shard
             if include_declaration {
@@ -339,25 +402,32 @@ fn identify_at_cursor(
         return Some(identity);
     }
 
-    // 4. Local variable?
-    if let Some(decl) = doc.scope_tree.resolve_decl(byte_offset, name) {
-        return Some(Identity::Local {
+    // 4-7. Bare-name resolution, per §1.6 — shared with `goto` / `hover`.
+    // See `name_resolution` for why this lives outside this module.
+    match crate::name_resolution::resolve_bare_name(
+        ident_node,
+        doc.source(),
+        uri_id,
+        &doc.scope_tree,
+        index,
+    ) {
+        crate::name_resolution::BareName::Local { decl_byte, .. } => Some(Identity::Local {
             name: name.to_string(),
-            decl_byte: decl.decl_byte,
-        });
+            decl_byte,
+        }),
+        crate::name_resolution::BareName::EnvField { name, location, .. } => {
+            // No declaration site means we cannot establish an identity to
+            // compare occurrences against. The name is definitively not a
+            // global, so report nothing rather than fall back to a same-named
+            // global outside the sandbox.
+            Some(Identity::EnvField {
+                field_name: name,
+                location: location?,
+            })
+        }
+        crate::name_resolution::BareName::TypeName { name } => Some(Identity::TypeName { name }),
+        crate::name_resolution::BareName::Global { name } => Some(Identity::Global { name }),
     }
-
-    // 5. Type name in type_shard?
-    if index.contains_type(name) {
-        return Some(Identity::TypeName {
-            name: name.to_string(),
-        });
-    }
-
-    // 6. Global
-    Some(Identity::Global {
-        name: name.to_string(),
-    })
 }
 
 /// Try to identify a field/method access. Returns `Some(Identity::Field)` if
@@ -539,13 +609,27 @@ fn verify_local(
 }
 
 /// Verify that a candidate identifier node is a global reference (not in
-/// field position, not shadowed by a local).
+/// field position, not shadowed by a local, and not sandboxed).
+///
+/// The `_ENV` condition is the mirror image of `Identity::EnvField`'s check:
+/// under a redirected environment a free name is a field of that table, not a
+/// global, so it is not an occurrence of this global. Without it, clicking the
+/// pre-redirect `g` in `g = 1; _ENV = {}; g = 2` also reported the post-redirect
+/// sites — the two are different variables at run time. `undefinedGlobal`
+/// suppresses on the same condition.
 fn verify_global(
     node: tree_sitter::Node,
     name: &str,
     scope_tree: &crate::scope::ScopeTree,
 ) -> bool {
-    !is_non_reference_position(node) && scope_tree.resolve_decl(node.start_byte(), name).is_none()
+    !is_non_reference_position(node)
+        && scope_tree.resolve_decl(node.start_byte(), name).is_none()
+        && crate::type_inference::env_field_base_fact_in_scope(
+            name,
+            node.start_byte(),
+            scope_tree,
+        )
+        .is_none()
 }
 
 /// Verify that a candidate identifier node is a field access that resolves

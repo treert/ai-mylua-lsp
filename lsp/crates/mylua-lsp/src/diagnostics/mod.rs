@@ -1,6 +1,8 @@
 mod call_args;
 mod duplicate_key;
+mod env_field;
 mod field_access;
+mod free_name;
 mod param_annotation;
 mod return_mismatch;
 mod suppression;
@@ -94,6 +96,24 @@ pub fn collect_semantic_diagnostics_with_version_id(
                 &mut cursor,
                 source,
                 &builtins,
+                index,
+                scope_tree,
+                &mut diagnostics,
+                severity,
+                line_index,
+            );
+        }
+    }
+    // Complements `undefinedGlobal`: that check bails out as soon as `_ENV` is
+    // redirected, because the name is then a table field rather than a global.
+    // This one takes over from there. It is `is_meta`-gated for the same reason
+    // — a stub file references symbols it deliberately does not define.
+    if let Some(severity) = diag_config.env_unknown_field.to_lsp_severity() {
+        if !is_meta {
+            env_field::check_env_field_diagnostics(
+                root,
+                source,
+                uri_id,
                 index,
                 scope_tree,
                 &mut diagnostics,

@@ -143,21 +143,71 @@ pub fn hover(
         // Match hit but no hover produced — fall through.
     }
 
-    if let Some(def) = doc.scope_tree.resolve_id(byte_offset, ident_text, uri_id) {
-        let type_info =
-            resolve_local_type_info(uri_id, ident_text, byte_offset, &doc.scope_tree, index);
-        lsp_log!(
-            "[hover] scope resolved '{}', type_info={:?}",
-            ident_text,
-            type_info
-        );
-        let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
-        return build_hover_for_definition(
-            &def,
-            render_ctx,
-            type_info.as_deref(),
-            Some(hover_range),
-        );
+    // Bare-name resolution, per §1.6 — shared with `goto` / `references`.
+    // See `name_resolution` for why this lives outside this module.
+    let bare = crate::name_resolution::resolve_bare_name(
+        ident_node,
+        doc.source(),
+        uri_id,
+        &doc.scope_tree,
+        index,
+    );
+    let hover_range = doc.line_index().ts_node_to_range(ident_node, doc.source());
+
+    match bare {
+        crate::name_resolution::BareName::Local { def, .. } => {
+            let type_info =
+                resolve_local_type_info(uri_id, ident_text, byte_offset, &doc.scope_tree, index);
+            lsp_log!(
+                "[hover] scope resolved '{}', type_info={:?}",
+                ident_text,
+                type_info
+            );
+            return build_hover_for_definition(
+                &def,
+                render_ctx,
+                type_info.as_deref(),
+                Some(hover_range),
+            );
+        }
+        crate::name_resolution::BareName::EnvField {
+            name,
+            location,
+            type_fact,
+        } => {
+            // Terminal branch: a sandboxed free name is not a global, so we
+            // never fall through to `global_shard` here. Without a definition
+            // site there is nothing truthful to show — stay silent rather than
+            // describe the same-named global from outside the sandbox.
+            let location = location?;
+            let type_info = format_resolved_type(&type_fact);
+            let synth = crate::types::Definition {
+                name: name.clone(),
+                kind: match type_fact {
+                    TypeFact::Known(KnownType::FunctionRef(_))
+                    | TypeFact::Known(KnownType::Function(_)) => DefKind::GlobalFunction,
+                    _ => DefKind::GlobalVariable,
+                },
+                range: location.range,
+                selection_range: location.range,
+                uri_id: location.uri_id,
+                uri: resolve_uri(location.uri_id),
+            };
+            return build_hover_for_definition(
+                &synth,
+                render_ctx,
+                Some(&type_info),
+                Some(hover_range),
+            );
+        }
+        crate::name_resolution::BareName::TypeName { .. }
+        | crate::name_resolution::BareName::Global { .. } => {
+            // Fall through to the type-name / global_shard paths below. Their
+            // relative order already matches §1.6, and `hover_type_name` keys
+            // off `merged_emmy_type_view`, which is broader than the
+            // `contains_type` check the shared layer uses — so the fallthrough
+            // must keep going through both.
+        }
     }
 
     // Check if ident is a type name (e.g. hovering on "Foo" in `---@type Foo`).

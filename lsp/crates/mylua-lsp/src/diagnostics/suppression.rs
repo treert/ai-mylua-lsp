@@ -47,6 +47,11 @@ pub fn classify_diagnostic_code(message: &str) -> &'static str {
         "return-mismatch"
     } else if message.starts_with("@param ") {
         "param-annotation"
+    } else if message.contains("the current _ENV") {
+        // `envUnknownField` — both variants ("is not a field of…" /
+        // "is read before it is assigned in…") start with the offending name,
+        // so the shared wording is what identifies the rule.
+        "env-field"
     } else {
         "general"
     }
@@ -319,6 +324,14 @@ mod directive_tests {
         assert_eq!(
             classify_diagnostic_code("Syntax error near 'foo'"),
             "syntax"
+        );
+        assert_eq!(
+            classify_diagnostic_code("'g1' is not a field of the current _ENV"),
+            "env-field"
+        );
+        assert_eq!(
+            classify_diagnostic_code("'g1' is read before it is assigned in the current _ENV"),
+            "env-field"
         );
     }
 }

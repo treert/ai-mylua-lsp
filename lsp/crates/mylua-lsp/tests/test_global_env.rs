@@ -23,29 +23,122 @@
 mod test_helpers;
 
 use mylua_lsp::completion;
-use mylua_lsp::config::DiagnosticsConfig;
+use mylua_lsp::config::{
+    DiagnosticSeverityOption, DiagnosticsConfig, GotoStrategy, ReferencesConfig, ReferencesStrategy,
+};
 use mylua_lsp::diagnostics;
+use mylua_lsp::document::DocumentStoreView;
 use mylua_lsp::semantic_tokens;
+use mylua_lsp::type_system::{KnownType, TypeFact};
 use mylua_lsp::uri_id::intern_uri;
+use mylua_lsp::{goto, hover, references};
+use std::collections::HashMap;
 use test_helpers::*;
 
-/// All diagnostic messages for a single-file workspace, prefixed with the
-/// 0-based line number (`"L6 Undefined global 'x'"`).
-fn all_diags(src: &str, filename: &str) -> Vec<String> {
+// ---------------------------------------------------------------------------
+// Navigation helpers — goto / hover / references on a single-file workspace
+// ---------------------------------------------------------------------------
+
+/// 0-based lines that `goto_definition` at `at` resolves to.
+fn goto_lines(src: &str, filename: &str, at: tower_lsp_server::ls_types::Position) -> Vec<u32> {
+    use tower_lsp_server::ls_types::GotoDefinitionResponse;
     let (doc, uri, mut agg) = setup_single_file(src, filename);
-    let cfg = DiagnosticsConfig::default();
+    match goto::goto_definition(&doc, intern_uri(&uri), at, &mut agg, &GotoStrategy::Auto) {
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc.range.start.line],
+        Some(GotoDefinitionResponse::Array(locs)) => {
+            locs.iter().map(|l| l.range.start.line).collect()
+        }
+        Some(GotoDefinitionResponse::Link(links)) => {
+            links.iter().map(|l| l.target_range.start.line).collect()
+        }
+        None => Vec::new(),
+    }
+}
+
+/// Rendered hover text at `at`, or `None` when hover produces nothing.
+fn hover_text(
+    src: &str,
+    filename: &str,
+    at: tower_lsp_server::ls_types::Position,
+) -> Option<String> {
+    use tower_lsp_server::ls_types::{HoverContents, MarkedString};
+    let (doc, uri, mut agg) = setup_single_file(src, filename);
+    let uri_id = intern_uri(&uri);
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&uri_id).expect("doc present");
+    hover::hover(doc, uri_id, at, &mut agg, &view).map(|h| match h.contents {
+        HoverContents::Markup(md) => md.value,
+        HoverContents::Scalar(MarkedString::String(s)) => s,
+        HoverContents::Scalar(MarkedString::LanguageString(ls)) => ls.value,
+        HoverContents::Array(items) => items
+            .into_iter()
+            .map(|m| match m {
+                MarkedString::String(s) => s,
+                MarkedString::LanguageString(ls) => ls.value,
+            })
+            .collect::<Vec<_>>()
+            .join("\n"),
+    })
+}
+
+/// Sorted `(line, character)` pairs that `find_references` at `at` reports.
+fn reference_sites(
+    src: &str,
+    filename: &str,
+    at: tower_lsp_server::ls_types::Position,
+) -> Vec<(u32, u32)> {
+    let (doc, uri, agg) = setup_single_file(src, filename);
+    let uri_id = intern_uri(&uri);
+    let docs = HashMap::from([(uri_id, doc)]);
+    let view = DocumentStoreView::new(&docs);
+    let doc = docs.get(&uri_id).expect("doc present");
+    let cfg = ReferencesConfig {
+        strategy: ReferencesStrategy::Best,
+        scan_comments: true,
+    };
+    let mut sites: Vec<(u32, u32)> =
+        references::find_references(doc, uri_id, at, true, &agg, &view, &cfg)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|l| (l.range.start.line, l.range.start.character))
+            .collect();
+    sites.sort();
+    sites.dedup();
+    sites
+}
+
+/// All diagnostic messages for a single-file workspace under an explicit
+/// config, prefixed with the 0-based line number (`"L6 Undefined global 'x'"`).
+fn all_diags_with_config(src: &str, filename: &str, cfg: &DiagnosticsConfig) -> Vec<String> {
+    let (doc, uri, mut agg) = setup_single_file(src, filename);
     diagnostics::collect_semantic_diagnostics_id(
         doc.root_node().unwrap(),
         src.as_bytes(),
         summary_id_by_uri(&agg, &uri),
         &mut agg,
         &doc.scope_tree,
-        &cfg,
+        cfg,
         doc.line_index(),
     )
     .into_iter()
     .map(|d| format!("L{} {}", d.range.start.line, d.message))
     .collect()
+}
+
+/// All diagnostic messages for a single-file workspace, prefixed with the
+/// 0-based line number (`"L6 Undefined global 'x'"`).
+fn all_diags(src: &str, filename: &str) -> Vec<String> {
+    all_diags_with_config(src, filename, &DiagnosticsConfig::default())
+}
+
+/// Only the `_ENV`-field diagnostics (both the "missing field" and the
+/// "read before assigned" variants share the `current _ENV` wording).
+fn env_field_diags(src: &str, filename: &str) -> Vec<String> {
+    all_diags(src, filename)
+        .into_iter()
+        .filter(|d| d.contains("the current _ENV"))
+        .collect()
 }
 
 /// Collect `Unknown field` diagnostic messages for a single-file workspace.
@@ -84,6 +177,30 @@ fn global_shard_paths(src: &str, filename: &str) -> Vec<String> {
         .collect();
     names.sort();
     names
+}
+
+/// Sorted field names recorded on the table `_ENV` points at, evaluated at the
+/// very end of the file. `None` when `_ENV` does not resolve to a known table.
+///
+/// This inspects the index directly because that is exactly what the bug is
+/// about: whether a write under a redirected `_ENV` lands anywhere at all. A
+/// name that reaches neither `global_shard` nor the environment's shape has
+/// simply vanished, and every downstream capability (goto, hover, references,
+/// diagnostics) loses it.
+fn env_shape_fields(src: &str, filename: &str) -> Option<Vec<String>> {
+    let (doc, uri, agg) = setup_single_file(src, filename);
+    let offset = src.len().saturating_sub(1);
+    let fact = doc.scope_tree.resolve_type(offset, "_ENV")?;
+    let TypeFact::Known(KnownType::Table(shape_id)) = fact else {
+        return None;
+    };
+    let shape = agg
+        .summary_by_id(intern_uri(&uri))?
+        .table_shapes
+        .get(shape_id)?;
+    let mut names: Vec<String> = shape.fields.keys().map(|k| k.as_str().to_string()).collect();
+    names.sort();
+    Some(names)
 }
 
 // ---------------------------------------------------------------------------
@@ -351,15 +468,59 @@ fn free_name_after_env_assignment_is_not_a_global() {
 }
 
 #[test]
-fn env_repro_reports_no_false_diagnostics() {
-    // Whole-file check: nothing in the repro is undefined. In particular
-    // `print` (captured as a local on line 1) must keep resolving after the
-    // `_ENV` write, and the free names must not be reported as undefined
-    // globals now that they are `_ENV` fields.
+fn env_repro_reports_exactly_the_premature_read() {
+    // Whole-file check. Exactly one thing is wrong in the repro: the line-6
+    // (0-based) read of `g1` happens while the new environment is still the
+    // empty table — `g1` is only written into it on line 8. Everything else
+    // must stay quiet; in particular `print` (captured as a local on line 0)
+    // must keep resolving after the `_ENV` write, and the free names must not
+    // be reported as undefined globals now that they are `_ENV` fields.
     let diags = all_diags(ENV_REPRO, "env_repro_diag.lua");
+    assert_eq!(
+        diags.len(),
+        1,
+        "the `_ENV` repro must produce exactly one diagnostic, got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].starts_with("L6 ") && diags[0].contains("'g1'"),
+        "the single diagnostic must be about `g1` on line 6 (0-based), got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].contains("the current _ENV"),
+        "the diagnostic must be the `_ENV`-field one, not `Undefined global`, got: {:?}",
+        diags
+    );
+}
+
+/// `ENV_REPRO` with the premature read on line 6 removed. Negative-space
+/// guard: the *only* difference is that one line, so if this file also
+/// reports something the implementation is over-firing rather than
+/// pinpointing the real problem.
+const ENV_REPRO_WITHOUT_PREMATURE_READ: &str = r#"local print = print
+
+g1 = 123
+print(g1)
+
+_ENV = {}
+
+g1 = 321
+print(g1)
+
+g2 = g1 + 1000
+print(g2)
+"#;
+
+#[test]
+fn env_repro_without_the_premature_read_reports_nothing() {
+    let diags = all_diags(
+        ENV_REPRO_WITHOUT_PREMATURE_READ,
+        "env_repro_clean_diag.lua",
+    );
     assert!(
         diags.is_empty(),
-        "the `_ENV` repro must produce no diagnostics, got: {:?}",
+        "with the premature read removed the repro must be completely clean, got: {:?}",
         diags
     );
 }
@@ -430,6 +591,12 @@ print(mystery)
     assert!(
         diags.iter().all(|d| !d.contains("Undefined global")),
         "an `_ENV` of unknown shape must not produce undefined-global noise, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().all(|d| !d.contains("the current _ENV")),
+        "an `_ENV` of unknown shape must not produce env-field noise either — we \
+         know neither what it contains nor that a name is missing, got: {:?}",
         diags
     );
     let paths = global_shard_paths(src, "env_unknown2.lua");
@@ -767,4 +934,738 @@ fn g_dot_env_is_flagged_with_stdlib_loaded() {
          table, got: {:?}",
         diags
     );
+}
+
+// ---------------------------------------------------------------------------
+// `_ENV` field diagnostics — reading a field the redirected environment
+// does not have (yet)
+// ---------------------------------------------------------------------------
+//
+// Position sensitivity is only sound along the top-level straight-line
+// execution flow of a chunk. A write inside a function body has no
+// relationship to the read's byte position (the function can be called
+// first), and a write inside a top-level branch is a flow-sensitivity
+// problem we deliberately do not solve. Both therefore silence the check
+// for that field rather than risk a false positive. The tests below pin
+// each of those escape hatches down, plus a negative control against an
+// inverted predicate.
+
+#[test]
+fn env_field_read_inside_a_function_body_is_not_flagged() {
+    // The byte position of `print(gg)` is before `gg = 1`, but `f`'s call
+    // time is unrelated to its definition site — calling `f` after the
+    // write is perfectly normal. Crossing a function boundary must abandon
+    // the positional judgement entirely.
+    let src = r#"local print = print
+_ENV = {}
+local function f() print(gg) end
+f()
+gg = 1
+"#;
+    let diags = env_field_diags(src, "env_field_in_function.lua");
+    assert!(
+        diags.is_empty(),
+        "a read inside a function body must not be judged positionally, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn env_field_assigned_in_a_top_level_branch_is_not_flagged() {
+    // Whether the branch runs is a flow-sensitivity question. Treat the
+    // field as defined (conservative) instead of guessing.
+    let src = r#"local print = print
+local cond = true
+_ENV = {}
+if cond then
+    gg = 1
+end
+print(gg)
+"#;
+    let diags = env_field_diags(src, "env_field_branch.lua");
+    assert!(
+        diags.is_empty(),
+        "a field written inside a top-level branch must be treated as \
+         defined, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn env_literal_field_read_is_not_flagged() {
+    // `local _ENV = { allowed = 1 }` — the field exists from the moment the
+    // environment is constructed, so every later read is fine.
+    let src = r#"local print = print
+local _ENV = { allowed = 1 }
+print(allowed)
+"#;
+    let diags = env_field_diags(src, "env_field_literal_ok.lua");
+    assert!(
+        diags.is_empty(),
+        "`allowed` is present in the environment literal, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn env_field_missing_from_the_literal_is_flagged() {
+    // Counterpart of the test above and the sharpest "missing field" case:
+    // the environment's shape is fully known and closed, and `nope` is not
+    // in it, so the read is `nil` at run time.
+    let src = r#"local print = print
+local _ENV = { allowed = 1 }
+print(nope)
+"#;
+    let diags = env_field_diags(src, "env_field_literal_missing.lua");
+    assert_eq!(
+        diags.len(),
+        1,
+        "`nope` is not a field of the environment literal, got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].starts_with("L2 ") && diags[0].contains("'nope'"),
+        "the diagnostic must point at `nope` on line 2 (0-based), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn builtin_names_are_reported_in_a_fully_known_env() {
+    // Noise boundary, take two. After `_ENV = {}` the stdlib genuinely is
+    // unreachable by its bare name — that is exactly why `ENV_REPRO` has to
+    // open with `local print = print`. When the environment's shape is fully
+    // known there is nothing speculative about saying so, so built-ins get no
+    // exemption. The sandbox idiom that *would* make them reachable
+    // (`setmetatable({}, { __index = _G })`) is handled by shape certainty
+    // instead — see `setmetatable_env_reports_nothing`.
+    let src = r#"_ENV = {}
+local s = string
+local p = print
+"#;
+    let diags = env_field_diags(src, "env_field_builtins.lua");
+    assert_eq!(
+        diags.len(),
+        2,
+        "in a fully known environment built-ins are missing fields like any \
+         other name, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().any(|d| d.contains("'string'"))
+            && diags.iter().any(|d| d.contains("'print'")),
+        "both built-in reads must be reported, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn bare_g_is_reported_in_a_fully_known_env() {
+    // `_G` must not be treated as the global environment table
+    // unconditionally: after `_ENV = {}` the *name* `_G` resolves through the
+    // new environment, which does not have it, so `_G` is nil here. The
+    // built-in `_G` recognition exists to keep `_G.X` independent of stdlib
+    // stub contents — not to override `_ENV` redirection.
+    let src = r#"local print = print
+_ENV = {}
+print(_G)
+"#;
+    let diags = env_field_diags(src, "env_field_bare_g.lua");
+    assert_eq!(
+        diags.len(),
+        1,
+        "bare `_G` under a fully known redirected environment must be \
+         reported, got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].starts_with("L2 ") && diags[0].contains("'_G'"),
+        "the diagnostic must point at `_G` on line 2 (0-based), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn g_qualified_read_under_redirected_env_does_not_reach_the_old_global() {
+    // The user-visible bug this pins down: `_G.g1` used to resolve straight to
+    // the pre-redirection global `g1`, so goto/hover jumped to a symbol that is
+    // unreachable at run time, and the field check reported the misleading
+    // "unknown field on type '_G'" (the real problem is that `_G` itself is
+    // nil). Now the base `_G` is what gets reported, and the field read stays
+    // silent because nothing is known about `nil.g1`.
+    let src = r#"local print = print
+g1 = 123
+_ENV = {}
+print(_G.g1)
+"#;
+    let diags = all_diags(src, "env_field_g_dotted.lua");
+    assert!(
+        diags.iter().any(|d| d.contains("'_G'") && d.contains("the current _ENV")),
+        "the base `_G` must be reported as missing from the current _ENV, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().all(|d| !d.contains("on type '_G'")),
+        "`_G` is nil here, so no diagnostic may claim to know its fields, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn setmetatable_env_reports_nothing() {
+    // REGRESSION GUARD, and the reason built-ins need no exemption.
+    //
+    // `setmetatable({}, { __index = _G })` is *the* idiomatic sandbox: every
+    // name missing from the table falls through to the real global
+    // environment, so `print`, `_G` and even a plain global really are
+    // reachable. We do not follow `__index`, so the only sound answer is
+    // silence — the table's field set is not an exhaustive description of the
+    // environment.
+    //
+    // Today this also happens to fall out of `setmetatable`'s return type not
+    // resolving to a table (its `---@generic T ... @return T` is not
+    // back-filled from the call site). That is *not* what this test relies on:
+    // if generic back-filling is ever implemented, `_ENV` would resolve to the
+    // `{}` literal's shape and every name here would light up. Attaching a
+    // metatable must keep marking the shape as non-exhaustive on its own.
+    let src = r#"_ENV = setmetatable({}, { __index = _G })
+local a = print
+local b = _G
+local c = whatever
+"#;
+    let diags = env_field_diags(src, "env_field_setmetatable.lua");
+    assert!(
+        diags.is_empty(),
+        "an environment with an `__index` metatable must silence the check, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn setmetatable_applied_after_construction_reports_nothing() {
+    // Same as above, but the metatable is attached in a separate statement, so
+    // `_ENV`'s fact *is* the literal's `Known(Table)` shape. Shape certainty
+    // alone therefore says "fully known" here and would report everything —
+    // only tracking the `setmetatable` call itself gets this right.
+    let src = r#"local t = {}
+setmetatable(t, { __index = _G })
+_ENV = t
+local a = print
+local c = whatever
+"#;
+    let diags = env_field_diags(src, "env_field_setmetatable_late.lua");
+    assert!(
+        diags.is_empty(),
+        "a metatable attached in a separate statement must silence the check \
+         just the same, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn rawset_on_the_env_table_reports_nothing() {
+    // `rawset` writes a field we do not record on the shape, so the shape
+    // stops being exhaustive.
+    let src = r#"local print = print
+_ENV = {}
+rawset(_ENV, "injected", 1)
+print(injected)
+"#;
+    let diags = env_field_diags(src, "env_field_rawset.lua");
+    assert!(
+        diags.is_empty(),
+        "a `rawset` on the environment table must silence the check, got: {:?}",
+        diags
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Writes must not leak into the global index once `_ENV` is redirected
+// ---------------------------------------------------------------------------
+//
+// The bare-name write path (`x = 1`) has been gated on `_ENV` redirection from
+// the start. The *dotted* write path had not been, so `Foo.bar = 1` inside a
+// sandbox was still exported as the global `Foo.bar` — polluting the whole
+// workspace index with symbols that do not exist at run time. `_G.x = 1` was
+// the same bug wearing a `_G` hat: `GlobalShard` normalizes the `_G.` prefix
+// away, so it landed on the bare key `x`.
+
+#[test]
+fn g_qualified_write_under_redirected_env_is_not_a_global() {
+    let paths = global_shard_paths("_ENV = {}\n_G.leaked = 1\n", "env_g_write_leak.lua");
+    assert!(
+        paths.is_empty(),
+        "`_G.leaked = 1` under a redirected `_ENV` targets a field of `nil`, \
+         nothing may reach global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn dotted_write_under_redirected_env_is_not_a_global() {
+    // Not a `_G` problem at all — any dotted write leaked.
+    let paths = global_shard_paths("_ENV = {}\nFoo.bar = 1\n", "env_dotted_write_leak.lua");
+    assert!(
+        paths.is_empty(),
+        "`Foo.bar = 1` under a redirected `_ENV` must not reach global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn g_qualified_function_declaration_under_redirected_env_is_not_a_global() {
+    let paths = global_shard_paths(
+        "_ENV = {}\nfunction _G.f() end\n",
+        "env_g_func_leak.lua",
+    );
+    assert!(
+        paths.is_empty(),
+        "`function _G.f()` under a redirected `_ENV` must not reach \
+         global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn dotted_function_declaration_under_redirected_env_is_not_a_global() {
+    let paths = global_shard_paths(
+        "_ENV = {}\nfunction Foo.f() end\n",
+        "env_dotted_func_leak.lua",
+    );
+    assert!(
+        paths.is_empty(),
+        "`function Foo.f()` under a redirected `_ENV` must not reach \
+         global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn g_keeps_working_when_env_is_bound_back_to_g() {
+    // SYMMETRY GUARD for the read-side fix. Moving the built-in `_G`
+    // recognition *after* the redirection check must not disturb the case
+    // where `_ENV` still is the global environment — whether implicitly or via
+    // an explicit `local _ENV = _G`.
+    let src = r#"local _ENV = _G
+GBound = 1
+print(_G.GBound)
+"#;
+    let paths = global_shard_paths(src, "env_g_symmetry_paths.lua");
+    assert!(
+        paths.contains(&"GBound".to_string()),
+        "`local _ENV = _G` keeps free names global, so `GBound` must be \
+         registered, got: {:?}",
+        paths
+    );
+    let diags = all_diags(src, "env_g_symmetry_diags.lua");
+    assert!(
+        diags.iter().all(|d| !d.contains("the current _ENV")),
+        "`_G` still denotes the global environment here, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn g_is_not_flagged_without_env_redirection() {
+    // Negative control: with no redirection anywhere, `_G` must keep its
+    // built-in meaning and produce no env-field noise.
+    let src = "GPlain = 1\nprint(_G.GPlain)\nprint(_G)\n";
+    let diags = env_field_diags(src, "env_g_no_redirect.lua");
+    assert!(
+        diags.is_empty(),
+        "`_G` outside any redirected environment must not be flagged, got: {:?}",
+        diags
+    );
+}
+
+// ---------------------------------------------------------------------------
+// A sandboxed `function foo() end` writes into the new environment
+// ---------------------------------------------------------------------------
+//
+// Keeping a write out of `global_shard` is only half the job. `function foo()`
+// under a redirected `_ENV` is perfectly ordinary sandbox code — it puts a
+// function into the new environment — so it has to land on that table's shape,
+// exactly like the assignment spelling `foo = function() end` already does.
+// Gating it without redirecting it made the name vanish from the index
+// altogether, which is worse than the leak it replaced: goto, hover and
+// references all lose the symbol.
+
+#[test]
+fn assignment_style_function_lands_on_the_env_shape() {
+    // Control for the test below — establishes that the assignment spelling
+    // already works, so a failure of the declaration spelling is attributable
+    // to the declaration path rather than to sandboxed writes in general.
+    let src = "_ENV = {}\nbar = function() end\nlocal probe = 1\n";
+    assert_eq!(
+        env_shape_fields(src, "env_fn_assign_shape.lua"),
+        Some(vec!["bar".to_string()]),
+        "`bar = function() end` must land on the environment's shape"
+    );
+}
+
+#[test]
+fn declaration_style_function_lands_on_the_env_shape() {
+    let src = "_ENV = {}\nfunction foo() end\nlocal probe = 1\n";
+    assert_eq!(
+        env_shape_fields(src, "env_fn_decl_shape.lua"),
+        Some(vec!["foo".to_string()]),
+        "`function foo() end` under a redirected `_ENV` must land on the \
+         environment's shape, not vanish"
+    );
+}
+
+#[test]
+fn declaration_style_function_lands_on_a_local_env_shape() {
+    // Same for the `local _ENV` sandbox form.
+    let src = "local _ENV = {}\nfunction foo() end\nlocal probe = 1\n";
+    assert_eq!(
+        env_shape_fields(src, "env_fn_decl_local_shape.lua"),
+        Some(vec!["foo".to_string()]),
+        "`function foo() end` under `local _ENV = {{}}` must land on the \
+         environment's shape"
+    );
+}
+
+#[test]
+fn sandboxed_function_declaration_is_still_not_a_global() {
+    // The redirect must not reintroduce the leak it replaced.
+    let paths = global_shard_paths(
+        "_ENV = {}\nfunction foo() end\n",
+        "env_fn_decl_not_global.lua",
+    );
+    assert!(
+        paths.is_empty(),
+        "`function foo() end` under a redirected `_ENV` must stay out of \
+         global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn goto_resolves_a_sandboxed_function_declaration() {
+    // The user-visible payoff: the symbol is reachable again.
+    let src = r#"local print = print
+_ENV = {}
+function foo() end
+print(foo)
+"#;
+    // `foo` inside `print(foo)` on line 3: p=0 … ( =5, f=6
+    let lines = goto_lines(src, "env_fn_decl_goto.lua", pos(3, 6));
+    assert!(
+        lines.contains(&2),
+        "goto on a sandboxed `foo` must reach its declaration on line 2 \
+         (0-based), got lines: {:?}",
+        lines
+    );
+}
+
+#[test]
+fn sandboxed_dotted_function_declaration_writes_nothing() {
+    // Contrast with the bare form: `function Foo.f()` needs `Foo` to already
+    // exist, and the sandbox does not provide it, so at run time this indexes
+    // nil. Nothing may be recorded anywhere — neither a global nor an
+    // environment field named `Foo`.
+    let src = "_ENV = {}\nfunction Foo.f() end\nlocal probe = 1\n";
+    let paths = global_shard_paths(src, "env_fn_dotted_nothing.lua");
+    assert!(
+        paths.is_empty(),
+        "`function Foo.f()` in a sandbox must not reach global_shard, got: {:?}",
+        paths
+    );
+    assert_eq!(
+        env_shape_fields(src, "env_fn_dotted_shape.lua"),
+        Some(Vec::new()),
+        "`function Foo.f()` must not invent a `Foo` field on the environment"
+    );
+}
+
+#[test]
+fn function_declarations_outside_a_sandbox_are_unaffected() {
+    // Negative control for the redirect: without `_ENV` redirection the
+    // declaration must still register as an ordinary global.
+    let paths = global_shard_paths(
+        "function plain_decl() end\nfunction Holder.method() end\n",
+        "env_fn_decl_control.lua",
+    );
+    assert!(
+        paths.contains(&"plain_decl".to_string()),
+        "`function plain_decl()` must still be a global, got: {:?}",
+        paths
+    );
+}
+
+// ---------------------------------------------------------------------------
+// §1.6 name resolution is shared: goto / hover / references must agree
+// ---------------------------------------------------------------------------
+//
+// §1.6 declares one resolution order shared by goto, hover and references.
+// That used to be aspirational — each capability re-implemented the order
+// inline, so a rule added to one silently failed in the others. `_ENV`
+// redirection was exactly that: goto learned about it, hover returned nothing,
+// and references fell back to whole-file text matching that could not tell the
+// pre- and post-redirect `g` apart.
+//
+// These tests pin the *shared* behavior. A regression in the common layer
+// breaks several at once, which is the point.
+
+/// Two environments, one name. `g` before the `_ENV` write and `g` after it are
+/// different variables at run time, so every navigation capability must keep
+/// them apart.
+const ENV_BOUNDARY: &str = r#"g = 1
+print(g)
+_ENV = {}
+g = 2
+print(g)
+"#;
+
+#[test]
+fn hover_resolves_a_sandboxed_function_declaration() {
+    let src = r#"local print = print
+_ENV = {}
+function sandboxed_fn() end
+print(sandboxed_fn)
+"#;
+    let text = hover_text(src, "env_hover_fn.lua", pos(3, 6));
+    let text = text.expect("hover on a sandboxed function must produce content");
+    assert!(
+        text.contains("sandboxed_fn"),
+        "hover must name the symbol, got: {:?}",
+        text
+    );
+}
+
+#[test]
+fn hover_resolves_a_sandboxed_variable() {
+    let src = r#"local print = print
+_ENV = {}
+sbx_var = 123
+print(sbx_var)
+"#;
+    let text = hover_text(src, "env_hover_var.lua", pos(3, 6));
+    let text = text.expect("hover on a sandboxed variable must produce content");
+    assert!(
+        text.contains("sbx_var"),
+        "hover must name the symbol, got: {:?}",
+        text
+    );
+}
+
+#[test]
+fn hover_stays_silent_for_an_unknown_shape_env() {
+    // The silence contract survives the shared layer: nothing is known about
+    // the environment, so nothing may be claimed about its fields.
+    let src = r#"function make_env() end
+local _ENV = make_env()
+local v = mystery
+"#;
+    assert!(
+        hover_text(src, "env_hover_unknown.lua", pos(2, 10)).is_none(),
+        "an `_ENV` of unknown shape must not produce hover content"
+    );
+}
+
+#[test]
+fn goto_keeps_the_two_environments_apart() {
+    // Control for the references test below, and a guard on the claim in §1.3.
+    let pre = goto_lines(ENV_BOUNDARY, "env_boundary_goto_pre.lua", pos(1, 6));
+    assert!(
+        pre.contains(&0) && !pre.contains(&3),
+        "the pre-redirect read must resolve to the pre-redirect write (line 0) \
+         only, got: {:?}",
+        pre
+    );
+    let post = goto_lines(ENV_BOUNDARY, "env_boundary_goto_post.lua", pos(4, 6));
+    assert!(
+        post.contains(&3) && !post.contains(&0),
+        "the post-redirect read must resolve to the post-redirect write \
+         (line 3) only, got: {:?}",
+        post
+    );
+}
+
+#[test]
+fn references_keep_the_two_environments_apart() {
+    // §1.3 has always claimed goto/references do not link the two `g`s.
+    // references did not honor it: `Identity::Global` scans the whole file by
+    // text, so clicking either `g` returned all four sites.
+    let pre = reference_sites(ENV_BOUNDARY, "env_boundary_refs_pre.lua", pos(1, 6));
+    assert_eq!(
+        pre,
+        vec![(0, 0), (1, 6)],
+        "clicking the pre-redirect `g` must report only the pre-redirect sites"
+    );
+    let post = reference_sites(ENV_BOUNDARY, "env_boundary_refs_post.lua", pos(4, 6));
+    assert_eq!(
+        post,
+        vec![(3, 0), (4, 6)],
+        "clicking the post-redirect `g` must report only the post-redirect sites"
+    );
+}
+
+#[test]
+fn references_find_every_use_of_a_sandboxed_name() {
+    // Positive counterpart: within one environment all uses must still be
+    // found — the boundary test above must not be satisfiable by simply
+    // reporting nothing.
+    let src = r#"local print = print
+_ENV = {}
+sbx = 1
+print(sbx)
+sbx = 2
+print(sbx)
+"#;
+    let sites = reference_sites(src, "env_refs_all_uses.lua", pos(3, 6));
+    assert_eq!(
+        sites,
+        vec![(2, 0), (3, 6), (4, 0), (5, 6)],
+        "all four uses of the sandboxed `sbx` must be reported"
+    );
+}
+
+#[test]
+fn ordinary_globals_keep_their_reference_behavior() {
+    // Negative control on the shared layer: without redirection, references on
+    // a plain global must behave exactly as before.
+    let src = "plain = 1\nprint(plain)\nplain = 2\n";
+    let sites = reference_sites(src, "env_refs_plain_global.lua", pos(1, 6));
+    assert!(
+        sites.contains(&(0, 0)) && sites.contains(&(1, 6)) && sites.contains(&(2, 0)),
+        "an ordinary global must still report all its sites, got: {:?}",
+        sites
+    );
+}
+
+#[test]
+fn navigation_agrees_on_a_sandboxed_name() {
+    // The consistency assertion §1.6 is really about: one cursor position, one
+    // answer. Whatever the shared layer decides, all three capabilities act on
+    // the same decision.
+    let src = r#"local print = print
+_ENV = {}
+shared_name = 1
+print(shared_name)
+"#;
+    let at = pos(3, 6);
+    assert_eq!(
+        goto_lines(src, "env_agree_goto.lua", at),
+        vec![2],
+        "goto must reach the write on line 2"
+    );
+    assert!(
+        hover_text(src, "env_agree_hover.lua", at)
+            .is_some_and(|t| t.contains("shared_name")),
+        "hover must resolve the same symbol"
+    );
+    assert_eq!(
+        reference_sites(src, "env_agree_refs.lua", at),
+        vec![(2, 0), (3, 6)],
+        "references must report exactly the two sites of that symbol"
+    );
+}
+
+#[test]
+fn env_field_defined_by_a_top_level_function_declaration_is_not_flagged() {
+    // `function foo() end` under a redirected `_ENV` writes `foo` into the
+    // new environment. The write is not recorded on the environment's table
+    // shape, so a shape-only check would report a false positive here.
+    let src = r#"local print = print
+_ENV = {}
+function foo() end
+print(foo)
+"#;
+    let diags = env_field_diags(src, "env_field_func_decl.lua");
+    assert!(
+        diags.is_empty(),
+        "`foo` is defined by a top-level function declaration before the \
+         read, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn env_field_read_before_its_function_declaration_is_flagged() {
+    // Same construct, reversed order — `foo` really is `nil` at the read.
+    let src = r#"local print = print
+_ENV = {}
+print(foo)
+function foo() end
+"#;
+    let diags = env_field_diags(src, "env_field_func_decl_early.lua");
+    assert_eq!(
+        diags.len(),
+        1,
+        "reading `foo` before its declaration must be flagged, got: {:?}",
+        diags
+    );
+    assert!(
+        diags[0].starts_with("L2 ") && diags[0].contains("'foo'"),
+        "the diagnostic must point at `foo` on line 2 (0-based), got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn dynamic_env_write_silences_env_field_diagnostics() {
+    // `_ENV[k] = v` adds a field we cannot name statically, so the shape is
+    // no longer an exhaustive description of the environment. Anything could
+    // be in there — stay silent.
+    let src = r#"local print = print
+local k = "dyn"
+_ENV = {}
+_ENV[k] = 1
+print(anything)
+"#;
+    let diags = env_field_diags(src, "env_field_dynamic.lua");
+    assert!(
+        diags.is_empty(),
+        "a dynamic-key write through `_ENV` must silence the check, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn files_without_env_redirection_get_no_env_field_diagnostics() {
+    // Negative control guarding against an inverted predicate. With no
+    // `_ENV` redirection anywhere, this check must never fire — a mistake
+    // that treats every file as sandboxed would otherwise flood the whole
+    // workspace with env-field diagnostics.
+    let src = r#"plain = 1
+print(plain)
+print(not_defined_anywhere)
+"#;
+    let diags = env_field_diags(src, "env_field_none.lua");
+    assert!(
+        diags.is_empty(),
+        "files without `_ENV` redirection must produce no env-field \
+         diagnostics (`not_defined_anywhere` is an undefined *global*), got: {:?}",
+        diags
+    );
+    // ... and the ordinary global check must still be doing its job, so the
+    // test above cannot pass merely because diagnostics are off.
+    let all = all_diags(src, "env_field_none_control.lua");
+    assert!(
+        all.iter().any(|d| d.contains("Undefined global")),
+        "the undefined-global check must still fire here, got: {:?}",
+        all
+    );
+}
+
+#[test]
+fn env_field_diagnostic_can_be_switched_off() {
+    let cfg = DiagnosticsConfig {
+        env_unknown_field: DiagnosticSeverityOption::Off,
+        ..Default::default()
+    };
+    let diags = all_diags_with_config(ENV_REPRO, "env_field_off.lua", &cfg);
+    assert!(
+        diags.is_empty(),
+        "`diagnostics.envUnknownField = off` must silence the check, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn env_field_diagnostic_defaults_to_warning() {
+    let cfg = DiagnosticsConfig::default();
+    assert_eq!(cfg.env_unknown_field, DiagnosticSeverityOption::Warning);
 }

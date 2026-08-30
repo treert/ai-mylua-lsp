@@ -94,22 +94,44 @@ fn goto_definition_inner(
         return result;
     }
 
-    if let Some(def) = doc.scope_tree.resolve_id(byte_offset, name, uri_id) {
-        return Some(GotoDefinitionResponse::Scalar(Location {
-            uri: def.uri,
-            range: def.selection_range.into(),
-        }));
-    }
-
-    // Check if ident is a type name → jump to its definition
-    if let Some(candidates) = index.type_candidates(name) {
-        if let Some(candidate) = candidates.first() {
-            let candidate_uri = resolve_uri(candidate.source_uri_id());
+    // Bare-name resolution, per §1.6 — shared with `hover` / `references`.
+    // See `name_resolution` for why this lives outside this module.
+    match crate::name_resolution::resolve_bare_name(
+        ident_node,
+        doc.source(),
+        uri_id,
+        &doc.scope_tree,
+        index,
+    ) {
+        crate::name_resolution::BareName::Local { def, .. } => {
             return Some(GotoDefinitionResponse::Scalar(Location {
-                uri: candidate_uri.clone(),
-                range: candidate.range.into(),
+                uri: def.uri,
+                range: def.selection_range.into(),
             }));
         }
+        crate::name_resolution::BareName::EnvField { location, .. } => {
+            // A sandboxed free name is definitively not a global, so this
+            // branch is terminal either way: jump when the environment records
+            // a definition site, otherwise report nothing rather than falling
+            // through to the global namespace.
+            return location.map(|loc| {
+                GotoDefinitionResponse::Scalar(Location {
+                    uri: resolve_uri(loc.uri_id),
+                    range: loc.range.into(),
+                })
+            });
+        }
+        crate::name_resolution::BareName::TypeName { name } => {
+            if let Some(candidates) = index.type_candidates(&name) {
+                if let Some(candidate) = candidates.first() {
+                    return Some(GotoDefinitionResponse::Scalar(Location {
+                        uri: resolve_uri(candidate.source_uri_id()),
+                        range: candidate.range.into(),
+                    }));
+                }
+            }
+        }
+        crate::name_resolution::BareName::Global { .. } => {}
     }
 
     if let Some(candidates) = index.global_shard.get(name) {
