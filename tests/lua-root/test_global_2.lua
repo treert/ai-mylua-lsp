@@ -24,3 +24,22 @@ print(mm_1.mm1)
 
 
 print(gg_test)
+
+-- global LuaPanda
+LuaPanda = {}
+local this = LuaPanda
+
+function this.f1()
+    print("f1")
+end
+
+function this.test()
+    this.f1()
+end
+
+print(LuaPanda)
+print(_G.LuaPanda)
+
+local _G = {}
+print(_G.LuaPanda) -- waning
+

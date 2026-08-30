@@ -2830,6 +2830,102 @@ utils2.hello()
 }
 
 #[test]
+fn local_alias_of_global_table_function_decl_is_not_flagged_as_unknown_field() {
+    // Regression: `local this = LuaPanda; function this.f1()` previously
+    // registered `f1` nowhere — the table-shape write bailed (the local's
+    // fact is a GlobalRef stub, not a Table shape), and the `has_local_base`
+    // early return skipped the global TableExtension contribution that the
+    // plain-assignment path (`this.f1 = ...`) already emits. Reads like
+    // `this.f1()` then falsely flagged "Unknown field 'f1' on table".
+    let src = r#"
+LuaPanda = {}
+local this = LuaPanda
+
+function this.f1()
+    print("f1")
+end
+
+function this.test()
+    this.f1()
+end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "local_alias_fn_decl.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "`function <local-alias-of-global>.f()` must register the field as a TableExtension \
+         under the global prefix so `this.f1()` is not flagged; got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
+fn global_env_access_of_defined_global_table_is_not_flagged() {
+    // Regression: with the bundled stdlib library loaded (its basic.lua
+    // declares `---@class _G` + `_G = {}`), `print(_G.LuaPanda)` flagged
+    // "Unknown field 'LuaPanda' on type '_G'" even though `LuaPanda = {}`
+    // is a defined workspace global. `_G.X` is the global-env alias read
+    // of the bare global `X`: when `X` resolves in global_shard, the
+    // `_G.`-qualified read must not be flagged either. `print(LuaPanda)`
+    // (the line above it in the original repro) is already clean.
+    let lib = bundled_lua54_library_path();
+    let src = r#"
+LuaPanda = {}
+local this = LuaPanda
+
+function this.f1()
+    print("f1")
+end
+
+function this.test()
+    this.f1()
+end
+
+print(LuaPanda)
+print(_G.LuaPanda)
+"#;
+    let (docs, mut agg, _parser, _library_uris) =
+        setup_workspace_with_library(&[("global_env_access.lua", src)], &[lib]);
+    let uri = make_uri("global_env_access.lua");
+    let doc = docs
+        .get(&intern_uri(&uri))
+        .expect("user document present");
+
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        intern_uri(&uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    let unknown: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .collect();
+    assert!(
+        unknown.is_empty(),
+        "`_G.<name>` reads of a defined global must not flag Unknown field; got: {:?}",
+        unknown,
+    );
+}
+
+#[test]
 fn global_table_function_decl_is_not_flagged_cross_file() {
     // Cross-file (cross workspace-root in practice) variant of the
     // same regression: file A defines `utils2 = {}` + `function utils2.hello()`,

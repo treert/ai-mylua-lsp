@@ -326,6 +326,13 @@ pub(crate) fn global_prefixes_for_fact(fact: &TypeFact, agg: &WorkspaceAggregati
         TypeFact::Stub(SymbolicStub::GlobalRef { name }) => {
             push_global_prefix(&mut prefixes, name.to_string());
         }
+        TypeFact::Known(KnownType::EmmyType(type_name)) if type_name == "_G" => {
+            // The stdlib library declares `_G` as an @class; field access on
+            // it must still fall back to the global environment. Emitting the
+            // `_G` prefix is enough — `GlobalShard` normalizes the resulting
+            // `_G.field` key down to the bare global.
+            push_global_prefix(&mut prefixes, "_G".to_string());
+        }
         TypeFact::Stub(SymbolicStub::RequireRef { module_path }) => {
             if let Some(name) = resolve_require_global_name(module_path, agg) {
                 push_global_prefix(&mut prefixes, name);
@@ -340,9 +347,6 @@ pub(crate) fn global_prefixes_for_fact(fact: &TypeFact, agg: &WorkspaceAggregati
                         format!("{}.{}", base_prefix, fields.join("."))
                     };
                     push_global_prefix(&mut prefixes, prefix);
-                    if base_prefix == "_G" && !fields.is_empty() {
-                        push_global_prefix(&mut prefixes, fields.join("."));
-                    }
                 }
             }
         }
@@ -357,13 +361,9 @@ fn push_global_prefix(prefixes: &mut Vec<String>, prefix: String) {
 }
 
 fn extend_global_prefixes(prefixes: &mut Vec<String>, field: &str) {
-    let add_global_env_alias = prefixes.iter().any(|prefix| prefix == "_G");
     for prefix in prefixes.iter_mut() {
         prefix.push('.');
         prefix.push_str(field);
-    }
-    if add_global_env_alias {
-        push_global_prefix(prefixes, field.to_string());
     }
 }
 
@@ -391,17 +391,21 @@ pub fn get_fields_for_type_id(
     // they live in global_shard rather than in a table shape.
     let mut global_prefix_fields = Vec::new();
     for prefix in global_prefixes_for_fact(fact, agg) {
+        // `_G` is the global environment: its members are the whole global
+        // namespace, which after path normalization lives at the trie root
+        // rather than under a `_G` node. Enumerate the roots instead.
+        if prefix == "_G" {
+            for (root_name, root_node) in agg.global_shard.iter_root_nodes() {
+                if let Some(c) = root_node.candidates.first() {
+                    push_global_prefix_field(&mut global_prefix_fields, root_name.as_str(), c);
+                }
+            }
+            continue;
+        }
         if let Some(node) = agg.global_shard.get_node(&prefix) {
             for (child_name, child_node) in &node.children {
                 if let Some(c) = child_node.candidates.first() {
-                    let is_func = is_function_type(&c.type_fact)
-                        || matches!(c.kind, crate::summary::GlobalContributionKind::Function);
-                    global_prefix_fields.push(FieldCompletion {
-                        name: child_name.to_string(),
-                        type_display: format!("{}", c.type_fact),
-                        is_function: is_func,
-                        def_range: Some(c.selection_range),
-                    });
+                    push_global_prefix_field(&mut global_prefix_fields, child_name.as_str(), c);
                 }
             }
         }
@@ -426,6 +430,25 @@ pub struct FieldCompletion {
     pub type_display: String,
     pub is_function: bool,
     pub def_range: Option<ByteRange>,
+}
+
+/// Append a `FieldCompletion` describing a `global_shard` candidate.
+fn push_global_prefix_field(
+    out: &mut Vec<FieldCompletion>,
+    name: &str,
+    candidate: &crate::aggregation::GlobalCandidate,
+) {
+    let is_func = is_function_type(&candidate.type_fact)
+        || matches!(
+            candidate.kind,
+            crate::summary::GlobalContributionKind::Function
+        );
+    out.push(FieldCompletion {
+        name: name.to_string(),
+        type_display: format!("{}", candidate.type_fact),
+        is_function: is_func,
+        def_range: Some(candidate.selection_range),
+    });
 }
 
 // ---------------------------------------------------------------------------

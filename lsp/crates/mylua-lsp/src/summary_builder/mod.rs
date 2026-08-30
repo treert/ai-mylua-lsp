@@ -284,6 +284,17 @@ impl<'a> BuildContext<'a> {
         }
     }
 
+    /// Look up a global function id by source-level callee text.
+    ///
+    /// Applies the same `_G.` normalization used when the index was
+    /// populated, so `_G.foo` and bare `foo` hit the same entry. Keeping the
+    /// lookup in one place stops the several call sites from drifting apart.
+    pub(crate) fn lookup_global_function(&self, callee_text: &str) -> Option<FunctionSummaryId> {
+        let key = crate::aggregation::normalize_global_path(callee_text);
+        let symbol = crate::lua_symbol::get_lua_symbol(key)?;
+        self.function_name_index.get(&symbol).copied()
+    }
+
     pub(crate) fn resolve_visible_in_build_scopes(
         &self,
         name: &str,

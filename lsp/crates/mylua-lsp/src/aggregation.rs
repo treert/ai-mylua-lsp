@@ -115,15 +115,49 @@ pub struct GlobalShard {
     uri_to_paths: HashMap<UriId, Vec<LuaSymbol>>,
 }
 
+/// Strip the redundant `_G.` prefix from a global path.
+///
+/// `_G` **is** the global environment table, so `_G.X` names the same global
+/// as bare `X` — and `_G._G.X` likewise, since `_G._G == _G`. Normalizing
+/// here, at the single entry point shared by every `GlobalShard` key
+/// operation, keeps the two spellings from splitting into duplicate entries
+/// and means callers never have to special-case `_G` when they build or
+/// query a path.
+///
+/// A bare `"_G"` is preserved: the bundled stdlib declares `_G` itself as a
+/// global (`---@class _G` + `_G = {}`), so that root must stay reachable.
+///
+/// NOTE on shadowing: a *local* named `_G` (`local _G = {}`) shadows the
+/// global environment, and `_G.X` is then an ordinary table field. That case
+/// never reaches this function — a shadowed base resolves to a local table
+/// shape and is filtered out before any `global_shard` path is built. The one
+/// place that used to bypass that filter (the raw-text prefix fallback in
+/// `diagnostics::field_access`) now excludes `_G` explicitly.
+pub(crate) fn normalize_global_path(path: &str) -> &str {
+    let mut normalized = path;
+    while let Some(rest) = normalized.strip_prefix("_G.") {
+        if rest.is_empty() {
+            break;
+        }
+        normalized = rest;
+    }
+    normalized
+}
+
 /// Split a path string on `.` and `:` separators.
 /// Returns `(root, [segment, ...])`.
+///
+/// The path is `_G.`-normalized first (see `normalize_global_path`), so
+/// `"_G.Foo.bar"` and `"Foo.bar"` split identically.
 ///
 /// Examples:
 /// - `"print"` → `("print", [])`
 /// - `"UE4.FVector"` → `("UE4", ["FVector"])`
 /// - `"Foo:bar"` → `("Foo", ["bar"])`
 /// - `"UE4.FVector:normalize"` → `("UE4", ["FVector", "normalize"])`
+/// - `"_G.Foo.bar"` → `("Foo", ["bar"])`
 fn split_global_path(path: &str) -> (&str, Vec<&str>) {
+    let path = normalize_global_path(path);
     let mut segments = Vec::new();
     let root_end = path.find(|c: char| c == '.' || c == ':');
     let Some(root_end) = root_end else {
@@ -252,7 +286,17 @@ impl GlobalShard {
 
     /// Insert a candidate at the given path, creating intermediate nodes
     /// as needed. Also updates the reverse URI→path index.
-    pub fn push_candidate(&mut self, path: &str, candidate: GlobalCandidate) {
+    ///
+    /// The path is `_G.`-normalized, and the candidate's own `name` is
+    /// rewritten to match: `collect_entries` reports `candidates[0].name` as
+    /// the entry key, so leaving it un-normalized would let a `_G.`-qualified
+    /// contribution resurface under its redundant spelling.
+    pub fn push_candidate(&mut self, path: &str, mut candidate: GlobalCandidate) {
+        let path = normalize_global_path(path);
+        if candidate.name.as_str() != path {
+            candidate.name = intern_lua_symbol(path);
+        }
+
         // Update reverse index.
         self.uri_to_paths
             .entry(candidate.source_uri_id())
@@ -326,6 +370,15 @@ impl GlobalShard {
             root_node.collect_entries(root_name.as_str(), &mut out);
         }
         out
+    }
+
+    /// Iterate the top-level global roots without descending into children.
+    ///
+    /// Used for `_G.` field enumeration: after path normalization every
+    /// `_G.X` entry lives at the trie root, so `_G`'s own node has no
+    /// children to walk — the global namespace *is* the root set.
+    pub fn iter_root_nodes(&self) -> impl Iterator<Item = (&LuaSymbol, &GlobalNode)> {
+        self.roots.iter()
     }
 
     /// Iterate entries whose root name starts with `prefix`, collecting

@@ -2,7 +2,7 @@ use crate::emmy::{
     collect_preceding_comments, emmy_type_to_fact, parse_emmy_comments, parse_type_from_str,
     EmmyAnnotation, EmmyType,
 };
-use crate::lua_symbol::{get_lua_symbol, intern_lua_symbol};
+use crate::lua_symbol::intern_lua_symbol;
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
 use crate::syntax_kind::{field, kind, NodeKindExt, SyntaxKind};
@@ -591,11 +591,9 @@ fn extract_call_return_types(
     }
 
     // Global function summary fallback.
-    if let Some(callee_symbol) = get_lua_symbol(callee_text) {
-        if let Some(&func_id) = ctx.function_name_index.get(&callee_symbol) {
-            if let Some(fs) = ctx.function_summaries.get(&func_id) {
-                return Some(fs.signature.returns.clone());
-            }
+    if let Some(func_id) = ctx.lookup_global_function(callee_text) {
+        if let Some(fs) = ctx.function_summaries.get(&func_id) {
+            return Some(fs.signature.returns.clone());
         }
     }
     None
@@ -869,9 +867,41 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     }
 
     // Base is a visible local but not a table shape. The declaration may
-    // still have attached to an @class via bound_class above, but it must
-    // not be exported through global_shard.
+    // still have attached to an @class via bound_class above, and it must
+    // not be exported through global_shard — EXCEPT when the local is an
+    // alias of a global (e.g. `LuaPanda = {}; local this = LuaPanda;
+    // function this.f1() ... end`). Then the write lands on the global
+    // table, so emit a TableExtension contribution under the global
+    // prefix, mirroring the plain-assignment path (`this.f1 = ...`) which
+    // already does this via `local_global_prefixes`. Without it, `f1` is
+    // registered nowhere and later reads (`this.f1()`) falsely flag
+    // "Unknown field 'f1' on table".
     if has_local_base {
+        if let Some((base_name, _)) = name.rsplit_once(':').or_else(|| name.rsplit_once('.')) {
+            let global_prefixes = ctx
+                .resolve_visible_in_build_scopes(base_name, name_node.start_byte())
+                .and_then(|decl| decl.type_fact.as_ref())
+                .map(global_prefixes_for_build_fact)
+                .unwrap_or_default();
+            if !global_prefixes.is_empty() {
+                let normalized = name.replace(':', ".");
+                let field_name = normalized.rsplit('.').next().unwrap_or("");
+                let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
+                let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
+                let selection_range =
+                    ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
+                for prefix in global_prefixes {
+                    let gname = format!("{}.{}", prefix, field_name);
+                    ctx.global_contributions.push(GlobalContribution {
+                        name: intern_lua_symbol(&gname),
+                        kind: GlobalContributionKind::TableExtension,
+                        type_fact: type_fact.clone(),
+                        range,
+                        selection_range,
+                    });
+                }
+            }
+        }
         return;
     }
 
@@ -880,32 +910,24 @@ fn visit_function_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
     let type_fact = TypeFact::Known(KnownType::FunctionRef(func_id));
     let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
     let selection_range = ctx.line_index.ts_node_to_byte_range(name_node, ctx.source);
-    ctx.function_name_index
-        .insert(intern_lua_symbol(&normalized), func_id);
+    // `function_name_index` shares the global name space with `GlobalShard`,
+    // so it must use the same `_G.`-normalized keys.
+    ctx.function_name_index.insert(
+        intern_lua_symbol(crate::aggregation::normalize_global_path(&normalized)),
+        func_id,
+    );
 
     // Base is not a local (or bare name) → register as global contribution
     // (e.g. `function Player.new()` where Player is a global).
+    // A `_G.`-qualified name needs no separate alias contribution:
+    // `GlobalShard` normalizes the key down to the bare global.
     ctx.global_contributions.push(GlobalContribution {
         name: intern_lua_symbol(&normalized),
         kind: GlobalContributionKind::Function,
-        type_fact: type_fact.clone(),
+        type_fact,
         range,
         selection_range,
     });
-
-    if let Some(chain) = function_name_dotted_chain(&normalized) {
-        if let Some(alias) = global_env_alias_for_chain(&chain) {
-            ctx.function_name_index
-                .insert(intern_lua_symbol(&alias), func_id);
-            ctx.global_contributions.push(GlobalContribution {
-                name: intern_lua_symbol(&alias),
-                kind: GlobalContributionKind::Function,
-                type_fact,
-                range,
-                selection_range,
-            });
-        }
-    }
 }
 
 /// Add a field to an `@class` TypeDefinition. Skips if:
@@ -1482,28 +1504,22 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 }
 
                 let name = chain.joined();
+                // `_G.X = v` defines the global `X` itself rather than a field
+                // on some table, so it must be recorded as a `Variable`.
+                // `GlobalShard` normalizes the key down to bare `X`; the kind
+                // has to follow the same normalization to stay consistent.
+                let kind = if crate::aggregation::normalize_global_path(&name).contains('.') {
+                    GlobalContributionKind::TableExtension
+                } else {
+                    GlobalContributionKind::Variable
+                };
                 ctx.global_contributions.push(GlobalContribution {
                     name: intern_lua_symbol(&name),
-                    kind: GlobalContributionKind::TableExtension,
-                    type_fact: type_fact.clone(),
+                    kind,
+                    type_fact,
                     range,
                     selection_range,
                 });
-
-                if let Some(alias) = global_env_alias_for_chain(&chain) {
-                    let kind = if chain.fields.len() == 1 {
-                        GlobalContributionKind::Variable
-                    } else {
-                        GlobalContributionKind::TableExtension
-                    };
-                    ctx.global_contributions.push(GlobalContribution {
-                        name: intern_lua_symbol(&alias),
-                        kind,
-                        type_fact,
-                        range,
-                        selection_range,
-                    });
-                }
             }
             _ => {}
         }
@@ -1538,14 +1554,6 @@ impl DottedChain {
     }
 }
 
-fn global_env_alias_for_chain(chain: &DottedChain) -> Option<String> {
-    if chain.base_name == "_G" && !chain.fields.is_empty() {
-        Some(chain.fields.join("."))
-    } else {
-        None
-    }
-}
-
 fn global_prefixes_for_build_fact(fact: &TypeFact) -> Vec<String> {
     let mut prefixes = Vec::new();
     match fact {
@@ -1561,9 +1569,6 @@ fn global_prefixes_for_build_fact(fact: &TypeFact) -> Vec<String> {
                         format!("{}.{}", base_prefix, fields.join("."))
                     };
                     push_global_prefix_for_build(&mut prefixes, prefix);
-                    if base_prefix == "_G" && !fields.is_empty() {
-                        push_global_prefix_for_build(&mut prefixes, fields.join("."));
-                    }
                 }
             }
         }

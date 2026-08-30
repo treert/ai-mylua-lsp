@@ -134,9 +134,10 @@
 ### 4.3 全局 Table 合并
 
 - `GlobalShard` 以树（trie）存储全局名：根节点对应顶层名（`UE4`、`print`），子节点按 `.` / `:` 切段（`UE4 → FVector → new`）；`.` 和 `:` 统一为同一个 `children` map（colon 只是 self 语法糖，由 `FunctionSignature.params` 区分）
+- 键入口统一做 `_G.` 规范化（`normalize_global_path`）：`_G.X` 与裸 `X` 落在同一节点，插入/查询/按文件删除共用该规则，因此不产生重复条目；裸 `_G` 作为根节点保留（详见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.2）
 - 每个节点挂 `Vec<GlobalCandidate>`（多文件贡献同一路径时保留多候选），按 `uri_id::priority(source_uri_id)` 排序；候选内部只存进程级 `source_uri_id`
 - LSP 输出边界通过 `WorkspaceAggregation::candidate_uri` / `type_candidate_uri` 将候选 `UriId` 解析回 `Uri`；`GlobalShard` 的 `uri_to_paths: HashMap<UriId, Vec<String>>` 按文件精准删除贡献，O(贡献数)
-- 子字段枚举（补全、hover）直接遍历 `node.children`，O(children) 而非 O(全局条目数)
+- 子字段枚举（补全、hover）直接遍历 `node.children`，O(children) 而非 O(全局条目数)；`_G` 的成员例外——规范化后其成员即 trie 根集合，改为遍历根节点
 - 全局链路某节点已绑定 Emmy 类型时，停止 GlobalTable 扩张，改走 Emmy 字段解析
 
 ---

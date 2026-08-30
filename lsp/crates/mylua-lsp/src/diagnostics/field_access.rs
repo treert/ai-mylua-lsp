@@ -173,6 +173,10 @@ fn check_dotted_field(
     match &resolved_base.type_fact {
         TypeFact::Known(KnownType::EmmyType(type_name)) => {
             if let Some(severity) = ctx.emmy_severity {
+                // `resolve_field_chain` handles the global-shard qualified
+                // fallback. The `_G.X` ↔ bare-`X` alias needs no handling
+                // here: `GlobalShard` normalizes it at the key level, so the
+                // `contains_key` below sees a single canonical name.
                 let field_resolved = resolver::resolve_field_chain(
                     resolved_base.owner_uri_id,
                     &resolved_base.type_fact,
@@ -253,11 +257,20 @@ fn field_global_prefixes(
         push_simple_prefix(&mut prefixes, segments.join("."));
     }
 
-    let mut segments = vec![node_text(base_node, source).to_string()];
-    if fields.len() > 1 {
-        segments.extend(fields[..fields.len() - 1].iter().cloned());
+    // Raw-text fallback prefix. Unlike the fact-derived prefixes above, this
+    // one is not backed by any scope resolution, so it must never claim the
+    // global environment: a shadowing `local _G = {}` would otherwise be
+    // treated as the global env and silently suppress unknown-field
+    // diagnostics on its members. The genuine global-env case is already
+    // covered by the fact-derived prefixes.
+    let base_text = node_text(base_node, source);
+    if base_text != "_G" {
+        let mut segments = vec![base_text.to_string()];
+        if fields.len() > 1 {
+            segments.extend(fields[..fields.len() - 1].iter().cloned());
+        }
+        push_simple_prefix(&mut prefixes, segments.join("."));
     }
-    push_simple_prefix(&mut prefixes, segments.join("."));
 
     prefixes
 }

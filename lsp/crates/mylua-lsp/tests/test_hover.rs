@@ -1754,6 +1754,66 @@ end
     );
 }
 
+/// `_G.X` is a read of the bare global `X`. With the bundled stdlib
+/// library loaded (its basic.lua declares `---@class _G` + `_G = {}`),
+/// hover on `_G.LuaPanda` must resolve to the same definition as hover
+/// on the bare `LuaPanda` — not degrade into a typeless field fallback.
+#[test]
+fn hover_global_env_qualified_name_resolves_like_bare_global() {
+    let lib = bundled_lua54_library_path();
+    let src = r#"LuaPanda = {}
+
+function LuaPanda.f1()
+    print("f1")
+end
+
+print(LuaPanda)
+print(_G.LuaPanda)
+"#;
+    let (docs, mut agg, _parser, _library_uris) =
+        setup_workspace_with_library(&[("g_env_hover.lua", src)], &[lib]);
+    let uri = make_uri("g_env_hover.lua");
+    let uri_id = intern_uri(&uri);
+    let doc = docs.get(&uri_id).expect("user document present");
+
+    // Bare reference: line 6 (`print(LuaPanda)`), col 6.
+    let bare = hover::hover(
+        doc,
+        uri_id,
+        pos(6, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on bare `LuaPanda` must resolve");
+    let bare_text = hover_content_string(&bare);
+    assert!(
+        bare_text.contains("g_env_hover.lua"),
+        "bare global hover should link to its definition file, got: {}",
+        bare_text
+    );
+
+    // `_G.`-qualified reference: line 7 (`print(_G.LuaPanda)`), col 9.
+    let qualified = hover::hover(
+        doc,
+        uri_id,
+        pos(7, 9),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on `_G.LuaPanda` must resolve");
+    let qualified_text = hover_content_string(&qualified);
+    assert!(
+        qualified_text.contains("g_env_hover.lua"),
+        "`_G.LuaPanda` hover must resolve to the same definition as the bare \
+         global; got: {}",
+        qualified_text
+    );
+    assert_eq!(
+        bare_text, qualified_text,
+        "`_G.X` and bare `X` hover must be equivalent"
+    );
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
     use tower_lsp_server::ls_types::HoverContents;
