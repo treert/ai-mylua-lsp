@@ -11,6 +11,15 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [0.2.17] - 2026-08-30
+
+### Fixed
+- 修复局部变量作为全局表别名时，其上定义的函数被误报 "Unknown field"：`LuaPanda = {}; local this = LuaPanda; function this.f1() end` 之后调用 `this.f1()` 不再报警告（此前该函数未登记到全局索引）。
+- 修复 `_G.X` 读取已定义全局时误报 "Unknown field"：`_G` 即全局环境表，`_G.X` 与裸 `X` 现统一视为同一个全局名，`_G.Foo`、`_G.Foo.bar`、`_G._G.Foo` 等写法均可正确解析、跳转与 hover。
+- 修复 `_G.X = 1` 在工作区符号搜索（`workspace/symbol`）中产生 `Foo` 与 `_G.Foo` 两个重复条目的问题。
+- 修复 `local _G = {}` 遮蔽全局环境时，其成员访问漏报 "Unknown field" 的问题：此时 `_G.X` 是普通 table 字段访问，不再享受全局别名待遇。
+- 修复 `_G.` 触发的成员补全列不出任何全局符号的问题，现可正常列出工作区全局变量与全局函数。
+
 ## [0.2.16] - 2026-08-20
 
 ### Added
