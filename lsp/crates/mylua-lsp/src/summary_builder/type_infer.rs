@@ -189,10 +189,20 @@ pub(super) fn infer_expression_type(
                     return tf.clone();
                 }
             }
-            // Bare `_ENV` with no user declaration is the implicit
-            // chunk-level environment upvalue — the global table itself,
-            // never a global *variable* named `_ENV`.
-            if text == crate::lua_builtins::ENV_NAME {
+            // Bare `_ENV` / `_G` denote the global environment table itself.
+            //
+            // `_ENV` is the implicit chunk-level environment upvalue (never a
+            // global *variable* — `_G._ENV` is nil). `_G` is a real global
+            // whose value points back at the environment; hard-coding it here
+            // rather than relying on a stdlib `_G = {}` line keeps
+            // `_G.<field>` resolution working regardless of stub contents.
+            //
+            // A user-declared `local _G` / `local _ENV` shadows these and is
+            // already handled by the scope lookup above, so it never reaches
+            // this point.
+            if text == crate::lua_builtins::ENV_NAME
+                || text == crate::lua_builtins::GLOBAL_TABLE_NAME
+            {
                 return implicit_env_fact();
             }
             // A free name `x` is sugar for `_ENV.x`. With a user-declared

@@ -1,8 +1,17 @@
 ---@type table
 arg = {}
 
--- _ENV is the global environment table.
-_ENV = {}
+-- `_ENV` is intentionally NOT declared here.
+--
+-- It is not a global variable but the *environment upvalue* every chunk
+-- carries (`_G._ENV` is nil in Lua), and the language server already models
+-- it as an implicit chunk-level declaration typed as `_G`.
+--
+-- Declaring it as `_ENV = {}` used to be actively harmful: by Lua semantics
+-- that statement rebinds the environment to a fresh empty table, so every
+-- assignment-style global *below* it in this file (`_G`, `_VERSION`) was
+-- treated as a field of that throwaway table and vanished from the global
+-- index.
 
 --- Calls error if the value of its argument `v` is false (i.e., **nil** or **false**); otherwise, returns all its arguments. In case of error, `message` is the error object; when absent, it defaults to "assertion failed!"
 ---@param v any
@@ -80,7 +89,6 @@ function dofile(filename) end
 function error(message, level) end
 
 ---@class _G @A global variable (not a function) that holds the global environment. Lua itself does not use this variable; changing its value does not affect any environment, nor vice versa. [`View online doc`](https://www.lua.org/manual/5.4/manual.html#pdf-_G)  |  [`View local doc`](command:extension.luahelper.doc?["en-us/54/manual.html/pdf-_G"])
-_G = {}
 
 --- If `object` does not have a metatable, returns **nil**. Otherwise, if the
 --- object's metatable has a `"__metatable"` field, returns the associated

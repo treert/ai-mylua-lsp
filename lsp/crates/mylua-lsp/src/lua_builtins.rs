@@ -136,6 +136,20 @@ pub const LUA_KEYWORDS: &[&str] = &[
 /// is the ordinary path.
 pub const ENV_NAME: &str = "_ENV";
 
+/// The name of the global environment table.
+///
+/// Unlike `_ENV`, `_G` *is* an ordinary field of the global table — one whose
+/// initial value points back at that table, so `_G.X` names the same global as
+/// bare `X`. Both the type name (`---@class _G`) and the variable use this
+/// spelling.
+///
+/// Treated as a built-in concept rather than relying on a stdlib stub
+/// declaring it: a plain `_G = {}` line in a stub is easy to lose (and by Lua
+/// semantics it does not even affect the real environment), so basing
+/// `_G.<field>` resolution on it made the feature silently dependent on stub
+/// contents.
+pub const GLOBAL_TABLE_NAME: &str = "_G";
+
 #[cfg(test)]
 mod tests {
     use super::*;

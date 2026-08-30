@@ -67,6 +67,45 @@ pub(crate) fn env_field_base_fact_in_scope(
     Some(fact)
 }
 
+/// Infer the fact of a bare identifier (a name with no `.`/`:` qualification).
+///
+/// **Single entry point** for the "free name" rules on the query side. The
+/// grammar reaches a bare name through two node shapes — a plain `identifier`
+/// and a `variable` wrapping one — and both must apply the same rules:
+///
+/// 1. a visible local / parameter wins (ordinary scope resolution);
+/// 2. `_ENV` and `_G` denote the global environment table itself. `_ENV` is
+///    the environment upvalue (never a global *variable* — `_G._ENV` is nil);
+///    `_G` is a real global whose value points back at the environment.
+///    Hard-coding `_G` here, rather than relying on a stdlib `_G = {}` line,
+///    keeps `_G.<field>` resolution independent of stub contents;
+/// 3. any other free name `x` is sugar for `_ENV.x` — a field of the
+///    redirected table when `_ENV` points elsewhere, otherwise a plain global.
+///
+/// Keeping this in one function is deliberate: the two node shapes previously
+/// each built their own `GlobalRef` stub, and a rule added to only one of them
+/// silently failed for the other.
+fn infer_bare_name_fact(
+    node: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+) -> TypeFact {
+    let text = node_text(node, source);
+    if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
+        return tf.clone();
+    }
+    if text == crate::lua_builtins::ENV_NAME || text == crate::lua_builtins::GLOBAL_TABLE_NAME {
+        return implicit_env_fact();
+    }
+    if let Some(env_fact) = env_field_base_fact_in_scope(text, node.start_byte(), scope_tree) {
+        return TypeFact::Stub(crate::type_system::SymbolicStub::FieldOf {
+            base: Box::new(env_fact),
+            field: text.into(),
+        });
+    }
+    TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: text.into() })
+}
+
 /// Recursively infer the type of an AST expression node.
 ///
 /// The mylua grammar uses `variable` nodes for both plain identifiers and
@@ -130,13 +169,7 @@ pub(crate) fn infer_node_type_in_file_id(
             if node.named_child_count() == 1 {
                 if let Some(child) = node.named_child(0) {
                     if child.is_kind(kind::IDENTIFIER) {
-                        let text = node_text(child, source);
-                        if let Some(tf) = scope_tree.resolve_type(child.start_byte(), text) {
-                            return tf.clone();
-                        }
-                        return TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef {
-                            name: text.into(),
-                        });
+                        return infer_bare_name_fact(child, source, scope_tree);
                     }
                 }
             }
@@ -155,31 +188,7 @@ pub(crate) fn infer_node_type_in_file_id(
             .named_child(0)
             .map(|inner| infer_node_type_in_file_id(inner, source, uri_id, scope_tree, index))
             .unwrap_or(TypeFact::Unknown),
-        kind::IDENTIFIER => {
-            let text = node_text(node, source);
-            if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
-                return tf.clone();
-            }
-            // Bare `_ENV` with no user declaration is the implicit
-            // chunk-level environment upvalue — the global table itself,
-            // never a global *variable* named `_ENV`.
-            if text == crate::lua_builtins::ENV_NAME {
-                return implicit_env_fact();
-            }
-            // A free name `x` is sugar for `_ENV.x`. With a user-declared
-            // `_ENV` in scope the read targets that table's field; otherwise
-            // `_ENV` is the implicit global environment and this is an
-            // ordinary global reference. Mirrors
-            // `summary_builder::type_infer::env_field_base_fact`.
-            if let Some(env_fact) = env_field_base_fact_in_scope(text, node.start_byte(), scope_tree)
-            {
-                return TypeFact::Stub(crate::type_system::SymbolicStub::FieldOf {
-                    base: Box::new(env_fact),
-                    field: text.into(),
-                });
-            }
-            TypeFact::Stub(crate::type_system::SymbolicStub::GlobalRef { name: text.into() })
-        }
+        kind::IDENTIFIER => infer_bare_name_fact(node, source, scope_tree),
         // Literal types — needed for function-level generic inference
         // so that `identity("abc")` can infer `T = string`.
         kind::NUMBER => TypeFact::Known(crate::type_system::KnownType::Number),

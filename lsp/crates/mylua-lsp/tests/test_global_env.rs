@@ -673,3 +673,98 @@ fn shadowed_local_env_qualified_write_is_not_a_global() {
         paths
     );
 }
+
+// ---------------------------------------------------------------------------
+// The bundled stdlib must survive `_ENV` redirection
+// ---------------------------------------------------------------------------
+
+/// Assignment-style globals declared by the bundled stdlib must reach the
+/// global index.
+///
+/// Regression: `basic.lua` used to declare `_ENV = {}` to document the
+/// environment table. By Lua semantics that statement rebinds the environment
+/// to a fresh empty table, so once `_ENV` redirection was implemented, every
+/// assignment-style global *below* that line (`_G` on line 83, `_VERSION` on
+/// line 304) was recorded as a field of the throwaway table and disappeared
+/// from `global_shard`. Function-style declarations (`function print() end`)
+/// were unaffected, which is what made the breakage so selective — and why it
+/// silently disabled every `_G.<field>` diagnostic instead of failing loudly.
+#[test]
+fn stdlib_assignment_style_globals_are_indexed() {
+    let lib = bundled_lua54_library_path();
+    let (_docs, agg, _parser, _library_uris) = setup_workspace_with_library(&[], &[lib]);
+    // `_G` is deliberately absent from this list: it is a built-in concept in
+    // the language server, not something a stub has to declare. See
+    // `g_dot_undefined_field_is_flagged_with_stdlib_loaded`.
+    for name in ["_VERSION", "arg", "string", "table", "math"] {
+        assert!(
+            agg.global_shard.contains_key(name),
+            "stdlib global `{}` must be present in global_shard",
+            name
+        );
+    }
+}
+
+#[test]
+fn g_dot_undefined_field_is_flagged_with_stdlib_loaded() {
+    // End-to-end guard for the regression above: `_G` must resolve to the
+    // stdlib `---@class _G`, so reading an undefined member through it is
+    // reported. This is the user-visible symptom that regressed.
+    let lib = bundled_lua54_library_path();
+    let src = "print(_G.definitely_not_defined)\n";
+    let (docs, mut agg, _parser, _library_uris) =
+        setup_workspace_with_library(&[("g_dot_undef.lua", src)], &[lib]);
+    let uri = make_uri("g_dot_undef.lua");
+    let uri_id = intern_uri(&uri);
+    let doc = docs.get(&uri_id).expect("user document present");
+    let cfg = DiagnosticsConfig::default();
+    let diags: Vec<String> = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        uri_id,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    )
+    .into_iter()
+    .map(|d| d.message)
+    .collect();
+    assert!(
+        diags.iter().any(|m| m.contains("definitely_not_defined")),
+        "`_G.<undefined>` must be flagged when the stdlib is loaded, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn g_dot_env_is_flagged_with_stdlib_loaded() {
+    // `_G._ENV` is nil in Lua — `_ENV` is an upvalue, not a field of the
+    // global table. Reading it must be reported rather than silently resolving.
+    let lib = bundled_lua54_library_path();
+    let src = "local x = _G._ENV\n";
+    let (docs, mut agg, _parser, _library_uris) =
+        setup_workspace_with_library(&[("g_dot_env_diag.lua", src)], &[lib]);
+    let uri = make_uri("g_dot_env_diag.lua");
+    let uri_id = intern_uri(&uri);
+    let doc = docs.get(&uri_id).expect("user document present");
+    let cfg = DiagnosticsConfig::default();
+    let diags: Vec<String> = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        uri_id,
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    )
+    .into_iter()
+    .map(|d| d.message)
+    .collect();
+    assert!(
+        diags.iter().any(|m| m.contains("_ENV")),
+        "`_G._ENV` must be flagged — `_ENV` is not a field of the global \
+         table, got: {:?}",
+        diags
+    );
+}
