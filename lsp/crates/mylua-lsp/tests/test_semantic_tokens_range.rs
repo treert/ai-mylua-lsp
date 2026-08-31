@@ -1,6 +1,7 @@
 mod test_helpers;
 
 use mylua_lsp::semantic_tokens;
+use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 use tower_lsp_server::ls_types::Range;
 
@@ -49,12 +50,14 @@ fn range(sl: u32, sc: u32, el: u32, ec: u32) -> Range {
 #[test]
 fn semantic_tokens_skip_table_field_keys() {
     let src = "local Direction = {\n    Up = 0,\n    Down = 1,\n}\nlocal origin = { x = 0, y = 0 }\nlocal key = x\nlocal k = \"x\"\nlocal t = { [k] = 1, plain = 2 }\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "table_keys.lua");
+    let (doc, uri, agg) = setup_single_file(src, "table_keys.lua");
 
     let tokens = semantic_tokens::collect_semantic_tokens(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         doc.line_index(),
     );
     let positions = absolute_cols(&tokens);
@@ -98,13 +101,15 @@ fn semantic_tokens_skip_table_field_keys() {
 #[test]
 fn semantic_tokens_range_filters_to_range() {
     let src = "local a = 1\nlocal b = 2\nlocal c = 3\nlocal d = 4\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "r.lua");
+    let (doc, uri, agg) = setup_single_file(src, "r.lua");
 
     // Range covering lines 1..=2 (middle two lines)
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         range(1, 0, 2, 0),
         doc.line_index(),
     );
@@ -127,12 +132,14 @@ fn semantic_tokens_range_delta_encoding_starts_fresh() {
     // the previous `full` result contained. Verify by checking the
     // first token's delta_line equals its absolute line.
     let src = "local a = 1\nlocal b = 2\nlocal c = 3\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "d.lua");
+    let (doc, uri, agg) = setup_single_file(src, "d.lua");
 
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         range(2, 0, 2, 20),
         doc.line_index(),
     );
@@ -152,13 +159,15 @@ fn semantic_tokens_range_delta_encoding_starts_fresh() {
 #[test]
 fn semantic_tokens_range_empty_range_returns_empty() {
     let src = "local a = 1\nlocal b = 2\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "e.lua");
+    let (doc, uri, agg) = setup_single_file(src, "e.lua");
 
     // Range on an empty line past EOF has no identifiers.
     let tokens = semantic_tokens::collect_semantic_tokens_range(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         range(100, 0, 100, 0),
         doc.line_index(),
     );
@@ -169,18 +178,22 @@ fn semantic_tokens_range_empty_range_returns_empty() {
 fn semantic_tokens_range_full_file_equals_full_result() {
     // Requesting the full file via range should match `full` output.
     let src = "local a = 1\nfunction f() return a end\nprint(a)\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "full.lua");
+    let (doc, uri, agg) = setup_single_file(src, "full.lua");
 
     let full = semantic_tokens::collect_semantic_tokens(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         doc.line_index(),
     );
     let ranged = semantic_tokens::collect_semantic_tokens_range(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         range(0, 0, 100, 0),
         doc.line_index(),
     );

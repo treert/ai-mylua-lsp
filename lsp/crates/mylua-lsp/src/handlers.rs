@@ -1013,13 +1013,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let idx = self.index.lock().unwrap();
         let data = semantic_tokens::collect_semantic_tokens_with_version(
             root,
             doc.source(),
             &doc.scope_tree,
+            uri_id,
+            &idx,
             &runtime_version,
             doc.line_index(),
         );
+        drop(idx);
         let result_id = self.mint_semantic_token_result_id();
         // Cache the full response so a subsequent `delta` request
         // with `previous_result_id == result_id` can diff against it.
@@ -1056,13 +1060,17 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let idx = self.index.lock().unwrap();
         let new_tokens = semantic_tokens::collect_semantic_tokens_with_version(
             root,
             doc.source(),
             &doc.scope_tree,
+            uri_id,
+            &idx,
             &runtime_version,
             doc.line_index(),
         );
+        drop(idx);
         drop(docs);
 
         // If the cache matches the client's previous_result_id, emit
@@ -1116,7 +1124,8 @@ impl LanguageServer for Backend {
         params: SemanticTokensRangeParams,
     ) -> Result<Option<SemanticTokensRangeResult>> {
         let mut docs = self.documents.lock().unwrap();
-        let Some(doc) = docs.get_mut(&intern_uri(&params.text_document.uri)) else {
+        let uri_id = intern_uri(&params.text_document.uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
         if doc.ensure_tree().is_none() {
@@ -1126,10 +1135,13 @@ impl LanguageServer for Backend {
             return Ok(None);
         };
         let runtime_version = self.config.lock().unwrap().runtime.version.clone();
+        let idx = self.index.lock().unwrap();
         let data = semantic_tokens::collect_semantic_tokens_range_with_version(
             root,
             doc.source(),
             &doc.scope_tree,
+            uri_id,
+            &idx,
             params.range,
             &runtime_version,
             doc.line_index(),

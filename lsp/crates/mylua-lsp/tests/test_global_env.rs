@@ -757,12 +757,13 @@ fn env_is_not_highlighted_as_a_global_variable() {
     // ordinary "is this name a local?" question answer correctly here without
     // the highlighter needing an `_ENV` branch of its own.
     let src = "local xx = _ENV\n";
-    let mut parser = new_parser();
-    let doc = parse_doc(&mut parser, src);
+    let (doc, uri, agg) = setup_single_file(src, "bare_env_highlight.lua");
     let tokens = semantic_tokens::collect_semantic_tokens(
         doc.root_node().unwrap(),
         src.as_bytes(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         doc.line_index(),
     );
     // Legend: modifier bit 1 is "global" (bit 0 is "defaultLibrary").
@@ -777,6 +778,90 @@ fn env_is_not_highlighted_as_a_global_variable() {
         "`_ENV` must not carry the `global` semantic-token modifier \
          (bitset was {:#b})",
         env_token.token_modifiers_bitset
+    );
+}
+
+/// `global` modifier flags of every semantic token, as `(line, character,
+/// is_global)` triples with the delta encoding undone.
+fn semantic_global_flags(src: &str, filename: &str) -> Vec<(u32, u32, bool)> {
+    const TM_GLOBAL: u32 = 1 << 1;
+    let (doc, uri, agg) = setup_single_file(src, filename);
+    let tokens = semantic_tokens::collect_semantic_tokens(
+        doc.root_node().unwrap(),
+        doc.source(),
+        &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
+        doc.line_index(),
+    );
+    let mut out = Vec::with_capacity(tokens.len());
+    let (mut line, mut col) = (0u32, 0u32);
+    for t in &tokens {
+        if t.delta_line == 0 {
+            col += t.delta_start;
+        } else {
+            line += t.delta_line;
+            col = t.delta_start;
+        }
+        out.push((line, col, t.token_modifiers_bitset & TM_GLOBAL != 0));
+    }
+    out
+}
+
+#[test]
+fn env_field_is_not_highlighted_as_a_global_variable() {
+    // A free name answered by a redirected `_ENV` is a field of that table, not
+    // a global (§1.6 step 2) — `only_this` below resolves to the environment
+    // literal one line up, exactly like `goto` reports. Highlighting keys off
+    // the same predicate as navigation and diagnostics, so it must not paint
+    // such a name with the `global` modifier.
+    let src = "do\n    local _ENV = { only_this = 1 }\n    print(only_this)\nend\n";
+    let flags = semantic_global_flags(src, "env_own_field_highlight.lua");
+    // Line 2: `    print(only_this)` — `print` at col 4, `only_this` at col 10.
+    assert_eq!(
+        flags
+            .iter()
+            .find(|&&(line, col, _)| line == 2 && col == 10)
+            .map(|&(_, _, is_global)| is_global),
+        Some(false),
+        "a field of a redirected `_ENV` must not carry the `global` modifier, \
+         got: {:?}",
+        flags
+    );
+    // Control: `print` is not provided by the exhaustive sandbox either, so it
+    // is not a global here — the sandbox answers (and `envUnknownField` flags)
+    // the name, so highlighting must agree.
+    assert_eq!(
+        flags
+            .iter()
+            .find(|&&(line, col, _)| line == 2 && col == 4)
+            .map(|&(_, _, is_global)| is_global),
+        Some(false),
+        "inside an exhaustive sandbox even a stdlib name is not a global, \
+         got: {:?}",
+        flags
+    );
+}
+
+#[test]
+fn sandbox_fallthrough_name_stays_highlighted_as_global() {
+    // The mirror image: a `{ __index = _G }` sandbox does not describe its
+    // field set, so a name it lacks falls through to the real global table
+    // (§1.3). Such a name *is* a global at run time and must keep the modifier
+    // — otherwise highlighting would disagree with `goto`, which jumps to the
+    // global definition.
+    let src = "GlobalForSandbox = 42\ndo\n    local _ENV = setmetatable({}, { __index = _G })\n    local v = GlobalForSandbox\nend\n";
+    let flags = semantic_global_flags(src, "env_fallthrough_highlight.lua");
+    // Line 3: `    local v = GlobalForSandbox` — the read starts at col 14.
+    assert_eq!(
+        flags
+            .iter()
+            .find(|&&(line, col, _)| line == 3 && col == 14)
+            .map(|&(_, _, is_global)| is_global),
+        Some(true),
+        "a name reached through `{{ __index = _G }}` is still a global, \
+         got: {:?}",
+        flags
     );
 }
 

@@ -1,5 +1,8 @@
+use crate::aggregation::WorkspaceAggregation;
+use crate::name_resolution;
 use crate::scope::ScopeTree;
 use crate::syntax_kind::{field, kind, NodeKindExt};
+use crate::uri_id::UriId;
 use crate::util::{node_text, LineIndex};
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
@@ -27,19 +30,40 @@ pub fn collect_semantic_tokens(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_semantic_tokens_with_version(root, source, scope_tree, "5.3", line_index)
+    collect_semantic_tokens_with_version(
+        root,
+        source,
+        scope_tree,
+        uri_id,
+        index,
+        "5.3",
+        line_index,
+    )
 }
 
 pub fn collect_semantic_tokens_with_version(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     runtime_version: &str,
     line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_tokens_filtered(root, source, scope_tree, None, runtime_version, line_index)
+    collect_tokens_filtered(
+        root,
+        source,
+        scope_tree,
+        uri_id,
+        index,
+        None,
+        runtime_version,
+        line_index,
+    )
 }
 
 /// `textDocument/semanticTokens/range` — return tokens that overlap
@@ -50,16 +74,29 @@ pub fn collect_semantic_tokens_range(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     range: Range,
     line_index: &LineIndex,
 ) -> Vec<SemanticToken> {
-    collect_semantic_tokens_range_with_version(root, source, scope_tree, range, "5.3", line_index)
+    collect_semantic_tokens_range_with_version(
+        root,
+        source,
+        scope_tree,
+        uri_id,
+        index,
+        range,
+        "5.3",
+        line_index,
+    )
 }
 
 pub fn collect_semantic_tokens_range_with_version(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     range: Range,
     runtime_version: &str,
     line_index: &LineIndex,
@@ -68,6 +105,8 @@ pub fn collect_semantic_tokens_range_with_version(
         root,
         source,
         scope_tree,
+        uri_id,
+        index,
         Some(range),
         runtime_version,
         line_index,
@@ -78,6 +117,8 @@ fn collect_tokens_filtered(
     root: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     range: Option<Range>,
     runtime_version: &str,
     line_index: &LineIndex,
@@ -91,6 +132,8 @@ fn collect_tokens_filtered(
         &mut cursor,
         source,
         scope_tree,
+        uri_id,
+        index,
         &builtins,
         &mut raw,
         line_index,
@@ -133,6 +176,8 @@ fn collect_variable_tokens(
     cursor: &mut tree_sitter::TreeCursor,
     source: &[u8],
     scope_tree: &ScopeTree,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
     builtins: &HashSet<&str>,
     tokens: &mut Vec<(u32, u32, u32, u32)>,
     line_index: &LineIndex,
@@ -144,6 +189,15 @@ fn collect_variable_tokens(
         let byte_offset = node.start_byte();
         let is_local = scope_tree.resolve_decl(byte_offset, name).is_some();
         let modifiers = if is_local {
+            0
+        } else if name_resolution::is_known_env_field(name, byte_offset, uri_id, scope_tree, index) {
+            // A free name answered by a redirected `_ENV` is a field of that
+            // environment table, not a global — §1.6 step 2. Keyed off the same
+            // predicate as goto / references / diagnostics so highlighting
+            // cannot disagree with them: whatever the name resolves to is what
+            // gets coloured. Built-ins are checked *after* this for the same
+            // reason (a sandbox that shadows `print` does not offer the stdlib
+            // one).
             0
         } else if builtins.contains(name) {
             TM_DEFAULT_LIBRARY | TM_GLOBAL
@@ -167,7 +221,16 @@ fn collect_variable_tokens(
 
     if cursor.goto_first_child() {
         loop {
-            collect_variable_tokens(cursor, source, scope_tree, builtins, tokens, line_index);
+            collect_variable_tokens(
+                cursor,
+                source,
+                scope_tree,
+                uri_id,
+                index,
+                builtins,
+                tokens,
+                line_index,
+            );
             if !cursor.goto_next_sibling() {
                 break;
             }

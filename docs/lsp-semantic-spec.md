@@ -82,6 +82,7 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
   两种 `function` 形式曾一并被闸门拦掉，使 `function foo() end` 的名字**既不在全局索引、也不在环境 shape**——等于凭空消失，goto / hover / references 全部失效，比它替代掉的索引泄漏更糟。赋值形式 `foo = function() end` 一直是对的，两者必须对称。
 - **查询侧的对应支路**：三个导航能力统一经 §1.6 的 `name_resolution::resolve_bare_name` 得到 `EnvField`，各自呈现。不要在单个能力里内联 `_ENV` 判定。
+- **semantic tokens 的 `global` 修饰符同用一个判据**：隐式 `_ENV` 声明只解决"这是局部变量吗"，答"不是"之后还要问"它是不是环境字段"——沙箱里的自由名是那张表的字段，运行时根本不经过全局表，标成 `global` 就是错的。因此高亮在内置识别**之前**过一遍 `name_resolution::is_known_env_field`（与 `undefinedGlobal`、references 校验侧共用），穷尽环境里连 `print` 也不算全局；按 `{__index=_G}` 约定回退到真全局的名字则照旧带 `global`——那正是 goto 会跳到的那个符号。
 - **`_ENV = expr` 的位置敏感性**由 `ScopeDecl.visible_after_byte` 表达：赋值前的自由名仍属于旧环境，赋值后属于新环境。因此 `g = 1; _ENV = {}; g = 2` 中两个 `g` 是**不同符号**，goto/references 不会互相关联。
 - **`_ENV` 自身永不登记为全局**：它是 upvalue，`_G._ENV` 恒为 nil。因此它也**不在** `lua_builtins::COMMON` 的内置全局名单里——隐式声明已让"这是局部变量吗"的提问对 `undefinedGlobal` 与 semantic tokens 都给出正确答案，名单里再列一次只会陈述与模型相反的事实。
 - **与 `_G` 的不对称性**：`_G` 是全局表的字段且指向自身，故 `_G.` 可重复剥离（`_G._G.X ≡ X`，读侧的同一规则见 §1.2）；`_ENV` 是词法名而非表字段，只能作路径**起点**，故 `_ENV.` 仅在头部剥离一次。因此 `_ENV.X ≡ X`、`_ENV._G.X ≡ X`，而 `_G._ENV.X` 与 `_ENV._ENV.X` 运行时是 index nil，**不做归一**，保留为无法解析的伪键。

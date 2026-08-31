@@ -7,16 +7,19 @@
 mod test_helpers;
 
 use mylua_lsp::semantic_tokens;
+use mylua_lsp::uri_id::intern_uri;
 use test_helpers::*;
 
 #[test]
 fn delta_zero_edits_for_identical_document() {
     let src = "local a = 1\nlocal b = 2\nprint(a, b)\n";
-    let (doc, _uri, _agg) = setup_single_file(src, "same.lua");
+    let (doc, uri, agg) = setup_single_file(src, "same.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        intern_uri(&uri),
+        &agg,
         "5.3",
         doc.line_index(),
     );
@@ -33,12 +36,14 @@ fn delta_zero_edits_for_identical_document() {
 fn delta_reflects_appended_line() {
     let before = "local a = 1\nprint(a)\n";
     let after = "local a = 1\nprint(a)\nlocal b = 2\n";
-    let (doc1, _, _) = setup_single_file(before, "before.lua");
-    let (doc2, _, _) = setup_single_file(after, "after.lua");
+    let (doc1, uri1, agg1) = setup_single_file(before, "before.lua");
+    let (doc2, uri2, agg2) = setup_single_file(after, "after.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
+        intern_uri(&uri1),
+        &agg1,
         "5.3",
         doc1.line_index(),
     );
@@ -46,6 +51,8 @@ fn delta_reflects_appended_line() {
         doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
+        intern_uri(&uri2),
+        &agg2,
         "5.3",
         doc2.line_index(),
     );
@@ -68,12 +75,14 @@ fn delta_reflects_appended_line() {
 fn delta_reflects_deleted_line() {
     let before = "local a = 1\nlocal b = 2\nprint(a, b)\n";
     let after = "local a = 1\nprint(a, b)\n";
-    let (doc1, _, _) = setup_single_file(before, "del1.lua");
-    let (doc2, _, _) = setup_single_file(after, "del2.lua");
+    let (doc1, uri1, agg1) = setup_single_file(before, "del1.lua");
+    let (doc2, uri2, agg2) = setup_single_file(after, "del2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
+        intern_uri(&uri1),
+        &agg1,
         "5.3",
         doc1.line_index(),
     );
@@ -81,6 +90,8 @@ fn delta_reflects_deleted_line() {
         doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
+        intern_uri(&uri2),
+        &agg2,
         "5.3",
         doc2.line_index(),
     );
@@ -97,12 +108,14 @@ fn delta_reflects_deleted_line() {
 fn delta_middle_edit_preserves_prefix_and_suffix() {
     let before = "local a = 1\nlocal b = 2\nlocal c = 3\n";
     let after = "local a = 1\nlocal bb = 2\nlocal c = 3\n";
-    let (doc1, _, _) = setup_single_file(before, "m1.lua");
-    let (doc2, _, _) = setup_single_file(after, "m2.lua");
+    let (doc1, uri1, agg1) = setup_single_file(before, "m1.lua");
+    let (doc2, uri2, agg2) = setup_single_file(after, "m2.lua");
     let t1 = semantic_tokens::collect_semantic_tokens_with_version(
         doc1.root_node().unwrap(),
         doc1.source(),
         &doc1.scope_tree,
+        intern_uri(&uri1),
+        &agg1,
         "5.3",
         doc1.line_index(),
     );
@@ -110,6 +123,8 @@ fn delta_middle_edit_preserves_prefix_and_suffix() {
         doc2.root_node().unwrap(),
         doc2.source(),
         &doc2.scope_tree,
+        intern_uri(&uri2),
+        &agg2,
         "5.3",
         doc2.line_index(),
     );

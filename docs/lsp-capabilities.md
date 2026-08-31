@@ -104,6 +104,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 
 ### semantic tokens
 - 全局变量 `defaultLibrary` + 局部变量标记（作用域感知）
+- **`global` 修饰符尊重 `_ENV` 重定向**：判据取自 `name_resolution::is_known_env_field`（与 goto / references / 诊断同源），凡由重定向环境作答的自由名都是那张表的字段而非全局，不带 `global`；按 `{__index=_G}` 约定回退到真全局的名字仍带（见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3 / §1.6）
 - **设计取舍**：刻意最小化，只补 TextMate 无法静态判定的语义区分
 - 支持 `full` / `range`（视口过滤）/ `full/delta`（最长公共前缀/后缀算法）
 

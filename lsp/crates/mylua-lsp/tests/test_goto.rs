@@ -757,11 +757,13 @@ fn semantic_token_columns_are_utf16_units() {
     //   `a = 1 --中 b` where `b` is on a following line — not useful.
     // Instead, put an emoji in a string after a local declaration:
     let src = "local x = 1\nlocal y = \"👋\" local z = 2";
-    let (doc, _uri, _agg) = setup_single_file(src, "sem.lua");
+    let (doc, uri, agg) = setup_single_file(src, "sem.lua");
     let tokens = semantic_tokens::collect_semantic_tokens(
         doc.root_node().unwrap(),
         doc.source(),
         &doc.scope_tree,
+        mylua_lsp::uri_id::intern_uri(&uri),
+        &agg,
         doc.line_index(),
     );
     // `z` on line 1 is AFTER `"👋"` (which is 4 UTF-8 bytes but 2 UTF-16 units).
