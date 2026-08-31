@@ -52,6 +52,23 @@ cd ../lsp && cargo build
 
 在 VS Code 中按 F5 启动 Extension Development Host 调试。
 
+## 图标再生成
+
+扩展图标的设计源是 `vscode-extension/assets/icon.svg`（深蓝月球 + 白色卫星 + "Lua"/"M" 文字）。它同时被两处使用：
+
+- VS Code 直接将该 SVG 渲染为 `.lua` 文件的 16px 文件图标（`package.json` 中 `contributes.languages[].icon`）
+- 市场图标需要 PNG 位图，由 `scripts/gen-icon.mjs` 将 SVG 光栅化成 256×256 的 `assets/icon.png`（`package.json` 顶层 `icon` 字段）
+
+修改图标时只需编辑 `assets/icon.svg`，然后重新生成 PNG：
+
+```bash
+cd vscode-extension
+npm install        # 首次，安装 @resvg/resvg-js
+node scripts/gen-icon.mjs
+```
+
+`assets/icon.png` 是生成产物，不要手工编辑。打包 vsix 前若改过 SVG，记得重跑一次该脚本让 PNG 保持同步。
+
 ## LSP 二进制查找顺序
 
 1. **`mylua.server.path`** —— 用户显式覆盖，最高优先级。两种写法：
