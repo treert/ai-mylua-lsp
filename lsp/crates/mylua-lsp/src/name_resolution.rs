@@ -119,11 +119,18 @@ pub(crate) fn resolve_bare_name(
 }
 
 /// The `EnvField` case on its own, for callers that only need to know whether
-/// the environment is redirected here (and for reference verification, which
-/// re-resolves candidate occurrences one by one).
+/// the name is answered by the environment (and for reference verification,
+/// which re-resolves candidate occurrences one by one).
 ///
-/// Returns `None` when `_ENV` denotes the global environment — the ordinary
-/// path — so a `Some` result always means "this name is not a global".
+/// Returns `None` — meaning "treat this as an ordinary global" — in two cases:
+///
+/// 1. `_ENV` denotes the global environment (the ordinary path);
+/// 2. the environment does not describe its field set *and* does not itself have
+///    this field. Such an environment is assumed to route missing names to the
+///    global table (§1.3), so falling through is the right answer.
+///
+/// A `Some` result therefore means "the environment answers this name", which is
+/// also exactly the condition under which `undefinedGlobal` must stay quiet.
 pub(crate) fn env_field_at(
     ident_node: tree_sitter::Node,
     source: &[u8],
@@ -132,7 +139,20 @@ pub(crate) fn env_field_at(
     index: &WorkspaceAggregation,
 ) -> Option<BareName> {
     let name = node_text(ident_node, source);
-    crate::type_inference::env_field_base_fact_in_scope(name, ident_node.start_byte(), scope_tree)?;
+    let env_fact = crate::type_inference::env_field_base_fact_in_scope(
+        name,
+        ident_node.start_byte(),
+        scope_tree,
+    )?;
+    // An environment whose field set is not exhaustive still answers the fields
+    // it *does* record — a name written inside the sandbox lives there and
+    // nowhere else, so resolving it to a same-named global would be wrong.
+    // Only names it does not have fall through.
+    if !env_describes_its_fields(&env_fact, uri_id, index)
+        && !env_records_field(&env_fact, name, uri_id, index)
+    {
+        return None;
+    }
     let fact = crate::type_inference::infer_node_type_in_file_id(
         ident_node, source, uri_id, scope_tree, index,
     );
@@ -141,6 +161,155 @@ pub(crate) fn env_field_at(
         name: name.to_string(),
         location: resolved.def_location,
         type_fact: resolved.type_fact,
+    })
+}
+
+/// Whether the environment's own shape records `name` as a field.
+///
+/// Used to keep names *written inside* a non-exhaustive sandbox resolving to
+/// that sandbox rather than falling through to a same-named global. Because
+/// `summary_builder::visitors::env_binding_fact` guarantees a redirected `_ENV`
+/// always has *some* shape, this is the lookup that makes those writes
+/// reachable at all.
+fn env_records_field(
+    env_fact: &crate::type_system::TypeFact,
+    name: &str,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
+) -> bool {
+    let resolved = resolver::resolve_type(uri_id, env_fact, index);
+    let crate::type_system::TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) =
+        resolved.type_fact
+    else {
+        return false;
+    };
+    index
+        .summary_by_id(resolved.source_uri_id())
+        .and_then(|summary| summary.table_shapes.get(&shape_id))
+        .is_some_and(|shape| shape.get_field(name).is_some())
+}
+
+/// Whether a redirected `_ENV`'s fact tells us what fields the environment has.
+///
+/// Two things must hold: the fact resolves to a definite table shape, **and**
+/// that shape's field set is exhaustive (`TableShape::is_closed`).
+///
+/// Since `summary_builder::visitors::env_binding_fact` guarantees a redirected
+/// `_ENV` always resolves to *some* shape, in practice this reduces to
+/// `is_closed` — which is precisely the "no metatable, clean sandbox" case:
+///
+/// ```lua
+/// local _ENV = {}                                  -- closed → true
+/// local _ENV = setmetatable({}, { __index = _G })  -- synthesized, open → false
+/// local t = {}; setmetatable(t, mt); _ENV = t      -- a shape, but open → false
+/// local _ENV = f()                                 -- synthesized, open → false
+/// ```
+///
+/// # What `false` means for the caller
+///
+/// Names the shape does not record fall through to the global namespace. This
+/// implements the documented convention (§1.3): rather than tracking `__index`,
+/// any environment carrying a metatable is **assumed** to be
+/// `{ __index = _G }`, which is one of the two supported sandbox styles. Code
+/// pointing `__index` elsewhere gets global answers anyway — deliberately, to
+/// push users toward the two supported styles.
+///
+/// This is why the assumption is safe to also apply to *diagnostics*: under the
+/// convention, a name missing from both the sandbox shape and the global index
+/// is missing at run time too, so `undefinedGlobal` can report it. `env_field_at`
+/// returning `None` is the single condition all consumers key off.
+///
+/// The **write** side is unaffected: `setmetatable`'s default `__newindex` does
+/// not forward, so `x = 1` in such a sandbox writes the sandbox table, and
+/// `summary_builder::type_infer::env_field_base_fact` keeps it out of the global
+/// index.
+fn env_describes_its_fields(
+    env_fact: &crate::type_system::TypeFact,
+    uri_id: UriId,
+    index: &WorkspaceAggregation,
+) -> bool {
+    let resolved = resolver::resolve_type(uri_id, env_fact, index);
+    let crate::type_system::TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) =
+        resolved.type_fact
+    else {
+        return false;
+    };
+    index
+        .summary_by_id(resolved.source_uri_id())
+        .and_then(|summary| summary.table_shapes.get(&shape_id))
+        .is_some_and(|shape| shape.is_closed)
+}
+
+/// Whether the free name `name` at `offset` is answered by a redirected `_ENV`
+/// — i.e. whether it is *not* an occurrence of the same-named global.
+///
+/// Name-and-offset mirror of [`env_field_at`]'s gate, for callers that have no
+/// AST node at hand (`references::verify_global`, `undefinedGlobal`). The two
+/// **must** stay in agreement: if the cursor side treats a sandboxed name as a
+/// global while the verification side excludes candidate sites inside that
+/// sandbox (or vice versa), references silently splits or merges symbols — the
+/// asymmetry §1.6 exists to prevent.
+pub(crate) fn is_known_env_field(
+    name: &str,
+    offset: usize,
+    uri_id: UriId,
+    scope_tree: &ScopeTree,
+    index: &WorkspaceAggregation,
+) -> bool {
+    crate::type_inference::env_field_base_fact_in_scope(name, offset, scope_tree).is_some_and(
+        |env_fact| {
+            env_describes_its_fields(&env_fact, uri_id, index)
+                || env_records_field(&env_fact, name, uri_id, index)
+        },
+    )
+}
+
+/// What a redirected `_ENV` at `offset` offers as completion candidates.
+///
+/// `None` means "the environment is the global one" — the ordinary path, where
+/// callers just offer the global namespace.
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum EnvCompletionScope {
+    /// The environment's field set is exhaustive (a clean, metatable-free
+    /// sandbox). Only its own fields exist at run time, so offering globals
+    /// would suggest names that `envUnknownField` immediately flags.
+    OnlyEnvFields(crate::table_shape::TableShapeId, UriId),
+    /// The field set is not exhaustive, so by the `{ __index = _G }` convention
+    /// (§1.3) both its own fields and the global namespace are reachable.
+    EnvFieldsAndGlobals(crate::table_shape::TableShapeId, UriId),
+}
+
+/// Completion scope for the environment in effect at `offset`.
+///
+/// Keyed off the same predicates as [`env_field_at`] / [`is_known_env_field`],
+/// so completion cannot end up disagreeing with navigation and diagnostics:
+/// whatever a name would resolve to is what gets offered.
+///
+/// The name passed to `env_field_base_fact_in_scope` is a placeholder — that
+/// function only rejects the literal `_ENV`, and completion asks about the
+/// environment as a whole rather than about one name.
+pub(crate) fn env_completion_scope(
+    offset: usize,
+    uri_id: UriId,
+    scope_tree: &ScopeTree,
+    index: &WorkspaceAggregation,
+) -> Option<EnvCompletionScope> {
+    let env_fact = crate::type_inference::env_field_base_fact_in_scope("", offset, scope_tree)?;
+    let resolved = resolver::resolve_type(uri_id, &env_fact, index);
+    let crate::type_system::TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) =
+        resolved.type_fact
+    else {
+        return None;
+    };
+    let owner = resolved.source_uri_id();
+    let is_closed = index
+        .summary_by_id(owner)
+        .and_then(|summary| summary.table_shapes.get(&shape_id))
+        .is_some_and(|shape| shape.is_closed);
+    Some(if is_closed {
+        EnvCompletionScope::OnlyEnvFields(shape_id, owner)
+    } else {
+        EnvCompletionScope::EnvFieldsAndGlobals(shape_id, owner)
     })
 }
 

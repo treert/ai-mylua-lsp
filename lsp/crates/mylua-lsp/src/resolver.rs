@@ -1164,6 +1164,24 @@ fn resolve_field_access(
     let base_resolved = resolve_recursive(ctx, base, agg, depth + 1, visited);
     let base_ctx = ResolveCtx::new(base_resolved.owner_uri_id);
 
+    // `_G._G == _G`: the global table holds itself under the name `_G`, so a
+    // `_G` field on the global environment is that same environment again.
+    //
+    // The *key space* already knew this — `aggregation::normalize_global_path`
+    // strips a repeated `_G.` prefix, which is what makes `_G._G.X = 1` register
+    // the bare global `X`. Resolution did not, so the read side disagreed with
+    // the write side: `_G._G.X` reported `Unknown field '_G' on type '_G'` and
+    // navigation went nowhere. Handling it here rather than in the diagnostic
+    // fixes goto / hover / field diagnostics in one place.
+    //
+    // Deliberately **not** symmetric with `_ENV`: that name is an upvalue, not a
+    // field of the table, so `_G._ENV` / `_ENV._ENV` stay unresolved (§1.3).
+    if field == crate::lua_builtins::GLOBAL_TABLE_NAME
+        && crate::type_system::is_global_env_fact(&base_resolved.type_fact)
+    {
+        return base_resolved;
+    }
+
     match &base_resolved.type_fact {
         TypeFact::Known(KnownType::Table(shape_id)) => {
             let result = resolve_table_field(base_ctx, *shape_id, field, agg);

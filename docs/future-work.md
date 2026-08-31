@@ -22,7 +22,7 @@
 
 ### 1.3 [P3] `FieldInfo.assignment_count` 名不副实
 
-- **问题**：`table_shape.rs` 的 `FieldInfo.assignment_count` 注释写着"同一字段多次赋值时累加（union）"，但全仓 4 处构造点全部硬编码 `1`，从未累加，也无任何消费方。同一结构体的 `def_range` 有类似问题：注释说"首次定义位置"，而 `set_field` 是覆盖写入，实际存的是**最后一次**（`diagnostics/env_field.rs` 因此自建写点表，不用该字段，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3.1）。
+- **问题**：`table_shape.rs` 的 `FieldInfo.assignment_count` 注释写着"同一字段多次赋值时累加（union）"，但全仓 6 处构造点全部硬编码 `1`，从未累加，也无任何消费方。同一结构体的 `def_range` 有类似问题：注释说"首次定义位置"，而 `set_field` 是覆盖写入，实际存的是**最后一次**（`diagnostics/env_field.rs` 因此自建写点表，不用该字段，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3.1）。
 - **方案**：二选一——要么实现累加并接上 union 推断，要么删除该字段并修正 `def_range` 的注释使其与实现相符。倾向后者：当前没有消费方，留着只会误导下一个读代码的人。
 - **验收**：字段注释与实现一致；若保留则有测试覆盖累加行为。
 
@@ -33,9 +33,12 @@
 ### 2.1 [P3] 泛型实参未从调用点回填
 
 - **问题**：`resolver.rs` 能对已知实参做替换，但调用点的实参类型没有传进来——`setmetatable({}, …)` 的 `call_arg_types` 是 `[Unknown, Unknown]`，其 `---@generic T … @return T` 因此解析为**未替换**的 `EmmyType("T")` 而非 `{}` 的 shape。
-- **耦合警告**：`diagnostics/env_field.rs` 的静默契约目前**部分依赖**这个缺口。实现回填后，`_ENV = setmetatable({}, {__index = _G})` 会解析出确定的 table shape，若不同时保证 metatable 追踪生效，沙箱内所有名字会爆红。该模块已按"装了 metatable 即失去穷尽性"独立处理此事，并由 `test_global_env.rs::setmetatable_env_reports_nothing` 锁定——**实现本条时该测试必须保持绿**。
 - **方案**：将调用点实参类型传入 `substitute_generic_params`，用 `unify_one` 的现有绑定机制回填。
-- **验收**：`local t = setmetatable({a=1}, {})` 的 `t.a` 可解析；且上述 `setmetatable_env_reports_nothing` 不变红。
+- **与 `_ENV` 的关系**（已不再是阻塞，但需确认）：实现回填后 `_ENV = setmetatable({}, …)` 会解析出字面量自己的 shape，这**正是** §3.1 想要的效果。沙箱行为不会退化，因为「字段集合非穷尽」已由 `mark_shapes_opened_by_metatable_calls` 独立记录在 shape 的 `is_closed` 上，不依赖"返回类型推不出 table"这一偶然事实。落地时下列测试必须保持绿，它们锁定了这份独立性：
+  - `setmetatable_env_reports_nothing`
+  - `setmetatable_env_navigates_a_free_name_to_the_global`
+  - `setmetatable_env_stays_silent_for_names_it_can_reach`
+- **验收**：`local t = setmetatable({a=1}, {})` 的 `t.a` 可解析；上述三个测试不变红。
 
 ### 2.2 [P3] 泛型上界约束（`@generic T : Foo`）未校验
 
@@ -57,18 +60,14 @@
 
 ## 3. `_ENV` 沙箱能力缺口
 
-> 背景与已实现部分见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3 / §1.3.1 / §1.6。
-> 已支持：goto / hover / references / `envUnknownField` 诊断。
+> 语义模型与已实现部分见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3 / §1.3.1 / §1.6。
+> 已支持：goto / hover / references / 补全 / 两类诊断按环境形态分工；`_ENV` 归一为「全局表或某个 TableShape」（推不出即合成），非穷尽环境按 `{__index=_G}` 约定回退全局。
 
-### 3.1 [P3] 沙箱内自由名不提供补全
+### 3.1 [P3] 沙箱表字面量的自有字段仍不可达
 
-- **问题**：`_ENV` 被重定向后，该作用域内的自由名不进入补全列表——既不污染、也不误报，但也不提供能力。当前是文档明确的既定立场，非疏漏。
-- **待定的语义问题**（动手前须先定）：补全候选应当是什么？
-  - 仅新环境表已知字段（最保守，但对 `setmetatable({}, {__index=_G})` 这类沙箱会漏掉绝大部分可用名字）；
-  - 还是叠加全局命名空间（对纯 `_ENV = {}` 会给出运行时为 nil 的候选，与 `envUnknownField` 诊断自相矛盾）。
-  - 两者取舍取决于是否追踪 `__index`——这与 2.1 的 metatable 处理是同一个问题。
-- **方案**：语义定下后，在 `completion.rs` 接入 `name_resolution` 的 `EnvField` 分支。
-- **验收**：`local _ENV = {allowed=1}` 下补全含 `allowed`；纯 `_ENV = {}` 下的行为符合上面选定的语义，且与 `envUnknownField` 的判断不冲突。
+- **问题**：`local _ENV = setmetatable({ own = 1 }, …)` 里写在**字面量内**的 `own` 找不到——`setmetatable` 的泛型返回推不出 table，于是 `env_binding_fact` 合成了一张**空** shape，字面量 `{ own = 1 }` 自身的 shape 被丢弃。沙箱内用**语句**写的字段（`own = 1`）不受影响，已可跳转与补全。
+- **方案**：把 `setmetatable(t, mt)` 的返回类型解析为**第一实参的 fact**（该函数的文档化恒等语义，比 §2.1 的通用泛型回填窄得多）；或直接实现 §2.1，两者都会让 `_ENV` 拿到字面量自己的 shape。由于 `mark_shapes_opened_by_metatable_calls` 已把它标为 open，缺失字段仍走全局回退、`envUnknownField` 仍静默。
+- **验收**：`own` 可跳转、可补全；§2.1 条目列出的三个测试保持绿。
 
 ### 3.2 [P3] `document_highlight` 不区分环境边界
 
@@ -76,6 +75,13 @@
 - **原因**：`document_highlight.rs` 按设计只做「文本匹配 + 作用域 decl_byte 过滤」，不查索引，因此对**所有**全局名都不做语义区分——这不是 `_ENV` 特有的缺口。
 - **方案**：若要修，需让它对非 local 的名字也走 `name_resolution`（§1.6 的公共层），代价是每次高亮请求都要做索引查询。需先评估该请求的调用频次（编辑器在光标移动时会频繁触发）是否承受得起。
 - **风险**：这是性能与精确性的取舍，不是纯 bug 修复。改动前应先量测。
+
+### 3.3 [P3] `envUnknownField` 不检查顶层 `do…end` 块
+
+- **问题**：该诊断的双侧围栏（§1.3.1）要求读与写都「直接位于 chunk 顶层作用域」，判据是 `ScopeTree::is_file_level_decl`。顶层 `do…end` 块被一并排除，但它其实**在**顶层直线执行流上——执行顺序完全确定，与函数体（调用时机未知）和 `if` 分支（是否执行未知）性质不同。
+- **方案**：放宽判据，允许「祖先链上只有 `do` 块、没有函数体与条件分支」的位置。
+- **收益**：沙箱代码常写成 `do local _ENV = … end` 以限定作用域，这类写法目前完全不受检查。
+- **风险**：需确认 `while` / `repeat` 的 body 不被误纳入——它们同样是 `do` 块形态但执行次数不确定。
 
 ---
 
@@ -94,16 +100,16 @@
 
 1. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
 2. **1.3** `assignment_count` / `def_range` 注释与实现对齐 — 改动极小，且消除一处持续误导
-3. **2.1** 泛型实参回填 — 能力提升明显，但需连带确认 metatable 追踪（见条目内耦合警告）
+3. **2.1** 泛型实参回填 — 能力提升明显，且顺带解决 3.1（见条目内说明）
 4. **1.2** `type_definitions` O(1) 详情索引 — 规模到 1 万+ 文件前不紧迫
-5. **3.1** 沙箱补全 — 须先定语义，与 2.1 同批做更省事
-6. 其余 P3 项按需补做
+5. 其余 P3 项按需补做
 
 ---
 
 ## 6. 维护约定
 
 - 已完成的条目直接从本文件删除；如涉及架构变更，同一次提交更新相关文档（`index-architecture.md`、`architecture.md` 等）。
+- **写条目前先核实现状**：本文件多次出现"描述与代码脱节"的情况（旧方案已被更好的方案取代、耦合警告因别处改动而失效、行数/计数过期）。动手前用搜索确认一遍，不要照抄旧描述。
 - 新增条目模板：
 
 ```markdown
@@ -121,6 +127,6 @@
 
 - **新增诊断类别**：在 `DiagnosticsConfig` 加字段 + 默认 severity + `vscode-extension/package.json` 配置声明 + `diagnostics/suppression.rs` 的抑制码；默认开启时需在 fixture 上跑一遍确认不会在真实项目上产生大量噪声
 - **新增 LSP capability**：在 `lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler；独立的 `src/<feature>.rs` 模块 + 对应集成测试文件
-- **涉及裸标识符解析**：只改 `name_resolution.rs`（§1.6 的单点实现），不要在单个能力里内联解析顺序
+- **涉及裸标识符解析**：只改 `name_resolution.rs`（§1.6 的单点实现），不要在单个能力里内联解析顺序。该模块同时是导航、references 验证侧、`undefinedGlobal` 与补全的共同判据——四者任一自行判定都会引入不对称
 - **代码修改后**：按 [`../.cursor/rules/coding-discipline.mdc`](../.cursor/rules/coding-discipline.mdc) 的纪律执行（尤其「Rust 禁止格式化」与「最小改动」），跑全量测试
 - **文档同步**：对外能力变动同步 [`lsp-capabilities.md`](lsp-capabilities.md)；架构/数据流变动同步 [`architecture.md`](architecture.md) / [`index-architecture.md`](index-architecture.md)；语义规则变动同步 [`lsp-semantic-spec.md`](lsp-semantic-spec.md)；用户可见变动追加 `vscode-extension/CHANGELOG.md` 的 `[Unreleased]`

@@ -142,10 +142,17 @@ pub struct GlobalShard {
 /// The last two stay as un-resolvable pseudo-keys, which is exactly right:
 /// nothing registers them, so they neither resolve nor mask a real global.
 ///
-/// A bare `"_G"` is preserved: the bundled stdlib declares `_G` itself as a
-/// global (`---@class _G` + `_G = {}`), so that root must stay reachable.
-/// A bare `"_ENV"` is likewise left alone — it is resolved through the scope
-/// tree and never registered as a global.
+/// A bare `"_G"` is preserved: the name is a real global whose value is the
+/// global table, so `_G` must stay reachable as its own root (the bundled stdlib
+/// contributes only `---@class _G` for documentation — see
+/// `lua_builtins::GLOBAL_TABLE_NAME`). A bare `"_ENV"` is likewise left alone —
+/// it is resolved through the scope tree and never registered as a global.
+///
+/// This is a *key-space* rule only. The matching *resolution* rule for reads
+/// (`_G._G` resolves back to the global environment) lives in
+/// `resolver::resolve_field_access`; the two have to agree, or a write
+/// registered under the normalized key becomes unreachable from the spelling
+/// that produced it.
 ///
 /// NOTE on shadowing: a local `_G` / `_ENV` (or an `_ENV = …` assignment)
 /// shadows the global environment, and `_G.X` / `_ENV.X` are then ordinary

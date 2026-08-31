@@ -63,7 +63,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - `@overload` 签名展示
 - 匿名函数绑定签名展示（`local f = function(a, b) end`）
 - `function a.b.c()` 中间段 identifier 不误报为函数 hover
-- `_ENV` 重定向后的自由名解析为环境表字段；环境形状未知时保持静默
+- `_ENV` 重定向后的自由名解析为环境表字段；环境形状非穷尽时（`setmetatable` / 类型未知）按 `{__index=_G}` 约定回退到全局命名空间
 
 ### signatureHelp
 - 基于 `FunctionSummary` 的参数签名浮窗
@@ -114,6 +114,7 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 - AST 驱动的点号字段补全 + 冒号补全过滤方法
 - `---@` EmmyLua tag 补全（class/field/param/return/type 等 24 种）
 - `require("…")` 模块路径补全
+- 裸名候选按当前 `_ENV` 分层：无元表沙箱只给该环境表的字段（不给运行时为 nil 的全局名），带元表 / 类型未知的沙箱按 `{__index=_G}` 约定给「环境字段 + 全局名」，无重定向时给全局名。判据与导航/诊断同源，见 [`lsp-semantic-spec.md` §1.3](lsp-semantic-spec.md)
 - `trigger_characters`: `.` `:` `@` `"` `'`
 - `completionItem/resolve` 延迟加载 documentation/detail
 
@@ -155,7 +156,7 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 `@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
 
-`envUnknownField` 与 `undefinedGlobal` 接力：环境被 `_ENV` 重定向后名字不再是全局，`undefinedGlobal` 退出，由 `envUnknownField` 判断该字段在新环境中是否存在（抑制码 `env-field`）。仅在 `_ENV` 指向**形状完全已知**的表、且读写均位于 chunk 顶层直线执行流时触发；`setmetatable` / `rawset` / 动态键会使形状不再穷尽而整体静默——因此内置库名（含 `_G`）**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
+`envUnknownField` 与 `undefinedGlobal` **按环境形态分工**（不是"只要重定向就交接"）：`_ENV` 指向形状**穷尽**（无元表、无 `rawset`）的表时由 `envUnknownField` 判断字段是否存在（抑制码 `env-field`），要求读写均位于 chunk 顶层直线执行流；形状**非穷尽**时按 `{__index=_G}` 约定处理——环境表没有的名字回退查全局索引，两处皆无则由 `undefinedGlobal` 报出。`__index` 的实际指向刻意不追踪。因此内置库名（含 `_G`）在穷尽环境下**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。

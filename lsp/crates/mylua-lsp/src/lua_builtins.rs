@@ -46,9 +46,15 @@ const COMMON: &[&str] = &[
     "coroutine",
     "package",
     "arg",
-    // Reserved / global meta
+    // Reserved / global meta.
+    //
+    // `_ENV` is deliberately absent: it is the environment *upvalue*, not a
+    // field of the global table (`_G._ENV` is nil), and every chunk gets an
+    // implicit `_ENV` scope declaration (`summary_builder::visitors::
+    // declare_implicit_env`), so both consumers of this list — `undefinedGlobal`
+    // and the `global` semantic-token modifier — already see it as a local.
+    // Listing it here would state the opposite of the model it is resolved by.
     "_G",
-    "_ENV",
     "_VERSION",
     // Literals / keywords that show up as identifiers in some AST
     // contexts and should never trip "undefined global".

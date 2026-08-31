@@ -96,6 +96,7 @@ pub fn collect_semantic_diagnostics_with_version_id(
                 &mut cursor,
                 source,
                 &builtins,
+                uri_id,
                 index,
                 scope_tree,
                 &mut diagnostics,

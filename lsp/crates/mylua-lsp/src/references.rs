@@ -150,7 +150,7 @@ pub fn find_references_by_uri_id(
                     else {
                         continue;
                     };
-                    if verify_global(node, name, &file_doc.scope_tree) {
+                    if verify_global(node, name, doc_uri_id, &file_doc.scope_tree, index) {
                         locations.push(ReferenceLocation {
                             uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
@@ -319,7 +319,7 @@ pub fn find_references_by_uri_id(
                     else {
                         continue;
                     };
-                    if verify_global(node, name, &file_doc.scope_tree) {
+                    if verify_global(node, name, doc_uri_id, &file_doc.scope_tree, index) {
                         locations.push(ReferenceLocation {
                             uri_id: doc_uri_id,
                             range: file_doc.line_index().ts_node_to_range(node, source),
@@ -612,24 +612,35 @@ fn verify_local(
 /// field position, not shadowed by a local, and not sandboxed).
 ///
 /// The `_ENV` condition is the mirror image of `Identity::EnvField`'s check:
-/// under a redirected environment a free name is a field of that table, not a
-/// global, so it is not an occurrence of this global. Without it, clicking the
-/// pre-redirect `g` in `g = 1; _ENV = {}; g = 2` also reported the post-redirect
-/// sites — the two are different variables at run time. `undefinedGlobal`
-/// suppresses on the same condition.
+/// under a redirected environment whose contents we know, a free name is a
+/// field of that table, not a global, so it is not an occurrence of this
+/// global. Without it, clicking the pre-redirect `g` in
+/// `g = 1; _ENV = {}; g = 2` also reported the post-redirect sites — the two
+/// are different variables at run time.
+///
+/// It delegates to `name_resolution::is_known_env_field` rather than testing
+/// the redirection itself, so that the "environment of unknown shape falls back
+/// to the global namespace" rule applies identically on both sides. When the
+/// cursor lands on a free name inside such a sandbox it resolves to a global,
+/// and these candidate sites must be accepted as occurrences of that same
+/// global — otherwise references would report the declaration but none of the
+/// sandboxed uses.
 fn verify_global(
     node: tree_sitter::Node,
     name: &str,
+    uri_id: UriId,
     scope_tree: &crate::scope::ScopeTree,
+    index: &WorkspaceAggregation,
 ) -> bool {
     !is_non_reference_position(node)
         && scope_tree.resolve_decl(node.start_byte(), name).is_none()
-        && crate::type_inference::env_field_base_fact_in_scope(
+        && !crate::name_resolution::is_known_env_field(
             name,
             node.start_byte(),
+            uri_id,
             scope_tree,
+            index,
         )
-        .is_none()
 }
 
 /// Verify that a candidate identifier node is a field access that resolves

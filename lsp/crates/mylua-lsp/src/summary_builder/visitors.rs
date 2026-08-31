@@ -58,14 +58,69 @@ fn declare_implicit_env(ctx: &mut BuildContext, root: tree_sitter::Node) {
         visible_after_byte: at,
         range,
         selection_range: range,
-        type_fact: Some(super::type_infer::implicit_env_fact()),
+        type_fact: Some(crate::type_system::global_env_fact()),
         bound_class: None,
         is_emmy_annotated: false,
     });
 }
 
-pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {
-    ctx.push_scope(ScopeKind::File, root.start_byte(), root.end_byte());
+/// The fact to record for a binding of `_ENV`, given what the right-hand side
+/// inferred to.
+///
+/// `_ENV` is normalized to exactly two possible shapes, so that every consumer
+/// only ever has to distinguish those two:
+///
+/// 1. **the global environment** — the implicit declaration, `_ENV = _G`,
+///    `local _ENV = _G`, or a local that itself holds `_G`. Passed through
+///    unchanged, keeping the ordinary global path;
+/// 2. **some `TableShape`** — every other case. When the RHS already yields a
+///    shape (`_ENV = {}`, `local _ENV = t`) that shape is used as-is;
+///    otherwise a fresh one is **synthesized and marked open**.
+///
+/// # Why synthesize rather than leave it `Unknown`
+///
+/// A free-name write under a redirected `_ENV` is `_ENV.x = v`, and
+/// `register_nested_field_write` needs a shape to write onto. With an `Unknown`
+/// environment it had none, so `x = 1` inside
+/// `local _ENV = setmetatable({}, { __index = _G })` reached **neither** the
+/// global index (correctly gated) **nor** any shape — the name vanished
+/// outright and goto / hover / references all came up empty. Synthesizing the
+/// shape gives those writes a home while keeping them out of the global index.
+///
+/// # Why `mark_open`
+///
+/// The synthesized shape describes a table we could not inspect, so its field
+/// set is *not* an exhaustive description of the environment. That is exactly
+/// what `is_closed == false` means, and it keeps the two behaviours we want for
+/// such an environment: navigation falls back to the global namespace for names
+/// the shape does not have (`name_resolution::env_describes_its_fields`), and
+/// `envUnknownField` stays silent about them. A genuine `_ENV = {}` keeps its
+/// closed shape and is therefore still checked strictly.
+fn env_binding_fact(ctx: &mut BuildContext, value_fact: TypeFact) -> TypeFact {
+    if crate::type_system::is_global_env_fact(&value_fact) {
+        return value_fact;
+    }
+    if let TypeFact::Known(KnownType::Table(shape_id)) = &value_fact {
+        if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+            shape.set_owner(ENV_NAME);
+        }
+        return value_fact;
+    }
+    let shape_id = ctx.alloc_shape_id();
+    let mut shape = crate::table_shape::TableShape::new(shape_id);
+    shape.set_owner(ENV_NAME);
+    shape.mark_open();
+    ctx.table_shapes.insert(shape_id, shape);
+    TypeFact::Known(KnownType::Table(shape_id))
+}
+
+/// True if `name` is `_ENV` — the one name whose binding needs
+/// [`env_binding_fact`] applied to it.
+fn is_env_name(name: &str) -> bool {
+    name == ENV_NAME
+}
+
+pub(super) fn visit_top_level(ctx: &mut BuildContext, root: tree_sitter::Node) {    ctx.push_scope(ScopeKind::File, root.start_byte(), root.end_byte());
     declare_implicit_env(ctx, root);
 
     let mut cursor = root.walk();
@@ -521,6 +576,15 @@ fn visit_local_declaration(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     shape.set_owner(&name);
                 }
             }
+            // `local _ENV = expr` binds the environment upvalue; normalize it
+            // the same way the `_ENV = expr` branch does (see
+            // `env_binding_fact`), so a sandbox built by any expression still
+            // has a shape for its writes to land on.
+            let final_type_fact = if is_env_name(&name) {
+                env_binding_fact(ctx, final_type_fact)
+            } else {
+                final_type_fact
+            };
             ctx.add_scoped_decl(ScopeDecl {
                 name: name.as_str().into(),
                 kind: DefKind::LocalVariable,
@@ -1427,18 +1491,17 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 // below: every chunk declares `_ENV` implicitly, so that
                 // check would otherwise treat the write as a plain assignment
                 // to an existing local and skip the re-declaration entirely.
-                if name == ENV_NAME {
+                if is_env_name(&name) {
                     let value_fact = value_node
                         .map(|v| infer_expression_type(ctx, v, 0))
                         .unwrap_or(TypeFact::Unknown);
                     let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
                     let selection_range =
                         ctx.line_index.ts_node_to_byte_range(var_node, ctx.source);
-                    if let TypeFact::Known(KnownType::Table(shape_id)) = &value_fact {
-                        if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
-                            shape.set_owner(ENV_NAME);
-                        }
-                    }
+                    // Normalize to "global environment or some shape" — see
+                    // `env_binding_fact`. Without this, a write under an
+                    // environment of unresolvable type had nowhere to land.
+                    let value_fact = env_binding_fact(ctx, value_fact);
                     ctx.add_scoped_decl(ScopeDecl {
                         name: ENV_NAME.into(),
                         kind: DefKind::LocalVariable,
@@ -2165,6 +2228,17 @@ fn register_single_param(
         .find(|p| p.name.as_str() == name)
         .map(|p| p.type_fact.clone())
         .filter(|tf| *tf != TypeFact::Unknown);
+    // An `_ENV` parameter redirects the environment for the whole body, so it
+    // needs a shape for that body's free-name writes to land on, exactly like
+    // the assignment forms (see `env_binding_fact`).
+    let type_fact = if is_env_name(&name) {
+        Some(env_binding_fact(
+            ctx,
+            type_fact.unwrap_or(TypeFact::Unknown),
+        ))
+    } else {
+        type_fact
+    };
     let db = id_node.start_byte();
     ctx.add_scoped_decl(ScopeDecl {
         name: name.as_str().into(),

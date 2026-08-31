@@ -297,6 +297,50 @@ print(_G.Holder.member)
     );
 }
 
+#[test]
+fn nested_g_qualified_read_resolves_like_the_bare_global() {
+    // Read-side counterpart of `nested_g_qualified_write_is_normalized`:
+    // because `_G._G == _G`, `_G._G.X` names the same global as bare `X` for
+    // reads too. The write side was pinned down long before the read side,
+    // which is exactly the asymmetry that lets a normalization gap hide.
+    let src = r#"Defined = 1
+print(_G._G.Defined)
+"#;
+    let diags = unknown_field_diags(src, "g_read_nested.lua");
+    assert!(
+        diags.is_empty(),
+        "`_G._G.Defined` must resolve like the bare global `Defined`, got: {:?}",
+        diags
+    );
+    // `_G._G.` prefix is 12 characters, so `Defined` starts at column 12.
+    assert_eq!(
+        goto_lines(src, "g_read_nested_goto.lua", pos(1, 12)),
+        vec![0],
+        "goto on `_G._G.Defined` must land on the bare global's definition"
+    );
+}
+
+#[test]
+fn env_and_g_prefixed_read_resolves_like_the_bare_global() {
+    // `_ENV._G.X`: strip the head `_ENV.` once (an upvalue, not a table
+    // field), then the repeatable `_G.` — both spellings collapse onto `X`.
+    let src = r#"Defined = 1
+print(_ENV._G.Defined)
+"#;
+    let diags = unknown_field_diags(src, "env_g_read.lua");
+    assert!(
+        diags.is_empty(),
+        "`_ENV._G.Defined` must resolve like the bare global `Defined`, got: {:?}",
+        diags
+    );
+    // `_ENV._G.` prefix is 14 characters counting `print(`.
+    assert_eq!(
+        goto_lines(src, "env_g_read_goto.lua", pos(1, 14)),
+        vec![0],
+        "goto on `_ENV._G.Defined` must land on the bare global's definition"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Shadowing: `local _G` makes `_G.X` an ordinary table field access
 // ---------------------------------------------------------------------------
@@ -572,31 +616,52 @@ fn free_name_read_under_local_env_is_not_undefined_global() {
 }
 
 #[test]
-fn env_with_unknown_shape_reports_nothing() {
-    // Chosen trade-off (a): when `_ENV` points at a value whose shape is
-    // unknown, we know neither what it contains nor that a name is missing.
-    // Stay silent rather than guess — and still keep the writes out of the
-    // global index.
+fn env_with_unknown_shape_falls_back_to_the_global_convention() {
+    // An `_ENV` whose shape we cannot inspect is **assumed** to be
+    // `{ __index = _G }` — one of the two supported sandbox styles (§1.3). We
+    // deliberately do not track `__index`; the convention is what makes a
+    // useful answer possible at all.
+    //
+    // Consequences, all pinned below:
+    // - a name the sandbox itself wrote resolves to the sandbox;
+    // - a name absent from the sandbox is looked up as a global;
+    // - absent from both means absent at run time, so it *is* reported —
+    //   staying silent here used to hide a genuine `nil`.
     //
     // `make_env` is declared as a real global so that the factory call on the
     // `_ENV` line is not itself an undefined global (it sits *before* the
     // `_ENV` declaration takes effect, so it resolves against the real global
     // environment — which is correct).
     let src = r#"function make_env() end
+RealGlobalHere = 1
 local _ENV = make_env()
 whatever = 1
+local a = whatever
+local b = RealGlobalHere
 print(mystery)
 "#;
     let diags = all_diags(src, "env_unknown.lua");
     assert!(
-        diags.iter().all(|d| !d.contains("Undefined global")),
-        "an `_ENV` of unknown shape must not produce undefined-global noise, got: {:?}",
+        diags.iter().any(|d| d.contains("Undefined global 'mystery'")),
+        "a name absent from both the sandbox and the global index must be \
+         reported, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().all(|d| !d.contains("'whatever'")),
+        "a name the sandbox itself wrote must not be flagged, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().all(|d| !d.contains("'RealGlobalHere'")),
+        "a real global, reachable by convention through `__index`, must not be \
+         flagged, got: {:?}",
         diags
     );
     assert!(
         diags.iter().all(|d| !d.contains("the current _ENV")),
-        "an `_ENV` of unknown shape must not produce env-field noise either — we \
-         know neither what it contains nor that a name is missing, got: {:?}",
+        "`envUnknownField` needs an exhaustive field set, which an \
+         unknown-shape environment does not have, got: {:?}",
         diags
     );
     let paths = global_shard_paths(src, "env_unknown2.lua");
@@ -604,6 +669,25 @@ print(mystery)
         !paths.contains(&"whatever".to_string()),
         "writes under an unknown-shape `_ENV` must stay out of global_shard, got: {:?}",
         paths
+    );
+}
+
+#[test]
+fn a_write_under_an_unknown_shape_env_is_still_navigable() {
+    // The write has to land *somewhere*. It must not reach the global index
+    // (`setmetatable`'s default `__newindex` does not forward), but dropping it
+    // entirely — which is what used to happen when `_ENV` had no shape to write
+    // onto — made the name vanish from goto / hover / references alike. A
+    // synthesized shape gives it a home.
+    let src = r#"local function mk() end
+local _ENV = mk()
+sandbox_var = 1
+local a = sandbox_var
+"#;
+    assert_eq!(
+        goto_lines(src, "env_unknown_write_goto.lua", pos(3, 10)),
+        vec![2],
+        "a free-name write under an unknown-shape `_ENV` must stay navigable"
     );
 }
 
@@ -1146,7 +1230,8 @@ fn setmetatable_applied_after_construction_reports_nothing() {
     // Same as above, but the metatable is attached in a separate statement, so
     // `_ENV`'s fact *is* the literal's `Known(Table)` shape. Shape certainty
     // alone therefore says "fully known" here and would report everything —
-    // only tracking the `setmetatable` call itself gets this right.
+    // the `setmetatable` call has to mark the shape non-exhaustive for this to
+    // come out right.
     let src = r#"local t = {}
 setmetatable(t, { __index = _G })
 _ENV = t
@@ -1176,6 +1261,409 @@ print(injected)
         diags.is_empty(),
         "a `rawset` on the environment table must silence the check, got: {:?}",
         diags
+    );
+}
+
+// ---------------------------------------------------------------------------
+// An `_ENV` that does not describe its own fields → navigation falls back to
+// the global namespace
+// ---------------------------------------------------------------------------
+//
+// Only a definite table shape tells us what the environment contains. For
+// everything else the environment can have been built arbitrarily, and the one
+// spelling that dominates real code routes missing names to the real global
+// table:
+//
+// ```lua
+// local _ENV = setmetatable({}, { __index = _G })
+// ```
+//
+// So navigation answers from the global namespace instead of staying mute (it
+// used to return nothing at all — no goto, no hover, no references). The
+// *diagnostics* keep their stricter silence, and the write side keeps refusing
+// to register globals; the tests below pin all three parts down together,
+// because it is the combination that is the contract.
+
+/// The idiomatic sandbox, with a real global defined before it.
+const SETMETA_ENV: &str = r#"SandboxReachable = 1
+local _ENV = setmetatable({}, { __index = _G })
+local x = SandboxReachable
+"#;
+
+#[test]
+fn setmetatable_env_navigates_a_free_name_to_the_global() {
+    // `__index = _G` makes `SandboxReachable` genuinely reachable at run time,
+    // and `setmetatable`'s generic return gives us no shape to check against —
+    // so the global is the only useful answer.
+    assert_eq!(
+        goto_lines(SETMETA_ENV, "setmeta_env_goto.lua", pos(2, 10)),
+        vec![0],
+        "a free name under a `setmetatable` environment must resolve to the global"
+    );
+    let text = hover_text(SETMETA_ENV, "setmeta_env_hover.lua", pos(2, 10))
+        .expect("hover must produce content for the fallback global");
+    assert!(
+        text.contains("SandboxReachable"),
+        "hover must name the symbol, got: {:?}",
+        text
+    );
+}
+
+#[test]
+fn setmetatable_env_keeps_the_free_name_out_of_the_global_index() {
+    // The fallback is read-side only. `setmetatable`'s default `__newindex`
+    // does not forward, so a write lands on the sandbox table — registering it
+    // as a global would pollute the workspace with a name that does not exist
+    // at run time.
+    let paths = global_shard_paths(
+        "local _ENV = setmetatable({}, { __index = _G })\nLeaked = 1\nfunction leaked_fn() end\n",
+        "setmeta_env_write.lua",
+    );
+    assert!(
+        paths.is_empty(),
+        "writes under a `setmetatable` environment must not reach global_shard, got: {:?}",
+        paths
+    );
+}
+
+#[test]
+fn setmetatable_env_reports_a_name_absent_from_both() {
+    // Under the `{ __index = _G }` convention (§1.3) a name missing from the
+    // sandbox table is looked up as a global. Missing from *both* means it is
+    // nil at run time, so it must be reported — this is the whole point of not
+    // tracking `__index`: the convention makes the answer decidable.
+    //
+    // `envUnknownField` stays out of it: that check needs an exhaustive field
+    // set, which a metatable-carrying environment does not have.
+    let unknown = r#"local _ENV = setmetatable({}, { __index = _G })
+local x = not_defined_anywhere
+"#;
+    let diags = all_diags(unknown, "setmeta_env_diags.lua");
+    assert!(
+        diags
+            .iter()
+            .any(|d| d.contains("Undefined global 'not_defined_anywhere'")),
+        "a name absent from both the sandbox and the global index must be \
+         reported, got: {:?}",
+        diags
+    );
+    assert!(
+        diags.iter().all(|d| !d.contains("the current _ENV")),
+        "`envUnknownField` must not fire for a non-exhaustive environment, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn setmetatable_env_stays_silent_for_names_it_can_reach() {
+    // The complement of the test above, and the guard against over-reporting:
+    // a real global (reachable by convention through `__index`) and a name the
+    // sandbox itself wrote must both stay clean.
+    let src = r#"ReachableGlobal = 1
+local _ENV = setmetatable({}, { __index = _G })
+own_field = 2
+local a = ReachableGlobal
+local b = own_field
+"#;
+    let diags = all_diags(src, "setmeta_env_silent.lua");
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.contains("ReachableGlobal") && !d.contains("own_field")),
+        "names reachable through `__index` or written in the sandbox must not \
+         be flagged, got: {:?}",
+        diags
+    );
+    // And the sandbox's own field must be navigable — it exists nowhere else,
+    // so resolving it to a same-named global would be wrong.
+    assert_eq!(
+        goto_lines(src, "setmeta_env_own_goto.lua", pos(4, 10)),
+        vec![2],
+        "a name written inside the sandbox must resolve to the sandbox, not to \
+         the global namespace"
+    );
+}
+
+#[test]
+fn references_include_free_names_under_a_setmetatable_env() {
+    // SYMMETRY GUARD for `verify_global`. The cursor side resolves the
+    // sandboxed name to a global, so the verification side must accept these
+    // sites as occurrences of that same global — otherwise references reports
+    // the declaration and none of the sandboxed uses (or the reverse).
+    let sites = reference_sites(SETMETA_ENV, "setmeta_env_refs.lua", pos(0, 0));
+    assert!(
+        sites.contains(&(0, 0)) && sites.contains(&(2, 10)),
+        "references must span the declaration and the sandboxed use, got: {:?}",
+        sites
+    );
+}
+
+#[test]
+fn env_of_unknown_type_navigates_to_the_global() {
+    // Same rule, reached via a plain unknown type rather than a metatable: an
+    // `_ENV` parameter tells us nothing about the field set, so the caller may
+    // well have passed the real environment.
+    let src = r#"ParamReachable = 1
+local function sandbox(_ENV)
+  local x = ParamReachable
+end
+"#;
+    assert_eq!(
+        goto_lines(src, "env_param_goto.lua", pos(2, 12)),
+        vec![0],
+        "a free name under an untyped `_ENV` parameter must resolve to the global"
+    );
+}
+
+#[test]
+fn a_factory_returning_a_table_literal_is_a_known_environment() {
+    // BOUNDARY, and an easy one to misread: the fallback keys off whether the
+    // environment's *type* yields an exhaustive shape, not off how elaborate
+    // the expression looks. `function f() return {} end; local _ENV = f()`
+    // resolves the return type to the `{}` literal's shape, so it is exactly
+    // as known as writing `local _ENV = {}` — at run time it *is* a plain
+    // table with no metatable, and every free name really is nil.
+    //
+    // Falling back here would be wrong, and would also contradict
+    // `envUnknownField`, which reports these names.
+    let src = r#"NotReachable = 1
+local function make_env() return {} end
+local _ENV = make_env()
+local x = NotReachable
+"#;
+    assert!(
+        goto_lines(src, "factory_known_goto.lua", pos(3, 10)).is_empty(),
+        "a factory returning a table literal yields a fully known environment, \
+         so the global must not be reachable"
+    );
+    let diags = env_field_diags(src, "factory_known_diags.lua");
+    assert!(
+        diags.iter().any(|d| d.contains("NotReachable")),
+        "`envUnknownField` must fire for a factory-built but fully known \
+         environment, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn a_factory_with_no_return_is_an_unknown_environment() {
+    // Contrast with the test above — the *only* difference is whether the
+    // factory returns anything. No return means no shape, hence the fallback.
+    let src = r#"FactoryReachable = 1
+local function make_env() end
+local _ENV = make_env()
+local x = FactoryReachable
+"#;
+    assert_eq!(
+        goto_lines(src, "factory_unknown_goto.lua", pos(3, 10)),
+        vec![0],
+        "a factory with no return leaves the environment unknown, so the \
+         global must be reachable"
+    );
+}
+
+/// The same sandbox with the metatable attached in a separate statement. Here
+/// `_ENV`'s fact *is* the `{}` literal's shape, so "does it resolve to a table"
+/// says yes — only the shape being marked non-exhaustive distinguishes it.
+const LATE_SETMETA_ENV: &str = r#"LateReachable = 1
+local t = {}
+setmetatable(t, { __index = _G })
+local _ENV = t
+local x = LateReachable
+"#;
+
+#[test]
+fn late_setmetatable_env_navigates_a_free_name_to_the_global() {
+    // The spelling that shape-certainty alone gets wrong. `setmetatable(t, …)`
+    // marks `t`'s shape open in the summary builder, so the environment stops
+    // describing its fields and navigation falls back to the global — matching
+    // the inline spelling instead of silently differing from it.
+    assert_eq!(
+        goto_lines(LATE_SETMETA_ENV, "late_setmeta_goto.lua", pos(4, 10)),
+        vec![0],
+        "a late-attached metatable must reach the global just like the inline form"
+    );
+    let text = hover_text(LATE_SETMETA_ENV, "late_setmeta_hover.lua", pos(4, 10))
+        .expect("hover must produce content for the fallback global");
+    assert!(
+        text.contains("LateReachable"),
+        "hover must name the symbol, got: {:?}",
+        text
+    );
+}
+
+#[test]
+fn rawset_on_a_table_opens_its_shape_for_navigation_too() {
+    // `rawset` is the other spelling that stops the field set from being
+    // exhaustive, and it travels the same single fact.
+    let src = r#"RawReachable = 1
+local t = {}
+rawset(t, "injected", 1)
+local _ENV = t
+local x = RawReachable
+"#;
+    assert_eq!(
+        goto_lines(src, "rawset_env_goto.lua", pos(4, 10)),
+        vec![0],
+        "a `rawset` target must stop describing its fields, so the global is reachable"
+    );
+}
+
+#[test]
+fn a_metatable_on_an_unrelated_table_does_not_open_the_environment() {
+    // NEGATIVE CONTROL for the shape-marking pass: it must mark the table that
+    // was actually passed to `setmetatable`, not every shape in the file. If
+    // the environment itself were opened here, the fallback would swallow a
+    // case that is genuinely fully known.
+    let src = r#"Unrelated = 1
+local other = {}
+setmetatable(other, { __index = _G })
+local _ENV = {}
+local x = Unrelated
+"#;
+    assert!(
+        goto_lines(src, "unrelated_meta_goto.lua", pos(4, 10)).is_empty(),
+        "a metatable on an unrelated table must leave the environment fully known"
+    );
+    let diags = env_field_diags(src, "unrelated_meta_diags.lua");
+    assert!(
+        diags.iter().any(|d| d.contains("Unrelated")),
+        "`envUnknownField` must still fire for the untouched environment, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn plain_empty_env_still_shadows_the_global() {
+    // NEGATIVE CONTROL, and the boundary of the fallback: `_ENV = {}` *does*
+    // describe its fields — exhaustively, as none — so the global must stay
+    // invisible and `envUnknownField` must still fire. If this ever starts
+    // resolving to the global, the fallback has swallowed the whole feature.
+    let src = r#"Shadowed = 1
+local _ENV = {}
+local x = Shadowed
+"#;
+    assert!(
+        goto_lines(src, "plain_env_goto.lua", pos(2, 10)).is_empty(),
+        "`_ENV = {{}}` has a fully known (empty) field set, so the global must \
+         not be reachable"
+    );
+    let diags = env_field_diags(src, "plain_env_diags.lua");
+    assert!(
+        diags.iter().any(|d| d.contains("Shadowed")),
+        "`envUnknownField` must still fire for a fully known environment, got: {:?}",
+        diags
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Completion follows the environment
+// ---------------------------------------------------------------------------
+//
+// A free name is `_ENV.name`, so what completion may offer depends on what
+// `_ENV` points at. It used to ignore that and always offer the global
+// namespace, which contradicted the rest of the server in both directions: in a
+// clean sandbox it suggested globals that `envUnknownField` flagged the instant
+// you accepted one, and it never offered the sandbox's own fields — the only
+// names actually reachable there.
+
+/// Completion labels at `at`.
+fn completion_labels(src: &str, filename: &str, at: tower_lsp_server::ls_types::Position) -> Vec<String> {
+    let (doc, uri, mut agg) = setup_single_file(src, filename);
+    completion::complete(&doc, intern_uri(&uri), at, &mut agg)
+        .into_iter()
+        .map(|i| i.label)
+        .collect()
+}
+
+#[test]
+fn clean_sandbox_completion_offers_only_its_own_fields() {
+    // Exhaustive field set → those fields are all that exist at run time.
+    // Offering `CompletionTarget` here would be offering a name that is nil.
+    let src = r#"CompletionTarget = 1
+local _ENV = { allowed = 1, also_allowed = 2 }
+local x = a
+"#;
+    let labels = completion_labels(src, "clean_sandbox_completion.lua", pos(2, 11));
+    assert!(
+        labels.contains(&"allowed".to_string()) && labels.contains(&"also_allowed".to_string()),
+        "a clean sandbox must offer its own fields, got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"CompletionTarget".to_string()),
+        "a clean sandbox must not offer globals — they are nil there, and \
+         `envUnknownField` would flag them, got: {:?}",
+        labels
+    );
+}
+
+#[test]
+fn metatable_sandbox_completion_offers_both() {
+    // Not exhaustive → by the `{ __index = _G }` convention both its own fields
+    // and the globals are reachable, so both are offered. This is the mirror of
+    // the navigation fallback, not a separate policy.
+    //
+    // Both names deliberately share the prefix `ap`, so one query proves the
+    // two sources are merged rather than one shadowing the other.
+    //
+    // The metatable is attached in a separate statement so that `_ENV` resolves
+    // to the literal's own shape. The inline spelling
+    // `setmetatable({ apricot_field = 2 }, …)` would lose the literal's fields
+    // — `setmetatable`'s generic return is unresolvable, so `env_binding_fact`
+    // synthesizes an empty shape instead (see `future-work.md` §3.2). Fields
+    // written by a *statement* inside the sandbox are unaffected either way.
+    let src = r#"apple_global = 1
+local t = { apricot_field = 2 }
+setmetatable(t, { __index = _G })
+local _ENV = t
+local x = ap
+"#;
+    let labels = completion_labels(src, "meta_sandbox_completion.lua", pos(4, 12));
+    assert!(
+        labels.contains(&"apricot_field".to_string()),
+        "a metatable sandbox must offer its own fields, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"apple_global".to_string()),
+        "a metatable sandbox must also offer globals (reachable via `__index`), \
+         got: {:?}",
+        labels
+    );
+}
+
+#[test]
+fn completion_outside_any_sandbox_is_unchanged() {
+    // NEGATIVE CONTROL: with no redirection the global namespace must be
+    // offered exactly as before. A mistake in the environment lookup that
+    // treated every file as sandboxed would silently empty completion.
+    let src = r#"CompletionTarget = 1
+function some_global_fn() end
+local x = C
+"#;
+    let labels = completion_labels(src, "no_sandbox_completion.lua", pos(2, 11));
+    assert!(
+        labels.contains(&"CompletionTarget".to_string()),
+        "ordinary completion must still list globals, got: {:?}",
+        labels
+    );
+}
+
+#[test]
+fn sandbox_completion_still_offers_visible_locals() {
+    // Locals are lexical, not environment fields — the canonical sandbox opens
+    // with `local print = print` precisely so they stay reachable. The
+    // environment gate must not swallow them.
+    let src = r#"local captured = 1
+local _ENV = {}
+local x = c
+"#;
+    let labels = completion_labels(src, "sandbox_locals_completion.lua", pos(2, 11));
+    assert!(
+        labels.contains(&"captured".to_string()),
+        "visible locals must still be offered inside a sandbox, got: {:?}",
+        labels
     );
 }
 

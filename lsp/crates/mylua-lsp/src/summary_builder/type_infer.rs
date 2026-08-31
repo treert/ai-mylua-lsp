@@ -17,37 +17,6 @@ use super::BuildContext;
 // Expression type inference (single-file)
 // ---------------------------------------------------------------------------
 
-/// Fact for the chunk-level `_ENV` — the global environment table.
-///
-/// `_ENV` is a lexical upvalue holding the current environment, **not** a
-/// global variable named `_ENV` (`_G._ENV` is nil). Modelling the default
-/// environment as the stdlib `_G` class means `local e = _ENV; e.some_global`
-/// resolves through the ordinary global namespace, and costs no new
-/// `TypeFact` variant.
-///
-/// Materialized as a real scope declaration by
-/// `visitors::declare_implicit_env`.
-pub(super) fn implicit_env_fact() -> TypeFact {
-    TypeFact::Known(KnownType::EmmyType(crate::lua_symbol::intern_lua_symbol(
-        "_G",
-    )))
-}
-
-/// True if `fact` denotes the global environment itself.
-///
-/// Two spellings reach here:
-/// - `EmmyType("_G")` — the implicit declaration's fact, and what the stdlib
-///   `---@class _G` resolves to;
-/// - `GlobalRef("_G")` — an explicit `local _ENV = _G`, where `_G` is a free
-///   name whose value *is* the global table.
-pub(super) fn is_global_env_fact(fact: &TypeFact) -> bool {
-    match fact {
-        TypeFact::Known(KnownType::EmmyType(name)) => name == "_G",
-        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => name == "_G",
-        _ => false,
-    }
-}
-
 /// Base fact for treating a free name as `_ENV.<name>`, or `None` when the
 /// ordinary global path applies.
 ///
@@ -221,7 +190,7 @@ pub(super) fn infer_expression_type(
             if text == crate::lua_builtins::ENV_NAME
                 || text == crate::lua_builtins::GLOBAL_TABLE_NAME
             {
-                return implicit_env_fact();
+                return global_env_fact();
             }
             TypeFact::Stub(SymbolicStub::GlobalRef { name: text.into() })
         }

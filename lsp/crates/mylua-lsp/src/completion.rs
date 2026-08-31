@@ -80,10 +80,92 @@ pub fn complete(
     let mut seen = HashSet::new();
 
     collect_scope_completions(doc, uri_id, position, &prefix, &mut items, &mut seen);
-    collect_global_completions(index, &prefix, &mut items, &mut seen);
+    collect_free_name_completions(doc, uri_id, position, index, &prefix, &mut items, &mut seen);
     collect_keyword_completions(&prefix, &mut items, &mut seen);
 
     items
+}
+
+/// Candidates for a bare (unqualified) name, honouring the environment in
+/// effect at the cursor.
+///
+/// A free name is `_ENV.name`, so what is reachable depends on what `_ENV`
+/// points at (§1.3). Completion used to skip that question entirely and always
+/// offer the global namespace, which contradicted the rest of the server: in a
+/// clean `local _ENV = {}` sandbox it suggested globals that `envUnknownField`
+/// then flagged the moment you accepted one, while the sandbox's *own* fields —
+/// the only names actually reachable — were missing.
+///
+/// The three cases mirror `name_resolution`'s, and are keyed off the same
+/// predicates so the two cannot drift apart.
+fn collect_free_name_completions(
+    doc: &Document,
+    uri_id: UriId,
+    position: Position,
+    index: &WorkspaceAggregation,
+    prefix: &str,
+    items: &mut Vec<CompletionItem>,
+    seen: &mut HashSet<String>,
+) {
+    let offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), position);
+    let scope = offset.and_then(|offset| {
+        crate::name_resolution::env_completion_scope(offset, uri_id, &doc.scope_tree, index)
+    });
+
+    use crate::name_resolution::EnvCompletionScope;
+    match scope {
+        // Exhaustive field set: those fields are all that exist.
+        Some(EnvCompletionScope::OnlyEnvFields(shape_id, owner)) => {
+            collect_env_field_completions(index, shape_id, owner, prefix, items, seen);
+        }
+        // Not exhaustive: by the `{ __index = _G }` convention both the
+        // environment's own fields and the globals are reachable. Own fields go
+        // first so a shadowing sandbox field wins the `seen` race.
+        Some(EnvCompletionScope::EnvFieldsAndGlobals(shape_id, owner)) => {
+            collect_env_field_completions(index, shape_id, owner, prefix, items, seen);
+            collect_global_completions(index, prefix, items, seen);
+        }
+        // Ordinary global environment.
+        None => collect_global_completions(index, prefix, items, seen),
+    }
+}
+
+fn collect_env_field_completions(
+    index: &WorkspaceAggregation,
+    shape_id: crate::table_shape::TableShapeId,
+    owner: UriId,
+    prefix: &str,
+    items: &mut Vec<CompletionItem>,
+    seen: &mut HashSet<String>,
+) {
+    let Some(shape) = index
+        .summary_by_id(owner)
+        .and_then(|summary| summary.table_shapes.get(&shape_id))
+    else {
+        return;
+    };
+    for (name, field) in &shape.fields {
+        let name = name.as_str();
+        if !name.starts_with(prefix) || seen.contains(name) {
+            continue;
+        }
+        seen.insert(name.to_string());
+        let kind = match field.type_fact {
+            crate::type_system::TypeFact::Known(crate::type_system::KnownType::Function(_))
+            | crate::type_system::TypeFact::Known(crate::type_system::KnownType::FunctionRef(_)) => {
+                CompletionItemKind::FUNCTION
+            }
+            _ => CompletionItemKind::VARIABLE,
+        };
+        items.push(CompletionItem {
+            label: name.to_string(),
+            kind: Some(kind),
+            detail: Some("field of the current _ENV".to_string()),
+            ..Default::default()
+        });
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -46,8 +46,12 @@
 //! through to the real global environment. We do not follow `__index`, so
 //! rather than exempting a name list we treat *attaching a metatable* as what
 //! it is: the table's static field set stops being an exhaustive description
-//! of the environment, and the whole check goes silent for it. Same category
-//! as a dynamic-key write.
+//! of the environment, and the whole check goes silent for it. That fact is
+//! recorded on the shape itself by
+//! `summary_builder::mark_shapes_opened_by_metatable_calls`, so the
+//! `!is_closed` early return in `check_one_read` covers it — same category as
+//! a dynamic-key write, and the same single fact that makes navigation fall
+//! back to the global namespace (`name_resolution::env_describes_its_fields`).
 //!
 //! # Known limitations (deliberate silence)
 //!
@@ -68,14 +72,6 @@ use crate::uri_id::UriId;
 use crate::util::{node_text, LineIndex};
 use std::collections::{HashMap, HashSet};
 use tower_lsp_server::ls_types::*;
-
-/// Functions that make a table's statically recorded field set stop being an
-/// exhaustive description of it.
-///
-/// - `setmetatable` installs `__index` / `__newindex`, so reads may resolve
-///   through a chain we do not follow (the `{ __index = _G }` sandbox).
-/// - `rawset` writes a field we never record on the shape.
-const SHAPE_OPENING_FUNCTIONS: &[&str] = &["setmetatable", "rawset"];
 
 /// Identity of one environment table. `TableShapeId` is only unique per file,
 /// so the owning file is part of the key (a `local _ENV = require("m")` can
@@ -116,9 +112,15 @@ struct EnvCtx<'a> {
     severity: DiagnosticSeverity,
     /// `(env shape, field name) → write sites`.
     writes: HashMap<(ShapeKey, String), FieldWrites>,
-    /// Shapes whose recorded field set is no longer an exhaustive description
-    /// of the table — a dynamic-key write, a metatable, or a `rawset`. Nothing
-    /// about such an environment can be reported.
+    /// Environments made non-exhaustive by an `_ENV[k] = v` write, whose key
+    /// cannot be named statically.
+    ///
+    /// Narrower than it looks: metatables and `rawset` are *not* recorded here
+    /// but on the shape itself (`TableShape::is_closed`, set by
+    /// `summary_builder::mark_shapes_opened_by_metatable_calls`), and reach
+    /// this module through the `!is_closed` early return in `check_one_read`.
+    /// Only the dynamic-key case stays local, because it is a statement about
+    /// this specific `_ENV` binding rather than about the table.
     poisoned: HashSet<ShapeKey>,
 }
 
@@ -194,57 +196,12 @@ fn collect_writes(ctx: &mut EnvCtx, node: tree_sitter::Node) {
         // up holding the *last* write, whereas we need the first — and we need
         // to know whether each write sits on the top-level straight-line flow.
         kind::FUNCTION_DECLARATION => collect_function_declaration_write(ctx, node),
-        kind::FUNCTION_CALL => collect_shape_opening_call(ctx, node),
         _ => {}
     }
     for i in 0..node.named_child_count() {
         if let Some(child) = node.named_child(i as u32) {
             collect_writes(ctx, child);
         }
-    }
-}
-
-/// `setmetatable(t, …)` / `rawset(t, …)` — poison `t`'s shape.
-///
-/// This is what keeps the `setmetatable({}, { __index = _G })` sandbox silent,
-/// and it must not be replaced by "the call's return type doesn't resolve to a
-/// table". Two independent reasons:
-///
-/// - `local t = {}; setmetatable(t, …); _ENV = t` never routes the environment
-///   through the call's return value at all, so `_ENV`'s fact *is* the
-///   literal's `Known(Table)` shape;
-/// - even for `_ENV = setmetatable({}, …)`, today's silence is incidental:
-///   `setmetatable`'s stdlib signature is `---@generic T … @return T`, and it
-///   currently resolves to the un-substituted `EmmyType("T")` only because
-///   generic arguments are not back-filled from the call site. Implementing
-///   that would hand us the `{}` literal's shape and light up every name in
-///   the sandbox.
-fn collect_shape_opening_call(ctx: &mut EnvCtx, node: tree_sitter::Node) {
-    let Some(callee) = node.child_by_field(field::CALLEE) else {
-        return;
-    };
-    // Bare-name callee only. A qualified `debug.setmetatable` is a different
-    // function we do not track anyway.
-    if !SHAPE_OPENING_FUNCTIONS.contains(&node_text(callee, ctx.source)) {
-        return;
-    }
-    let Some(args) = node.child_by_field(field::ARGUMENTS) else {
-        return;
-    };
-    let arg_nodes = crate::util::extract_call_arg_nodes(args, ctx.source);
-    let Some(first) = arg_nodes.first() else {
-        return;
-    };
-    let fact = crate::type_inference::infer_node_type_in_file_id(
-        *first,
-        ctx.source,
-        ctx.uri_id,
-        ctx.scope_tree,
-        ctx.index,
-    );
-    let resolved = resolver::resolve_type(ctx.uri_id, &fact, ctx.index);
-    if let TypeFact::Known(KnownType::Table(shape_id)) = resolved.type_fact {
-        ctx.poisoned.insert((resolved.source_uri_id(), shape_id));
     }
 }
 

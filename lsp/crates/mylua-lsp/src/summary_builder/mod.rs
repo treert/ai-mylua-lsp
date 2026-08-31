@@ -81,6 +81,10 @@ pub fn build_file_analysis(
 
     let scope_tree = ctx.take_scope_tree();
 
+    // Must run after `take_scope_tree`: resolving the call's target needs the
+    // finished tree, not the build-time scope stack (which is empty by now).
+    mark_shapes_opened_by_metatable_calls(&mut ctx.table_shapes, root, source, &scope_tree);
+
     let summary = DocumentSummary {
         uri: uri.clone(),
         global_contributions: ctx.global_contributions,
@@ -97,6 +101,98 @@ pub fn build_file_analysis(
     };
 
     (summary, scope_tree)
+}
+
+/// Functions that stop a table's recorded field set from being an exhaustive
+/// description of it.
+///
+/// - `setmetatable` installs `__index` / `__newindex`, so a read may resolve
+///   through a chain we do not follow (the `{ __index = _G }` sandbox);
+/// - `rawset` writes a field that never reaches the shape.
+const SHAPE_OPENING_FUNCTIONS: &[&str] = &["setmetatable", "rawset"];
+
+/// Mark every table shape targeted by a `setmetatable` / `rawset` call as open.
+///
+/// # Why this belongs in the summary builder
+///
+/// "This table's field set is not exhaustive" is a **fact about the table**,
+/// not about any one consumer's question. `TableShape::is_closed` already
+/// expresses exactly that fact and already reaches every consumer:
+///
+/// - `name_resolution::env_describes_its_fields` — an `_ENV` on such a table
+///   no longer describes its fields, so navigation falls back to the global
+///   namespace (which is where `__index = _G` actually sends the lookup);
+/// - `diagnostics::env_field` — `check_one_read` already returns early on
+///   `!is_closed`;
+/// - `diagnostics::field_access` — an unknown field on an open table is a
+///   warning rather than an error.
+///
+/// Recording it once here keeps those three in agreement. `diagnostics/
+/// env_field.rs` previously carried a private copy of this scan, which only
+/// silenced *its own* check: the identical sandbox written as
+/// `local t = {}; setmetatable(t, mt); _ENV = t` still lost all navigation,
+/// because nothing had told the resolver the shape was no longer exhaustive.
+///
+/// Only a bare-name callee counts. A qualified `debug.setmetatable` is a
+/// different function that we do not track anyway.
+fn mark_shapes_opened_by_metatable_calls(
+    table_shapes: &mut HashMap<TableShapeId, TableShape>,
+    node: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+) {
+    if node.is_kind(kind::FUNCTION_CALL) {
+        if let Some(shape_id) = metatable_call_target(node, source, scope_tree) {
+            if let Some(shape) = table_shapes.get_mut(&shape_id) {
+                shape.mark_open();
+            }
+        }
+    }
+    for i in 0..node.named_child_count() {
+        if let Some(child) = node.named_child(i as u32) {
+            mark_shapes_opened_by_metatable_calls(table_shapes, child, source, scope_tree);
+        }
+    }
+}
+
+/// The file-local shape that a `setmetatable(t, …)` / `rawset(t, …)` call
+/// targets, when `t` is a name bound to one.
+///
+/// Deliberately narrow: only a bare identifier whose scope declaration carries
+/// a `Known(Table)` fact. An inline `setmetatable({}, …)` needs no handling
+/// here — the resulting `_ENV` never resolves to a shape in the first place, so
+/// it is already covered by the "environment of unknown shape" fallback.
+fn metatable_call_target(
+    call: tree_sitter::Node,
+    source: &[u8],
+    scope_tree: &ScopeTree,
+) -> Option<TableShapeId> {
+    // `obj:method(...)` is a different call shape whose `callee` is just `obj`.
+    if call.child_by_field(crate::syntax_kind::field::METHOD).is_some() {
+        return None;
+    }
+    let callee = call.child_by_field(crate::syntax_kind::field::CALLEE)?;
+    if !SHAPE_OPENING_FUNCTIONS.contains(&node_text(callee, source)) {
+        return None;
+    }
+    let args = call.child_by_field(crate::syntax_kind::field::ARGUMENTS)?;
+    let first = crate::util::extract_call_arg_nodes(args, source)
+        .first()
+        .copied()?;
+    // Unwrap the `variable` wrapper the grammar puts around a bare name.
+    let ident = if first.is_kind(kind::VARIABLE) && first.named_child_count() == 1 {
+        first.named_child(0)?
+    } else {
+        first
+    };
+    if !ident.is_kind(kind::IDENTIFIER) {
+        return None;
+    }
+    let name = node_text(ident, source);
+    match scope_tree.resolve_type(ident.start_byte(), name)? {
+        TypeFact::Known(KnownType::Table(shape_id)) => Some(*shape_id),
+        _ => None,
+    }
 }
 
 /// Backfill `anchor_shape_id` on `TypeDefinition`s whose anchor is a local

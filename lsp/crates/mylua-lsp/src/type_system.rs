@@ -236,6 +236,44 @@ pub fn format_resolved_type(fact: &TypeFact) -> String {
     }
 }
 
+/// The fact denoting the global environment table.
+///
+/// This is the type of the implicit chunk-level `_ENV` (§1.3): Lua 5.2+ compiles
+/// every chunk as a function whose first upvalue is `_ENV`, initialized to the
+/// global table, so a free name `x` is by definition `_ENV.x`. Modelling that
+/// table as the stdlib `_G` class means `local e = _ENV; e.some_global` resolves
+/// through the ordinary global namespace and costs no new `TypeFact` variant.
+///
+/// Materialized as a real scope declaration by
+/// `summary_builder::visitors::declare_implicit_env`.
+pub fn global_env_fact() -> TypeFact {
+    TypeFact::Known(KnownType::EmmyType(intern_lua_symbol(
+        crate::lua_builtins::GLOBAL_TABLE_NAME,
+    )))
+}
+
+/// True if `fact` denotes the global environment table itself.
+///
+/// Two spellings reach here and both mean the same table:
+/// - `EmmyType("_G")` — [`global_env_fact`], and what the stdlib `---@class _G`
+///   resolves to;
+/// - `GlobalRef("_G")` — an explicit `local _ENV = _G`, where `_G` is a free
+///   name whose value *is* the global table.
+///
+/// **Single source of truth.** Three layers ask this question — the summary
+/// builder (`summary_builder::type_infer::env_field_base_fact`), the query side
+/// (`type_inference::env_field_base_fact_in_scope`) and the resolver's
+/// `_G._G == _G` rule — and each used to carry its own copy, so a spelling added
+/// to one silently failed in the others.
+pub fn is_global_env_fact(fact: &TypeFact) -> bool {
+    let name = match fact {
+        TypeFact::Known(KnownType::EmmyType(name)) => name,
+        TypeFact::Stub(SymbolicStub::GlobalRef { name }) => name,
+        _ => return false,
+    };
+    name.as_str() == crate::lua_builtins::GLOBAL_TABLE_NAME
+}
+
 /// Recursively replace `EmmyType("self")` / `EmmyGeneric("self", …)`
 /// references inside `fact` with the supplied `class_name`. Used by
 /// `summary_builder` when building method signatures so that

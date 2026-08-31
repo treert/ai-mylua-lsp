@@ -19,6 +19,8 @@
 `_G` 就是全局环境表本身，因此 `_G.X` 与裸 `X` 是**同一个全局名**（`_G._G == _G`，故 `_G._G.X` 同理）。
 
 - **规范化时机**：在 `GlobalShard` 的键入口统一剥除 `_G.` 前缀（`normalize_global_path`），读、写、诊断、补全、`function_name_index` 共用同一键空间。上层调用方**不需要**再对 `_G` 做特殊判断。
+- **键空间与类型解析必须两侧都归一（重要）**：`normalize_global_path` 只管**键空间**，因此写侧 `_G._G.X = 1` 早就落在裸键 `X` 上；但读一个字段还要经过**类型解析**，那里同样需要承认 `_G._G == _G`。该规则由 `resolver::resolve_field_access` 单点实现（字段名为 `_G` 且基类型是全局环境时，原样返回环境 fact）。此前只有键空间做了归一，读侧与写侧因此分歧：`_G._G.X` 报 `Unknown field '_G' on type '_G'`，跳转与 hover 也全部落空。放在解析层而不是诊断层，goto / hover / 字段诊断一次对齐。
+- **"什么是全局环境 fact" 只有一个判据**：`type_system::global_env_fact`（构造）与 `type_system::is_global_env_fact`（判定）是唯一实现，构建侧（`summary_builder::type_infer`）、查询侧（`type_inference`）与 `resolver` 共用。两种拼写都算全局环境：`EmmyType("_G")`（隐式 `_ENV` 声明 / stdlib `---@class _G`）与 `GlobalRef("_G")`（显式 `local _ENV = _G`）。三层曾各自复制一份，新增拼写只改一处就会在另两层静默失效。
 - **不产生重复条目**：`_G.Foo = 1` 只登记一条 `Foo`，不再同时登记 `_G.Foo`；`workspace/symbol` 因此不会出现两个同义条目。
 - **kind 跟随规范化**：`_G.X = v` 定义的是全局变量本身，登记为 `Variable`；`_G.T.f = v` 规范化后仍是多段路径，登记为 `TableExtension`。
 - **裸 `_G` 是内置概念**：`_G` 的值即全局环境表，由 LSP 直接内置识别（`GLOBAL_TABLE_NAME`），**不依赖 stdlib 声明 `_G = {}`**——因此即使用户未配置任何 library，`_G.X` 仍可正常解析。stdlib 只保留 `---@class _G` 提供 hover 文档与跳转目标。`_G.` 的成员枚举（补全）遍历 trie 根集合，而非 `_G` 节点的 children。
@@ -35,13 +37,39 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
 这样作用域树成为 `_ENV` 的**单一真源**：所有既有的「这个名字是局部变量吗」的提问——semantic tokens、hover、goto、补全、`undefinedGlobal`——都自动得到正确答案，各层**不需要**自己写 `_ENV` 分支。
 
-**判据是「`_ENV` 指向什么」，而非「有无声明」**（预置后总是有声明）：
+**`_ENV` 的类型被归一为恰好两种**（`summary_builder::visitors::env_binding_fact`，三个绑定点共用：`_ENV = expr`、`local _ENV = expr`、`_ENV` 形参）：
 
-| `_ENV` 指向 | 自由名 `x` 的语义 |
+| 归一结果 | 何时 | 说明 |
+|---|---|---|
+| 全局环境 fact | 隐式声明、`_ENV = _G`、`local _ENV = _G`、或指向 `_G` 的局部 | 常规全局路径 |
+| 某个 `TableShape` | 其余一切 | RHS 已有 shape 则原样用；否则**合成一个并 `mark_open`** |
+
+合成 shape 的必要性：自由名写入 `x = 1` 就是 `_ENV.x = 1`，需要一张表来承载。此前 `_ENV` 类型推不出时（`setmetatable(...)` 的泛型返回、工厂函数、形参）没有落点，于是 `x = 1` **既不进全局索引（正确）、也不进任何 shape**——名字凭空消失，goto / hover / references 全部失效。归一后写入总有归属，且仍不污染全局索引。
+
+**两种支持的沙箱写法**（`__index` **不做追踪**，其余情形一律按第 2 种处理）：
+
+| 写法 | shape | 读 | 写 | 诊断 |
+|---|---|---|---|---|
+| 1. 无元表，`_ENV = {}`；需要的全局提前 `local` 保存 | `is_closed` | **只查 shape** | 落 shape | 缺失字段报 `envUnknownField` |
+| 2. `setmetatable({}, {__index=_G})`：可读全局、不写全局 | 非 `is_closed` | 查 shape → **回退全局** | 落 shape | 两处都查不到报 `undefinedGlobal` |
+
+第 2 种是**约定而非推断**：不追踪 `__index` 指向何处，凡带元表（或类型推不出）的环境**一律假定**为 `{__index=_G}`。`__index` 指到别处的代码也会得到全局的答案——这是刻意的，用于迫使按上述两种方式书写。
+
+约定带来的关键收益：**诊断可以恢复**。既然假定 `__index=_G`，那么「shape 里没有、全局索引里也没有」就等于运行时是 nil，报 `undefinedGlobal` 不再是猜测。此前这类环境下诊断全面静默，会掩盖真实的 nil 访问。
+
+**唯一判据是 `env_field_at` 是否返回 `Some`**（`name_resolution`），四个消费方共用：导航（`resolve_bare_name`）、`references::verify_global`、`undefinedGlobal`、补全（经 `env_completion_scope`，同一套谓词）。返回 `None` 即「按普通全局处理」。四者不一致时，光标处把沙箱名解析为全局、而验证侧把沙箱内出现点排除掉，引用结果会只剩声明而丢掉所有沙箱内用法（§1.6 要防的正是这类不对称）。
+
+**`_ENV = _G` 的恢复语义**：`local _ENV = _G`、`_ENV = _G`、以及先 `local G = _G` 再 `_ENV = G` 都能正确恢复到全局环境（写侧重新进入 `GlobalShard`）。但**先重定向再 `_ENV = _G` 无法恢复**——那时名字 `_G` 已经是 nil，该语句实际是 `_ENV = nil`，我们也正确报出 `'_G' is not a field of the current _ENV`。要恢复必须提前捕获 `_G`。
+
+**shape 何时非穷尽**：`setmetatable(t, …)` / `rawset(t, …)` 在构建侧对目标 shape 调 `TableShape::mark_open()`（`summary_builder::mark_shapes_opened_by_metatable_calls`），覆盖分离式写法 `local t = {}; setmetatable(t, mt); _ENV = t`——它的 `_ENV` fact **就是** `{}` 字面量的确定 shape，只看「是不是 table」会漏掉。「字段集合非穷尽」是关于**这张表本身**的事实，记录在 shape 上即经既有的 `is_closed` 单点流向全部消费方：
+
+| 消费方 | 如何收到 |
 |---|---|
-| 全局环境（隐式声明，或显式 `local _ENV = _G`）| 普通全局，走 `GlobalShard`（即常规路径）|
-| 其他表（`local _ENV = t`、`_ENV` 形参、`_ENV = t`）| 该表的字段，**不进** `GlobalShard`，且不报 `undefinedGlobal` |
-| 未知类型（`local _ENV = f()`）| 保持静默：既不污染全局索引，也不猜测字段是否存在 |
+| 导航 | `env_describes_its_fields` 检查 `is_closed` |
+| `envUnknownField` | `check_one_read` 原有的 `!is_closed` 早退 |
+| `luaFieldWarning` | 严重度自 `luaFieldError` 降为 `luaFieldWarning`（两者默认同为 `warning`，故默认配置下不可见）|
+
+> `mark_open` 只标记**实际传给** `setmetatable` 的那张表，同文件其它表不受影响。该扫描此前是 `diagnostics/env_field.rs` 的私有副本，只让它自己的检查静默；收归构建侧后私有扫描已退役，`env_field.rs` 的 `poisoned` 只剩 `_ENV[k] = v` 动态键这一项。
 
 - **读侧**复用 `FieldOf` stub，**写侧**复用 `register_nested_field_write`，未引入新的 `TypeFact` 类型。
 - **裸名与点号两条写入路径都要设闸**：`x = 1`、`Foo.bar = 1`、`function foo()`、`function Foo.f()` 在沙箱下**一律不登记**任何全局。点号路径曾漏设闸门，导致 `Foo.bar = 1` 仍导出全局 `Foo.bar`；`_G.x = 1` 更隐蔽——经 `_G.` 规范化后落在裸键 `x` 上。判据统一为「基名在该位置属于重定向环境的字段」（`env_field_base_fact`），`_ENV` 自身返回 `None`，故 `_ENV.foo = 1` 仍正确归一为全局 `foo`。
@@ -55,15 +83,31 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
   两种 `function` 形式曾一并被闸门拦掉，使 `function foo() end` 的名字**既不在全局索引、也不在环境 shape**——等于凭空消失，goto / hover / references 全部失效，比它替代掉的索引泄漏更糟。赋值形式 `foo = function() end` 一直是对的，两者必须对称。
 - **查询侧的对应支路**：三个导航能力统一经 §1.6 的 `name_resolution::resolve_bare_name` 得到 `EnvField`，各自呈现。不要在单个能力里内联 `_ENV` 判定。
 - **`_ENV = expr` 的位置敏感性**由 `ScopeDecl.visible_after_byte` 表达：赋值前的自由名仍属于旧环境，赋值后属于新环境。因此 `g = 1; _ENV = {}; g = 2` 中两个 `g` 是**不同符号**，goto/references 不会互相关联。
-- **`_ENV` 自身永不登记为全局**：它是 upvalue，`_G._ENV` 恒为 nil。
-- **与 `_G` 的不对称性**：`_G` 是全局表的字段且指向自身，故 `_G.` 可重复剥离（`_G._G.X ≡ X`）；`_ENV` 是词法名而非表字段，只能作路径**起点**，故 `_ENV.` 仅在头部剥离一次。因此 `_ENV.X ≡ X`、`_ENV._G.X ≡ X`，而 `_G._ENV.X` 与 `_ENV._ENV.X` 运行时是 index nil，**不做归一**，保留为无法解析的伪键。
-- **已知限制**：`load(chunk, name, mode, env)` 的第四参数、条件分支内的 `_ENV` 赋值（需流敏感分析）、`debug.setupvalue` 均不追踪。沙箱内的自由名**不提供补全**（不污染、不误报，但也不提供能力）；`goto` / `hover` / `references` 经 §1.6 的公共层已支持。`document_highlight` 按设计只做文本 + 作用域匹配、不查索引，因此与其它全局名一样不区分环境边界。
+- **`_ENV` 自身永不登记为全局**：它是 upvalue，`_G._ENV` 恒为 nil。因此它也**不在** `lua_builtins::COMMON` 的内置全局名单里——隐式声明已让"这是局部变量吗"的提问对 `undefinedGlobal` 与 semantic tokens 都给出正确答案，名单里再列一次只会陈述与模型相反的事实。
+- **与 `_G` 的不对称性**：`_G` 是全局表的字段且指向自身，故 `_G.` 可重复剥离（`_G._G.X ≡ X`，读侧的同一规则见 §1.2）；`_ENV` 是词法名而非表字段，只能作路径**起点**，故 `_ENV.` 仅在头部剥离一次。因此 `_ENV.X ≡ X`、`_ENV._G.X ≡ X`，而 `_G._ENV.X` 与 `_ENV._ENV.X` 运行时是 index nil，**不做归一**，保留为无法解析的伪键。
+- **补全按环境分层**（`completion::collect_free_name_completions`）：判据取自同一个 `name_resolution::env_completion_scope`，因此补全给出的名字与导航/诊断的判断一致——不会出现"补全提示的名字被 `envUnknownField` 立刻打红"。
+
+| 环境 | 补全候选 |
+|---|---|
+| 全局环境 | 全局命名空间（常规） |
+| 穷尽 shape（写法 1）| **只有**该 shape 的字段（全局在那里是 nil，给了就是错的）|
+| 非穷尽 shape（写法 2 及其余）| shape 字段 **叠加** 全局命名空间（按 `{__index=_G}` 约定两者都可达）|
+
+  可见的 `local` 不受影响——它们是词法名而非环境字段，沙箱开头 `local print = print` 的意义正在此。
+- **已知限制**：`load(chunk, name, mode, env)` 的第四参数、条件分支内的 `_ENV` 赋值（需流敏感分析）、`debug.setupvalue` 均不追踪；`__index` 的实际指向**按设计不追踪**（见上文约定）。`document_highlight` 按设计只做文本 + 作用域匹配、不查索引，因此与其它全局名一样不区分环境边界。沙箱表**字面量内**写的字段仍不可达（见 `future-work.md` §3.1）。
 - **对 stub / 声明文件的影响（重要）**：`_ENV = {}` 是一条**真实生效**的环境重绑语句，不是"声明 `_ENV` 存在"。因此声明文件（stdlib、`workspace.library` 下的第三方 stub）中**不得**出现该语句——否则同文件中位于其**之后**的所有「赋值形式」全局（`X = {}`）都会被视为那张废弃表的字段而无法导出到全局索引；函数形式声明（`function f() end`）不受影响，故故障表现极为隐蔽。自带 stdlib 已移除该行；`_ENV` 无需任何声明，由隐式声明提供。
 - **自由名 fact 的唯一入口**：文法会把裸名包成两种节点形状（`identifier` 与单子节点的 `variable`），两者必须应用同一套规则。查询侧收敛于 `type_inference::infer_bare_name_fact`，构建侧收敛于 `summary_builder::type_infer` 的对应分支；新增规则只改一处会在另一形状上静默失效。
 
 #### 1.3.1 环境字段未定义诊断（`envUnknownField`）
 
-环境被重定向后，读取新环境中不存在的名字在运行时是 `nil`，几乎总是 bug。该诊断由 `diagnostics/env_field.rs` 实现，与 `undefinedGlobal` 接力：后者一旦发现环境被重定向便退出（此时名字是表字段而非全局），前者从此处接管。
+环境被重定向后，读取新环境中不存在的名字在运行时是 `nil`，几乎总是 bug。该诊断由 `diagnostics/env_field.rs` 实现，与 `undefinedGlobal` **按环境形态分工**：
+
+| 环境形态 | 归谁管 |
+|---|---|
+| 穷尽 shape（写法 1，无元表）| `envUnknownField` —— 字段集合已知，缺失即确定为 nil |
+| 非穷尽 shape（写法 2 及其余）| `undefinedGlobal` —— 按 `{__index=_G}` 约定回退查全局索引，两处皆无才报 |
+
+交接点是 `name_resolution::env_field_at`：返回 `Some` 则 `undefinedGlobal` 静默、本诊断接管；返回 `None` 则按普通全局走 `undefinedGlobal`。
 
 **为什么这条诊断是位置敏感的，而 `luaFieldWarning` 不是**：普通 table 的 shape 是全文件汇总、无顺序概念，`local M = {}; print(M.a); M.a = 1` 不报——此行为**不变**。chunk 的环境则不同：文件顶层语句恰好执行一次、且按源码顺序，因此「读取早于首次写入」是可判定的事实。
 
@@ -87,15 +131,17 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
 **shape 失去穷尽性的三个来源**（任一命中即静默整个环境）：
 
-| 来源 | 说明 |
-|---|---|
-| 动态键 `_ENV[k] = v` | 字段名无法静态确定 |
-| `setmetatable(t, …)` | `__index` / `__newindex` 链不被追踪 |
-| `rawset(t, …)` | 写入不登记在 shape 上 |
+| 来源 | 说明 | 记录位置 |
+|---|---|---|
+| `setmetatable(t, …)` | `__index` / `__newindex` 链不被追踪 | 构建侧 `mark_shapes_opened_by_metatable_calls` → `TableShape::is_closed` |
+| `rawset(t, …)` | 写入不登记在 shape 上 | 同上 |
+| 动态键 `_ENV[k] = v` | 字段名无法静态确定 | 本模块局部的 `poisoned` 集合 |
 
-> **不能**用「`setmetatable(...)` 的返回类型推不出 table」来代替对调用本身的追踪，两个独立原因：① `local t = {}; setmetatable(t, …); _ENV = t` 根本不经过返回值，`_ENV` 的 fact **就是**字面量的 `Known(Table)`；② 即便 `_ENV = setmetatable({}, …)`，当前的静默也是**偶然**的——stdlib 签名是 `---@generic T … @return T`，现在解析为未替换的 `EmmyType("T")` 仅因为泛型实参尚未从调用点回填；一旦实现回填就会拿到 `{}` 的 shape，沙箱内全部名字爆红。`test_global_env.rs::setmetatable_env_reports_nothing` 锁定此点。
+前两者记录在 **shape 自身**上，因为「字段集合非穷尽」是关于那张表的事实，而非本诊断独有的关切——同一事实还要供导航的全局回退（§1.3）与 `luaFieldWarning` 的严重度使用。本模块因此只需原有的 `!is_closed` 早退即可收到。动态键写入是关于**这一处 `_ENV` 绑定**的陈述而非关于表，故仍留在本模块。
 
-**保持静默的其余场景**：`_ENV` 指向未知类型 / 非 table；shape 非 closed；`load` 第四参数、`debug.setupvalue`、`debug.setmetatable`；仅在函数体内写入的字段。
+> **不能**用「`setmetatable(...)` 的返回类型推不出 table」来代替对调用本身的追踪，两个独立原因：① `local t = {}; setmetatable(t, …); _ENV = t` 根本不经过返回值，`_ENV` 的 fact **就是**字面量的 `Known(Table)`；② 即便 `_ENV = setmetatable({}, …)`，当前"返回类型推不出 table"也是**偶然**的——stdlib 签名是 `---@generic T … @return T`，现在解析为未替换的 `EmmyType("T")` 仅因为泛型实参尚未从调用点回填；一旦实现回填就会拿到 `{}` 的 shape。届时静默由 `is_closed` 独立保证（该 shape 已被标 open），`test_global_env.rs::setmetatable_env_reports_nothing` 与 `late_setmetatable_env_navigates_a_free_name_to_the_global` 共同锁定此点。
+
+**保持静默的其余场景**：`_ENV` 指向未知类型 / 非 table；`load` 第四参数、`debug.setupvalue`、`debug.setmetatable`；仅在函数体内写入的字段。
 
 **实现要点**：写点位置由本模块自建的写点表给出，**不用** `FieldInfo.def_range`——后者经 `set_field` 覆盖后是**最后一次**写入位置，而位置敏感判定需要的是首次写入，且需要区分「顶层直线流」与「函数体/分支内」。写点收集必须覆盖赋值形式与声明形式（`function foo() end`）两种写法，缺一即对该形态误报。
 
