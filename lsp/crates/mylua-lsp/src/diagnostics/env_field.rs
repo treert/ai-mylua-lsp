@@ -29,9 +29,16 @@
 //! not attempt to answer.
 //!
 //! The check is therefore fenced in on both sides:
-//! - the **read** must sit directly in the chunk's top-level scope;
-//! - **every** write of that field must sit directly in the chunk's top-level
-//!   scope, otherwise the field is treated as defined and nothing is reported.
+//! - the **read** must sit on the chunk's straight-line execution flow;
+//! - **every** write of that field must sit on that same flow, otherwise the
+//!   field is treated as defined and nothing is reported.
+//!
+//! "Straight-line flow" means the chunk's top-level scope *or* a plain
+//! `do … end` block nested in it: such a block adds a lexical scope but no
+//! control flow, so its statements still run exactly once in source order.
+//! Scoping a sandbox with `do local _ENV = … end` is the idiomatic spelling,
+//! and excluding it left that whole shape unchecked. See
+//! `ScopeTree::is_on_chunk_straight_line`.
 //!
 //! # Why no exemption for built-ins
 //!
@@ -81,12 +88,12 @@ type ShapeKey = (UriId, TableShapeId);
 /// Where a field of a redirected `_ENV` gets written.
 #[derive(Default)]
 struct FieldWrites {
-    /// Earliest write sitting directly in the chunk's top-level scope.
+    /// Earliest write sitting on the chunk's straight-line execution flow.
     first_top_level: Option<usize>,
     /// A write was seen somewhere whose execution order relative to a read's
     /// byte position is unknowable — inside a function body, or inside a
-    /// nested block such as an `if` branch. Any such write disables the
-    /// positional judgement for this field.
+    /// conditional / loop block such as an `if` branch. Any such write disables
+    /// the positional judgement for this field.
     has_indirect: bool,
 }
 
@@ -176,10 +183,17 @@ fn redirected_env_shape_at(ctx: &EnvCtx, name: &str, offset: usize) -> Option<Sh
     env_shape_at(ctx, offset)
 }
 
-/// True if `offset` sits directly in the chunk's top-level scope — not inside
-/// a function body, and not inside a nested block.
+/// True if `offset` sits on the chunk's straight-line execution flow — the file
+/// scope itself, or nested only inside plain `do … end` blocks.
+///
+/// A `do … end` block is included because it adds a lexical scope but no
+/// control flow: its statements still run exactly once, in source order. That
+/// matters in practice, because scoping a sandbox with
+/// `do local _ENV = … end` is the idiomatic spelling. Function bodies,
+/// conditional branches and loop bodies stay excluded — see
+/// `ScopeTree::is_on_chunk_straight_line`.
 fn is_top_level(ctx: &EnvCtx, offset: usize) -> bool {
-    ctx.scope_tree.is_file_level_decl(offset)
+    ctx.scope_tree.is_on_chunk_straight_line(offset)
 }
 
 // ---------------------------------------------------------------------------

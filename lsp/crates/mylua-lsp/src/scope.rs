@@ -231,6 +231,38 @@ impl ScopeTree {
         };
         self.scopes[scope_id].kind == ScopeKind::File
     }
+
+    /// Returns `true` if `byte_offset` sits on the chunk's **straight-line
+    /// execution flow**: the file scope itself, or nested only inside plain
+    /// `do … end` blocks.
+    ///
+    /// Wider than `is_file_level_decl` on purpose. A `do … end` block adds a
+    /// lexical scope but no control flow: its statements still run exactly
+    /// once, in source order, as part of the chunk's single pass. Every other
+    /// scope kind breaks that guarantee — a function body runs at an unknown
+    /// time (or never), an `if` branch may not run, a loop body runs an unknown
+    /// number of times and can therefore observe a *later* write on a
+    /// subsequent iteration.
+    ///
+    /// Used by `diagnostics::env_field`, whose whole judgement is "does this
+    /// read happen before the first write", which is only decidable on that
+    /// flow.
+    pub fn is_on_chunk_straight_line(&self, byte_offset: usize) -> bool {
+        let Some(mut scope_id) = self.innermost_scope(byte_offset) else {
+            return false;
+        };
+        loop {
+            match self.scopes[scope_id].kind {
+                ScopeKind::File => return true,
+                ScopeKind::DoBlock => {}
+                _ => return false,
+            }
+            match self.scopes[scope_id].parent {
+                Some(parent_id) => scope_id = parent_id,
+                None => return false,
+            }
+        }
+    }
 }
 
 #[cfg(test)]

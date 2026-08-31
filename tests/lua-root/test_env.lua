@@ -136,12 +136,12 @@ end
 local function make_empty() return {} end
 do
     local _ENV = make_empty()
-    local v = GlobalForParam     -- 不应跳转（环境字段集合已知且为空）
+    local v = GlobalForParam     -- 不应跳转，且应报 envUnknownField
     print(v)
 end
--- 注意：上面块内的读**不报** envUnknownField —— 该诊断按设计只检查 chunk
--- 顶层直线执行流，do...end 块内不在其中（见 §1.3.1 双侧围栏）。因此这里
--- 既无跳转也无提示。同样的代码放在顶层就会报（见第 5 节）。
+-- 顶层 `do…end` 只是词法作用域、不引入控制流，其语句照样按源码顺序恰好执行
+-- 一次，因此仍属「chunk 顶层直线执行流」，双侧围栏成立（见 §1.3.1）。函数体、
+-- if 分支、循环体则不在其中。
 
 -- 3e. 穷尽环境的自有字段
 do

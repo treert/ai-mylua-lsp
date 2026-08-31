@@ -76,12 +76,10 @@
 - **方案**：若要修，需让它对非 local 的名字也走 `name_resolution`（§1.6 的公共层），代价是每次高亮请求都要做索引查询。需先评估该请求的调用频次（编辑器在光标移动时会频繁触发）是否承受得起。
 - **风险**：这是性能与精确性的取舍，不是纯 bug 修复。改动前应先量测。
 
-### 3.3 [P3] `envUnknownField` 不检查顶层 `do…end` 块
+### 3.3 [已完成] `envUnknownField` 现已覆盖顶层 `do…end` 块
 
-- **问题**：该诊断的双侧围栏（§1.3.1）要求读与写都「直接位于 chunk 顶层作用域」，判据是 `ScopeTree::is_file_level_decl`。顶层 `do…end` 块被一并排除，但它其实**在**顶层直线执行流上——执行顺序完全确定，与函数体（调用时机未知）和 `if` 分支（是否执行未知）性质不同。
-- **方案**：放宽判据，允许「祖先链上只有 `do` 块、没有函数体与条件分支」的位置。
-- **收益**：沙箱代码常写成 `do local _ENV = … end` 以限定作用域，这类写法目前完全不受检查。
-- **风险**：需确认 `while` / `repeat` 的 body 不被误纳入——它们同样是 `do` 块形态但执行次数不确定。
+- 双侧围栏的判据从 `ScopeTree::is_file_level_decl` 改为 `ScopeTree::is_on_chunk_straight_line`：chunk 顶层作用域 + 嵌在其中的纯 `do … end` 块。
+- `while` / `repeat` / `for` 的 body 与 `if` 分支仍排除（判据取自 `ScopeKind`，不看表面语法）。见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3.1。
 
 ---
 

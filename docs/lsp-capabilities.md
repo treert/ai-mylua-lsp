@@ -156,7 +156,7 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 `@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
 
-`envUnknownField` 与 `undefinedGlobal` **按环境形态分工**（不是"只要重定向就交接"）：`_ENV` 指向形状**穷尽**（无元表、无 `rawset`）的表时由 `envUnknownField` 判断字段是否存在（抑制码 `env-field`），要求读写均位于 chunk 顶层直线执行流；形状**非穷尽**时按 `{__index=_G}` 约定处理——环境表没有的名字回退查全局索引，两处皆无则由 `undefinedGlobal` 报出。`__index` 的实际指向刻意不追踪。因此内置库名（含 `_G`）在穷尽环境下**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
+`envUnknownField` 与 `undefinedGlobal` **按环境形态分工**（不是"只要重定向就交接"）：`_ENV` 指向形状**穷尽**（无元表、无 `rawset`）的表时由 `envUnknownField` 判断字段是否存在（抑制码 `env-field`），要求读写均位于 chunk 的直线执行流上（顶层作用域或嵌在其中的纯 `do … end` 块；函数体、`if` 分支、循环体不算）；形状**非穷尽**时按 `{__index=_G}` 约定处理——环境表没有的名字回退查全局索引，两处皆无则由 `undefinedGlobal` 报出。`__index` 的实际指向刻意不追踪。因此内置库名（含 `_G`）在穷尽环境下**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。

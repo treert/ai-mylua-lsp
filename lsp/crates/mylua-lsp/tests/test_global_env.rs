@@ -1556,6 +1556,77 @@ local x = Shadowed
     );
 }
 
+#[test]
+fn a_do_block_sandbox_is_still_on_the_chunks_straight_line_flow() {
+    // `do local _ENV = … end` is the idiomatic way to scope a sandbox, and it
+    // used to escape the check entirely: the both-sided fence asked for the
+    // chunk's *top-level scope*, which a `do` block is not. But a `do` block
+    // adds a lexical scope and no control flow — its statements run exactly
+    // once, in source order, so both halves of the judgement still hold.
+    //
+    // `NotHere` is missing from the (empty, exhaustive) environment, and the
+    // navigation side already agrees: goto returns nothing there. Staying
+    // silent meant offering neither a jump nor a reason.
+    let src = r#"NotHere = 1
+do
+    local _ENV = {}
+    local x = NotHere
+    print(x)
+end
+"#;
+    assert!(
+        goto_lines(src, "do_block_env_goto.lua", pos(3, 14)).is_empty(),
+        "the environment is fully known and empty, so the global must not be reachable"
+    );
+    let diags = env_field_diags(src, "do_block_env_diags.lua");
+    assert!(
+        diags.iter().any(|d| d.contains("'NotHere'")),
+        "`envUnknownField` must fire inside a top-level `do` block, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn a_do_block_sandbox_stays_silent_for_its_own_fields() {
+    // The complement: relaxing the fence must not start flagging names the
+    // sandbox genuinely has, whether they come from the literal or from a
+    // write earlier in the same block. (`print` is captured as a local first —
+    // built-ins are deliberately *not* exempt, which is exactly why the
+    // canonical sandbox opens that way.)
+    let src = r#"local print = print
+do
+    local _ENV = { from_literal = 1 }
+    from_write = 2
+    print(from_literal)
+    print(from_write)
+end
+"#;
+    assert_eq!(
+        env_field_diags(src, "do_block_env_own.lua"),
+        Vec::<String>::new(),
+        "fields the sandbox has must stay clean"
+    );
+}
+
+#[test]
+fn a_loop_body_is_not_straight_line_flow() {
+    // BOUNDARY: `while … do … end` looks like a `do` block but is not one —
+    // the body runs an unknown number of times, so a read can legitimately
+    // observe a write that sits *later* in the source on a later iteration.
+    // The positional judgement is undecidable there, so nothing is reported.
+    let src = r#"local _ENV = {}
+while true do
+    print(later_field)
+    later_field = 1
+end
+"#;
+    assert_eq!(
+        env_field_diags(src, "loop_body_env.lua"),
+        Vec::<String>::new(),
+        "a loop body must not be judged positionally"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Completion follows the environment
 // ---------------------------------------------------------------------------
