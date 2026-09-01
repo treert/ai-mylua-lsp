@@ -788,13 +788,26 @@ fn infer_operator_type(ctx: &mut BuildContext, node: tree_sitter::Node, depth: u
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" => {
+                // `a and b` evaluates to `b` when it evaluates to anything
+                // useful; `a` is typically just a guard.
                 if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_expression_type(ctx, right, depth + 1);
                 }
             }
             "or" => {
+                // `a or b` yields `a` unless `a` is falsy, so prefer `a`'s
+                // type and fall back to `b` when nothing is known about `a`.
+                // Build time has no aggregation index, so `Stub` is kept
+                // rather than resolved — see `TypeFact::is_uninformative`.
                 if let Some(left) = node.child_by_field(field::LEFT) {
-                    return infer_expression_type(ctx, left, depth + 1);
+                    let left_fact = infer_expression_type(ctx, left, depth + 1);
+                    if !left_fact.is_uninformative() {
+                        return left_fact;
+                    }
+                    return match node.child_by_field(field::RIGHT) {
+                        Some(right) => infer_expression_type(ctx, right, depth + 1),
+                        None => left_fact,
+                    };
                 }
             }
             _ => {}

@@ -66,13 +66,26 @@ where
             | kind::GT_EQ
             | kind::WORD_NOT => return TypeFact::Known(KnownType::Boolean),
             kind::WORD_AND => {
+                // `a and b` evaluates to `b` when it evaluates to anything
+                // useful; `a` is typically just a guard.
                 if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_child(right);
                 }
             }
             kind::WORD_OR => {
+                // `a or b` yields `a` unless `a` is falsy, so prefer `a`'s
+                // type and fall back to `b` when nothing is known about `a`.
+                // No aggregation index here, so `Stub` is left alone rather
+                // than resolved — see `TypeFact::is_uninformative`.
                 if let Some(left) = node.child_by_field(field::LEFT) {
-                    return infer_child(left);
+                    let left_fact = infer_child(left);
+                    if !left_fact.is_uninformative() {
+                        return left_fact;
+                    }
+                    return node
+                        .child_by_field(field::RIGHT)
+                        .map(&mut infer_child)
+                        .unwrap_or(left_fact);
                 }
             }
             _ => {}

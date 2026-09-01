@@ -29,6 +29,25 @@ pub enum TypeFact {
     Unknown,
 }
 
+impl TypeFact {
+    /// Whether this fact carries no usable type information.
+    ///
+    /// Drives the `a or b` fallback: Lua evaluates to `a` unless `a` is
+    /// falsy, so `a`'s type is preferred — but when inference learned
+    /// nothing about `a`, `b` is the better answer than giving up. This
+    /// makes the common `local v = maybe_missing and maybe_missing.f() or
+    /// "default"` idiom infer `string` instead of nothing.
+    ///
+    /// `Stub` is deliberately *not* uninformative: it is a promise that
+    /// cross-file resolution can still produce a type, and discarding it
+    /// here would throw that away before the resolver ever runs. Callers
+    /// with access to the aggregation index should resolve first and test
+    /// the result.
+    pub fn is_uninformative(&self) -> bool {
+        matches!(self, TypeFact::Unknown)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum KnownType {
     Nil,

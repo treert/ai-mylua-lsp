@@ -279,13 +279,35 @@ fn infer_operator_type_in_file_id(
                 return TypeFact::Known(KnownType::Boolean);
             }
             "and" => {
+                // `a and b` evaluates to `b` whenever it evaluates to
+                // anything useful, and `a` is typically just a guard, so
+                // `b` is the informative side.
                 if let Some(right) = node.child_by_field(field::RIGHT) {
                     return infer_node_type_in_file_id(right, source, uri_id, scope_tree, index);
                 }
             }
             "or" => {
-                if let Some(left) = node.child_by_field(field::LEFT) {
-                    return infer_node_type_in_file_id(left, source, uri_id, scope_tree, index);
+                // `a or b` yields `a` unless `a` is falsy, so `a`'s type
+                // wins — but only if we actually know one. This path has
+                // the aggregation index, so a `Stub` gets resolved before
+                // being judged; a stub that resolves to nothing is no more
+                // useful than `Unknown`.
+                let left_fact = node
+                    .child_by_field(field::LEFT)
+                    .map(|left| infer_node_type_in_file_id(left, source, uri_id, scope_tree, index));
+                if let Some(left_fact) = left_fact {
+                    if !resolver::resolve_type(uri_id, &left_fact, index)
+                        .type_fact
+                        .is_uninformative()
+                    {
+                        return left_fact;
+                    }
+                    return node
+                        .child_by_field(field::RIGHT)
+                        .map(|right| {
+                            infer_node_type_in_file_id(right, source, uri_id, scope_tree, index)
+                        })
+                        .unwrap_or(left_fact);
                 }
             }
             _ => {}

@@ -91,6 +91,101 @@ print(abc)"#;
     );
 }
 
+// ---------------------------------------------------------------------------
+// `and` / `or` inference
+//
+// `a and b` takes `b` (`a` is just a guard); `a or b` prefers `a` and only
+// falls back to `b` when nothing is known about `a`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn hover_or_fallback_does_not_reach_a_stub_left_operand() {
+    // Documents a current limitation rather than the desired outcome.
+    //
+    // `gg_missing` is undeclared, so ideally the `and` chain yields nothing
+    // and the `or` fallback supplies `string` from the literal. It does not:
+    // `summary_builder` infers a bare name as `Stub(GlobalRef)`, never
+    // `Unknown`, and a `Stub` is deliberately kept (it may still resolve
+    // across files). The choice between operands is therefore frozen at
+    // build time, before the resolver can report that the stub resolves to
+    // nothing — and hover reads the stored `ScopeDecl.type_fact`.
+    //
+    // The `or` rule *does* apply on the `type_inference` path, which has the
+    // aggregation index and resolves before judging. Closing this gap needs
+    // the operand choice deferred into resolution.
+    let src = r#"local xx = gg_missing and gg_missing.some_func() or ""
+print(xx)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "or_fallback.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(1, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let hover = result.expect("hover should return a result for `xx`");
+    let content = hover_content_string(&hover);
+    assert!(
+        !content.contains("string"),
+        "if this now reports `string`, the deferred-choice gap closed — \
+         flip this assertion, got: {:?}",
+        content
+    );
+}
+
+#[test]
+fn hover_or_keeps_left_type_when_left_is_known() {
+    let src = r#"local base = 1
+local yy = base or "fallback"
+print(yy)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "or_keep_left.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let hover = result.expect("hover should return a result for `yy`");
+    let content = hover_content_string(&hover);
+    assert!(
+        !content.contains("string"),
+        "a known left operand must win over the `or` fallback, got: {}",
+        content
+    );
+}
+
+#[test]
+fn hover_and_takes_right_operand_type() {
+    let src = r#"local flag = nil
+local zz = flag and "chosen"
+print(zz)"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "and_right.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    );
+    let hover = result.expect("hover should return a result for `zz`");
+    let content = hover_content_string(&hover);
+    assert!(
+        content.contains("string"),
+        "`and` should take the right operand's type, got: {}",
+        content
+    );
+}
+
 #[test]
 fn hover_type_name_shows_definition_origin_link() {
     let src = r#"---@class OriginClass
