@@ -14,6 +14,18 @@ pub enum ScopeKind {
     DoBlock,
     WhileBlock,
     RepeatBlock,
+    /// Outer shell spanning the whole `if … end` construct. Holds no
+    /// declarations of its own; it exists so the three branch scopes
+    /// (`IfThenBlock` / `ElseIfBlock` / `ElseBlock`) can be *siblings*
+    /// under it while `innermost_scope` still has a parent region to
+    /// descend through.
+    ///
+    /// Branch conditions sit in this shell rather than in any branch,
+    /// matching Lua semantics: a condition is evaluated outside the
+    /// branch it guards.
+    IfStatement,
+    /// Body of the leading `if … then` branch only — it does **not**
+    /// cover the condition, the `elseif` / `else` clauses, or `end`.
     IfThenBlock,
     ElseIfBlock,
     ElseBlock,

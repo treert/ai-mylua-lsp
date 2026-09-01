@@ -296,13 +296,18 @@ fn visit_nested_block_inner(
     node: tree_sitter::Node,
     return_types: &mut Option<&mut Vec<TypeFact>>,
 ) {
+    // `if` needs per-branch scopes with hand-computed byte ranges, so it
+    // gets its own walker instead of the uniform "one scope spanning the
+    // whole node" treatment below.
+    if node.is_kind(kind::IF_STATEMENT) {
+        visit_if_statement(ctx, node, return_types);
+        return;
+    }
+
     let scope_kind = match node.syntax_kind() {
         kind::DO_STATEMENT => Some(ScopeKind::DoBlock),
         kind::WHILE_STATEMENT => Some(ScopeKind::WhileBlock),
         kind::REPEAT_STATEMENT => Some(ScopeKind::RepeatBlock),
-        kind::IF_STATEMENT => Some(ScopeKind::IfThenBlock),
-        kind::ELSEIF_CLAUSE => Some(ScopeKind::ElseIfBlock),
-        kind::ELSE_CLAUSE => Some(ScopeKind::ElseBlock),
         kind::FOR_NUMERIC_STATEMENT => Some(ScopeKind::ForNumeric),
         kind::FOR_GENERIC_STATEMENT => Some(ScopeKind::ForGeneric),
         _ => None,
@@ -365,64 +370,268 @@ fn visit_nested_block_inner(
     }
     loop {
         let child = cursor.node();
-        match child.syntax_kind() {
-            kind::ELSEIF_CLAUSE
-            | kind::ELSE_CLAUSE
-            | kind::IF_STATEMENT
-            | kind::DO_STATEMENT
-            | kind::WHILE_STATEMENT
-            | kind::REPEAT_STATEMENT
-            | kind::FOR_NUMERIC_STATEMENT
-            | kind::FOR_GENERIC_STATEMENT => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                ctx.pending_generic_params.clear();
-                visit_nested_block_inner(ctx, child, return_types);
-            }
-            kind::FUNCTION_DECLARATION => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                visit_function_declaration(ctx, child);
-                ctx.pending_generic_params.clear();
-            }
-            kind::ASSIGNMENT_STATEMENT => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                visit_assignment(ctx, child);
-                ctx.pending_generic_params.clear();
-            }
-            kind::LOCAL_DECLARATION => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                visit_local_declaration(ctx, child);
-                ctx.pending_generic_params.clear();
-            }
-            kind::LOCAL_FUNCTION_DECLARATION => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                visit_local_function(ctx, child);
-                ctx.pending_generic_params.clear();
-            }
-            kind::RETURN_STATEMENT => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                if let Some(returns) = return_types.as_deref_mut() {
-                    collect_return_statement_types(ctx, child, returns);
-                }
-                ctx.pending_generic_params.clear();
-                visit_anonymous_function_definitions_in_node(ctx, child);
-            }
-            kind::EMMY_COMMENT => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                visit_emmy_comment(ctx, child);
-                ctx.last_emmy_end_row = Some(child.end_position().row as u32);
-            }
-            _ => {
-                clear_pending_on_blank_line_gap(ctx, child);
-                ctx.pending_generic_params.clear();
-                visit_anonymous_function_definitions_in_node(ctx, child);
-            }
-        }
+        visit_block_child(ctx, child, return_types);
         if !cursor.goto_next_sibling() {
             break;
         }
     }
 
     if scope_kind.is_some() {
+        ctx.pop_scope();
+    }
+}
+
+/// Dispatch a single statement-level child of a block. Shared by the
+/// uniform block walker and by `visit_if_statement`, which drives its
+/// branches by hand.
+fn visit_block_child(
+    ctx: &mut BuildContext,
+    child: tree_sitter::Node,
+    return_types: &mut Option<&mut Vec<TypeFact>>,
+) {
+    match child.syntax_kind() {
+        kind::ELSEIF_CLAUSE
+        | kind::ELSE_CLAUSE
+        | kind::IF_STATEMENT
+        | kind::DO_STATEMENT
+        | kind::WHILE_STATEMENT
+        | kind::REPEAT_STATEMENT
+        | kind::FOR_NUMERIC_STATEMENT
+        | kind::FOR_GENERIC_STATEMENT => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            ctx.pending_generic_params.clear();
+            visit_nested_block_inner(ctx, child, return_types);
+        }
+        kind::FUNCTION_DECLARATION => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            visit_function_declaration(ctx, child);
+            ctx.pending_generic_params.clear();
+        }
+        kind::ASSIGNMENT_STATEMENT => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            visit_assignment(ctx, child);
+            ctx.pending_generic_params.clear();
+        }
+        kind::LOCAL_DECLARATION => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            visit_local_declaration(ctx, child);
+            ctx.pending_generic_params.clear();
+        }
+        kind::LOCAL_FUNCTION_DECLARATION => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            visit_local_function(ctx, child);
+            ctx.pending_generic_params.clear();
+        }
+        kind::RETURN_STATEMENT => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            if let Some(returns) = return_types.as_deref_mut() {
+                collect_return_statement_types(ctx, child, returns);
+            }
+            ctx.pending_generic_params.clear();
+            visit_anonymous_function_definitions_in_node(ctx, child);
+        }
+        kind::EMMY_COMMENT => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            visit_emmy_comment(ctx, child);
+            ctx.last_emmy_end_row = Some(child.end_position().row as u32);
+        }
+        _ => {
+            clear_pending_on_blank_line_gap(ctx, child);
+            ctx.pending_generic_params.clear();
+            visit_anonymous_function_definitions_in_node(ctx, child);
+        }
+    }
+}
+
+/// Walk `if … elseif … else … end`, giving each branch body its own
+/// scope so a `local` declared in one branch is invisible in the others.
+///
+/// Layout produced:
+///
+/// ```text
+/// IfStatement   [whole if … end]        -- shell, no declarations
+/// ├── IfThenBlock  [after `then` → first clause / `end`]
+/// ├── ElseIfBlock  [after that clause's `then` → next clause / `end`]
+/// └── ElseBlock    [after `else` → `end`]
+/// ```
+///
+/// The branch scopes are siblings, so `resolve_decl` walking up from one
+/// branch reaches the shell (which holds nothing) and continues to the
+/// enclosing block — it can never see a sibling branch's locals.
+///
+/// Conditions deliberately stay in the shell: in Lua a condition is
+/// evaluated outside the branch it guards.
+///
+/// Branch end offsets are taken from the *next* sibling's start rather
+/// than the branch node's own `end_byte`, because tree-sitter ends a
+/// clause at its last statement and does not extend it over the trailing
+/// blank lines up to `end`.
+fn visit_if_statement(
+    ctx: &mut BuildContext,
+    node: tree_sitter::Node,
+    return_types: &mut Option<&mut Vec<TypeFact>>,
+) {
+    ctx.push_scope(ScopeKind::IfStatement, node.start_byte(), node.end_byte());
+
+    // Pass 1 — locate the branch boundaries. Only direct children are
+    // inspected, so the `word_then` belonging to a nested `elseif_clause`
+    // (or to a nested `if`) cannot be mistaken for this branch's own.
+    let mut then_kw_end: Option<usize> = None;
+    let mut first_clause_start: Option<usize> = None;
+    let mut end_kw_start: Option<usize> = None;
+    let mut clauses: Vec<tree_sitter::Node> = Vec::new();
+
+    let mut scan = node.walk();
+    if scan.goto_first_child() {
+        loop {
+            let child = scan.node();
+            match child.syntax_kind() {
+                kind::WORD_THEN => {
+                    if then_kw_end.is_none() {
+                        then_kw_end = Some(child.end_byte());
+                    }
+                }
+                kind::ELSEIF_CLAUSE | kind::ELSE_CLAUSE => {
+                    if first_clause_start.is_none() {
+                        first_clause_start = Some(child.start_byte());
+                    }
+                    clauses.push(child);
+                }
+                kind::WORD_END => end_kw_start = Some(child.start_byte()),
+                _ => {}
+            }
+            if !scan.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    let branches_end = first_clause_start
+        .or(end_kw_start)
+        .unwrap_or_else(|| node.end_byte());
+
+    // Pass 2 — children in source order. The leading branch's statements
+    // are exactly those starting at/after `then` and before the first
+    // clause (or `end`); the condition sorts before that window and `end`
+    // after it, so the offset test alone classifies every child.
+    //
+    // Visiting *every* child through `visit_block_child` (not just the
+    // branch body) keeps the pending-emmy-annotation bookkeeping —
+    // `clear_pending_on_blank_line_gap` / `pending_generic_params` — in the
+    // same sequence as the uniform walker it replaces.
+    let mut then_scope_open = false;
+    let mut cursor = node.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            if child.is_kind(kind::ELSEIF_CLAUSE) || child.is_kind(kind::ELSE_CLAUSE) {
+                // Visited in pass 3, as siblings of the leading branch.
+                if !cursor.goto_next_sibling() {
+                    break;
+                }
+                continue;
+            }
+            let in_then_body = then_kw_end
+                .map(|then_start| {
+                    child.start_byte() >= then_start && child.start_byte() < branches_end
+                })
+                .unwrap_or(false);
+            if in_then_body && !then_scope_open {
+                let then_start = then_kw_end.unwrap_or_else(|| child.start_byte());
+                ctx.push_scope(ScopeKind::IfThenBlock, then_start, branches_end);
+                then_scope_open = true;
+            } else if !in_then_body && then_scope_open {
+                ctx.pop_scope();
+                then_scope_open = false;
+            }
+            visit_block_child(ctx, child, return_types);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+    if then_scope_open {
+        ctx.pop_scope();
+    }
+
+    // Pass 3 — `elseif` / `else` clauses, each a sibling of the leading
+    // branch under the shell.
+    for (i, clause) in clauses.iter().enumerate() {
+        let clause_end = clauses
+            .get(i + 1)
+            .map(|next| next.start_byte())
+            .or(end_kw_start)
+            .unwrap_or_else(|| clause.end_byte());
+        visit_if_clause(ctx, *clause, clause_end, return_types);
+    }
+
+    ctx.pop_scope();
+}
+
+/// Walk one `elseif … then …` / `else …` clause. `clause_end` is the
+/// offset where this branch stops being in effect (start of the next
+/// clause, or of `end`).
+fn visit_if_clause(
+    ctx: &mut BuildContext,
+    clause: tree_sitter::Node,
+    clause_end: usize,
+    return_types: &mut Option<&mut Vec<TypeFact>>,
+) {
+    let is_elseif = clause.is_kind(kind::ELSEIF_CLAUSE);
+
+    // Body starts after `then` for `elseif`, after `else` otherwise.
+    let mut body_start: Option<usize> = None;
+    let mut scan = clause.walk();
+    if scan.goto_first_child() {
+        loop {
+            let child = scan.node();
+            let opens_body = if is_elseif {
+                child.is_kind(kind::WORD_THEN)
+            } else {
+                child.is_kind(kind::WORD_ELSE)
+            };
+            if opens_body && body_start.is_none() {
+                body_start = Some(child.end_byte());
+            }
+            if !scan.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    // An `elseif` condition sorts before `body_start`, so the offset test
+    // below leaves it outside the branch scope on its own — matching Lua,
+    // where the condition is evaluated outside the branch it guards.
+    let scope_kind = if is_elseif {
+        ScopeKind::ElseIfBlock
+    } else {
+        ScopeKind::ElseBlock
+    };
+
+    let mut body_scope_open = false;
+    let mut cursor = clause.walk();
+    if cursor.goto_first_child() {
+        loop {
+            let child = cursor.node();
+            let in_body = body_start
+                .map(|start| child.start_byte() >= start && child.start_byte() < clause_end)
+                .unwrap_or(false);
+            if in_body && !body_scope_open {
+                let start = body_start.unwrap_or_else(|| child.start_byte());
+                ctx.push_scope(scope_kind, start, clause_end);
+                body_scope_open = true;
+            } else if !in_body && body_scope_open {
+                ctx.pop_scope();
+                body_scope_open = false;
+            }
+            visit_block_child(ctx, child, return_types);
+            if !cursor.goto_next_sibling() {
+                break;
+            }
+        }
+    }
+
+    if body_scope_open {
         ctx.pop_scope();
     }
 }

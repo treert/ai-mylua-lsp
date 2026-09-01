@@ -107,6 +107,19 @@
 | `Scope` | 词法块（File / FunctionBody / Do / For / If / …），含父子关系和声明列表 |
 | `ScopeTree` | 所有 Scope 组成的扁平数组 + 查询 API |
 
+**`if` 的分支作用域**：`if` 生成一个不含任何声明的 `IfStatement` 外壳，三类分支体作为**兄弟**挂在壳下：
+
+```
+IfStatement   [整个 if … end]        ← 壳，无 declarations
+├── IfThenBlock  [`then` 之后 → 首个 clause / `end`]
+├── ElseIfBlock  [该 clause 的 `then` 之后 → 下一 clause / `end`]
+└── ElseBlock    [`else` 之后 → `end`]
+```
+
+分支互为兄弟，因此从某一分支向上解析只会经过（空的）外壳再进入外层块，**永远看不到另一分支的 local**。条件表达式落在壳里而不在任何分支内，符合 Lua 语义：条件在它守卫的分支之外求值。
+
+分支区间需要手工计算：文法中 `_block` 是 hidden rule，`then` 体在 CST 里没有独立节点；且 tree-sitter 把 clause 节点的 `end_byte` 定在最后一条语句处而非 `end` 关键字，故分支尾部延伸到下一个兄弟（clause 或 `end`）的起点，使光标停在分支尾部空行时补全仍能看到该分支的 local。
+
 查询 API：
 - `resolve_type(byte_offset, name)` → 在给定位置按 Lua 词法规则查找局部变量类型
 - `resolve_decl(byte_offset, name)` → 返回完整 `ScopeDecl`

@@ -26,7 +26,7 @@
 | `test_call_hierarchy.rs` | 8 | 调用层次 |
 | `test_workspace_symbol.rs` | 7 | 工作区符号 |
 | `test_symbols.rs` | 13 | 文档符号 |
-| `test_scope.rs` | 11 | 作用域树 |
+| `test_scope.rs` | 18 | 作用域树（含 if/elseif/else 分支隔离） |
 | `test_diagnostics.rs` | 42 | 语法 + 语义诊断全覆盖 |
 | `test_diagnostic_suppress.rs` | 9 | `@diagnostic` 抑制 |
 | `test_folding_range.rs` | 16 | 折叠范围 |

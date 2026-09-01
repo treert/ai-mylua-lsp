@@ -185,3 +185,174 @@ end
     assert!(names.contains(&"c"), "should see inner 'c': {:?}", names);
     assert!(names.contains(&"foo"), "should see 'foo': {:?}", names);
 }
+
+// ---------------------------------------------------------------------------
+// if / elseif / else branch isolation
+//
+// The three branch bodies are sibling scopes under a declaration-free
+// `IfStatement` shell, so a `local` in one branch is invisible in the
+// others. Conditions live in the shell, outside every branch.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn else_branch_cannot_see_then_branch_local() {
+    let src = r#"if cond then
+    local a = 1
+    print(a)
+else
+    print(a)
+end
+"#;
+    // Inside `then`: resolves to the branch-local `a`.
+    assert_eq!(resolve_name(src, 2, 10).as_deref(), Some("a: local"));
+    // Inside `else`: the `then` branch's `a` is out of scope.
+    assert_eq!(resolve_name(src, 4, 10), None);
+}
+
+#[test]
+fn then_branch_cannot_see_else_branch_local() {
+    let src = r#"if cond then
+    print(b)
+else
+    local b = 2
+    print(b)
+end
+"#;
+    assert_eq!(resolve_name(src, 1, 10), None);
+    assert_eq!(resolve_name(src, 4, 10).as_deref(), Some("b: local"));
+}
+
+#[test]
+fn elseif_branches_are_mutually_isolated() {
+    let src = r#"if c1 then
+    local x = 1
+elseif c2 then
+    print(x)
+    local y = 2
+elseif c3 then
+    print(y)
+else
+    print(x)
+end
+"#;
+    // First `elseif` cannot see the `then` branch's `x`.
+    assert_eq!(resolve_name(src, 3, 10), None);
+    // Second `elseif` cannot see the first `elseif`'s `y`.
+    assert_eq!(resolve_name(src, 6, 10), None);
+    // `else` cannot see the `then` branch's `x` either.
+    assert_eq!(resolve_name(src, 8, 10), None);
+}
+
+#[test]
+fn branch_local_is_invisible_after_the_if_statement() {
+    let src = r#"local outer = 1
+if cond then
+    local inner = 2
+end
+print(inner)
+print(outer)
+"#;
+    assert_eq!(resolve_name(src, 2, 10).as_deref(), Some("inner: local"));
+    assert_eq!(resolve_name(src, 4, 6), None);
+    // The enclosing scope is still reachable through the shell.
+    assert_eq!(resolve_name(src, 5, 6).as_deref(), Some("outer: local"));
+}
+
+#[test]
+fn condition_resolves_in_enclosing_scope_not_the_branch() {
+    let src = r#"local guard = 1
+if guard then
+    local guard = 2
+    print(guard)
+end
+"#;
+    // The condition sits in the shell, so it sees the outer `guard`; the
+    // shadowing declaration inside `then` must not leak backwards into it.
+    assert_eq!(resolve_name(src, 1, 3).as_deref(), Some("guard: local"));
+    assert_eq!(resolve_name(src, 3, 10).as_deref(), Some("guard: local"));
+
+    let mut parser = new_parser();
+    let doc = parse_doc(&mut parser, src);
+    let cond_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), pos(1, 3))
+        .unwrap();
+    let cond_decl = doc.scope_tree.resolve_decl(cond_offset, "guard").unwrap();
+    let body_offset = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), pos(3, 10))
+        .unwrap();
+    let body_decl = doc.scope_tree.resolve_decl(body_offset, "guard").unwrap();
+    assert_ne!(
+        cond_decl.decl_byte, body_decl.decl_byte,
+        "condition must bind the outer `guard`, not the branch-local one"
+    );
+}
+
+#[test]
+fn nested_if_inside_branch_still_resolves_outward() {
+    let src = r#"local a = 1
+if c1 then
+    local b = 2
+    if c2 then
+        local c = 3
+        print(a, b, c)
+    end
+end
+"#;
+    assert_eq!(resolve_name(src, 5, 14).as_deref(), Some("a: local"));
+    assert_eq!(resolve_name(src, 5, 17).as_deref(), Some("b: local"));
+    assert_eq!(resolve_name(src, 5, 20).as_deref(), Some("c: local"));
+}
+
+#[test]
+fn branch_local_visible_on_trailing_blank_line_of_its_branch() {
+    // tree-sitter ends a clause at its last statement; the branch scope is
+    // deliberately extended to the next clause / `end` so completion still
+    // sees branch locals while the cursor rests on a trailing blank line.
+    let src = "if cond then\n    local a = 1\n\nelse\n    local b = 2\n\nend\n";
+    let mut parser = new_parser();
+    let doc = parse_doc(&mut parser, src);
+
+    let then_tail = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), pos(2, 0))
+        .unwrap();
+    let then_names: Vec<&str> = doc
+        .scope_tree
+        .visible_locals(then_tail)
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    assert!(
+        then_names.contains(&"a"),
+        "then-branch tail should still see 'a': {:?}",
+        then_names
+    );
+    assert!(
+        !then_names.contains(&"b"),
+        "then-branch tail must not see else's 'b': {:?}",
+        then_names
+    );
+
+    let else_tail = doc
+        .line_index()
+        .position_to_byte_offset(doc.source(), pos(5, 0))
+        .unwrap();
+    let else_names: Vec<&str> = doc
+        .scope_tree
+        .visible_locals(else_tail)
+        .iter()
+        .map(|d| d.name.as_str())
+        .collect();
+    assert!(
+        else_names.contains(&"b"),
+        "else-branch tail should still see 'b': {:?}",
+        else_names
+    );
+    assert!(
+        !else_names.contains(&"a"),
+        "else-branch tail must not see then's 'a': {:?}",
+        else_names
+    );
+}
