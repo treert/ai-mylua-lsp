@@ -11,6 +11,8 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-09-01
+
 ### Added
 - 新增配置项 `mylua.diagnostics.narrowByConditionGuard`（bool，默认开启）：当一次读取已被存在性检查包裹时，抑制 `Undefined global` 与 `Unknown field` 诊断。典型场景是宿主程序（通常是 C++）在运行时把符号注册进 Lua 全局表，工作区里查不到定义，于是脚本先探测再使用——此时报错纯属噪音，而满屏警告往往导致用户直接关掉整类诊断。识别 `if X then …`、`elseif X then …`、`if X == nil then … else …`、`if not X then … else …`、`while X do …`、`X and X.f()` 六种形态，条件形式支持 `X` / `X ~= nil` / `nil ~= X` / `not X` / `X == nil` / `nil == X`（`not` 与 `== nil` 翻转极性）。守卫以**访问路径**为键而非仅变量名，故 `x.m_some` 与全局名同等处理，且对前缀的检查覆盖更深的读取（检查 `x.cfg` 也覆盖 `x.cfg.opt`）。
   **这不改变任何类型推断结果**：名字仍保持原有类型（通常未知），仅丢弃诊断。写全 `---@class` / `---@meta` stub 仍是获得真实类型信息的唯一正解，本能力只为尚未写到那一步的代码降噪。要求读取在词法上嵌套于守卫区域内；`if not X then return end`、`assert(X)`、`if not X then X = {} end` 这类「保证其后语句」的写法**有意不支持**——抑制覆盖得越多，写注释的动力越少，而注释才是精确可预测的那条路。`or` 右操作数与 `repeat … until`（条件在循环体之后求值）同样不构成守卫。
