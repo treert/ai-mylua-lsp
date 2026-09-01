@@ -65,21 +65,28 @@
 
 ### 3.1 [P3] 沙箱表字面量的自有字段仍不可达
 
-- **问题**：`local _ENV = setmetatable({ own = 1 }, …)` 里写在**字面量内**的 `own` 找不到——`setmetatable` 的泛型返回推不出 table，于是 `env_binding_fact` 合成了一张**空** shape，字面量 `{ own = 1 }` 自身的 shape 被丢弃。沙箱内用**语句**写的字段（`own = 1`）不受影响，已可跳转与补全。
+- **问题**：`local _ENV = setmetatable({ own = 1 }, …)` 里写在**字面量内**的 `own` 找不到——`setmetatable` 的泛型返回推不出 table，于是 `env_binding_fact` 合成了一张**空** shape，字面量 `{ own = 1 }` 自身的 shape 被丢弃。
+- **缺口的精确边界**（已实测，只有第三种挂掉）：
+
+  | 写法 | `_ENV` 的 RHS | shape 来源 | 自有字段 |
+  |---|---|---|---|
+  | `local _ENV = { own = 1 }` | table 字面量 | 直接推出 | ✅ |
+  | `local t = { own = 1 }; setmetatable(t, …); local _ENV = t` | 变量 `t` | 从 `t` 的字面量推出，`setmetatable` 仅 mark open | ✅ |
+  | `local _ENV = setmetatable({ own = 1 }, …)` | `setmetatable(…)` **调用** | 泛型返回推不出 → **合成空 shape** | ❌ |
+
+  判据即 `env_binding_fact` 文档里那句「RHS already yields a shape … otherwise a fresh one is synthesized」：前两种命中前半句，第三种命中 `otherwise`。沙箱内用**语句**写的字段（`own = 1`）任何写法下都不受影响，已可跳转与补全。
 - **方案**：把 `setmetatable(t, mt)` 的返回类型解析为**第一实参的 fact**（该函数的文档化恒等语义，比 §2.1 的通用泛型回填窄得多）；或直接实现 §2.1，两者都会让 `_ENV` 拿到字面量自己的 shape。由于 `mark_shapes_opened_by_metatable_calls` 已把它标为 open，缺失字段仍走全局回退、`envUnknownField` 仍静默。
 - **验收**：`own` 可跳转、可补全；§2.1 条目列出的三个测试保持绿。
+- **手工用例**：`tests/lua-root/test_env.lua` §2e（内联写法 + 字面量自有字段）。对照组：§2a 是内联但字面量为空、§3f 第二个 `do` 块是分离写法带自有字段，两者都能工作——**缺口仅在"内联 + 有自有字段"这一格**。
 
 ### 3.2 [P3] `document_highlight` 不区分环境边界
 
-- **问题**：`g = 1; _ENV = {}; g = 2` 中两个 `g` 运行时是不同变量，goto / references 已能区分，但同文件高亮仍把四处一起点亮。
-- **原因**：`document_highlight.rs` 按设计只做「文本匹配 + 作用域 decl_byte 过滤」，不查索引，因此对**所有**全局名都不做语义区分——这不是 `_ENV` 特有的缺口。
-- **方案**：若要修，需让它对非 local 的名字也走 `name_resolution`（§1.6 的公共层），代价是每次高亮请求都要做索引查询。需先评估该请求的调用频次（编辑器在光标移动时会频繁触发）是否承受得起。
+- **问题**：`g = 1; _ENV = {}; g = 2; print(g)` 中第一个 `g` 与后两个运行时是不同变量，goto / references 已能区分，但同文件高亮仍把三处一起点亮——**点击其中任意一处，结果都完全相同**。
+- **注意别与语义着色混淆**：`semantic tokens` 对同一段代码**已正确区分**（重定向后 `g` 不再着色为 global），那是常驻的文字颜色；本条目说的是 `document_highlight`——光标停留时出现、移开即消失的**背景色块**（VS Code 的 `editor.occurrencesHighlight`）。两者是不同的 LSP 能力。
+- **原因**：`document_highlight.rs` 按设计只做「文本匹配 + 作用域 `decl_byte` 过滤」，不查索引。全局名 `resolve_decl` 返回 `None` → `target_decl_byte` 为 `None` → `matches_scope` 恒为 `true` → 纯文本全命中。该文件没有引用 `name_resolution`，因此对**所有**全局名都不做语义区分——这不是 `_ENV` 特有的缺口，`_ENV` 只是让它变得可观察。local 名不受影响（`decl_byte` 过滤一直正确）。
+- **方案**：若要修，需让它对非 local 的名字也走 `name_resolution`（§1.6 的公共层），代价是每次高亮请求都要做索引查询。需先评估该请求的调用频次（编辑器在光标移动时会频繁触发，远高于用户主动执行的 references）是否承受得起。
 - **风险**：这是性能与精确性的取舍，不是纯 bug 修复。改动前应先量测。
-
-### 3.3 [已完成] `envUnknownField` 现已覆盖顶层 `do…end` 块
-
-- 双侧围栏的判据从 `ScopeTree::is_file_level_decl` 改为 `ScopeTree::is_on_chunk_straight_line`：chunk 顶层作用域 + 嵌在其中的纯 `do … end` 块。
-- `while` / `repeat` / `for` 的 body 与 `if` 分支仍排除（判据取自 `ScopeKind`，不看表面语法）。见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3.1。
+- **手工用例**：`tests/lua-root/test_env.lua` 第 4 节末尾的 `do` 块（`g = 1 / _ENV = {} / g = 2 / print(g)`）。
 
 ---
 

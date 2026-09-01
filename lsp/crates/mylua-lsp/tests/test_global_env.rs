@@ -1767,7 +1767,7 @@ fn metatable_sandbox_completion_offers_both() {
     // to the literal's own shape. The inline spelling
     // `setmetatable({ apricot_field = 2 }, …)` would lose the literal's fields
     // — `setmetatable`'s generic return is unresolvable, so `env_binding_fact`
-    // synthesizes an empty shape instead (see `future-work.md` §3.2). Fields
+    // synthesizes an empty shape instead (see `future-work.md` §3.1). Fields
     // written by a *statement* inside the sandbox are unaffected either way.
     let src = r#"apple_global = 1
 local t = { apricot_field = 2 }
