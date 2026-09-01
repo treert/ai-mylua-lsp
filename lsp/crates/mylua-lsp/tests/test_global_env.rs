@@ -1291,12 +1291,10 @@ fn setmetatable_env_reports_nothing() {
     // silence — the table's field set is not an exhaustive description of the
     // environment.
     //
-    // Today this also happens to fall out of `setmetatable`'s return type not
-    // resolving to a table (its `---@generic T ... @return T` is not
-    // back-filled from the call site). That is *not* what this test relies on:
-    // if generic back-filling is ever implemented, `_ENV` would resolve to the
-    // `{}` literal's shape and every name here would light up. Attaching a
-    // metatable must keep marking the shape as non-exhaustive on its own.
+    // `_ENV` *does* resolve to the `{}` literal's shape here — `setmetatable`
+    // returns its first argument. Silence therefore rests entirely on the
+    // metatable marking that shape non-exhaustive, not on the return type being
+    // unresolvable.
     let src = r#"_ENV = setmetatable({}, { __index = _G })
 local a = print
 local b = _G
@@ -1466,6 +1464,92 @@ local b = own_field
         vec![2],
         "a name written inside the sandbox must resolve to the sandbox, not to \
          the global namespace"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// The inline `setmetatable({ … }, …)` spelling keeps the literal's own fields
+// ---------------------------------------------------------------------------
+//
+// `setmetatable(t, mt)` returns `t` — documented identity semantics, and the
+// only way fields written *inside* the literal stay reachable. Before, the
+// `---@generic T … @return T` was not back-filled from the call site, so the
+// return resolved to nothing and `env_binding_fact` synthesized an **empty**
+// shape, throwing the literal away (`future-work.md` §3.1). Fields written by a
+// *statement* inside the sandbox were never affected.
+//
+// The metatable still has to mark the shape non-exhaustive on its own, which is
+// what the `setmetatable_env_*` tests above lock down.
+
+const INLINE_SETMETA_ENV: &str = r#"owl_global = 1
+local _ENV = setmetatable({ own_inline = 1 }, { __index = _G })
+local v = own_inline
+local w = owl_global
+"#;
+
+#[test]
+fn inline_setmetatable_env_keeps_the_literals_own_fields() {
+    assert_eq!(
+        env_shape_fields(INLINE_SETMETA_ENV, "inline_setmeta_env_shape.lua"),
+        Some(vec!["own_inline".to_string()]),
+        "`_ENV` must resolve to the literal's own shape, not to a synthesized \
+         empty one"
+    );
+    assert_eq!(
+        goto_lines(
+            INLINE_SETMETA_ENV,
+            "inline_setmeta_env_goto.lua",
+            pos(2, 12)
+        ),
+        vec![1],
+        "a field written inside the literal must be navigable"
+    );
+}
+
+#[test]
+fn inline_setmetatable_env_stays_non_exhaustive() {
+    // The literal's shape is now `_ENV`'s shape, so the metatable — not the
+    // absence of a resolvable return type — is what keeps the fall-through to
+    // the global namespace alive.
+    assert_eq!(
+        goto_lines(
+            INLINE_SETMETA_ENV,
+            "inline_setmeta_env_global_goto.lua",
+            pos(3, 12)
+        ),
+        vec![0],
+        "a name the literal does not have must still resolve to the global"
+    );
+    let diags = all_diags(INLINE_SETMETA_ENV, "inline_setmeta_env_diags.lua");
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.contains("own_inline") && !d.contains("owl_global")),
+        "neither the literal's own field nor the reachable global may be \
+         flagged, got: {:?}",
+        diags
+    );
+}
+
+#[test]
+fn inline_setmetatable_env_completion_offers_both() {
+    // Same layering as `metatable_sandbox_completion_offers_both`, reached
+    // through the inline spelling. Both names share the prefix `ow`, so one
+    // query proves the two sources are merged.
+    let src = r#"owl_global = 1
+local _ENV = setmetatable({ own_inline = 1 }, { __index = _G })
+local x = ow
+"#;
+    let labels = completion_labels(src, "inline_setmeta_env_completion.lua", pos(2, 12));
+    assert!(
+        labels.contains(&"own_inline".to_string()),
+        "the literal's own field must be offered, got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"owl_global".to_string()),
+        "globals stay reachable through `__index`, got: {:?}",
+        labels
     );
 }
 
@@ -1763,12 +1847,8 @@ fn metatable_sandbox_completion_offers_both() {
     // Both names deliberately share the prefix `ap`, so one query proves the
     // two sources are merged rather than one shadowing the other.
     //
-    // The metatable is attached in a separate statement so that `_ENV` resolves
-    // to the literal's own shape. The inline spelling
-    // `setmetatable({ apricot_field = 2 }, …)` would lose the literal's fields
-    // — `setmetatable`'s generic return is unresolvable, so `env_binding_fact`
-    // synthesizes an empty shape instead (see `future-work.md` §3.1). Fields
-    // written by a *statement* inside the sandbox are unaffected either way.
+    // The metatable is attached in a separate statement here; the inline
+    // spelling is covered by `inline_setmetatable_env_completion_offers_both`.
     let src = r#"apple_global = 1
 local t = { apricot_field = 2 }
 setmetatable(t, { __index = _G })

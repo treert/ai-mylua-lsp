@@ -137,6 +137,42 @@ local XX = UE4.Class()"#;
 }
 
 #[test]
+fn goto_field_of_a_setmetatable_result_resolves_through_the_first_argument() {
+    // `setmetatable(t, mt)` returns `t`. Its declared type is
+    // `---@generic T … @return T`, and generic parameters are not back-filled
+    // from call-site arguments (`future-work.md` §2.1), so the return type used
+    // to come out as an unsubstituted `T` and `t.inner` resolved nowhere.
+    // Modelling the documented identity semantics directly is narrower than
+    // general back-filling and is what the `_ENV` sandbox needs (§3.1).
+    let src = "local t = setmetatable({ inner = 1 }, {})\nprint(t.inner)\n";
+    let (doc, uri, mut agg) = setup_single_file(src, "setmetatable_identity.lua");
+
+    let result = goto::goto_definition(
+        &doc,
+        intern_uri(&uri),
+        pos(1, 9),
+        &mut agg,
+        &GotoStrategy::Auto,
+    );
+
+    let lines: Vec<u32> = match result {
+        Some(GotoDefinitionResponse::Scalar(loc)) => vec![loc.range.start.line],
+        Some(GotoDefinitionResponse::Array(locs)) => {
+            locs.iter().map(|l| l.range.start.line).collect()
+        }
+        Some(GotoDefinitionResponse::Link(links)) => {
+            links.iter().map(|l| l.target_range.start.line).collect()
+        }
+        None => Vec::new(),
+    };
+    assert_eq!(
+        lines,
+        vec![0],
+        "`t.inner` must resolve to the field in the first argument's literal",
+    );
+}
+
+#[test]
 fn local_reassignment_is_not_indexed_as_global_contribution() {
     let src = r#"function foo()
     local Class = Actor:GetClass()

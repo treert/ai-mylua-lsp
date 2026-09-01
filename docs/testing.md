@@ -40,7 +40,7 @@
 | `test_emmy_self_and_multireturn.rs` | 8 | self 替换 + 多返回值 |
 | `test_meta.rs` | 6 | `@meta` 元文件 |
 | `test_document_link.rs` | 6 | require 链接 |
-| `test_document_highlight.rs` | 10 | 文档高亮 |
+| `test_document_highlight.rs` | 14 | 文档高亮（含 `_ENV` 环境边界） |
 | `test_workspace.rs` | 4 | 多文件工作区 |
 | `test_workspace_library.rs` | 5 | workspace.library |
 

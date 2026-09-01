@@ -109,7 +109,8 @@ pub fn build_file_analysis(
 /// - `setmetatable` installs `__index` / `__newindex`, so a read may resolve
 ///   through a chain we do not follow (the `{ __index = _G }` sandbox);
 /// - `rawset` writes a field that never reaches the shape.
-const SHAPE_OPENING_FUNCTIONS: &[&str] = &["setmetatable", "rawset"];
+const SHAPE_OPENING_FUNCTIONS: &[&str] =
+    &[crate::lua_builtins::SETMETATABLE_NAME, "rawset"];
 
 /// Mark every table shape targeted by a `setmetatable` / `rawset` call as open.
 ///
@@ -159,9 +160,10 @@ fn mark_shapes_opened_by_metatable_calls(
 /// targets, when `t` is a name bound to one.
 ///
 /// Deliberately narrow: only a bare identifier whose scope declaration carries
-/// a `Known(Table)` fact. An inline `setmetatable({}, …)` needs no handling
-/// here — the resulting `_ENV` never resolves to a shape in the first place, so
-/// it is already covered by the "environment of unknown shape" fallback.
+/// a `Known(Table)` fact. The inline `setmetatable({ … }, …)` spelling has no
+/// name to look up and is handled on the *return* path instead
+/// (`type_infer::infer_call_return_type`), which knows the shape it just
+/// allocated for the literal and marks it open there.
 fn metatable_call_target(
     call: tree_sitter::Node,
     source: &[u8],

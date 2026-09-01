@@ -504,6 +504,43 @@ fn infer_call_return_type(
         return TypeFact::Unknown;
     }
 
+    // `setmetatable(t, mt)` → the fact of `t`.
+    //
+    // Identity semantics is what the function is documented to do, and the only
+    // way fields written *inside* an inline literal stay reachable:
+    // `local _ENV = setmetatable({ own = 1 }, …)` otherwise leaves
+    // `env_binding_fact` with no shape on the right-hand side, so it synthesizes
+    // an empty one and `own` becomes unreachable. Modelling this one function
+    // directly is far narrower than back-filling generic parameters from
+    // call-site arguments in general (`future-work.md` §2.1), which the stdlib's
+    // `---@generic T … @return T` would need.
+    //
+    // The returned table stops being an exhaustive description of itself —
+    // `__index` may answer for absent fields — so its shape is marked open right
+    // here. `mark_shapes_opened_by_metatable_calls` cannot do it for this
+    // spelling: it resolves the target through a *name*, and an inline literal
+    // has none.
+    //
+    // Only a bare-name callee counts, matching `SHAPE_OPENING_FUNCTIONS`: a
+    // qualified `debug.setmetatable` is a different function, and `obj:m()` puts
+    // the method name elsewhere.
+    if callee_text == crate::lua_builtins::SETMETATABLE_NAME
+        && node.child_by_field(field::METHOD).is_none()
+    {
+        let first_arg = node
+            .child_by_field(field::ARGUMENTS)
+            .and_then(|args| crate::util::extract_call_arg_nodes(args, ctx.source).first().copied());
+        if let Some(first_arg) = first_arg {
+            let fact = infer_expression_type(ctx, first_arg, depth + 1);
+            if let TypeFact::Known(KnownType::Table(shape_id)) = &fact {
+                if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+                    shape.mark_open();
+                }
+            }
+            return fact;
+        }
+    }
+
     // @customrequire function: generate FunctionCallReturn stub (with raw_string_args)
     // so the resolver can intercept at call sites and resolve via RequireRef.
     // This must run before the dotted-callee handling below, which would

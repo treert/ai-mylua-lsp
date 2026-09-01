@@ -129,6 +129,8 @@ alias 到 `goto_definition`（Lua 中 declaration ≡ definition）。
 
 ### documentHighlight
 同文件 identifier 同义高亮，按 AST 祖先区分 Read/Write，作用域感知 shadowing。
+- 环境边界感知：`_ENV` 重定向前后的同名自由名是不同符号，不再一起点亮（判据与 goto / references 同源，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.6）
+- 未出现 `_ENV` 重定向的文件走原先的纯文本 + 作用域匹配，不查索引
 
 ## 诊断
 

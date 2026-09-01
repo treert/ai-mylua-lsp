@@ -625,7 +625,11 @@ fn verify_local(
 /// and these candidate sites must be accepted as occurrences of that same
 /// global — otherwise references would report the declaration but none of the
 /// sandboxed uses.
-fn verify_global(
+///
+/// `document_highlight` shares this predicate rather than re-deriving it: the
+/// two capabilities answer the same question ("is this occurrence the same
+/// global?") for the same file, and a private copy would be free to drift.
+pub(crate) fn verify_global(
     node: tree_sitter::Node,
     name: &str,
     uri_id: UriId,
@@ -857,7 +861,10 @@ fn collect_global_declarations(
 /// - Label/goto names (`::foo::`, `goto foo`)
 /// - Local declaration names (`local foo = ...`'s `foo`)
 /// - For-loop variable names, parameter names in `attribute_name_list`/`name_list`
-fn is_non_reference_position(node: tree_sitter::Node) -> bool {
+///
+/// Also used by `document_highlight`, which must not apply free-name resolution
+/// to an identifier that is not a free name in the first place.
+pub(crate) fn is_non_reference_position(node: tree_sitter::Node) -> bool {
     let Some(parent) = node.parent() else {
         return false;
     };

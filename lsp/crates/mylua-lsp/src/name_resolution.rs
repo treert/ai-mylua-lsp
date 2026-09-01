@@ -240,6 +240,28 @@ fn env_describes_its_fields(
         .is_some_and(|shape| shape.is_closed)
 }
 
+/// Whether the file binds `_ENV` to anything other than the global environment.
+///
+/// A file-level pre-check for capabilities whose alternative is a *per
+/// occurrence* [`env_field_at`], which queries the index. With no redirecting
+/// binding anywhere in the file, no name in it can be an environment field, so
+/// the caller may keep its cheaper non-semantic path. `document_highlight` runs
+/// on every cursor move, so that distinction is worth making.
+///
+/// Only a binding provably pointing at the global environment is *not* a
+/// redirect: the implicit chunk-level declaration and an explicit
+/// `local _ENV = _G`. A declaration carrying no fact counts as a redirect,
+/// since nothing shows it is the global environment.
+pub(crate) fn file_redirects_env(scope_tree: &ScopeTree) -> bool {
+    scope_tree.all_declarations().any(|decl| {
+        decl.name.as_str() == crate::lua_builtins::ENV_NAME
+            && !decl
+                .type_fact
+                .as_ref()
+                .is_some_and(crate::type_system::is_global_env_fact)
+    })
+}
+
 /// Whether the free name `name` at `offset` is answered by a redirected `_ENV`
 /// — i.e. whether it is *not* an occurrence of the same-named global.
 ///

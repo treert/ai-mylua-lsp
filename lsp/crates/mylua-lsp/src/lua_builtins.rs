@@ -142,6 +142,16 @@ pub const LUA_KEYWORDS: &[&str] = &[
 /// is the ordinary path.
 pub const ENV_NAME: &str = "_ENV";
 
+/// The stdlib function that installs a metatable.
+///
+/// Two layers care about it and must agree on the spelling: it makes the
+/// target table's recorded field set non-exhaustive
+/// (`summary_builder::SHAPE_OPENING_FUNCTIONS`), and it *returns its first
+/// argument* — documented identity semantics that
+/// `summary_builder::type_infer` models directly, because the stdlib's
+/// `---@generic T … @return T` is not back-filled from call-site arguments.
+pub const SETMETATABLE_NAME: &str = "setmetatable";
+
 /// The name of the global environment table.
 ///
 /// Unlike `_ENV`, `_G` *is* an ordinary field of the global table — one whose

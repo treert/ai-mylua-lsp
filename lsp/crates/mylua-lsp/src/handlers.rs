@@ -736,13 +736,17 @@ impl LanguageServer for Backend {
         let uri = &params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
         let mut docs = self.documents.lock().unwrap();
-        let Some(doc) = docs.get_mut(&intern_uri(uri)) else {
+        let uri_id = intern_uri(uri);
+        let Some(doc) = docs.get_mut(&uri_id) else {
             return Ok(None);
         };
         if doc.ensure_tree().is_none() {
             return Ok(None);
         }
-        Ok(document_highlight::document_highlight(doc, position))
+        let idx = self.index.lock().unwrap();
+        Ok(document_highlight::document_highlight(
+            doc, uri_id, position, &idx,
+        ))
     }
 
     async fn goto_definition(

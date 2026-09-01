@@ -1118,6 +1118,52 @@ print(t.anything)
 }
 
 #[test]
+fn inline_and_separate_setmetatable_report_the_same_thing() {
+    // `setmetatable(t, mt)` returns `t`, so both spellings end up on the *same*
+    // shape with the *same* `is_closed == false`. The inline form used to escape
+    // the check by accident — its return type resolved to nothing at all, so
+    // there was no shape to compare the field against.
+    //
+    // Whether "Unknown field on an open table" should be reported here at all is
+    // a separate question (`__index` may legitimately supply it); that policy is
+    // pre-existing and shared by both spellings. This test only locks them
+    // together so the two can never drift again.
+    let separate = r#"
+local Base = { known = 1 }
+local a = {}
+setmetatable(a, { __index = Base })
+print(a.unknown_one)
+"#;
+    let inline = r#"
+local Base = { known = 1 }
+local b = setmetatable({}, { __index = Base })
+print(b.unknown_one)
+"#;
+    let messages = |src: &str, filename: &str| -> Vec<String> {
+        let (doc, uri, mut agg) = setup_single_file(src, filename);
+        let cfg = DiagnosticsConfig::default();
+        diagnostics::collect_semantic_diagnostics_id(
+            doc.root_node().unwrap(),
+            src.as_bytes(),
+            summary_id_by_uri(&agg, &uri),
+            &mut agg,
+            &doc.scope_tree,
+            &cfg,
+            doc.line_index(),
+        )
+        .iter()
+        .filter(|d| d.message.contains("Unknown field"))
+        .map(|d| format!("{} @{:?}", d.message, d.severity))
+        .collect()
+    };
+    assert_eq!(
+        messages(inline, "setmeta_inline_diag.lua"),
+        messages(separate, "setmeta_separate_diag.lua"),
+        "the inline and separate `setmetatable` spellings must be judged alike",
+    );
+}
+
+#[test]
 fn array_style_field_does_not_flag_missing_field() {
     // `{ "a", "b", "c" }` — no named fields; accessing `t.anything`
     // on a shape with only array entries shouldn't accidentally fire

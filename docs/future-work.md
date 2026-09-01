@@ -32,13 +32,14 @@
 
 ### 2.1 [P3] 泛型实参未从调用点回填
 
-- **问题**：`resolver.rs` 能对已知实参做替换，但调用点的实参类型没有传进来——`setmetatable({}, …)` 的 `call_arg_types` 是 `[Unknown, Unknown]`，其 `---@generic T … @return T` 因此解析为**未替换**的 `EmmyType("T")` 而非 `{}` 的 shape。
-- **方案**：将调用点实参类型传入 `substitute_generic_params`，用 `unify_one` 的现有绑定机制回填。
-- **与 `_ENV` 的关系**（已不再是阻塞，但需确认）：实现回填后 `_ENV = setmetatable({}, …)` 会解析出字面量自己的 shape，这**正是** §3.1 想要的效果。沙箱行为不会退化，因为「字段集合非穷尽」已由 `mark_shapes_opened_by_metatable_calls` 独立记录在 shape 的 `is_closed` 上，不依赖"返回类型推不出 table"这一偶然事实。落地时下列测试必须保持绿，它们锁定了这份独立性：
+- **问题**：`resolver.rs` 能对已知实参做替换，但调用点的实参类型没有传进来——`---@generic T @param x T @return T` 的用户函数以 table 字面量调用时 `call_arg_types` 里是 `Unknown`，返回因此解析为**未替换**的 `EmmyType("T")`。
+- **已单独绕过的一格**：`setmetatable` 不再依赖本条——它的恒等语义（返回第一实参）已在 `summary_builder::type_infer::infer_call_return_type` 里直接建模，见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3。落地本条时下列测试必须保持绿，它们锁定「沙箱静默由 `is_closed` 独立保证、与返回类型能否解析无关」：
   - `setmetatable_env_reports_nothing`
   - `setmetatable_env_navigates_a_free_name_to_the_global`
   - `setmetatable_env_stays_silent_for_names_it_can_reach`
-- **验收**：`local t = setmetatable({a=1}, {})` 的 `t.a` 可解析；上述三个测试不变红。
+  - `inline_setmetatable_env_stays_non_exhaustive`
+- **方案**：将调用点实参类型传入 `substitute_generic_params`，用 `unify_one` 的现有绑定机制回填。
+- **验收**：自定义泛型函数以字面量调用时返回类型可解析；上述测试不变红。
 
 ### 2.2 [P3] 泛型上界约束（`@generic T : Foo`）未校验
 
@@ -58,35 +59,16 @@
 
 ---
 
-## 3. `_ENV` 沙箱能力缺口
+## 3. 元表与表形状
 
-> 语义模型与已实现部分见 [`lsp-semantic-spec.md`](lsp-semantic-spec.md) §1.3 / §1.3.1 / §1.6。
-> 已支持：goto / hover / references / 补全 / 两类诊断按环境形态分工；`_ENV` 归一为「全局表或某个 TableShape」（推不出即合成），非穷尽环境按 `{__index=_G}` 约定回退全局。
+### 3.1 [P3] 带元表的表仍会被报 `Unknown field`
 
-### 3.1 [P3] 沙箱表字面量的自有字段仍不可达
-
-- **问题**：`local _ENV = setmetatable({ own = 1 }, …)` 里写在**字面量内**的 `own` 找不到——`setmetatable` 的泛型返回推不出 table，于是 `env_binding_fact` 合成了一张**空** shape，字面量 `{ own = 1 }` 自身的 shape 被丢弃。
-- **缺口的精确边界**（已实测，只有第三种挂掉）：
-
-  | 写法 | `_ENV` 的 RHS | shape 来源 | 自有字段 |
-  |---|---|---|---|
-  | `local _ENV = { own = 1 }` | table 字面量 | 直接推出 | ✅ |
-  | `local t = { own = 1 }; setmetatable(t, …); local _ENV = t` | 变量 `t` | 从 `t` 的字面量推出，`setmetatable` 仅 mark open | ✅ |
-  | `local _ENV = setmetatable({ own = 1 }, …)` | `setmetatable(…)` **调用** | 泛型返回推不出 → **合成空 shape** | ❌ |
-
-  判据即 `env_binding_fact` 文档里那句「RHS already yields a shape … otherwise a fresh one is synthesized」：前两种命中前半句，第三种命中 `otherwise`。沙箱内用**语句**写的字段（`own = 1`）任何写法下都不受影响，已可跳转与补全。
-- **方案**：把 `setmetatable(t, mt)` 的返回类型解析为**第一实参的 fact**（该函数的文档化恒等语义，比 §2.1 的通用泛型回填窄得多）；或直接实现 §2.1，两者都会让 `_ENV` 拿到字面量自己的 shape。由于 `mark_shapes_opened_by_metatable_calls` 已把它标为 open，缺失字段仍走全局回退、`envUnknownField` 仍静默。
-- **验收**：`own` 可跳转、可补全；§2.1 条目列出的三个测试保持绿。
-- **手工用例**：`tests/lua-root/test_env.lua` §2e（内联写法 + 字面量自有字段）。对照组：§2a 是内联但字面量为空、§3f 第二个 `do` 块是分离写法带自有字段，两者都能工作——**缺口仅在"内联 + 有自有字段"这一格**。
-
-### 3.2 [P3] `document_highlight` 不区分环境边界
-
-- **问题**：`g = 1; _ENV = {}; g = 2; print(g)` 中第一个 `g` 与后两个运行时是不同变量，goto / references 已能区分，但同文件高亮仍把三处一起点亮——**点击其中任意一处，结果都完全相同**。
-- **注意别与语义着色混淆**：`semantic tokens` 对同一段代码**已正确区分**（重定向后 `g` 不再着色为 global），那是常驻的文字颜色；本条目说的是 `document_highlight`——光标停留时出现、移开即消失的**背景色块**（VS Code 的 `editor.occurrencesHighlight`）。两者是不同的 LSP 能力。
-- **原因**：`document_highlight.rs` 按设计只做「文本匹配 + 作用域 `decl_byte` 过滤」，不查索引。全局名 `resolve_decl` 返回 `None` → `target_decl_byte` 为 `None` → `matches_scope` 恒为 `true` → 纯文本全命中。该文件没有引用 `name_resolution`，因此对**所有**全局名都不做语义区分——这不是 `_ENV` 特有的缺口，`_ENV` 只是让它变得可观察。local 名不受影响（`decl_byte` 过滤一直正确）。
-- **方案**：若要修，需让它对非 local 的名字也走 `name_resolution`（§1.6 的公共层），代价是每次高亮请求都要做索引查询。需先评估该请求的调用频次（编辑器在光标移动时会频繁触发，远高于用户主动执行的 references）是否承受得起。
-- **风险**：这是性能与精确性的取舍，不是纯 bug 修复。改动前应先量测。
-- **手工用例**：`tests/lua-root/test_env.lua` 第 4 节末尾的 `do` 块（`g = 1 / _ENV = {} / g = 2 / print(g)`）。
+- **问题**：`local obj = setmetatable({}, { __index = Base })` 之后读 `obj.field_on_base` 会得到 `Unknown field 'field_on_base' on table`（`luaFieldWarning`，默认 `warning`）。装了元表恰恰意味着「静态字段集合不是穷尽描述」，此时断言字段不存在是不可靠的——`__index` 完全可能提供它。
+- **现状不是新引入的**：`diagnostics/field_access.rs` 一直只按 `TableShape::is_closed` 把严重度从 `luaFieldError` 降到 `luaFieldWarning`，而不是静默。分离式写法 `local t = {}; setmetatable(t, mt); t.x` 早就如此；内联写法此前因为返回类型推不出 table 而**偶然**逃过检查，`setmetatable` 恒等返回落地后两种写法归于一致（`test_diagnostics.rs::inline_and_separate_setmetatable_report_the_same_thing` 锁定这份一致性），于是这条既有噪声变得更容易撞上——内联写法在 OO 惯用法里更常见。
+- **对照**：同一个 `is_closed == false` 事实，`envUnknownField` 与导航层的处理是**静默 / 回退**（§1.3 的 `{__index=_G}` 约定），只有 `field_access` 选择照报。两者对不齐。
+- **方案**：需要能区分「非穷尽的来源」——元表 vs 动态键写入 vs `rawset`。`is_closed` 是单个 bool，表达不了，得在 `TableShape` 上记来源（如 `openness: Openness` 枚举）。有了来源后：元表 → 静默（与 `_ENV` 一致）；动态键 → 保留现有 `luaFieldWarning`（`test_diagnostics.rs::dynamic_bracket_key_opens_shape` 锁定）。
+- **验收**：`setmetatable({}, {__index=Base})` 上的字段读不再报；动态键 `{ [k] = 1 }` 的行为不变。
+- **风险**：改的是默认开启的诊断类别，需按 [`../AGENTS.md`](../AGENTS.md) §7 在真实 fixture 上确认噪声方向。
 
 ---
 
@@ -103,11 +85,12 @@
 
 ## 5. 推荐落地顺序
 
-1. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
-2. **1.3** `assignment_count` / `def_range` 注释与实现对齐 — 改动极小，且消除一处持续误导
-3. **2.1** 泛型实参回填 — 能力提升明显，且顺带解决 3.1（见条目内说明）
-4. **1.2** `type_definitions` O(1) 详情索引 — 规模到 1 万+ 文件前不紧迫
-5. 其余 P3 项按需补做
+1. **3.1** 元表来源区分 — 直接影响默认开启诊断的信噪比，改动集中在 `TableShape` + 一处消费方
+2. **1.1** per-name fingerprint — 改动较大，可显著缩小大型工作区的级联重算范围
+3. **1.3** `assignment_count` / `def_range` 注释与实现对齐 — 改动极小，且消除一处持续误导
+4. **2.1** 泛型实参回填 — 能力提升明显
+5. **1.2** `type_definitions` O(1) 详情索引 — 规模到 1 万+ 文件前不紧迫
+6. 其余 P3 项按需补做
 
 ---
 

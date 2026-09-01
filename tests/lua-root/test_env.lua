@@ -92,12 +92,14 @@ do
     print(v)
 end
 
--- 2e. 内联写法 + 字面量自有字段：泛型返回未回填，own_inline 目前不可达
---     （future-work.md §3.1；随 §2.1 泛型实参回填一并解决）
+-- 2e. 内联写法 + 字面量自有字段：setmetatable 恒等返回（返回第一实参），
+--     所以 _ENV 拿到的就是字面量自己的 shape
 do
     local _ENV = setmetatable({ own_inline = 1 }, { __index = _G })
-    local v = own_inline
+    local v = own_inline         -- 应可跳转到上一行的 own_inline，可补全
     print(v)
+    local g = GlobalForSandbox   -- 元表仍让 shape 非穷尽，故照旧回退到全局
+    print(g)
 end
 
 -- ============================================================
@@ -194,6 +196,9 @@ end
 print(still_a_real_global)                    -- 应可跳转，无诊断
 
 
+-- 4a. 重定向前后的同名自由名是不同符号。除 goto / references 外，
+--     document_highlight（光标停留时的背景色块，editor.occurrencesHighlight）
+--     也已区分：点第 1 个 g 只亮它自己，点第 3 个 g 只亮它与 print(g)。
 do
     g = 1          -- 真全局的 g
     _ENV = {}      -- 环境切换
