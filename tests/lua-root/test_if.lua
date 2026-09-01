@@ -3,8 +3,11 @@
 -- 虽然找不到 gg_cpp_define_some 的定义，但是这是再 if 里做逻辑判断，判断通过后，then 的语句块里，gg_cpp_define_some 就有定义了。
 -- 这种情况下 then 分支 gg_cpp_define_some 的类型可能用 any 来表示，或者用一个特殊的类型来表示 "可能存在的全局变量"。
 if gg_cpp_define_some then
-    print(gg_cpp_define_some)   -- 
+    print(gg_cpp_define_some)
+    gg_cpp_define_some.some_func()
 end
+
+gg_cpp_define_some.some_func() -- 预期诊断 Undefined global 'gg_cpp_define_some'
 
 -- 与上面其实一样
 if gg_cpp_define_some ~= nil then

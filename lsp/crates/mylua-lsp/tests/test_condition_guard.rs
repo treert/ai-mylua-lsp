@@ -354,9 +354,33 @@ fn or_right_operand_is_not_guarded() {
 }
 
 #[test]
-fn early_return_guard_is_out_of_scope() {
-    // Documents a known limitation: recognizing this needs
-    // statement-order data flow, which this pass deliberately omits.
+fn early_return_guard_is_intentionally_not_supported() {
+    // Not a TODO — evaluated and declined.
+    //
+    // The `if not P then return end` idiom does establish that `P` exists
+    // for everything after it, and recognizing it would need statement-order
+    // data flow: a fact set accumulated across sibling statements, plus a
+    // "does this branch definitely terminate" analysis (`return` / `break` /
+    // `error()` / all-branches-terminate), plus a rule for how far a fact
+    // propagates out of its block. `assert(P)` and the lazy-init
+    // `if not P then P = {} end` are the same family and would share ~70% of
+    // that machinery.
+    //
+    // It is deliberately left out, for a reason that is about product
+    // direction rather than difficulty: the more existence idioms get
+    // suppressed, the less reason anyone has to write the annotation that
+    // would actually give them types. Annotations (`---@class`, `---@meta`)
+    // are exact and predictable; suppression is inherently heuristic, and
+    // Lua admits unboundedly many ways to say "this might not exist", so
+    // each new form bought here also buys a new way to hide a real bug.
+    //
+    // What this pass covers — reads lexically nested inside the guarded
+    // region, reachable by walking ancestors — is the deliberate stopping
+    // point: enough to clear the obvious noise, not enough to make skipping
+    // annotations free.
+    //
+    // So a failure here means suppression got *wider* than intended. Check
+    // that against the above before updating the expectation.
     let src = "\
 if not gg_cpp_define_some then
     return
@@ -366,8 +390,8 @@ print(gg_cpp_define_some)
     let msgs = guardable_messages(src, true);
     assert!(
         msgs.iter().any(|m| m.starts_with("3:")),
-        "if this now passes, early-return support landed — update the test, \
-         got: {:#?}",
+        "early return is intentionally not treated as a guard; suppression \
+         appears to have widened — got: {:#?}",
         msgs
     );
 }

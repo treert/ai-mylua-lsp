@@ -42,11 +42,39 @@
 //! `== nil` flip the polarity, so `if not P then … else <here> end` is
 //! guarded just like `if P then <here> end`.
 //!
-//! Deliberately **out of scope** (each needs statement-order data flow,
-//! which this does not do): early return (`if not P then return end`),
-//! `assert(P)`, `or` right-hand sides, `repeat … until C` (the condition
-//! is evaluated *after* the body, so it guards nothing), guards stored in
-//! an intermediate variable, and `a[b]` subscript paths (a non-constant
+//! # Where this stops, and why
+//!
+//! Requiring the read to be lexically nested inside the guarded region —
+//! reachable by walking ancestors — is the deliberate stopping point, not a
+//! staging post. Several common idioms establish existence for their
+//! *following siblings* instead, and are knowingly left unsupported:
+//!
+//! ```lua
+//! if not P then return end     -- early return
+//! assert(P)                    -- assert
+//! if not P then P = {} end     -- lazy init
+//! ```
+//!
+//! All three would need statement-order data flow: a fact set accumulated
+//! across sibling statements, a "does this branch definitely terminate"
+//! analysis (`return` / `break` / `error()` / all-branches-terminate), and a
+//! rule for how far a fact escapes its block. They share most of that
+//! machinery, so supporting one sensibly means supporting all.
+//!
+//! They are declined on product grounds rather than difficulty: the more
+//! existence idioms are suppressed, the less reason anyone has to write the
+//! annotation that would actually give them types. Annotations (`---@class`,
+//! `---@meta`) are exact and predictable; suppression is inherently
+//! heuristic, and Lua admits unboundedly many ways to say "this might not
+//! exist", so every extra form recognized here is also an extra way to hide
+//! a real bug. Clearing the obvious noise is worth it; making skipped
+//! annotations free is not.
+//!
+//! Also unsupported, for their own reasons: `or` right-hand sides (`a or b`
+//! evaluates `b` precisely when `a` was falsy, so `a` guarantees nothing
+//! there), `repeat … until C` (the condition runs *after* the body, so it
+//! guards nothing — permanent, not a limitation), guards stored in an
+//! intermediate variable, and `a[b]` subscript paths (a non-constant
 //! subscript has no stable key).
 //!
 //! # Cost
