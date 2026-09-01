@@ -15,7 +15,7 @@
 | 并行冷启动 | 5 阶段流水线，rayon 全量并行 parse，后台化不阻塞 UI |
 | 增量 reparse | `tree.edit` + `parse(new, Some(old))`，未变区域子树复用 |
 | 诊断调度 | 公共 300ms debounce + scheduler 内部 scope 收集 + pending 合并 + modified/open/unopened 优先级排序 |
-| 级联精细化 | 签名指纹不变不级联；双向反向索引覆盖 require 与类型依赖 |
+| 级联精细化 | 签名指纹不变则完全不级联（见 [`index-architecture.md`](index-architecture.md) §6.3）；级联后的范围由 `diagnostics.scope` 控制，不做依赖筛选 |
 | Fast path | `did_open`/`did_close` 内容未变时跳过 reparse |
 | 冷启动抢跑 | Ready 前打开的文件立即发 syntax-only 诊断 |
 | 模块解析 | last-segment 索引 + 最长后缀匹配，O(1) 查找无 fallback |
@@ -123,4 +123,4 @@ tree-sitter 单节点成本：实测约 **88–155 B/可见节点**（工作系�
 
 ---
 
-**维护提示**：若对冷启动路径、`documents` 生命周期、诊断调度策略做了实质性调整，请同步更新本文件的相关章节（特别是 §2 瓶颈条目、§3 设计权衡、§4 规模分级表与 §6 变更简史）。若将来**反悔** §3.1 的"全内存驻留"决策要引入 LRU，需要先在 §3 标注并同步更新 `AGENTS.md` 的架构描述。
+**维护提示**：若对冷启动路径、`documents` 生命周期、诊断调度策略做了实质性调整，请同步更新本文件的相关章节（特别是 §2 瓶颈条目、§3 设计权衡、§4 规模分级表与 §6 变更简史）。若将来**反悔** §3.1 的"全内存驻留"决策要引入 LRU，需要先在 §3 标注并同步更新 [`architecture.md`](architecture.md) 的相关描述。

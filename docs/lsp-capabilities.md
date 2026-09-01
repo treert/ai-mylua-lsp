@@ -277,3 +277,11 @@ local a = custom_require("mgr_abc.abc_mgr")
 ```
 
 server 进程常驻内存（working set / RSS）字节数，供扩展在状态栏 tooltip 显示。ready 之后 server 每 ~2 秒采样一次，仅当相比上次推送变化 ≥ 1 MiB 时才发送，因此内存平稳时可能长时间不推送。采样失败或平台不支持（非 Windows/Linux/macOS）时不发送。
+
+## 新增能力时的连带修改
+
+漏改任一处都会造成"功能看着能用、实际半残"：
+
+- **新增诊断类别**：`DiagnosticsConfig` 加字段 + 默认 severity + `vscode-extension/package.json` 配置声明 + `diagnostics/suppression.rs` 抑制码。默认开启需在 fixture 上确认噪声
+- **新增 capability**：`lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler + 独立 `src/<feature>.rs` + 集成测试 + 本文档对应章节
+

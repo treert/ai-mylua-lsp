@@ -1475,7 +1475,7 @@ local b = own_field
 // only way fields written *inside* the literal stay reachable. Before, the
 // `---@generic T … @return T` was not back-filled from the call site, so the
 // return resolved to nothing and `env_binding_fact` synthesized an **empty**
-// shape, throwing the literal away (`future-work.md` §3.1). Fields written by a
+// shape, throwing the literal away. Fields written by a
 // *statement* inside the sandbox were never affected.
 //
 // The metatable still has to mark the shape non-exhaustive on its own, which is

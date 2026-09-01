@@ -140,10 +140,10 @@ local XX = UE4.Class()"#;
 fn goto_field_of_a_setmetatable_result_resolves_through_the_first_argument() {
     // `setmetatable(t, mt)` returns `t`. Its declared type is
     // `---@generic T … @return T`, and generic parameters are not back-filled
-    // from call-site arguments (`future-work.md` §2.1), so the return type used
+    // from call-site arguments, so the return type used
     // to come out as an unsubstituted `T` and `t.inner` resolved nowhere.
     // Modelling the documented identity semantics directly is narrower than
-    // general back-filling and is what the `_ENV` sandbox needs (§3.1).
+    // general back-filling and is what the `_ENV` sandbox needs.
     let src = "local t = setmetatable({ inner = 1 }, {})\nprint(t.inner)\n";
     let (doc, uri, mut agg) = setup_single_file(src, "setmetatable_identity.lua");
 
@@ -326,7 +326,7 @@ end"#;
 
 #[test]
 fn goto_nested_chained_field_jumps_to_assignment_site() {
-    // P2 / future-work §0 (AST chained assign): after `a.b.c = 1`
+    // AST chained assign: after `a.b.c = 1`
     // registers `c` on the inner `a.b` shape (AST-driven, not splitn),
     // goto on `.c` in a subsequent read site must reach the assignment
     // line. Previously this would fall back to None because

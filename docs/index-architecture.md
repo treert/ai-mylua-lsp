@@ -225,18 +225,20 @@ Phase 1: Scan → Phase 1.5: Module → Phase 2: Parse → Phase 3: Merge → Ph
     → GlobalContributions 变化 → 更新 GlobalShard
     → TypeTable 变化 → 更新 TypeShard
     → RequireBindings 变化 → 更新 RequireByReturn
-    → 签名变化 → 调度依赖方诊断重算
+    → 签名变化 → 置 cascade 标记，交给诊断调度
   → 用 S' 替换 S → 调度诊断
 ```
 
 ### 6.3 级联失效：签名指纹
 
-为每个对外可见的类型事实计算**签名指纹**（参数类型 + 返回类型 + 字段集合 → 哈希）。
+为每个对外可见的类型事实计算**签名指纹**（参数类型 + 返回类型 + 字段集合 → 哈希），聚合成 `DocumentSummary.signature_fingerprint`（文件级单一 hash）。
 
 | 指纹变化？ | 动作 |
 |-----------|------|
 | **未变** | 仅更新本文件 Summary，**不触发级联** |
-| **变了** | 沿反向依赖标记脏 |
+| **变了** | 置 `should_cascade`，由 `DiagnosticScheduler` 按 `diagnostics.scope` 重新入队候选文件 |
+
+**没有反向依赖图**：指纹的唯一产物是"要不要级联"这一个布尔值，不参与"哪些下游需要重算"的推导。级联一旦触发，`scope=full` 入队全部已索引文件、`scope=openOnly` 入队全部已打开文件——都不做依赖筛选。这是有意的取舍，理由与"为何不拆成 per-name 指纹"一并记在 [`architecture.md`](architecture.md) §3.4。
 
 实践中，函数内部逻辑修改大多不改变签名指纹，不会触发级联。
 

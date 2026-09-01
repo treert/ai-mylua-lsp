@@ -95,6 +95,8 @@ flowchart TB
 - **分层策略**：Emmy 路径严格（`error`），Lua 路径保守（高确定性才报）
 - **调度**：`DiagnosticScheduler` 统一管理，文件修改触发公共 300ms debounce；debounce 到期后 scheduler 按 `diagnostics.scope` 主动收集候选文件，合并尚未消费的 pending，再按已修改（最近优先）→ 已打开 → 未打开排序；队列内部使用进程级 `UriId`，在 LSP 发布边界再解析回 `Uri`
 - **配置**：`mylua.diagnostics.scope`（`full` / `openOnly`）控制范围
+- **粒度（有意为之）**：重算单位是**文件**，不做依赖分析。`DocumentSummary.signature_fingerprint` 是文件级单一 hash，只用于产出 `should_cascade` 这一个布尔信号（签名未变则不 cascade），并不参与"哪些下游需要重算"的推导；cascade 触发后 `scope=full` 入队全部已索引文件、`scope=openOnly` 入队全部已打开文件，均不做依赖筛选（细节见 [`index-architecture.md`](index-architecture.md) §6.3）。
+  控制无谓开销的手段是 `scope=openOnly` + 300ms debounce，而非细粒度失效追踪。因此把 fingerprint 拆成 per-name（`HashMap<String, u64>`）在当前架构下**没有消费方**，不是待办项——若将来引入真正的依赖图驱动增量诊断，再一并考虑。
 
 **模块结构**（`src/diagnostics/`）：
 

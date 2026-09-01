@@ -252,10 +252,12 @@ impl Default for DiagnosticsConfig {
 /// Scope of diagnostics publishing.
 ///
 /// - `Full` (default): cold-start seeds the entire workspace (already
-///   open → Hot queue, others → Cold); cascade 触发所有 dependant URIs.
-/// - `OpenOnly`: cold-start seeds only `open_uris` as Hot; cascade 跳过
-///   未打开的 dependant URIs. Matches the default behavior of most LSPs
+///   open → Hot queue, others → Cold); cascade 入队全部已索引文件。
+/// - `OpenOnly`: cold-start seeds only `open_uris` as Hot; cascade 只入队
+///   已打开文件. Matches the default behavior of most LSPs
 ///   (rust-analyzer, pyright).
+///
+/// 两种模式都**不做依赖筛选**——没有反向依赖图，"dependant" 一词不适用。
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[derive(Default)]

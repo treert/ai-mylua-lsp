@@ -235,8 +235,10 @@ pub enum EmmyAnnotation {
 /// `local s = [[\n  local x = ---@type Foo\n]]` will be treated as if
 /// `Foo` were a real type reference. Callers happy to trade that edge
 /// case for simplicity should keep using this; AST-aware filtering can
-/// be layered on at the entry sites if/when it matters. See
-/// `docs/future-work.md`.
+/// be layered on at the entry sites if/when it matters. Accepted as-is:
+/// triggering it needs emmy-shaped text inside a long string/comment
+/// *and* a type name that actually resolves, and the worst outcome is a
+/// spurious hover / jump.
 pub fn emmy_type_name_at_byte(source: &[u8], byte_offset: usize) -> Option<String> {
     if byte_offset > source.len() {
         return None;

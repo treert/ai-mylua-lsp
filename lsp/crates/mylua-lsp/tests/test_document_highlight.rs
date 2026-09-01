@@ -248,7 +248,7 @@ fn document_highlight_no_match_on_nothing() {
 }
 
 // ---------------------------------------------------------------------------
-// Environment boundaries (`future-work.md` §3.2)
+// Environment boundaries
 // ---------------------------------------------------------------------------
 //
 // A free name is `_ENV.name`, so two occurrences of the same text on either

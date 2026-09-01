@@ -175,7 +175,7 @@ Foo = { x = 1 }
 
 #[test]
 fn two_shapes_each_know_their_owner() {
-    // Regression focus for the future-work note: two shape tables
+    // Regression focus: two shape tables
     // in the same file each with a same-named method should carry
     // distinct owner_names, giving hover / signature_help a
     // disambiguation hook even without any class annotation.

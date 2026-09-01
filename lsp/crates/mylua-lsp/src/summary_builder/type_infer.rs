@@ -512,7 +512,7 @@ fn infer_call_return_type(
     // `env_binding_fact` with no shape on the right-hand side, so it synthesizes
     // an empty one and `own` becomes unreachable. Modelling this one function
     // directly is far narrower than back-filling generic parameters from
-    // call-site arguments in general (`future-work.md` §2.1), which the stdlib's
+    // call-site arguments in general (not implemented), which the stdlib's
     // `---@generic T … @return T` would need.
     //
     // The returned table stops being an exhaustive description of itself —

@@ -17,7 +17,7 @@ Lua 5.3+ 语言支持：**自研 Tree-sitter 文法**、**独立 LSP**、**VS Co
 | [grammar/](grammar/) | Tree-sitter 文法（`tree-sitter test`，parser 供 LSP 链入） |
 | [lsp/](lsp/) | 语言服务器实现与构建产物 |
 | [vscode-extension/](vscode-extension/) | VS Code 扩展（TextMate、拉起 LSP、配置） |
-| [docs/](docs/) | 需求、架构、路线图 |
+| [docs/](docs/) | 需求、架构、语义规格、性能与待办 |
 
 ## 快速构建
 

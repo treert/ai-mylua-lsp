@@ -37,7 +37,10 @@ pub struct DocumentSummary {
     /// has no top-level return.
     pub module_return_range: Option<ByteRange>,
     /// Fingerprint of all externally-visible type signatures.
-    /// Used for cascade invalidation: if unchanged, dependants don't need revalidation.
+    /// Used for cascade invalidation: if unchanged, nothing is re-queued.
+    /// If changed, the scheduler re-queues candidates by `diagnostics.scope`
+    /// — there is no reverse-dependency graph, so this is a plain bool
+    /// signal rather than input to a "which dependants" computation.
     pub signature_fingerprint: u64,
     /// Call sites captured from this file's function bodies (and
     /// top-level code). Feeds `call_hierarchy` incoming/outgoing

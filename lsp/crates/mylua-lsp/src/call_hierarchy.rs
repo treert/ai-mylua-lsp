@@ -21,8 +21,9 @@
 //! Name matching uses the **last path segment** of the callee: for
 //! `m.sub.foo()` the callee name is `foo`, for `obj:bar()` it's
 //! `bar`. This is a known simplification that can produce false
-//! positives across same-named functions in different files; see
-//! `future-work.md`.
+//! positives across same-named functions in different files;
+//! disambiguating would require resolving each callee to a definition,
+//! which is exactly the cost name matching is here to avoid.
 
 use std::collections::HashMap;
 

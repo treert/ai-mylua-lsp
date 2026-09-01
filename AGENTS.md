@@ -4,8 +4,7 @@
 
 ## 强制规则（给 AI）
 
-1. **在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`AGENTS.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
-2. **修改架构、图层、数据路径或依赖时**，同步更新 `docs/` 中相关文档（跨文件索引见 [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md)），避免文档与代码脱节。
+**在回答与本项目相关的实现、排错、重构或规划前**，应阅读本文件（`AGENTS.md`）与 [`docs/README.md`](docs/README.md)，并按主题查阅 [`docs/`](docs/) 下对应文档。
 
 ## 开发规范（必须遵守）
 
@@ -20,8 +19,9 @@
 ## 文档同步（强制）
 
 - 新增/删除/重构 LSP 能力（如 semantic tokens、completion、diagnostics）→ 同一次提交更新 [`docs/lsp-capabilities.md`](docs/lsp-capabilities.md)
-- 改变架构或数据流（如索引策略、模块边界）→ 同一次提交更新 `docs/architecture.md` 相关章节
-- 改变实现路线或阶段完成状态 → 更新 `docs/implementation-roadmap.md`
+- 改变架构或数据流（如索引策略、模块边界）→ 同一次提交更新 [`docs/architecture.md`](docs/architecture.md) / [`docs/index-architecture.md`](docs/index-architecture.md) 相关章节
+- 改变语义约定或名字解析规则 → 同一次提交更新 [`docs/lsp-semantic-spec.md`](docs/lsp-semantic-spec.md)
+- 用户可见变动 → 追加 `vscode-extension/CHANGELOG.md` 的 `[Unreleased]`
 
 不需要更新文档的场景：bug 修复（不改变功能描述）、纯重构（对外行为不变）、配置微调。
 
@@ -31,6 +31,8 @@
 **需要支持 emmylua 类型的类型注释。**
 **仅支持 Lua 5.3 及以上版本。**
 对性能有较高要求，需要支持5万个lua文件级别。
+
+**当前状态**：功能开发已完成（文法 / LSP / 扩展全部落地），后续工作以优化与修复为主，待办见 [`docs/future-work.md`](docs/future-work.md)。
 
 **方案取向**：
 - **全工作区能力**：定义、所有引用、工作区符号均为硬性目标
@@ -51,15 +53,6 @@ ai-mylua-lsp/
 ├── tests/            # 手工测试用 Lua 文件（可随意增删改，Rust 测试不依赖此目录）
 └── docs/             # 设计文档中心
 ```
-
-## 开发进度
-
-| 阶段 | 状态 | 说明 |
-|------|------|------|
-| A — Grammar | ✅ 完成 | Tree-sitter 文法 + 外部扫描器 |
-| B — LSP 骨架 | ✅ 完成 | Rust + tower-lsp-server + 增量解析 |
-| C — 全功能 LSP | ✅ 完成 | 30+ LSP 能力，全工作区索引 |
-| D — VS Code Extension | ✅ 完成 | TextMate 着色 + LSP 客户端 + 打包发布 |
 
 ## 功能索引
 
