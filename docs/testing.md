@@ -29,6 +29,7 @@
 | `test_scope.rs` | 18 | 作用域树（含 if/elseif/else 分支隔离） |
 | `test_diagnostics.rs` | 42 | 语法 + 语义诊断全覆盖 |
 | `test_diagnostic_suppress.rs` | 9 | `@diagnostic` 抑制 |
+| `test_condition_guard.rs` | 24 | 条件守卫抑制 `narrowByConditionGuard` |
 | `test_folding_range.rs` | 16 | 折叠范围 |
 | `test_selection_range.rs` | 5 | 选区扩展 |
 | `test_semantic_tokens_delta.rs` | 4 | 语义 token 增量 |

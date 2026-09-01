@@ -44,6 +44,7 @@ const RESTART_RELEVANT_CONFIG_KEYS = [
   'mylua.diagnostics.argumentCountMismatch',
   'mylua.diagnostics.argumentTypeMismatch',
   'mylua.diagnostics.returnMismatch',
+  'mylua.diagnostics.narrowByConditionGuard',
   'mylua.diagnostics.scope',
   'mylua.inlayHint.enable',
   'mylua.inlayHint.parameterNames',
@@ -151,6 +152,7 @@ function collectLspConfig(
       argumentCountMismatch: cfg.get('diagnostics.argumentCountMismatch'),
       argumentTypeMismatch: cfg.get('diagnostics.argumentTypeMismatch'),
       returnMismatch: cfg.get('diagnostics.returnMismatch'),
+      narrowByConditionGuard: cfg.get('diagnostics.narrowByConditionGuard'),
       scope: cfg.get('diagnostics.scope'),
     },
     documentSymbol: {

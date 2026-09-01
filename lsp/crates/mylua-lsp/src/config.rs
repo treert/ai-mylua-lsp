@@ -212,6 +212,17 @@ pub struct DiagnosticsConfig {
     /// `return` statements (including inside `if`/`do`/`while`).
     #[serde(rename = "returnMismatch")]
     pub return_mismatch: DiagnosticSeverityOption,
+    /// Suppress `undefinedGlobal` / unknown-field reports at reads the
+    /// author already guarded with an existence check, e.g.
+    /// `if X then … X … end` for a symbol the host application registers
+    /// at run time.
+    ///
+    /// A bool rather than a `DiagnosticSeverityOption`: this does not
+    /// produce diagnostics of its own, it only filters others. It covers
+    /// both affected codes with one switch because they share the same
+    /// mechanism, and it changes no types — see `diagnostics::condition_guard`.
+    #[serde(rename = "narrowByConditionGuard")]
+    pub narrow_by_condition_guard: bool,
     /// Scope of cold-start diagnostics publishing + cascade fan-out.
     /// Default `"full"`. See `DiagnosticScope` for semantics.
     pub scope: DiagnosticScope,
@@ -232,6 +243,7 @@ impl Default for DiagnosticsConfig {
             argument_count_mismatch: DiagnosticSeverityOption::Off,
             argument_type_mismatch: DiagnosticSeverityOption::Warning,
             return_mismatch: DiagnosticSeverityOption::Off,
+            narrow_by_condition_guard: true,
             scope: DiagnosticScope::Full,
         }
     }

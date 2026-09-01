@@ -1,4 +1,5 @@
 mod call_args;
+mod condition_guard;
 mod duplicate_key;
 mod env_field;
 mod field_access;
@@ -20,6 +21,7 @@ use crate::util::LineIndex;
 use std::collections::HashSet;
 use tower_lsp_server::ls_types::*;
 
+pub use condition_guard::filter_guarded_diagnostics;
 pub use suppression::{apply_diagnostic_suppressions, classify_diagnostic_code};
 
 // Built-in identifier set is now version-dependent and lives in
@@ -192,5 +194,14 @@ pub fn collect_semantic_diagnostics_with_version_id(
         &mut diagnostics,
         line_index,
     );
+
+    // Runs last, over the assembled list: a read the author already
+    // guarded with an existence check (`if X then … X …`) should not be
+    // reported as undefined. Post-processing keeps every producing check
+    // unaware of it, and costs nothing when nothing was reported.
+    if diag_config.narrow_by_condition_guard {
+        diagnostics =
+            condition_guard::filter_guarded_diagnostics(root, source, line_index, diagnostics);
+    }
     diagnostics
 }

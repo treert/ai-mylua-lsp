@@ -305,6 +305,11 @@
           "default": "warning",
           "description": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries."
         },
+        "mylua.diagnostics.narrowByConditionGuard": {
+          "type": "boolean",
+          "default": true,
+          "description": "Suppress \"undefined global\" and \"unknown field\" reports where the code already checks the name exists — `if X then … X … end`, `if X == nil then … else … X … end`, `X and X.f()`, `while X do … end`. Useful when a host application registers symbols into the Lua globals at run time. Does not change any inferred types: writing a `---@class` or a `---@meta` stub is still the way to get real type information."
+        },
         "mylua.diagnostics.scope": {
           "type": "string",
           "enum": [

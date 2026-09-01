@@ -11,6 +11,18 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+### Added
+- 新增配置项 `mylua.diagnostics.narrowByConditionGuard`（bool，默认开启）：当一次读取已被存在性检查包裹时，抑制 `Undefined global` 与 `Unknown field` 诊断。典型场景是宿主程序（通常是 C++）在运行时把符号注册进 Lua 全局表，工作区里查不到定义，于是脚本先探测再使用——此时报错纯属噪音，而满屏警告往往导致用户直接关掉整类诊断。识别 `if X then …`、`elseif X then …`、`if X == nil then … else …`、`if not X then … else …`、`while X do …`、`X and X.f()` 六种形态，条件形式支持 `X` / `X ~= nil` / `nil ~= X` / `not X` / `X == nil` / `nil == X`（`not` 与 `== nil` 翻转极性）。守卫以**访问路径**为键而非仅变量名，故 `x.m_some` 与全局名同等处理，且对前缀的检查覆盖更深的读取（检查 `x.cfg` 也覆盖 `x.cfg.opt`）。
+  **这不改变任何类型推断结果**：名字仍保持原有类型（通常未知），仅丢弃诊断。写全 `---@class` / `---@meta` stub 仍是获得真实类型信息的唯一正解，本能力只为尚未写到那一步的代码降噪。刻意不支持需要语句级数据流的形态：early return（`if not X then return end`）、`assert(X)`、`or` 右操作数、`repeat … until`（条件在循环体之后求值，不构成守卫）。
+
+### Changed
+- `if` / `elseif` / `else` 的每个分支体现在各自拥有独立的词法作用域，互为兄弟挂在一个不含声明的 `if` 外壳下。条件表达式落在外壳而非任何分支内，符合 Lua 语义（条件在它守卫的分支之外求值）。
+- `a or b` 的类型推断改为「优先取 `a`，仅当推断不出 `a` 的类型时才回退到 `b`」，此前无条件取 `a`。`a and b` 仍取 `b`（`a` 通常只是条件）。三处平行实现（类型推断、诊断类型兼容、summary 构建）统一到同一判定规则，不再各自漂移。
+
+### Fixed
+- 修复 `else` 分支能错误看到 `then` 分支中声明的 `local` 的问题：`if c then local a = 1 else print(a) end` 中的 `a` 此前会解析到 `then` 分支的声明，实际运行时该变量在 `else` 分支不存在。各 `elseif` 分支之间、以及分支与 `if` 语句之后的代码同样不再互相泄漏。
+- 修复光标停在分支尾部空行时补全看不到该分支 `local` 的问题：tree-sitter 把分支节点的结束位置定在最后一条语句处，作用域区间现延伸至下一个分支或 `end`。
+
 ## [0.2.19] - 2026-08-31
 
 ### Added

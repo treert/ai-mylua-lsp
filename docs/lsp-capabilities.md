@@ -155,12 +155,45 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 | return 不匹配 | `returnMismatch` | Warning |
 | `@param` 名称不匹配 Lua 参数 | 内置 | Warning |
 
+`narrowByConditionGuard`（bool，默认 true）不产生诊断，只抑制上表中 `undefined-global` / `unknown-field` 两类，详见下文同名小节。
+
 `@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
 
 `envUnknownField` 与 `undefinedGlobal` **按环境形态分工**（不是"只要重定向就交接"）：`_ENV` 指向形状**穷尽**（无元表、无 `rawset`）的表时由 `envUnknownField` 判断字段是否存在（抑制码 `env-field`），要求读写均位于 chunk 的直线执行流上（顶层作用域或嵌在其中的纯 `do … end` 块；函数体、`if` 分支、循环体不算）；形状**非穷尽**时按 `{__index=_G}` 约定处理——环境表没有的名字回退查全局索引，两处皆无则由 `undefinedGlobal` 报出。`__index` 的实际指向刻意不追踪。因此内置库名（含 `_G`）在穷尽环境下**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
 
 ### `---@meta [name]`
 文件标记为 stub，跳过 `undefinedGlobal` 诊断，声明的 global 正常参与索引。
+
+### 条件守卫抑制 `narrowByConditionGuard`
+
+配置键 `narrowByConditionGuard`（bool，默认 **true**）。当一次读取已被作者用存在性检查包裹时，抑制 `undefined-global` 与 `unknown-field` 两类诊断。典型场景是宿主程序（通常是 C++）在运行时把符号注册进 Lua 全局表，工作区里查不到定义，于是脚本先探测再使用：
+
+```lua
+if gg_cpp_registered then
+    print(gg_cpp_registered)   -- 已被守卫，不报
+end
+```
+
+**这不是类型收窄**。不向类型系统写回任何东西——名字仍保持推断得到的类型（通常是 `Unknown`），只是丢掉诊断。想真正拿到类型，写全 `---@class` 或 `---@meta` stub 仍然是唯一正解；本能力只为还没写到那一步的代码降噪。
+
+守卫通过**读取点的祖先链**识别（语法制导，非控制流分析）。识别的形态：
+
+| 形态 | 守卫区域 | 极性 |
+|------|---------|------|
+| `if C then …` | `then` 体 | 正 |
+| `elseif C then …` | 该 `elseif` 体 | 正 |
+| `else …` | `else` 体 | 前序所有条件取反 |
+| `while C do …` | 循环体 | 正 |
+| `A and B` | `B` | 正（对 `A` 中的路径） |
+| 条件表达式自身 | — | 恒抑制 |
+
+条件被视为存在性检查的形式：`P`、`P ~= nil`、`nil ~= P`、`not P`、`P == nil`、`nil == P`。`not` 与 `== nil` 翻转极性，因此 `if not P then … else <此处> end` 与 `if P then <此处> end` 同样被守卫。
+
+守卫以**访问路径**为键，不限于全局变量：`x.m_some` 与 `gg_name` 同样处理。前缀守卫覆盖更深的读取（检查 `x.cfg` 也覆盖 `x.cfg.opt`），反之不成立。
+
+**刻意不支持**（均需语句级数据流）：early return（`if not P then return end`）、`assert(P)`、`or` 右操作数、`repeat … until C`（条件在体之后求值，不构成守卫）、守卫结果存入中间变量、`a[b]` 下标路径（非常量下标无稳定键）。
+
+实现为诊断列表的**后处理**，因此无候选诊断的文件零开销；每条存活诊断的代价是一次祖先链上溯。不做任何预扫描。
 
 ### `---@diagnostic` 抑制
 支持 `disable-next-line` / `disable-line` / `disable` ... `enable`，逗号分隔 code 列表或通配符 `*`。
