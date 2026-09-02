@@ -170,6 +170,34 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
 `---@class`、`---@alias` 等进入工作区类型表。解析顺序：本文件 → 工作区。
 
+### 1.5.1 Table shape 的键
+
+一张表的字段来自三种写法，**必须得到同一个结论**（否则同一次写入换个拼法就换个语义）：
+
+| 写法 | 处理者 |
+|---|---|
+| `{ Name = v }` / `{ ["Name"] = v }` | `summary_builder::table_extract::extract_single_field` |
+| `t.Name = v` / `t["Name"] = v` | `summary_builder::visitors::extract_dotted_chain` |
+| 读取 `t.Name` / `t["Name"]` | `util::extract_field_chain`、`type_inference` 的下标分支 |
+
+三者对「哪些静态字符串键算字段」的判断收在**唯一判据** `table_shape::classify_string_key` 上，由两个开关驱动：
+
+| `stringKeys` | `stringKeysRequireIdentifier` | 键形如 `foo` | 键形如 `a-b` |
+|---|---|---|---|
+| true（默认） | true（默认） | 进 fields | 丢弃，shape 保持 closed |
+| true | false | 进 fields | 进 fields（只能经方括号读取） |
+| false | — | 丢弃，**shape 转 open** | 丢弃，shape 保持 closed |
+
+**为什么丢弃时的 `is_closed` 要分两种**：`is_closed` 唯一被问到的问题是「点号读取查不到，是否等于运行时 nil」。丢掉 `["foo"]` 时 `t.foo` 确实可写、却查不到，答案不再可靠，必须转 open；丢掉 `["a-b"]` 时没有任何点号读取会问到它，字段集合对点号读取仍是穷尽的，转 open 只会白白削弱诊断。
+
+**读写必须同源**：读侧走 `util::static_string_key_segment`，它调用的就是写侧那个 `classify_string_key`。若两侧对某个键的判断不一致，光标侧把 `t["foo"]` 解析成字段而验证侧不认，references 就会只剩声明而丢掉全部用法——§1.6 要防的正是这类不对称。
+
+**非标识符键不进 `GlobalShard`**：全局索引的键是点号拼接的字符串，`Cfg["a-b"] = 1` 没有合法的点号拼法，导出 `Cfg.a-b` 既无人能写、又会和真实的 `Cfg.a` 冲突。这类链只做 shape 写入，不产生全局贡献（`DottedChain::has_non_identifier_segment`）。
+
+**非字段的方括号写入让 shape 转 open**：`t[k] = v`（动态键）与被丢弃的标识符型字符串键都往表里加了字段，却没留下记录，因此字段集合不再穷尽。构造器形式与赋值语句形式共用这条规则（`visitors::mark_subscript_write_target_open` 对齐 `extract_single_field`）；数字键 `t[1] = v` 例外——它没有点号拼法，不影响点号读取的穷尽性。
+
+**两个开关在 `initialize` 时固定**。策略在建索引时就写进了每个文件的 `DocumentSummary`，而配置变更不触发全量重建，中途改动只会让索引一半新一半旧。同 `runtime.topKeyword`、`workspace.priorityKeyword`。
+
 ### 1.6 标识符解析流程
 
 **裸名（无 `.` / `:` 限定）的解析顺序**，由 `name_resolution::resolve_bare_name` **单点实现**：
@@ -287,6 +315,8 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 | `workspace.exclude` | string[] | 索引排除的 glob 模式 |
 | `workspace.library` | string[] | 额外索引目录（只读，抑制诊断） |
 | `workspace.useBundledStdlib` | boolean | 自动注入内置 stdlib stubs |
+| `tableShape.stringKeys` | boolean | 静态字符串键是否登记为表字段（见 §1.5.1，需重启） |
+| `tableShape.stringKeysRequireIdentifier` | boolean | 字符串键是否必须是合法标识符（见 §1.5.1，需重启） |
 | `diagnostics.enable` | boolean | 语义诊断开关；语法诊断始终保留 |
 | `diagnostics.scope` | `"full"` \| `"openOnly"` | 诊断范围 |
 

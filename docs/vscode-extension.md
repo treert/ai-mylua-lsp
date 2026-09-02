@@ -22,13 +22,26 @@
 
 ### 配置收集
 
-- `useBundledStdlib=true` 时将内置 stdlib 路径预置到 `workspace.library`
-- 用户自定义 library 路径追加其后
-- stdlib 按 `runtime.version` 查找，找不到时沿 fallback 链回落到 5.4
-- `inlayHint.enable` / `parameterNames` / `variableTypes` 会透传给 LSP；默认值以 `vscode-extension/package.json` 为准
+**`package.json` 是配置项的唯一真源。** `collectLspConfig` 与 `affectsRestartRelevantConfig` 都在运行时从 `context.extension.packageJSON.contributes.configuration.properties` 派生，**不再手工镜像**：每个 `mylua.<section>.<leaf>` 自动按点号路径嵌套成 `{ section: { leaf } }`，正好是 `LspConfig` 的 serde 结构。因此**新增配置项只需改 `package.json` 一处**。
 
-- `performance.slowParseKeepTreeThresholdMs` 透传给 LSP，控制冷启动解析后哪些文件保留 parse tree；小于 15 时改为全部缓存
+之所以这样做，是因为原先要手工同步三份清单，漏一处就静默失效：`mylua.diagnostics.envUnknownField` 就这样漏了两个版本——扩展从不下发，服务端一直用默认值，用户设成 `off` 也无效。清单里唯独 `package.json` 不可能漏（未声明的配置 VS Code 根本不显示），故以它为准。
+
+两类例外，均在通用遍历**之后**覆盖，避免被清单变动悄悄改回：
+
+| 例外 | 处理 |
+|---|---|
+| `server.path`、`server.autoRestartOnConfigChange`、`workspace.useBundledStdlib` | 客户端自用，不下发（服务端无对应字段） |
+| `runtime.version` | 强制转 string（同时用于选择 stdlib stub 目录） |
+| `workspace.library` | 用户列表 **+** 内置 stdlib 路径（后者预置在前，用户项可后续遮蔽同名符号）；stdlib 按 `runtime.version` 查找，找不到时沿 fallback 链回落到 5.4 |
+
+其余配置项（诊断严重度、`inlayHint.*`、`performance.slowParseKeepTreeThresholdMs`、`tableShape.*` 等）一律原样透传；默认值以 `vscode-extension/package.json` 为准，本文不维护。
+
+**默认值同样以清单为准**，`LspConfig::default()` 必须与之一致，由 `lsp/crates/mylua-lsp/tests/test_config_defaults.rs` 强制。两者不一致时在 VS Code 里**看不出来**——扩展总会下发，清单值永远获胜——只有脱离该扩展运行（其他 LSP 客户端、不带 `initializationOptions` 的 `initialize`、集成测试）才会暴露，届时同一份工作区行为不同。已知豁免仅三类：客户端自用项、计算值 `workspace.library`，以及测试中 `KNOWN_DIVERGENCES` 列出的待裁决项。
+
+**`affectsRestartRelevantConfig` 是总闸门**：它返回 false 时连 `didChangeConfiguration` 通知都不会发出，所以某个键漏在这里不只是"不提示重启"，而是服务端**完全收不到**该变更。现同样由清单派生，仅排除 `server.autoRestartOnConfigChange`（它本身就是重启偏好）。
+
 - MyLua 配置变更后默认由扩展自动重启 LSP；设置 `mylua.server.autoRestartOnConfigChange=false` 后改为弹窗询问
+- 部分配置即使重新下发也需重启才生效（`runtime.topKeyword`、`workspace.priorityKeyword`、`tableShape.*`），原因见 [`lsp-semantic-spec.md` §1.5.1](lsp-semantic-spec.md) 与 `handlers.rs` 中 `did_change_configuration` 的注释
 
 
 

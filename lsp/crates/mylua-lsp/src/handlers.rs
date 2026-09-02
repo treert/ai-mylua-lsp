@@ -74,6 +74,13 @@ impl LanguageServer for Backend {
             // when `false` (default), they emit normal WORD_*.
             tree_sitter_mylua::set_top_keyword_default_disabled(!cfg.runtime.top_keyword);
             set_priority_keywords(cfg.workspace.priority_keyword.clone());
+            // Must be applied BEFORE the workspace scan builds any summary:
+            // the policy decides which keys become `TableShape` fields, and
+            // resident summaries are never rebuilt for a config change.
+            crate::table_shape::set_string_key_policy(
+                cfg.table_shape.string_keys,
+                cfg.table_shape.string_keys_require_identifier,
+            );
             *self.config.lock().unwrap() = cfg;
         }
 
@@ -587,6 +594,9 @@ impl LanguageServer for Backend {
         // `priority_keyword` is also pinned: UriPriority is computed
         // once at intern time and cached, so mid-session changes need
         // a restart to take effect on all URIs.
+        // `tableShape.*` is pinned for the same reason as the parser mode:
+        // it is baked into every resident `DocumentSummary` at build time,
+        // and we do not re-index the workspace on a config change.
         set_priority_keywords(cfg.workspace.priority_keyword.clone());
         *self.config.lock().unwrap() = cfg;
     }

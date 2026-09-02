@@ -1117,6 +1117,136 @@ print(t.anything)
     );
 }
 
+/// `Unknown field` messages reported against a **closed** table shape.
+///
+/// The two shape states map to two different config knobs — `luaFieldError`
+/// for a closed shape, `luaFieldWarning` for an open one — but both default to
+/// `Warning`, so a severity filter alone cannot tell them apart. These tests
+/// are entirely about which state the shape ended up in, so they split the two
+/// severities apart explicitly.
+fn closed_shape_unknown_fields(src: &str, filename: &str) -> Vec<String> {
+    let (doc, uri, mut agg) = setup_single_file(src, filename);
+    let cfg = DiagnosticsConfig {
+        lua_field_error: DiagnosticSeverityOption::Error,
+        lua_field_warning: DiagnosticSeverityOption::Hint,
+        ..DiagnosticsConfig::default()
+    };
+    diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    )
+    .into_iter()
+    .filter(|d| {
+        d.message.contains("Unknown field")
+            && d.severity == Some(tower_lsp_server::ls_types::DiagnosticSeverity::ERROR)
+    })
+    .map(|d| d.message)
+    .collect()
+}
+
+#[test]
+fn bracket_string_assignment_becomes_a_named_field() {
+    // The statement form must reach the shape exactly like the constructor
+    // form `{ ["foo"] = 1 }` already did — otherwise the two spellings of the
+    // same write disagree, and `t.foo` is an error in one of them.
+    let src = r#"
+local t = {}
+t["foo"] = 1
+t.bar = 2
+print(t.foo, t.bar)
+"#;
+    let errors = closed_shape_unknown_fields(src, "bracket_assign.lua");
+    assert!(
+        errors.is_empty(),
+        "`t[\"foo\"] = 1` must register `foo` on the shape, got: {:?}",
+        errors,
+    );
+}
+
+#[test]
+fn nested_bracket_string_assignment_creates_intermediate_shapes() {
+    // `a["b"].c` must decompose to the same field path as `a.b.c`, including
+    // the on-demand nested shape for `b`.
+    let src = r#"
+local a = {}
+a["b"] = {}
+a["b"].c = 1
+a.b.d = 2
+print(a.b.c, a.b.d)
+"#;
+    let errors = closed_shape_unknown_fields(src, "bracket_nested.lua");
+    assert!(
+        errors.is_empty(),
+        "bracket and dot spellings must share one field path, got: {:?}",
+        errors,
+    );
+}
+
+#[test]
+fn dynamic_bracket_assignment_opens_shape() {
+    // Regression: only the *constructor* form `{ [k] = v }` used to open the
+    // shape. The statement form left it closed, so a table we cannot describe
+    // still produced hard "Unknown field" errors.
+    let src = r#"
+local k = "x"
+local t = {}
+t[k] = 1
+print(t.anything)
+"#;
+    let errors = closed_shape_unknown_fields(src, "dyn_bracket_assign.lua");
+    assert!(
+        errors.is_empty(),
+        "a dynamic-key write must cost the shape its exhaustiveness, got: {:?}",
+        errors,
+    );
+}
+
+#[test]
+fn numeric_bracket_assignment_keeps_shape_closed() {
+    // `t[1] = v` adds a key with no dotted spelling, so it tells us nothing
+    // about `t.anything` — the shape is still an exhaustive answer to dotted
+    // reads and the error must survive. Mirrors the constructor's `[number]`
+    // branch.
+    let src = r#"
+local t = {}
+t[1] = "one"
+print(t.anything)
+"#;
+    let errors = closed_shape_unknown_fields(src, "num_bracket_assign.lua");
+    assert_eq!(
+        errors.len(),
+        1,
+        "a numeric key must not weaken dotted-read checking, got: {:?}",
+        errors,
+    );
+}
+
+#[test]
+fn bracket_string_read_resolves_the_same_field_as_dot_read() {
+    // Read-side symmetry: `t["cfg"].missing` must be checked against the very
+    // field `t.cfg.missing` is checked against. Asymmetry here is what
+    // `lsp-semantic-spec.md` §1.6 warns about — the cursor side and the
+    // verification side must agree on what a bracket read names.
+    let src = r#"
+local t = { cfg = { known = 1 } }
+print(t["cfg"].known)
+print(t["cfg"].missing)
+"#;
+    let errors = closed_shape_unknown_fields(src, "bracket_read.lua");
+    assert_eq!(
+        errors.len(),
+        1,
+        "exactly `missing` should be flagged through the bracket read, got: {:?}",
+        errors,
+    );
+    assert!(errors[0].contains("missing"), "got: {:?}", errors);
+}
+
 #[test]
 fn inline_and_separate_setmetatable_report_the_same_thing() {
     // `setmetatable(t, mt)` returns `t`, so both spellings end up on the *same*
@@ -2442,7 +2572,18 @@ f(1)
 }
 
 #[test]
-fn argument_count_off_by_default() {
+fn argument_count_defaults_to_hint() {
+    // Not `Off`: a genuine arity bug should still be visible. Not `Warning`:
+    // omitting trailing arguments is idiomatic Lua (they arrive as `nil`), so
+    // on an unannotated codebase a warning-level report would bury the real
+    // warnings. `Hint` underlines the call without entering the Problems
+    // panel's error/warning counts.
+    //
+    // `test_config_defaults.rs` holds `package.json` to the same value. The
+    // two disagreed for a while — commit 0b71e91 set the Rust default without
+    // touching the manifest — and since the extension always forwards its own
+    // default, the previous version of this test asserted a state no user was
+    // ever in.
     let src = r#"
 local function f(a) return a end
 f(1, 2, 3)
@@ -2458,10 +2599,21 @@ f(1, 2, 3)
         &cfg,
         doc.line_index(),
     );
-    assert!(
-        diags.iter().all(|d| !d.message.contains("argument(s)")),
-        "argument count check is off by default, got: {:?}",
+    let reports: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("argument(s)"))
+        .collect();
+    assert_eq!(
+        reports.len(),
+        1,
+        "argument count check should report at the default severity, got: {:?}",
         diags,
+    );
+    assert_eq!(
+        reports[0].severity,
+        Some(tower_lsp_server::ls_types::DiagnosticSeverity::HINT),
+        "argument count check defaults to Hint, got: {:?}",
+        reports[0],
     );
 }
 
@@ -2713,12 +2865,17 @@ end
 }
 
 #[test]
-fn return_mismatch_off_by_default() {
+fn return_mismatch_defaults_to_hint() {
+    // Same reasoning as `argument_count_defaults_to_hint`: an early bare
+    // `return` and branches with differing arities are ordinary Lua that a
+    // static comparison cannot tell apart from a real mismatch, so the report
+    // stays visible but below warning level. Kept in step with `package.json`
+    // by `test_config_defaults.rs`.
     let src = r#"
 ---@return number
 local function f() return "str" end
 "#;
-    let (doc, uri, mut agg) = setup_single_file(src, "return_off.lua");
+    let (doc, uri, mut agg) = setup_single_file(src, "return_default.lua");
     let cfg = DiagnosticsConfig::default();
     let diags = diagnostics::collect_semantic_diagnostics_id(
         doc.root_node().unwrap(),
@@ -2729,10 +2886,21 @@ local function f() return "str" end
         &cfg,
         doc.line_index(),
     );
-    assert!(
-        diags.iter().all(|d| !d.message.contains("Return")),
-        "return mismatch default off, got: {:?}",
+    let reports: Vec<_> = diags
+        .iter()
+        .filter(|d| d.message.contains("Return"))
+        .collect();
+    assert_eq!(
+        reports.len(),
+        1,
+        "return mismatch should report at the default severity, got: {:?}",
         diags,
+    );
+    assert_eq!(
+        reports[0].severity,
+        Some(tower_lsp_server::ls_types::DiagnosticSeverity::HINT),
+        "return mismatch defaults to Hint, got: {:?}",
+        reports[0],
     );
 }
 

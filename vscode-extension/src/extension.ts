@@ -21,39 +21,80 @@ let latestMemoryBytes: number | undefined;
 let restartInProgress = false;
 let restartPromptPending = false;
 
-const RESTART_RELEVANT_CONFIG_KEYS = [
-  'mylua.server.path',
-  'mylua.debug.fileLog',
-  'mylua.runtime.version',
-  'mylua.runtime.topKeyword',
-  'mylua.require.aliases',
-  'mylua.workspace.include',
-  'mylua.workspace.exclude',
-  'mylua.workspace.library',
-  'mylua.workspace.useBundledStdlib',
-  'mylua.workspace.priorityKeyword',
-  'mylua.performance.slowParseKeepTreeThresholdMs',
-  'mylua.diagnostics.enable',
-  'mylua.diagnostics.undefinedGlobal',
-  'mylua.diagnostics.emmyTypeMismatch',
-  'mylua.diagnostics.emmyUnknownField',
-  'mylua.diagnostics.luaFieldError',
-  'mylua.diagnostics.luaFieldWarning',
-  'mylua.diagnostics.duplicateTableKey',
-  'mylua.diagnostics.unusedLocal',
-  'mylua.diagnostics.argumentCountMismatch',
-  'mylua.diagnostics.argumentTypeMismatch',
-  'mylua.diagnostics.returnMismatch',
-  'mylua.diagnostics.narrowByConditionGuard',
-  'mylua.diagnostics.scope',
-  'mylua.inlayHint.enable',
-  'mylua.inlayHint.parameterNames',
-  'mylua.inlayHint.variableTypes',
-  'mylua.documentSymbol.detailLevel',
-  'mylua.gotoDefinition.strategy',
-  'mylua.references.strategy',
-  'mylua.references.scanComments',
-];
+const CONFIG_PREFIX = 'mylua';
+
+/// Settings the extension consumes itself and deliberately does **not**
+/// forward: the server has no matching field, so sending them would be dead
+/// weight in `initializationOptions`.
+///
+/// `workspace.library` is intentionally absent — it *is* forwarded, just as a
+/// computed value rather than the raw setting (see `collectLspConfig`).
+const CLIENT_ONLY_CONFIG_SECTIONS = new Set([
+  'server.path',
+  'server.autoRestartOnConfigChange',
+  'workspace.useBundledStdlib',
+]);
+
+/// Changing this must not itself trigger the restart flow — it *is* the
+/// restart preference.
+const RESTART_EXEMPT_CONFIG_KEYS = new Set([
+  `${CONFIG_PREFIX}.server.autoRestartOnConfigChange`,
+]);
+
+/// Every `mylua.*` key declared in `package.json`, e.g.
+/// `"mylua.diagnostics.envUnknownField"`.
+///
+/// # Why this is derived rather than listed
+///
+/// Adding a setting used to mean editing three places — the manifest, the
+/// payload built by `collectLspConfig`, and the restart-relevant key list —
+/// with no check that they agreed. `mylua.diagnostics.envUnknownField` was
+/// missing from the latter two for two releases: the extension never sent it,
+/// so the server silently ran on the default and every user setting for it
+/// (including `"off"`) was ignored. The manifest is the only one of the three
+/// that *cannot* be forgotten, since VS Code will not surface an undeclared
+/// setting at all — so it is now the single source of truth and the other two
+/// are computed from it.
+function declaredConfigKeys(context: vscode.ExtensionContext): string[] {
+  const properties: unknown =
+    context.extension?.packageJSON?.contributes?.configuration?.properties;
+  const keys =
+    properties && typeof properties === 'object'
+      ? Object.keys(properties as Record<string, unknown>).filter((key) =>
+          key.startsWith(`${CONFIG_PREFIX}.`),
+        )
+      : [];
+  if (keys.length === 0) {
+    // A packaging fault rather than a user error: the server would fall back
+    // to its own defaults and ignore the entire settings UI, so say so loudly.
+    console.error(
+      '[mylua] no mylua.* settings found in the extension manifest; ' +
+        'the language server will run on built-in defaults',
+    );
+  }
+  return keys;
+}
+
+/// Assign `value` at a dotted path, creating intermediate objects as needed:
+/// `("diagnostics.scope", v)` produces `{ diagnostics: { scope: v } }`.
+function assignAtPath(
+  target: Record<string, unknown>,
+  dottedPath: string,
+  value: unknown,
+): void {
+  const parts = dottedPath.split('.');
+  const leaf = parts.pop();
+  if (leaf === undefined) return;
+  let cursor = target;
+  for (const part of parts) {
+    const existing = cursor[part];
+    if (typeof existing !== 'object' || existing === null) {
+      cursor[part] = {};
+    }
+    cursor = cursor[part] as Record<string, unknown>;
+  }
+  cursor[leaf] = value;
+}
 
 
 type IndexStatusParams = {
@@ -109,71 +150,51 @@ function resolveBundledLibrary(
   return undefined;
 }
 
+/// Build the `initializationOptions` payload from the declared settings.
+///
+/// Every `mylua.<section>` in the manifest is forwarded verbatim under its
+/// own dotted path, so `mylua.diagnostics.scope` arrives as
+/// `{ diagnostics: { scope } }` — the shape `LspConfig`'s serde renames
+/// already expect. Only two settings need more than a passthrough, and both
+/// are applied *after* the generic pass so a manifest edit can never silently
+/// revert them.
+///
+/// Undeclared extras are harmless in the other direction too: `LspConfig`
+/// carries `#[serde(default)]` throughout and ignores unknown fields, so a
+/// setting the server does not (yet) know about is simply dropped.
 function collectLspConfig(
   context: vscode.ExtensionContext,
 ): Record<string, unknown> {
-  const cfg = vscode.workspace.getConfiguration('mylua');
+  const cfg = vscode.workspace.getConfiguration(CONFIG_PREFIX);
+  const payload: Record<string, unknown> = {};
+
+  for (const key of declaredConfigKeys(context)) {
+    const section = key.slice(CONFIG_PREFIX.length + 1);
+    if (CLIENT_ONLY_CONFIG_SECTIONS.has(section)) continue;
+    assignAtPath(payload, section, cfg.get(section));
+  }
+
+  // `runtime.version` also selects the bundled stub tree below, so pin it to
+  // a string first — the manifest declares an enum, but a hand-edited
+  // settings.json can hold anything.
   const version = String(cfg.get('runtime.version') ?? '5.4');
+  assignAtPath(payload, 'runtime.version', version);
+
+  // `workspace.library` is the user's list *plus* the bundled stdlib stubs,
+  // which live outside the settings system entirely. The bundled path is
+  // prepended so user entries can shadow specific names later (first-wins at
+  // scan time is the server's responsibility, but the array order is
+  // preserved through initializationOptions for determinism).
   const userLibrary = cfg.get<string[]>('workspace.library') ?? [];
   const useBundled = cfg.get<boolean>('workspace.useBundledStdlib') ?? true;
   const bundled = useBundled ? resolveBundledLibrary(context, version) : undefined;
-  // Bundled path is prepended so user entries can shadow specific
-  // names later (first-wins at scan time is the server's
-  // responsibility, but the array order is preserved through
-  // initializationOptions for determinism).
-  const library = bundled ? [bundled, ...userLibrary] : userLibrary;
-  return {
-    runtime: {
-      version,
-      topKeyword: cfg.get('runtime.topKeyword'),
-    },
-    require: {
-      aliases: cfg.get('require.aliases'),
-    },
-    workspace: {
-      include: cfg.get('workspace.include'),
-      exclude: cfg.get('workspace.exclude'),
-      library,
-      priorityKeyword: cfg.get('workspace.priorityKeyword'),
-    },
-    performance: {
+  assignAtPath(
+    payload,
+    'workspace.library',
+    bundled ? [bundled, ...userLibrary] : userLibrary,
+  );
 
-      slowParseKeepTreeThresholdMs: cfg.get('performance.slowParseKeepTreeThresholdMs'),
-    },
-    diagnostics: {
-      enable: cfg.get('diagnostics.enable'),
-      undefinedGlobal: cfg.get('diagnostics.undefinedGlobal'),
-      emmyTypeMismatch: cfg.get('diagnostics.emmyTypeMismatch'),
-      emmyUnknownField: cfg.get('diagnostics.emmyUnknownField'),
-      luaFieldError: cfg.get('diagnostics.luaFieldError'),
-      luaFieldWarning: cfg.get('diagnostics.luaFieldWarning'),
-      duplicateTableKey: cfg.get('diagnostics.duplicateTableKey'),
-      unusedLocal: cfg.get('diagnostics.unusedLocal'),
-      argumentCountMismatch: cfg.get('diagnostics.argumentCountMismatch'),
-      argumentTypeMismatch: cfg.get('diagnostics.argumentTypeMismatch'),
-      returnMismatch: cfg.get('diagnostics.returnMismatch'),
-      narrowByConditionGuard: cfg.get('diagnostics.narrowByConditionGuard'),
-      scope: cfg.get('diagnostics.scope'),
-    },
-    documentSymbol: {
-      detailLevel: cfg.get('documentSymbol.detailLevel'),
-    },
-    gotoDefinition: {
-      strategy: cfg.get('gotoDefinition.strategy'),
-    },
-    references: {
-      strategy: cfg.get('references.strategy'),
-      scanComments: cfg.get('references.scanComments'),
-    },
-    inlayHint: {
-      enable: cfg.get('inlayHint.enable'),
-      parameterNames: cfg.get('inlayHint.parameterNames'),
-      variableTypes: cfg.get('inlayHint.variableTypes'),
-    },
-    debug: {
-      fileLog: cfg.get('debug.fileLog'),
-    },
-  };
+  return payload;
 }
 
 function formatElapsed(ms: number): string {
@@ -371,8 +392,19 @@ async function restartLanguageClient(
   }
 }
 
-function affectsRestartRelevantConfig(e: vscode.ConfigurationChangeEvent): boolean {
-  return RESTART_RELEVANT_CONFIG_KEYS.some((key) => e.affectsConfiguration(key));
+/// Whether `e` touched a setting the running server cares about.
+///
+/// Derived from the manifest for the same reason as the payload: this
+/// predicate gates *everything* downstream, including the
+/// `didChangeConfiguration` notification, so a key missing here is not merely
+/// "no restart prompt" — the server never hears about the change at all.
+function affectsRestartRelevantConfig(
+  context: vscode.ExtensionContext,
+  e: vscode.ConfigurationChangeEvent,
+): boolean {
+  return declaredConfigKeys(context)
+    .filter((key) => !RESTART_EXEMPT_CONFIG_KEYS.has(key))
+    .some((key) => e.affectsConfiguration(key));
 }
 
 async function handleConfigurationChange(
@@ -380,9 +412,9 @@ async function handleConfigurationChange(
   luaFileWatcher: vscode.FileSystemWatcher,
   e: vscode.ConfigurationChangeEvent,
 ): Promise<void> {
-  if (!client || restartInProgress || !affectsRestartRelevantConfig(e)) return;
+  if (!client || restartInProgress || !affectsRestartRelevantConfig(context, e)) return;
   const autoRestart = vscode.workspace
-    .getConfiguration('mylua')
+    .getConfiguration(CONFIG_PREFIX)
     .get<boolean>('server.autoRestartOnConfigChange') ?? false;
   if (autoRestart) {
     await restartLanguageClient(context, luaFileWatcher);

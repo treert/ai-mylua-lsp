@@ -129,15 +129,28 @@ pub(crate) fn infer_node_type_in_file_id(
                 );
                 return resolved.type_fact;
             }
-            // Subscript variant: `variable { object, index }` — look up
-            // the base's shape `array_element_type` so chains like
-            // `a[1].field` can continue with a real element type.
+            // Subscript variant: `variable { object, index }`.
+            //
+            // A static string key the `mylua.tableShape.*` policy records as
+            // a field resolves exactly like the dotted spelling — `t["foo"]`
+            // and `t.foo` name the same field and must infer the same type.
+            // Everything else (numbers, dynamic keys, dropped string keys)
+            // falls back to the base shape's `array_element_type`, so chains
+            // like `a[1].field` still continue with a real element type.
             if let (Some(object), Some(_index_node)) = (
                 node.child_by_field(field::OBJECT),
                 node.child_by_field(field::INDEX),
             ) {
                 let base_fact =
                     infer_node_type_in_file_id(object, source, uri_id, scope_tree, index);
+                if let Some(key) = crate::util::static_string_key_segment(node, source) {
+                    let resolved = resolver::resolve_field_chain_in_file_id(
+                        uri_id, &base_fact, &[key], index,
+                    );
+                    if resolved.type_fact != TypeFact::Unknown {
+                        return resolved.type_fact;
+                    }
+                }
                 if let TypeFact::Known(crate::type_system::KnownType::Table(shape_id)) = &base_fact
                 {
                     if let Some(summary) = index.summary_by_id(uri_id) {

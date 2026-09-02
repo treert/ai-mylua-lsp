@@ -419,6 +419,36 @@ pub fn find_node_at_position<'a>(
     Some(node)
 }
 
+/// The field name a `variable { object, index }` denotes, when the index is a
+/// static string key that the `mylua.tableShape.*` policy records as a named
+/// field.
+///
+/// Reading goes through the very same [`crate::table_shape::classify_string_key`]
+/// the summary builder writes through, so the two sides cannot disagree about
+/// which keys are fields. That symmetry is load-bearing for references
+/// (`lsp-semantic-spec.md` §1.6): if the cursor side resolved `t["foo"]` as a
+/// field while the verification side did not, "find all references" would
+/// return the declaration and drop every use.
+pub(crate) fn static_string_key_segment(
+    node: tree_sitter::Node,
+    source: &[u8],
+) -> Option<String> {
+    let index = node.child_by_field(field::INDEX)?;
+    if !index.is_kind(kind::STRING) {
+        return None;
+    }
+    let key = extract_string_literal(index, source)?;
+    (crate::table_shape::classify_string_key(&key) == crate::table_shape::StringKeyDecision::Field)
+        .then_some(key)
+}
+
+/// Decompose a read like `a.b.c` / `a["b"].c` into its base node and the
+/// ordered field names hanging off it.
+///
+/// Bracket segments are accepted on exactly the terms the summary builder
+/// accepts them on — see [`static_string_key_segment`] — so `t["foo"].bar`
+/// and `t.foo.bar` produce the identical `(base, ["foo", "bar"])` and land on
+/// the same `TableShapeId + FieldKey` identity.
 pub fn extract_field_chain<'a>(
     mut node: tree_sitter::Node<'a>,
     source: &[u8],
@@ -426,12 +456,16 @@ pub fn extract_field_chain<'a>(
     let mut fields = Vec::new();
 
     while node.is_kind(kind::VARIABLE) {
-        let Some(field) = node.child_by_field(field::FIELD) else {
-            break;
+        let segment = match node.child_by_field(field::FIELD) {
+            Some(field) => node_text(field, source).to_string(),
+            None => match static_string_key_segment(node, source) {
+                Some(key) => key,
+                None => break,
+            },
         };
 
         let object = node.child_by_field(field::OBJECT)?;
-        fields.push(node_text(field, source).to_string());
+        fields.push(segment);
         node = object;
     }
 

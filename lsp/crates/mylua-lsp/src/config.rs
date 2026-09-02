@@ -8,6 +8,8 @@ pub struct LspConfig {
     pub require: RequireConfig,
     pub workspace: WorkspaceConfig,
     pub performance: PerformanceConfig,
+    #[serde(rename = "tableShape")]
+    pub table_shape: TableShapeConfig,
     pub diagnostics: DiagnosticsConfig,
     #[serde(rename = "documentSymbol")]
     pub document_symbol: DocumentSymbolConfig,
@@ -54,7 +56,10 @@ pub struct DebugConfig {
 
 impl Default for DebugConfig {
     fn default() -> Self {
-        Self { file_log: true }
+        // Matches `mylua.debug.fileLog` in the extension manifest. Writing a
+        // log file into the user's workspace is not something a client that
+        // sent no configuration should get by surprise.
+        Self { file_log: false }
     }
 }
 
@@ -92,7 +97,12 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            version: "5.3".to_string(),
+            // Matches `mylua.runtime.version` in the extension manifest, which
+            // is the single source of truth for defaults
+            // (`docs/vscode-extension.md`). 5.4 is also the only bundled stub
+            // tree, so a client that sends no config still gets stdlib
+            // annotations that match the assumed runtime.
+            version: "5.4".to_string(),
             top_keyword: false,
         }
     }
@@ -164,6 +174,44 @@ impl Default for WorkspaceConfig {
     }
 }
 
+/// How static string keys (`{ ["k"] = v }`, `t["k"] = v`) contribute to
+/// `TableShape`.
+///
+/// Both switches are read through `table_shape::classify_string_key`, the
+/// single decision point shared by the constructor and assignment paths.
+/// They are pinned at `initialize`: summaries built under one policy stay
+/// resident, so a mid-session change would leave the index half-converted.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct TableShapeConfig {
+    /// Whether a static string key becomes a named field at all.
+    ///
+    /// With this off, `t.foo` after `t["foo"] = 1` is unresolvable — so the
+    /// shape is marked non-exhaustive instead of reporting a bogus
+    /// "Unknown field". Turning it off buys a style push (forcing `.Name`)
+    /// at the cost of navigation, which is why the default is on.
+    #[serde(rename = "stringKeys")]
+    pub string_keys: bool,
+    /// Whether the key text must match Lua's `Name` production
+    /// (`[A-Za-z_][A-Za-z0-9_]*`) to be recorded.
+    ///
+    /// On (default): only keys that also have a dot spelling become fields,
+    /// so the shape's field set stays exactly "what `t.x` can reach".
+    /// Off: `t["a-b"]`, `t["1"]` and non-ASCII keys become fields too —
+    /// reachable only through the bracket-read path.
+    #[serde(rename = "stringKeysRequireIdentifier")]
+    pub string_keys_require_identifier: bool,
+}
+
+impl Default for TableShapeConfig {
+    fn default() -> Self {
+        Self {
+            string_keys: true,
+            string_keys_require_identifier: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(default)]
 pub struct DiagnosticsConfig {
@@ -200,6 +248,16 @@ pub struct DiagnosticsConfig {
     /// P2-3 continued: call-site arg count vs FunctionSummary params
     /// mismatch. Respects vararg (`...` absorbs extras) and overloads
     /// (any overload matching clears the diagnostic).
+    ///
+    /// **Hint by default.** Omitting trailing arguments is idiomatic Lua —
+    /// they arrive as `nil` — so without `---@param` annotations marking
+    /// which parameters are optional this fires on a lot of correct code.
+    /// `Hint` keeps it out of the Problems panel's error/warning counts and
+    /// off the scrollbar while still underlining the call, so a real
+    /// arity bug stays visible without drowning an unannotated codebase.
+    /// Contrast `argument_type_mismatch`, which is a full `Warning`: it only
+    /// fires when both sides have a known concrete type, so it has evidence
+    /// of an actual conflict rather than a missing annotation.
     #[serde(rename = "argumentCountMismatch")]
     pub argument_count_mismatch: DiagnosticSeverityOption,
     /// P2-3 continued: call-site arg type vs `@param` declared type
@@ -210,6 +268,12 @@ pub struct DiagnosticsConfig {
     /// P2-3 continued: `---@return` count/type mismatch vs actual
     /// `return` statements in the function body. Walks all nested
     /// `return` statements (including inside `if`/`do`/`while`).
+    ///
+    /// **Hint by default**, for the same reason as
+    /// `argument_count_mismatch`: a bare `return` used as an early exit, and
+    /// branches that legitimately return different arities, are ordinary Lua
+    /// that a static count comparison cannot distinguish from a real
+    /// mismatch.
     #[serde(rename = "returnMismatch")]
     pub return_mismatch: DiagnosticSeverityOption,
     /// Suppress `undefinedGlobal` / unknown-field reports at reads the
@@ -240,9 +304,9 @@ impl Default for DiagnosticsConfig {
             env_unknown_field: DiagnosticSeverityOption::Warning,
             duplicate_table_key: DiagnosticSeverityOption::Warning,
             unused_local: DiagnosticSeverityOption::Hint,
-            argument_count_mismatch: DiagnosticSeverityOption::Off,
+            argument_count_mismatch: DiagnosticSeverityOption::Hint,
             argument_type_mismatch: DiagnosticSeverityOption::Warning,
-            return_mismatch: DiagnosticSeverityOption::Off,
+            return_mismatch: DiagnosticSeverityOption::Hint,
             narrow_by_condition_guard: true,
             scope: DiagnosticScope::Full,
         }
@@ -307,13 +371,14 @@ pub struct InlayHintConfig {
 
 impl Default for InlayHintConfig {
     fn default() -> Self {
+        // Mirrors `mylua.inlayHint.*` in the extension manifest, which is the
+        // single source of truth for defaults (`docs/vscode-extension.md`).
+        // Clients can still turn each category on/off via
+        // `initializationOptions.inlayHint.*`.
         Self {
-            // Parameter-name hints are useful by default and less noisy
-            // than inferred variable type hints. Clients can still turn
-            // each category on/off via initializationOptions.inlayHint.*.
             enable: true,
             parameter_names: true,
-            variable_types: false,
+            variable_types: true,
         }
     }
 }
@@ -402,6 +467,28 @@ mod tests {
     }
 
     #[test]
+    fn table_shape_string_keys_default_to_identifier_only() {
+        let cfg = LspConfig::default();
+
+        assert!(cfg.table_shape.string_keys);
+        assert!(cfg.table_shape.string_keys_require_identifier);
+    }
+
+    #[test]
+    fn table_shape_switches_read_from_json_independently() {
+        let cfg = LspConfig::from_value(serde_json::json!({
+            "tableShape": {
+                "stringKeysRequireIdentifier": false
+            }
+        }));
+
+        // Omitted keys keep their default, so relaxing the identifier
+        // requirement alone does not silently disable string keys.
+        assert!(cfg.table_shape.string_keys);
+        assert!(!cfg.table_shape.string_keys_require_identifier);
+    }
+
+    #[test]
     fn document_symbol_detail_level_defaults_to_compact() {
         let cfg = LspConfig::default();
 
@@ -412,12 +499,14 @@ mod tests {
     }
 
     #[test]
-    fn inlay_hint_defaults_to_parameter_names_only() {
+    fn inlay_hint_defaults_enable_both_categories() {
+        // Kept in step with `mylua.inlayHint.*` in the extension manifest;
+        // `tests/test_config_defaults.rs` enforces that agreement wholesale.
         let cfg = LspConfig::default();
 
         assert!(cfg.inlay_hint.enable);
         assert!(cfg.inlay_hint.parameter_names);
-        assert!(!cfg.inlay_hint.variable_types);
+        assert!(cfg.inlay_hint.variable_types);
     }
 
     #[test]

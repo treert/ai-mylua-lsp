@@ -1,6 +1,8 @@
 use crate::emmy::{emmy_type_to_fact, parse_emmy_comments, EmmyAnnotation};
 use crate::syntax_kind::{field, kind, NodeKindExt};
-use crate::table_shape::{FieldInfo, TableShape, MAX_TABLE_SHAPE_DEPTH};
+use crate::table_shape::{
+    classify_string_key, FieldInfo, StringKeyDecision, TableShape, MAX_TABLE_SHAPE_DEPTH,
+};
 use crate::type_system::*;
 use crate::util::{extract_string_literal, node_text};
 
@@ -86,27 +88,36 @@ fn extract_single_field(
                 );
             }
         }
-        // `["name"] = value` — static string key that can be read via
-        // dot syntax (`t.name`). Non-identifier strings remain map-like
-        // entries rather than polluting the named-field table.
+        // `["name"] = value` — static string key. Whether it becomes a named
+        // field is the `mylua.tableShape.*` policy's call, shared with the
+        // assignment form `t["name"] = value` via `classify_string_key`.
         Some(k) if k.is_kind(kind::STRING) => {
             let key_text = extract_string_literal(k, ctx.source)
                 .unwrap_or_else(|| node_text(k, ctx.source).to_string());
-            if is_lua_identifier_key(&key_text) {
-                if let Some(val) = value_node {
-                    let type_fact = infer_field_value_type(ctx, field_node, val, depth);
-                    shape.set_field(
-                        &key_text,
-                        FieldInfo {
-                            name: key_text.as_str().into(),
-                            type_fact,
-                            def_range: Some(
-                                ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
-                            ),
-                            assignment_count: 1,
-                        },
-                    );
+            match classify_string_key(&key_text) {
+                StringKeyDecision::Field => {
+                    if let Some(val) = value_node {
+                        let type_fact = infer_field_value_type(ctx, field_node, val, depth);
+                        shape.set_field(
+                            &key_text,
+                            FieldInfo {
+                                name: key_text.as_str().into(),
+                                type_fact,
+                                def_range: Some(
+                                    ctx.line_index.ts_node_to_byte_range(field_node, ctx.source),
+                                ),
+                                assignment_count: 1,
+                            },
+                        );
+                    }
                 }
+                // The key has a dot spelling we chose not to record, so the
+                // field set is no longer an exhaustive description of the
+                // table — otherwise `t.name` would be a hard error.
+                StringKeyDecision::DropAndOpen => shape.mark_open(),
+                // No dot spelling exists; nothing a dotted read can ask about
+                // was lost, so the shape stays closed.
+                StringKeyDecision::Drop => {}
             }
         }
         // `[number] = value` is a static subscript key, but not a named
@@ -139,17 +150,6 @@ fn extract_single_field(
             }
         }
     }
-}
-
-fn is_lua_identifier_key(text: &str) -> bool {
-    let mut bytes = text.bytes();
-    let Some(first) = bytes.next() else {
-        return false;
-    };
-    if !(first == b'_' || first.is_ascii_alphabetic()) {
-        return false;
-    }
-    bytes.all(|b| b == b'_' || b.is_ascii_alphanumeric())
 }
 
 fn infer_field_value_type(

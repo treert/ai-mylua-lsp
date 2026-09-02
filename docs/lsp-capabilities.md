@@ -152,14 +152,18 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 | 类型不匹配 | `emmyTypeMismatch` | Warning |
 | 重复 table key | `duplicateTableKey` | Warning |
 | 未使用 local | `unusedLocal` | Hint |
-| 参数个数不匹配 | `argumentCountMismatch` | Warning |
+| 参数个数不匹配 | `argumentCountMismatch` | Hint |
 | 参数类型不匹配 | `argumentTypeMismatch` | Warning |
-| return 不匹配 | `returnMismatch` | Warning |
+| return 不匹配 | `returnMismatch` | Hint |
 | `@param` 名称不匹配 Lua 参数 | 内置 | Warning |
+
+**两类调用签名检查默认为 `Hint` 而非 `Warning`**，因为在无注解的 Lua 上误报率过高：`argumentCountMismatch` —— 省略尾部实参是 Lua 惯用法（自动为 `nil`），没有 `---@param` 标注哪些参数可选时会大面积误报；`returnMismatch` —— 早退的裸 `return`、以及各分支返回不同个数，都是正常写法，静态计数无从区分。取 `Hint` 而非 `Off`，是为了让真正的实参个数错误仍然可见（编辑器仍会标出该调用），同时不计入 Problems 面板的 error/warning 数、不占滚动条标记，避免淹没真实警告。对照之下 `argumentTypeMismatch` 为 `Warning`：它只在两侧类型都已知时才触发，握有真实冲突的证据，而非仅仅缺少注解。给签名写全注解的代码库可把前两项提到 `warning`。
 
 `narrowByConditionGuard`（bool，默认 true）不产生诊断，只抑制上表中 `undefined-global` / `unknown-field` 两类，详见下文同名小节。
 
 `@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
+
+`luaFieldError` / `luaFieldWarning` 的分工取决于 table shape 是否「字段集合穷尽」（`is_closed`）：穷尽时未知字段用前者，非穷尽时用后者。哪些写法会让 shape 失去穷尽性（动态键、`setmetatable` / `rawset`、被策略丢弃的标识符型字符串键），以及静态字符串键 `{ ["foo"] = 1 }` / `t["foo"] = 1` 何时登记为字段（`tableShape.stringKeys`、`tableShape.stringKeysRequireIdentifier` 两个开关），见 [`lsp-semantic-spec.md` §1.5.1](lsp-semantic-spec.md)。
 
 `envUnknownField` 与 `undefinedGlobal` **按环境形态分工**（不是"只要重定向就交接"）：`_ENV` 指向形状**穷尽**（无元表、无 `rawset`）的表时由 `envUnknownField` 判断字段是否存在（抑制码 `env-field`），要求读写均位于 chunk 的直线执行流上（顶层作用域或嵌在其中的纯 `do … end` 块；函数体、`if` 分支、循环体不算）；形状**非穷尽**时按 `{__index=_G}` 约定处理——环境表没有的名字回退查全局索引，两处皆无则由 `undefinedGlobal` 报出。`__index` 的实际指向刻意不追踪。因此内置库名（含 `_G`）在穷尽环境下**不豁免**。详见 [`lsp-semantic-spec.md` §1.3.1](lsp-semantic-spec.md)。
 
@@ -284,4 +288,5 @@ server 进程常驻内存（working set / RSS）字节数，供扩展在状态�
 
 - **新增诊断类别**：`DiagnosticsConfig` 加字段 + 默认 severity + `vscode-extension/package.json` 配置声明 + `diagnostics/suppression.rs` 抑制码。默认开启需在 fixture 上确认噪声
 - **新增 capability**：`lib.rs::initialize` 的 `ServerCapabilities` 声明 + async handler + 独立 `src/<feature>.rs` + 集成测试 + 本文档对应章节
+- **新增配置项**：`LspConfig` 加字段（含 `#[serde(rename)]` 与默认值）+ `vscode-extension/package.json` 声明。扩展侧**无需改动**——`collectLspConfig` 与重启判定均从清单派生，见 [`vscode-extension.md`](vscode-extension.md#配置收集)。若该项在 `initialize` 后需固定（影响索引结果），还要在 `handlers.rs` 的 `initialize` 中应用并在 `did_change_configuration` 注释里说明原因
 

@@ -43,6 +43,9 @@
 | `test_document_highlight.rs` | 14 | 文档高亮（含 `_ENV` 环境边界） |
 | `test_workspace.rs` | 4 | 多文件工作区 |
 | `test_workspace_library.rs` | 5 | workspace.library |
+| `test_config_defaults.rs` | 1 | `LspConfig::default()` 与 `package.json` 声明的默认值一致性 |
+
+> `test_config_defaults.rs` 直接读取 `vscode-extension/package.json`，是唯一跨越 Rust / 扩展两侧的测试。它防的是一类在编辑器里**看不见**的漂移：扩展总会下发配置，清单值永远获胜，因此两侧默认值不一致只在脱离该扩展运行时才暴露。豁免项（客户端自用、计算值、待裁决分歧）在文件顶部的三个常量里声明。
 
 ## 内嵌单元测试
 

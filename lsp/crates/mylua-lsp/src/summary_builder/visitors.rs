@@ -7,7 +7,9 @@ use crate::lua_symbol::intern_lua_symbol;
 use crate::scope::{ScopeDecl, ScopeKind};
 use crate::summary::*;
 use crate::syntax_kind::{field, kind, NodeKindExt, SyntaxKind};
-use crate::table_shape::{FieldInfo, TableShape};
+use crate::table_shape::{
+    classify_string_key, is_lua_identifier_key, FieldInfo, StringKeyDecision, TableShape,
+};
 use crate::type_system::*;
 use crate::types::DefKind;
 use crate::util::{extract_string_literal, node_text};
@@ -1812,17 +1814,20 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     selection_range: ctx.line_index.ts_node_to_byte_range(var_node, ctx.source),
                 });
             }
-            // Field assignment: `x.foo = expr` or `a.b.c = expr` etc.
+            // Field assignment: `x.foo = expr`, `a.b.c = expr`,
+            // `t["foo"] = expr` etc.
             //
             // Strategy (AST-driven, not string splitn):
-            //   1. Walk the nested `variable(object, field)` chain to collect
-            //      field names outermost→innermost and reach the innermost
-            //      bare identifier.
-            //   2. If any intermediate node is not a pure dotted `variable`
-            //      (e.g. `function_call`, subscript, parenthesized) → bail:
-            //      the LHS targets a transient value that can't be named
-            //      again. No shape write, no global contribution.
-            //   3. Pure dotted chain:
+            //   1. Walk the nested `variable(object, field|index)` chain to
+            //      collect field names outermost→innermost and reach the
+            //      innermost bare identifier.
+            //   2. If any intermediate node is not nameable (e.g.
+            //      `function_call`, dynamic subscript, parenthesized) → bail:
+            //      the LHS targets a value that can't be named again. No
+            //      shape write, no global contribution — but a bracket write
+            //      still costs the target shape its exhaustiveness, see
+            //      `mark_subscript_write_target_open`.
+            //   3. Nameable chain:
             //      - Base is a local with Table shape → walk/create nested
             //        shapes for intermediate fields, then `set_field` on the
             //        innermost. Intermediate shape creation is on-demand.
@@ -1831,7 +1836,10 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             kind::VARIABLE => {
                 let chain = match extract_dotted_chain(var_node, ctx.source) {
                     Some(c) if !c.fields.is_empty() => c,
-                    _ => continue,
+                    _ => {
+                        mark_subscript_write_target_open(ctx, var_node);
+                        continue;
+                    }
                 };
 
                 let type_fact = if i == 0 {
@@ -1892,6 +1900,16 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                 //       a likely user bug and we MUST NOT surface the
                 //       junk path through `global_shard` (the local `a`
                 //       is not a global).
+                // Everything below writes into `GlobalShard`, whose keys are
+                // dot-joined paths. A segment with no dotted spelling
+                // (`Cfg["a-b"] = 1`, only reachable with
+                // `stringKeysRequireIdentifier` off) has no valid key, so the
+                // global export stops here — the shape write above already
+                // happened and is the only faithful record.
+                if chain.has_non_identifier_segment {
+                    continue;
+                }
+
                 let range = ctx.line_index.ts_node_to_byte_range(node, ctx.source);
                 let selection_range = ctx.line_index.ts_node_to_byte_range(var_node, ctx.source);
                 let local_global_prefixes = ctx
@@ -1966,16 +1984,28 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
 // Dotted LHS helpers — AST-driven chain extraction & nested shape registration
 // ---------------------------------------------------------------------------
 
-/// Decomposition of a pure dotted LHS like `a.b.c` into the bare base name
-/// and an ordered list of field names. Returned by `extract_dotted_chain`
-/// only when the entire chain is made of `variable` nodes with an
-/// `object + field` pair (outer levels) plus a single bare `identifier`
-/// at the root. Any intermediate `function_call` / subscript /
-/// `parenthesized_expression` → `None` (caller should bail on shape writes).
+/// Decomposition of a nameable LHS like `a.b.c` / `a["b"].c` into the bare
+/// base name and an ordered list of field names. Returned by
+/// `extract_dotted_chain` only when every level is a `variable` carrying
+/// either an `object + field` pair or an `object + index` pair whose index is
+/// a static string the `mylua.tableShape.*` policy accepts, plus a single
+/// bare `identifier` at the root. Any intermediate `function_call` / dynamic
+/// subscript / `parenthesized_expression` → `None` (caller should bail on
+/// shape writes).
 struct DottedChain {
     base_name: String,
     /// Field names in write order: for `a.b.c` this is `["b", "c"]`.
     fields: Vec<String>,
+    /// `true` when some segment came from a `["…"]` subscript whose text is
+    /// not a valid Lua identifier (only possible with
+    /// `stringKeysRequireIdentifier` off).
+    ///
+    /// Such a path has no dotted spelling, so it must stay out of
+    /// `GlobalShard`, whose keys *are* dot-joined strings: exporting
+    /// `Cfg.a-b` would invent a global nobody can write and would collide
+    /// with any real `Cfg.a` / `b` split. Shape writes are unaffected —
+    /// `TableShape` keys the field by its exact text.
+    has_non_identifier_segment: bool,
 }
 
 impl DottedChain {
@@ -2053,44 +2083,134 @@ fn push_global_prefix_for_build(prefixes: &mut Vec<String>, prefix: String) {
 fn extract_dotted_chain(node: tree_sitter::Node, source: &[u8]) -> Option<DottedChain> {
     // Walk down the `object` chain, collecting field names. Every
     // intermediate node must itself be a `variable` with an `object` +
-    // `field` pair. The innermost `object` must be a `variable` whose
-    // only named child is a bare
-
+    // `field` pair, or an `object` + `index` pair whose index is a static
+    // string key the policy turns into a field. The innermost `object` must
+    // be a `variable` whose only named child is a bare
     // `identifier` — i.e. the chain roots at a plain local/global name.
+    //
+    // Accepted (subject to `mylua.tableShape.*`):
+    //   - `a["b"].c`    → same field path as `a.b.c`
     //
     // Rejected (return None):
     //   - `foo().c`     → intermediate `function_call`
-    //   - `a[1].c`      → `variable` whose `object` has an `index` field
-    //                     instead of `field`
+    //   - `a[1].c`      → numeric index, not a named field
+    //   - `a[k].c`      → dynamic index, no static name
     //   - `(x).c`       → `parenthesized_expression` intermediate
     //   - `a:m().c`     → grammar wraps the method call as `function_call`
     let mut fields_rev: Vec<String> = Vec::new();
+    let mut has_non_identifier_segment = false;
     let mut current = node;
     loop {
         if !current.is_kind(kind::VARIABLE) {
             return None;
         }
-        let field = match current.child_by_field(field::FIELD) {
-            Some(f) => f,
-            None => {
-                // Innermost: a `variable` with a single `identifier` child.
-                if current.named_child_count() == 1 {
-                    let child = current.named_child(0)?;
-                    if child.is_kind(kind::IDENTIFIER) {
-                        let base_name = node_text(child, source).to_string();
-                        fields_rev.reverse();
-                        return Some(DottedChain {
-                            base_name,
-                            fields: fields_rev,
-                        });
+        let segment = match current.child_by_field(field::FIELD) {
+            Some(f) => node_text(f, source).to_string(),
+            None => match current.child_by_field(field::INDEX) {
+                // Bracket segment: only a static string the policy accepts
+                // names a field. Everything else (numbers, dynamic keys,
+                // dropped string keys) leaves the LHS unnameable.
+                Some(index) => {
+                    if !index.is_kind(kind::STRING) {
+                        return None;
                     }
+                    let key = extract_string_literal(index, source)?;
+                    if classify_string_key(&key) != StringKeyDecision::Field {
+                        return None;
+                    }
+                    if !is_lua_identifier_key(&key) {
+                        has_non_identifier_segment = true;
+                    }
+                    key
                 }
-                return None;
-            }
+                None => {
+                    // Innermost: a `variable` with a single `identifier` child.
+                    if current.named_child_count() == 1 {
+                        let child = current.named_child(0)?;
+                        if child.is_kind(kind::IDENTIFIER) {
+                            let base_name = node_text(child, source).to_string();
+                            fields_rev.reverse();
+                            return Some(DottedChain {
+                                base_name,
+                                fields: fields_rev,
+                                has_non_identifier_segment,
+                            });
+                        }
+                    }
+                    return None;
+                }
+            },
         };
         let object = current.child_by_field(field::OBJECT)?;
-        fields_rev.push(node_text(field, source).to_string());
+        fields_rev.push(segment);
         current = object;
+    }
+}
+
+/// A bracket write `t[k] = v` we could not turn into a named field still puts
+/// a field on `t`. Record that the shape has stopped being an exhaustive
+/// description of the table.
+///
+/// # Why this is not optional
+///
+/// `TableShape::is_closed` is what makes an unknown dotted read an *error*
+/// rather than a warning (`diagnostics::field_access`), and what lets a
+/// redirected `_ENV` skip the global fallback
+/// (`name_resolution::env_describes_its_fields`). Before this, only the
+/// *constructor* form `{ [k] = v }` opened the shape, so the statement form
+/// left it closed and
+///
+/// ```lua
+/// local t = {}
+/// t[k] = 1
+/// print(t.foo)   -- hard "Unknown field" error, on a table we cannot describe
+/// ```
+///
+/// reported an error it had no basis for. The two spellings describe the same
+/// runtime fact and must reach the same conclusion.
+///
+/// # Which keys count
+///
+/// Exactly mirrors `table_extract::extract_single_field`, so constructor and
+/// assignment stay in step:
+///
+/// | key | effect |
+/// |---|---|
+/// | static string → a field | nothing (the chain path recorded it) |
+/// | static string the policy dropped | per [`StringKeyDecision`] |
+/// | number (`t[1] = v`) | nothing — a numeric key has no dotted spelling |
+/// | anything else (`t[k] = v`) | open the shape |
+///
+/// Only a subscript at the **outermost** level is considered: in `a[k].c = v`
+/// the field lands on the transient `a[k]`, not on `a`, so `a`'s field set is
+/// still exhaustive.
+fn mark_subscript_write_target_open(ctx: &mut BuildContext, var_node: tree_sitter::Node) {
+    let Some(index) = var_node.child_by_field(field::INDEX) else {
+        return;
+    };
+    if index.is_kind(kind::NUMBER) {
+        return;
+    }
+    if index.is_kind(kind::STRING) {
+        let key = extract_string_literal(index, ctx.source)
+            .unwrap_or_else(|| node_text(index, ctx.source).to_string());
+        match classify_string_key(&key) {
+            // Already handled as a named field by `extract_dotted_chain`;
+            // reaching here means the chain bailed for an unrelated reason
+            // (e.g. a non-nameable object), and we know nothing about the
+            // target shape either way.
+            StringKeyDecision::Field => return,
+            StringKeyDecision::Drop => return,
+            StringKeyDecision::DropAndOpen => {}
+        }
+    }
+    let Some(object) = var_node.child_by_field(field::OBJECT) else {
+        return;
+    };
+    if let TypeFact::Known(KnownType::Table(shape_id)) = infer_expression_type(ctx, object, 0) {
+        if let Some(shape) = ctx.table_shapes.get_mut(&shape_id) {
+            shape.mark_open();
+        }
     }
 }
 
@@ -2248,6 +2368,7 @@ fn function_name_dotted_chain(name: &str) -> Option<DottedChain> {
     Some(DottedChain {
         base_name,
         fields: parts,
+        has_non_identifier_segment: false,
     })
 }
 

@@ -11,8 +11,25 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+### Added
+- 新增配置项 `mylua.tableShape.stringKeys`（bool，默认开启）：静态字符串键（`{ ["foo"] = 1 }`、`t["foo"] = 1`）是否登记为表字段。关闭后字符串键不贡献字段，同时该表被视作「字段集合不完整」，因此不会因此报出未知字段——用于强制 `.Name` 书写风格。
+- 新增配置项 `mylua.tableShape.stringKeysRequireIdentifier`（bool，默认开启）：在上一项开启时，是否要求键文本必须是合法 Lua 标识符（`[A-Za-z_][A-Za-z0-9_]*`）才登记。开启时字段集合恰好等于「`t.x` 能触达的东西」；关闭后 `t["a-b"]`、`t["1"]`、中文键也会登记，只能经方括号读取访问。
+  两项均在服务启动时固定，修改后需重启语言服务才会生效（策略在建索引时写进每个文件的摘要）。
+
+### Changed
+- `mylua.diagnostics.argumentCountMismatch` 与 `mylua.diagnostics.returnMismatch` 的默认值统一为 `hint`（此前扩展声明 `warning`、语言服务内置 `off`，两侧从未一致）。这两类检查在无 EmmyLua 注解的代码上误报率过高：省略尾部实参是 Lua 惯用法（自动为 `nil`），早退的裸 `return` 与各分支返回不同个数也都是正常写法，静态检查无从区分。取 `hint` 是为了让真正的错误仍被标出，同时不计入 Problems 面板的错误/警告数、不占滚动条标记，避免淹没真实警告。给签名写全 `---@param` / `---@return` 的代码库可提到 `warning`。参数**类型**检查 `argumentTypeMismatch` 不受影响，仍为 `warning`——它只在两侧类型都已知时触发，有真实冲突的证据。
+- 赋值语句形式的字符串键 `t["foo"] = 1` 现在与初始化形式 `{ ["foo"] = 1 }` 一样登记为表字段，此前只有初始化形式支持。因此 `t["foo"] = 1` 之后 `t.foo` 可跳转、可 hover、不再被报未知字段；`a["b"].c = 1` 与 `a.b.c = 1` 走同一条字段路径。
+- 方括号字符串读取 `t["foo"].bar` 现在与 `t.foo.bar` 解析为同一个字段，类型推断、hover、跳转与诊断都不再因书写方式不同而分叉。
+
 ### Fixed
 - 修复 `if A and B then` 形式的条件判断中，`then` 分支体内对 `A` 的读取被误报为 `Undefined global` 的问题。现在 `and` 链中任意操作数的存在性检查均可抑制其在 truthy 分支内的诊断（如 `if jit and jit.version then`，分支体内不再报 `Undefined global 'jit'`）。
+- 修复 `t[k] = v` 这类动态键**赋值语句**不会把表标记为「字段集合不完整」的问题。此前只有初始化形式 `{ [k] = v }` 会标记，导致 `local t = {}; t[k] = 1` 之后读 `t.foo` 被当作确凿的未知字段错误——而这张表恰恰是我们无法完整描述的。
+- 修复 `mylua.diagnostics.envUnknownField` 配置完全不生效的问题：该项自加入以来一直未被扩展下发给语言服务，服务端始终使用默认值 `warning`，用户的设置（包括设为 `off`）被静默忽略。
+
+### Internal
+- 扩展下发给语言服务的配置、以及「哪些配置变更需要通知服务」的判定，改为在运行时从 `package.json` 的配置声明派生，不再手工维护两份平行清单。此前新增一个配置项需同步修改三处，漏改则该项静默失效且无任何报错——上述 `envUnknownField` 正是这样漏了两个版本。现新增配置项只需改 `package.json`。
+- 语言服务内置的配置默认值改为与 `package.json` 声明一致（`runtime.version` 5.3→5.4、`debug.fileLog` true→false、`inlayHint.variableTypes` false→true）。这三项**不影响** VS Code 中的行为——扩展始终下发配置，清单值一直是实际生效值；差异只在脱离本扩展运行语言服务时（其他 LSP 客户端等）才会显现。另有两项两侧都做了调整（见 Changed 中的 `argumentCountMismatch` / `returnMismatch`），那两项是用户可见的变化。
+- 新增 `test_config_defaults.rs`：直接读取 `package.json`，校验全部配置项的默认值与 `LspConfig::default()` 一致。此前五项漂移全部无人察觉，正是因为这类差异在编辑器里看不见。
 
 ## [1.0.0] - 2026-09-01
 

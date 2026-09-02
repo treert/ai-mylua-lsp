@@ -179,6 +179,16 @@
           "default": 500,
           "markdownDescription": "Cold-start parse tree retention threshold in milliseconds. Files that parse slower than this keep their parse tree cached for faster follow-up incremental edits. Values below 15 disable this selective-retention optimization and cache every parsed file."
         },
+        "mylua.tableShape.stringKeys": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Whether a static string key (`{ [\"foo\"] = 1 }`, `t[\"foo\"] = 1`) becomes a named table field, so that `t.foo` has goto / hover / completion and is not reported as an unknown field. Disable to force the `.Name` style: string keys then contribute no fields, and the table is treated as non-exhaustive so no bogus unknown-field errors appear. Changing this requires a server restart, because the policy is baked into every indexed file's summary."
+        },
+        "mylua.tableShape.stringKeysRequireIdentifier": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "When `#mylua.tableShape.stringKeys#` is enabled, require the key text to be a valid Lua identifier (`[A-Za-z_][A-Za-z0-9_]*`) before recording it as a field. With this on, the field set stays exactly \"what `t.x` can reach\". Turn it off to also record keys with no dotted spelling — `t[\"a-b\"]`, `t[\"1\"]`, non-ASCII keys — which are then reachable only through bracket reads. Changing this requires a server restart."
+        },
         "mylua.diagnostics.enable": {
           "type": "boolean",
           "default": true,
@@ -280,8 +290,8 @@
             "hint",
             "off"
           ],
-          "default": "warning",
-          "description": "Severity when a call passes a different number of arguments than the resolved signature expects. Vararg (`...`) absorbs extras; any `---@overload` matching the count suppresses the diagnostic."
+          "default": "hint",
+          "markdownDescription": "Severity when a call passes a different number of arguments than the resolved signature expects. Vararg (`...`) absorbs extras; any `---@overload` matching the count suppresses the diagnostic.\n\n**Hint by default**: omitting trailing arguments is idiomatic Lua — they simply arrive as `nil` — so without `---@param` annotations marking which parameters are optional, this fires on a lot of correct code. `hint` underlines the call without adding to the Problems panel's error/warning counts. Raise it to `warning` on codebases that annotate their signatures."
         },
         "mylua.diagnostics.argumentTypeMismatch": {
           "type": "string",
@@ -302,8 +312,8 @@
             "hint",
             "off"
           ],
-          "default": "warning",
-          "description": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries."
+          "default": "hint",
+          "markdownDescription": "Severity when a function's `---@return` annotation doesn't match the actual `return` statements. Walks all nested returns (including inside `if`/`do`/`while`) but stops at inner function boundaries.\n\n**Hint by default**: a bare `return` for an early exit, and conditional branches returning different arities, are both ordinary Lua that this static comparison cannot tell apart from a genuine mismatch. Raise it to `warning` on codebases with disciplined `---@return` annotations."
         },
         "mylua.diagnostics.narrowByConditionGuard": {
           "type": "boolean",
