@@ -2,7 +2,7 @@
   "name": "mylua-lsp",
   "displayName": "My Lua Lsp",
   "description": "My Lua language support with EmmyLua annotations",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "publisher": "onemore",
   "repository": {
     "type": "git",

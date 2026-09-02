@@ -11,6 +11,8 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-09-02
+
 ### Added
 - 新增配置项 `mylua.tableShape.stringKeys`（bool，默认开启）：静态字符串键（`{ ["foo"] = 1 }`、`t["foo"] = 1`）是否登记为表字段。关闭后字符串键不贡献字段，同时该表被视作「字段集合不完整」，因此不会因此报出未知字段——用于强制 `.Name` 书写风格。
 - 新增配置项 `mylua.tableShape.stringKeysRequireIdentifier`（bool，默认开启）：在上一项开启时，是否要求键文本必须是合法 Lua 标识符（`[A-Za-z_][A-Za-z0-9_]*`）才登记。开启时字段集合恰好等于「`t.x` 能触达的东西」；关闭后 `t["a-b"]`、`t["1"]`、中文键也会登记，只能经方括号读取访问。
