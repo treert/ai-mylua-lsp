@@ -11,6 +11,9 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+### Fixed
+- 修复 `if A and B then` 形式的条件判断中，`then` 分支体内对 `A` 的读取被误报为 `Undefined global` 的问题。现在 `and` 链中任意操作数的存在性检查均可抑制其在 truthy 分支内的诊断（如 `if jit and jit.version then`，分支体内不再报 `Undefined global 'jit'`）。
+
 ## [1.0.0] - 2026-09-01
 
 ### Added

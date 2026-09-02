@@ -1,4 +1,20 @@
 
+-- ============================================================================
+-- 测试说明
+-- 本文件专门用于验证【诊断抑制】能力，核心场景是「判空逻辑」。
+--
+-- 即：在 if / and / or 等条件表达式里对一个可能未定义的全局变量做是否为 nil 的
+-- 判断，一旦判断通过（变量非 nil），则该分支内变量应被视为「存在」，从而抑制
+-- Undefined global 之类的诊断，不再报错。
+--
+-- 实现策略：低成本，尽量抑制。
+--   1. 只做结构性、语法层面的简单判断，不做复杂的流分析，也不做完整类型推断。
+--   2. 宁可少报（漏报真实错误），也不要因为拿不准而误报 —— 尽量抑制。
+--
+-- 本文件中的 gg_cpp_define_some / jit 等均为手写用例中「假定存在」的全局变量，
+-- 用于验证抑制逻辑，不代表真实代码里一定存在定义。
+-- ============================================================================
+
 -- 这儿的 gg_cpp_define_some 假设是 C++ 里可能定义注册进入 lua 全局表的。
 -- 虽然找不到 gg_cpp_define_some 的定义，但是这是再 if 里做逻辑判断，判断通过后，then 的语句块里，gg_cpp_define_some 就有定义了。
 -- 这种情况下 then 分支 gg_cpp_define_some 的类型可能用 any 来表示，或者用一个特殊的类型来表示 "可能存在的全局变量"。
@@ -40,3 +56,12 @@ local x = {}
 if x.m_some then
     print(x.m_some)
 end
+
+
+if jit and jit.version then
+    print(jit.version) -- 预期：不报 Undefined global 'jit'
+end
+
+local sock = lua_extension and lua_extension.luasocket and lua_extension.luasocket().tcp();-- 预期：不报 Undefined global 'lua_extension'
+local ttt = lua_extension -- 预期：报 Undefined global 'lua_extension'
+local ttt = lua_extension and lua_extension.luasocket -- 预期：不报 Undefined global 'lua_extension'

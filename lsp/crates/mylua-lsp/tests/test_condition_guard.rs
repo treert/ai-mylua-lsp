@@ -124,6 +124,47 @@ fn and_or_idiom_is_fully_guarded() {
 }
 
 #[test]
+fn and_condition_guards_then_branch_body() {
+    // `if jit and jit.version then` — the `jit` check in the condition
+    // should guard references to `jit` (and `jit.version`) inside the
+    // then-branch body. Currently this is a known bug: `jit.version` on
+    // the body line still fires "Undefined global 'jit'".
+    assert_all_guarded(
+        "\
+if jit and jit.version then
+    print(jit.version)
+end
+",
+    );
+}
+
+#[test]
+fn nested_and_chain_guards_later_operands() {
+    // Left-associative: ((A and B) and C). The bare `lua_extension` test
+    // in the first operand must vouch for the reads in every later one,
+    // including through a call (`...luasocket().tcp()`).
+    assert_all_guarded(
+        "local sock = lua_extension and lua_extension.luasocket and lua_extension.luasocket().tcp()\n",
+    );
+}
+
+#[test]
+fn and_chain_guard_does_not_leak_to_an_unguarded_read() {
+    let src = "\
+local a = lua_extension
+local b = lua_extension and lua_extension.luasocket
+";
+    let msgs = guardable_messages(src, true);
+    assert_eq!(
+        msgs.len(),
+        1,
+        "only the bare read on line 0 should report, got: {:#?}",
+        msgs
+    );
+    assert!(msgs[0].starts_with("0:"), "got: {:#?}", msgs);
+}
+
+#[test]
 fn while_condition_guards_loop_body() {
     assert_all_guarded(
         "\

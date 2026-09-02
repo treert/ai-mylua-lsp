@@ -356,12 +356,55 @@ fn condition_guards_path(
     let Some(condition) = condition else {
         return false;
     };
+    // A compound `A and B` condition: the region is entered only when
+    // *every* operand held, so in the truthy region any single operand
+    // that is an existence test for `path` suffices as a guard. The
+    // falsy region proves nothing about the individual operands (`A and B`
+    // being false does not say which one failed), so it is not decomposed.
+    if want_truthy && and_chain_guards(condition, path, source, want_truthy) {
+        return true;
+    }
     match classify_condition(condition, source) {
         Some((tested, truthy_means_exists)) => {
             same_path(&tested, path) && truthy_means_exists == want_truthy
         }
         None => false,
     }
+}
+
+/// Whether any operand of a (possibly nested) `and` chain is a positive
+/// existence test for `path`. Only meaningful for a truthy region.
+fn and_chain_guards(
+    condition: tree_sitter::Node,
+    path: &[String],
+    source: &[u8],
+    want_truthy: bool,
+) -> bool {
+    let node = if condition.is_kind(kind::PARENTHESIZED_EXPRESSION) {
+        let Some(inner) = condition.named_child(0) else {
+            return false;
+        };
+        inner
+    } else {
+        condition
+    };
+    if node.syntax_kind() != kind::BINARY_EXPRESSION {
+        return false;
+    }
+    let Some(op) = node.child_by_field(field::OPERATOR) else {
+        return false;
+    };
+    if node_text(op, source) != "and" {
+        return false;
+    }
+    let Some(left) = node.child_by_field(field::LEFT) else {
+        return false;
+    };
+    let Some(right) = node.child_by_field(field::RIGHT) else {
+        return false;
+    };
+    condition_guards_path(Some(left), path, source, want_truthy)
+        || condition_guards_path(Some(right), path, source, want_truthy)
 }
 
 /// Decompose an existence test into the path it probes and whether a
