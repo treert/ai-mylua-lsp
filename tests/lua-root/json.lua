@@ -119,7 +119,7 @@ end
 --- Decodes a JSON string and returns the decoded value as a Lua data structure / value.
 -- @param s string The string to scan.
 -- @param startPos? Optional starting position where the JSON string is located. Defaults to 1.
--- @return Lua object, number The object that was scanned, as a Lua table / string / number / boolean or nil,
+-- @return any, number The object that was scanned, as a Lua table / string / number / boolean or nil,
 -- and the position of the first character after
 -- the scanned JSON object.
 function json.decode(s, startPos)
