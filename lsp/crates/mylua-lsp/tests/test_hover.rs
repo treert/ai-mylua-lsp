@@ -1909,6 +1909,136 @@ print(_G.LuaPanda)
     );
 }
 
+// ---------------------------------------------------------------------------
+// Forward-declared locals: `local mgr` at the top, `mgr = create()` at the
+// bottom. The readers in between are closures, so they observe the assigned
+// value at run time even though it is written below them.
+// ---------------------------------------------------------------------------
+
+const FORWARD_DECL_SRC: &str = r#"local mgr;
+
+local function test_mgr()
+    mgr.do_something()
+    mgr.do_another_thing()
+    print(mgr.m_some)
+end
+
+local function create_mgr()
+    local mgr = {}
+
+    function mgr.do_something()
+    end
+
+    mgr.do_another_thing = function()
+    end
+
+    mgr.m_some = 123
+
+    return mgr
+end
+
+mgr = create_mgr()
+"#;
+
+#[test]
+fn hover_forward_declared_local_learns_from_later_assignment() {
+    let (doc, uri, mut agg) = setup_single_file(FORWARD_DECL_SRC, "forward_decl.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+    let view = mylua_lsp::document::DocumentStoreView::new(&docs);
+
+    // `mgr.do_something` on line 3 — declared with `function mgr.f()`.
+    let method = hover::hover(doc, intern_uri(&uri), pos(3, 9), &mut agg, &view)
+        .expect("hover on `mgr.do_something` must resolve");
+    let method_text = hover_content_string(&method);
+    assert!(
+        method_text.contains("do_something"),
+        "a forward-declared local must take the type of its later assignment, got: {}",
+        method_text
+    );
+
+    // `mgr.do_another_thing` on line 4 — declared with `mgr.f = function()`.
+    let assigned = hover::hover(doc, intern_uri(&uri), pos(4, 9), &mut agg, &view)
+        .expect("hover on `mgr.do_another_thing` must resolve");
+    let assigned_text = hover_content_string(&assigned);
+    assert!(
+        assigned_text.contains("do_another_thing"),
+        "a field bound to a function expression must resolve too, got: {}",
+        assigned_text
+    );
+
+    // `mgr.m_some` on line 5 — a plain number field.
+    let field = hover::hover(doc, intern_uri(&uri), pos(5, 14), &mut agg, &view)
+        .expect("hover on `mgr.m_some` must resolve");
+    let field_text = hover_content_string(&field);
+    assert!(
+        field_text.contains("number"),
+        "field type must come through the back-patched declaration, got: {}",
+        field_text
+    );
+}
+
+#[test]
+fn hover_forward_declared_local_prefers_first_informative_write() {
+    // `x = nil` teaches nothing about what `x` is for, so the declaration
+    // stays open for the real assignment that follows.
+    let src = r#"local x
+
+local function read()
+    print(x.field)
+end
+
+x = nil
+x = { field = "hello" }
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "forward_decl_nil.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(3, 13),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on `x.field` must resolve");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("string"),
+        "a `nil` write must not shadow the real assignment, got: {}",
+        text
+    );
+}
+
+#[test]
+fn hover_initialized_local_is_not_overwritten_by_later_assignment() {
+    // The declaration already carries a type, so a later write of a
+    // different type must not silently replace it.
+    let src = r#"local n = 1
+n = { field = "hello" }
+print(n)
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "forward_decl_initialized.lua");
+    let docs = HashMap::from([(intern_uri(&uri), doc)]);
+    let doc = docs.get(&intern_uri(&uri)).unwrap();
+
+    let result = hover::hover(
+        doc,
+        intern_uri(&uri),
+        pos(2, 6),
+        &mut agg,
+        &mylua_lsp::document::DocumentStoreView::new(&docs),
+    )
+    .expect("hover on `n` must resolve");
+    let text = hover_content_string(&result);
+    assert!(
+        text.contains("number") && !text.contains("field"),
+        "an initialized local keeps its declared type, got: {}",
+        text
+    );
+}
+
 /// Extract the text content from a Hover result.
 fn hover_content_string(h: &tower_lsp_server::ls_types::Hover) -> String {
     use tower_lsp_server::ls_types::HoverContents;

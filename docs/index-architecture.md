@@ -153,6 +153,18 @@ IfStatement   [整个 if … end]        ← 壳，无 declarations
 - 子字段枚举（补全、hover）直接遍历 `node.children`，O(children) 而非 O(全局条目数)；`_G` 的成员例外——规范化后其成员即 trie 根集合，改为遍历根节点
 - 全局链路某节点已绑定 Emmy 类型时，停止 GlobalTable 扩张，改走 Emmy 字段解析
 
+### 4.4 前置声明的局部变量回填
+
+`local mgr` 声明时没有初值，`ScopeDecl.type_fact` 为 `None`；值在文件后面的 `mgr = create_mgr()` 才写入。这是 Lua 常见写法（读 upvalue 比读全局快），读它的闭包往往写在赋值语句**上方**。
+
+`visit_assignment` 遇到裸名 LHS 且该名字解析到一个 `type_fact == None` 的可见局部声明时，把赋值右值（或语句上的 `---@type`）推断出的类型回填到该声明：
+
+- **只回填从未有过类型的声明**：因此只增加信息，不会与已有类型冲突；`local n = 1; n = {}` 保持 `number`
+- **跳过 `Unknown` 与 `nil` 写入**：`local x; x = nil; x = create()` 仍从 `create()` 学到类型
+- **首个有效写入胜出**：回填后 `type_fact` 不再是 `None`，后续赋值不再改写
+- **刻意 flow-insensitive**：事实作用于整个声明，包含位于赋值语句上方的读取——这些读取都在闭包里，运行时必然发生在赋值之后
+- 右值是 table 字面值时，与 `visit_local_declaration` 一样把变量名 stamp 到 shape 的 owner 上
+
 ---
 
 ## 5. 跨文件解析：链式追踪

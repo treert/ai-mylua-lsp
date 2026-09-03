@@ -1727,10 +1727,32 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
                     continue;
                 }
 
-                if ctx
+                // A local declared with no initializer (`local mgr`) is a
+                // forward declaration: its value arrives at a later
+                // assignment, very often *after* the closures that read it —
+                // `local mgr` … `local function f() mgr.step() end` …
+                // `mgr = create_mgr()`. That layout is idiomatic Lua (an
+                // upvalue read is cheaper than a global one), and nothing else
+                // in the pipeline ever revisits the declaration, so its
+                // `type_fact` stayed `None` forever and every read through it
+                // lost hover / goto / completion.
+                //
+                // Back-patch the declaration from the assignment instead.
+                // Only a declaration that never had a type is touched, so this
+                // can add information but never contradict it.
+                let existing_decl_is_untyped = ctx
                     .resolve_visible_in_build_scopes(&name, var_node.start_byte())
-                    .is_some()
-                {
+                    .map(|decl| decl.type_fact.is_none());
+                if let Some(is_untyped) = existing_decl_is_untyped {
+                    if is_untyped {
+                        backfill_forward_declared_local(
+                            ctx,
+                            &name,
+                            var_node,
+                            value_node,
+                            if i == 0 { pending_type.as_ref() } else { None },
+                        );
+                    }
                     continue;
                 }
 
@@ -1978,6 +2000,59 @@ fn visit_assignment(ctx: &mut BuildContext, node: tree_sitter::Node) {
             _ => {}
         }
     }
+}
+
+/// Give a forward-declared local (`local mgr` … `mgr = create_mgr()`) the type
+/// of its first informative assignment.
+///
+/// Deliberately flow-*insensitive*: the fact applies to the whole declaration,
+/// including reads that sit textually above the write. That is what makes the
+/// pattern this exists for work at all — the readers are closures, so they run
+/// after the assignment no matter where they are written.
+///
+/// `annotation` is the `---@type` attached to the assignment statement; it wins
+/// over the inferred right-hand side, exactly as it does on a
+/// `local_declaration`.
+///
+/// Returns `true` when the declaration was patched.
+fn backfill_forward_declared_local(
+    ctx: &mut BuildContext,
+    name: &str,
+    var_node: tree_sitter::Node,
+    value_node: Option<tree_sitter::Node>,
+    annotation: Option<&EmmyType>,
+) -> bool {
+    let (fact, from_annotation) = match annotation {
+        Some(type_expr) => (emmy_type_to_fact(type_expr), true),
+        None => match value_node {
+            Some(value) => (infer_expression_type(ctx, value, 0), false),
+            None => return false,
+        },
+    };
+
+    // `Unknown` teaches nothing, and an explicit `nil` write is never what the
+    // variable is *for*. Leaving the slot empty in both cases lets a later,
+    // real assignment fill it — `local x; x = nil; x = create()` still learns
+    // from `create()`.
+    if fact.is_uninformative() || matches!(fact, TypeFact::Known(KnownType::Nil)) {
+        return false;
+    }
+
+    // Same owner stamping as `visit_local_declaration`: a table literal on the
+    // right-hand side is named by the variable it lands in, so hover /
+    // signature help can tell two same-shaped tables apart.
+    if let TypeFact::Known(KnownType::Table(shape_id)) = &fact {
+        if let Some(shape) = ctx.table_shapes.get_mut(shape_id) {
+            shape.set_owner(name);
+        }
+    }
+
+    let Some(decl) = ctx.resolve_visible_in_build_scopes_mut(name, var_node.start_byte()) else {
+        return false;
+    };
+    decl.type_fact = Some(fact);
+    decl.is_emmy_annotated = from_annotation;
+    true
 }
 
 // ---------------------------------------------------------------------------
