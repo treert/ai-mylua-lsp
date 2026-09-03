@@ -152,11 +152,15 @@ pub(super) fn infer_expression_type(
 
         kind::VARIABLE | kind::IDENTIFIER => {
             let text = node_text(node, ctx.source);
-            // Check if it's a known local
+            // A lexically visible binding wins outright — including when its
+            // type is unknown. A name that resolves in the scope tree is never
+            // a global at run time, so falling through to the `GlobalRef` stub
+            // below would attach an unrelated same-named global to it (an
+            // untyped parameter, a loop variable, or a forward-declared local
+            // whose assignment taught nothing). `Unknown` is the honest answer.
+            // Mirrors `type_inference::infer_bare_name_fact` on the query side.
             if let Some(decl) = ctx.resolve_visible_in_build_scopes(text, node.start_byte()) {
-                if let Some(ref tf) = decl.type_fact {
-                    return tf.clone();
-                }
+                return decl.type_fact.clone().unwrap_or(TypeFact::Unknown);
             }
             // A free name `x` is sugar for `_ENV.x`. With `_ENV` redirected the
             // read targets that table's field; otherwise `_ENV` is the implicit

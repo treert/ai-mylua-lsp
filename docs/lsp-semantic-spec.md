@@ -220,6 +220,17 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
 **`EnvField` 无定义位置时必须静默**，不得回落到全局分支：此时名字确定**不是**全局，回落会跳到运行时不可达的同名符号上。
 
+**「作用域优先」同样约束类型事实推断，且判据是「有没有这个声明」而非「这个声明有没有类型」**。上表是导航身份（`BareName`）的解析顺序；裸名的**类型事实**由 §1.3 末尾那对入口给出（查询侧 `type_inference::infer_bare_name_fact`、构建侧 `summary_builder::type_infer`），两者的第 1 步必须问 `ScopeTree::resolve_decl`：
+
+| 提问方式 | 「没有这个 local」 | 「有这个 local，但类型未知」 |
+|---|---|---|
+| `resolve_decl` | `None` | `Some(decl)`，`decl.type_fact == None` |
+| `resolve_type` | `None` | `None` ← **两者不可分辨** |
+
+因此**不得**用 `resolve_type` 做这一步。名字在作用域里解析成功即意味着它运行时**绝不是**全局（`local x` 完全遮蔽全局 `x`），可 `resolve_type` 把「类型未知」也报成 `None`，于是这类名字一路落到第 4 步兜底成 `GlobalRef`，其后的字段链就去查工作区里的同名全局：无 `---@param` 的形参 `function f(cfg)` 让 `cfg.field` 跳进别的文件、`for _, item in …` 的循环变量、以及赋值推不出类型的前置声明（§1.3 的回填只在 RHS 有信息时生效）全都如此。
+
+正确答案是 `Unknown`——**这与既有行为一致**：类型已知但解析不出的 local（`local x = unknownCall()`）本来就得到 `Unknown` 并静默，「宁可不跳，也不跳到错误的文件」是这条路径的既定取向，只是「有声明、无类型」这一支此前漏掉了。两侧入口都要改，缺一即在另一侧静默失效（构建侧错的是索引里存下来的事实，比查询侧更难察觉）。
+
 **references 的两侧对称性**：`Identity::EnvField` 在每个候选位置**重新解析**（`env_field_location`），因此 `_ENV = expr` 的位置敏感性自动生效，重绑前后的 `g` 落在不同声明上而不合并；对称地 `verify_global` 也必须排除「该位置环境已重定向」，否则点击重绑**前**的 `g` 仍会把沙箱内的 `g` 算作同一符号。两者缺一即漏。
 
 **`document_highlight` 复用同一对函数**（`env_field_location` / `verify_global`），而不是自己判一遍——两者问的是同一个问题「这个出现点是不是同一个符号」，各写一份必然漂移。它多出的两处特化都是**放宽**而非另立规则：文件里没有重定向 `_ENV` 时整体跳过语义比对（高频请求的成本闸门，见 §1.3），以及显式接纳 `EnvField` 的定义位置本身（那常常是 table 字面量的键，重新解析根本不算裸名）。

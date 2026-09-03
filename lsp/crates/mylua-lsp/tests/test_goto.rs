@@ -1490,3 +1490,63 @@ print(tt)
         loc.range.start.line,
     );
 }
+
+// ---------------------------------------------------------------------------
+// A lexically visible binding is never a global, so a field access through one
+// must not fall back to a same-named global in another file. Covers every shape
+// that leaves `ScopeDecl.type_fact` empty: an unannotated parameter, a generic
+// `for` variable, and a forward declaration whose assignment taught nothing.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn goto_field_on_untyped_local_does_not_fall_back_to_global() {
+    const MAIN: &str = r#"local never_assigned
+
+local function read_never()
+    return never_assigned.field
+end
+
+local function read_param(cfg)
+    return cfg.field
+end
+
+for _, item in ipairs({}) do
+    print(item.field)
+end
+
+return read_never, read_param
+"#;
+    // Same names as globals elsewhere in the workspace — the bait the old
+    // `GlobalRef` fallback used to take.
+    const OTHER: &str = r#"never_assigned = { field = 1 }
+cfg = { field = 2 }
+item = { field = 3 }
+"#;
+
+    let (docs, mut agg, _) = setup_workspace(&[("main.lua", MAIN), ("other.lua", OTHER)]);
+    let uri = make_uri("main.lua");
+    let doc = docs.get(&intern_uri(&uri)).expect("main doc");
+
+    // `.field` column: line 3 `    return never_assigned.field`,
+    // line 7 `    return cfg.field`, line 11 `    print(item.field)`.
+    for (line, character, label) in [
+        (3, 27, "never_assigned.field"),
+        (7, 16, "cfg.field"),
+        (11, 15, "item.field"),
+    ] {
+        let result = goto::goto_definition(
+            doc,
+            intern_uri(&uri),
+            pos(line, character),
+            &mut agg,
+            &GotoStrategy::Auto,
+        );
+        assert!(
+            result.is_none(),
+            "`{}` resolves through a visible local of unknown type, so goto must \
+             report nothing rather than jump to the same-named global; got {:?}",
+            label,
+            result,
+        );
+    }
+}

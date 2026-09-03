@@ -49,7 +49,8 @@ pub(crate) fn env_field_base_fact_in_scope(
 /// grammar reaches a bare name through two node shapes — a plain `identifier`
 /// and a `variable` wrapping one — and both must apply the same rules:
 ///
-/// 1. a visible local / parameter wins (ordinary scope resolution);
+/// 1. a visible local / parameter wins (ordinary scope resolution), **whether
+///    or not its type is known** — see below;
 /// 2. a free name `x` is sugar for `_ENV.x`, so when `_ENV` points somewhere
 ///    other than the global environment the name is a field of *that* table.
 ///    This is checked **before** the built-in `_G` recognition below: `_G` is
@@ -70,14 +71,25 @@ pub(crate) fn env_field_base_fact_in_scope(
 /// Keeping this in one function is deliberate: the two node shapes previously
 /// each built their own `GlobalRef` stub, and a rule added to only one of them
 /// silently failed for the other.
+///
+/// **Step 1 must ask `resolve_decl`, not `resolve_type`** — the latter folds
+/// "no such local" and "local of unknown type" into the same `None`, so an
+/// untyped-but-visible binding used to fall through to step 4 and become a
+/// `GlobalRef`. A name that resolves lexically is *never* a global at run time
+/// (`local x` shadows the global `x` outright), so the resulting field lookups
+/// landed on a same-named global in some unrelated file: an untyped parameter
+/// `function f(cfg)` navigated `cfg.field` to a global `cfg`, and so did loop
+/// variables and forward-declared locals whose assignment taught nothing.
+/// `Unknown` is the honest answer, and matches what an unresolvable *typed*
+/// local already produced.
 fn infer_bare_name_fact(
     node: tree_sitter::Node,
     source: &[u8],
     scope_tree: &ScopeTree,
 ) -> TypeFact {
     let text = node_text(node, source);
-    if let Some(tf) = scope_tree.resolve_type(node.start_byte(), text) {
-        return tf.clone();
+    if let Some(decl) = scope_tree.resolve_decl(node.start_byte(), text) {
+        return decl.type_fact.clone().unwrap_or(TypeFact::Unknown);
     }
     if let Some(env_fact) = env_field_base_fact_in_scope(text, node.start_byte(), scope_tree) {
         return TypeFact::Stub(crate::type_system::SymbolicStub::FieldOf {
