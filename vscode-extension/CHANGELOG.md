@@ -11,8 +11,11 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-09-14
+
 ### Added
 - 新增配置参考文档 [CONFIGURATION.md](https://github.com/treert/ai-mylua-lsp/blob/master/vscode-extension/CONFIGURATION.md)：覆盖全部配置项的类型、默认值与说明。
+- 新增推荐写法文档 [BEST-PRACTICES.md](https://github.com/treert/ai-mylua-lsp/blob/master/vscode-extension/BEST-PRACTICES.md)：说明设计取舍对应的 Lua 代码与 EmmyLua 注解推荐用法（注释优于抑制、`_ENV` 沙箱写法、静态字符串键、stub 文件禁令等），README 同步以链接引用。
 
 ### Changed
 - README 配置章节精简为最常用项（诊断、注解库、内嵌提示），其余配置链接至配置参考文档。
