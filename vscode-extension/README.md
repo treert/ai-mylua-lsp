@@ -22,32 +22,29 @@ MyLua LSP 为 VS Code 提供 Lua 语言支持，内置 `mylua-lsp` 语言服务�
 
 ## 常用配置
 
-在 VS Code `settings.json` 中可按需调整：
+所有配置均有默认值，开箱即用。以下是最常调整的几项：
 
 ```jsonc
 {
-  // 额外注解库，例如 LÖVE、OpenResty 或项目内部 SDK 的 EmmyLua stubs
+  // 诊断范围：full（默认）诊断整个工作区；
+  // 大型项目可改为 "openOnly"，只诊断已打开的文件，避免大量警告堆积。
+  "mylua.diagnostics.scope": "full",
+
+  // 额外的 EmmyLua 注解库目录（LÖVE、OpenResty、内部 SDK 等），
+  // 支持绝对路径、~/… 与相对首个工作区根目录的路径
   "mylua.workspace.library": ["./typings"],
 
-  // 是否自动加载扩展内置 Lua 标准库注解
-  "mylua.workspace.useBundledStdlib": true,
-
-  // 诊断范围：full 诊断整个工作区；openOnly 只诊断已打开文件
-  "mylua.diagnostics.scope": "full"
+  // 觉得内嵌提示太吵时关闭
+  "mylua.inlayHint.enable": true
 }
 ```
 
-如果需要使用自定义语言服务器二进制，可设置 `mylua.server.path`：
+### 两个不常用但影响较大的配置
 
-```jsonc
-{
-  "mylua.server.path": {
-    "win32": "C:/tools/mylua-lsp.exe",
-    "darwin": "/usr/local/bin/mylua-lsp",
-    "linux": "/usr/local/bin/mylua-lsp"
-  }
-}
-```
+- **`mylua.require.aliases`** — require 路径别名（点分前缀匹配，最长前缀优先）。项目里用了 `require('@utils.foo')` 这类别名时必须配置，否则别名模块的跳转与返回值类型推断都无法解析。例：`{ "@": "src", "@utils": "src.utils" }`
+- **`mylua.performance.slowParseKeepTreeThresholdMs`** — 冷启动扫描期间的语法树保留阈值（默认 500ms）：扫描时只有解析慢于该值的文件保留语法树，其余只留索引摘要，因此初始内存占用较低。注意它**只影响初始扫描**——之后使用查找引用等需要语法树的功能时，会重新解析并常驻内存，**第一次查找引用比较慢**。内存占用可在状态栏 mylua 的tip里看到，上限约为源码总量的 30 倍（索引信息约 10 倍 + 语法树约 20 倍）。**如果你的项目文件数量较少，降低这个值到 0，就会全部缓存语法树。**
+
+Lua 版本、诊断细项等全部配置见[配置参考](./CONFIGURATION.md)。
 
 ## EmmyLua 注解支持
 
@@ -72,19 +69,7 @@ MyLua LSP 支持 **UTF-8**（含 BOM）和 **UTF-16**（LE/BE，需 BOM）编码
 
 开启 `mylua.debug.fileLog` 后可在 `.vscode/mylua-lsp.log` 中查看被跳过的文件列表。
 
-### 想减少大型项目的诊断开销？
-
-可以将诊断范围改为只处理已打开文件：
-
-```jsonc
-{
-  "mylua.diagnostics.scope": "openOnly"
-}
-```
-
 ## 反馈
 
 问题与建议请提交到仓库 Issues：<https://github.com/treert/ai-mylua-lsp/issues>
-
-开发、构建和发布说明见仓库文档：<https://github.com/treert/ai-mylua-lsp/blob/master/docs/vscode-extension.md>
 
