@@ -11,6 +11,12 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-09-16
+
+### Changed
+- 精简推荐写法文档。开篇给出 EmmyLua / LuaLS 官方注解参考链接，正文聚焦 mylua-lsp 特有约定。
+- README「延伸阅读」链接改为 GitHub 绝对路径，修复市场页面跳转错误。
+
 ## [1.0.3] - 2026-09-14
 
 ### Added

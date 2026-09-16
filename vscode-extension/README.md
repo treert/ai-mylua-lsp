@@ -47,8 +47,8 @@ MyLua LSP 为 VS Code 提供 Lua 语言支持，内置 `mylua-lsp` 语言服务�
 
 ## 延伸阅读
 
-- 全部配置项（Lua 版本、诊断细项等）见[配置参考](./CONFIGURATION.md)。
-- mylua-lsp 在设计上做了一些取舍：某些写法能获得更精确的跳转、类型与诊断，另一些惯用法则有意不支持。对 Lua 代码与 EmmyLua 注解的推荐用法见[推荐写法](./BEST-PRACTICES.md)。
+- 全部配置项（Lua 版本、诊断细项等）见[配置参考](https://github.com/treert/ai-mylua-lsp/blob/master/vscode-extension/CONFIGURATION.md)。
+- mylua-lsp 在设计上做了一些取舍：某些写法能获得更精确的跳转、类型与诊断，另一些惯用法则有意不支持。对 Lua 代码与 EmmyLua 注解的推荐用法见[推荐写法](https://github.com/treert/ai-mylua-lsp/blob/master/vscode-extension/BEST-PRACTICES.md)。
 
 ## 常见问题
 
