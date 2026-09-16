@@ -391,12 +391,12 @@ end
 #[test]
 fn repro_cross_file_conditional_global_custom_require() {
     // 复现实际项目场景：
-    // - _CNPve 通过条件赋值定义（if not _CNPve then _CNPve = {...} end）
-    // - _CNPve.CNPveRequire 定义在 game_entry.lua
-    // - 在 caller.lua 中跨文件调用 _CNPve.CNPveRequire("Gameplay.target")
+    // - _MgrMgr 通过条件赋值定义（if not _MgrMgr then _MgrMgr = {...} end）
+    // - _MgrMgr.CustomRequire 定义在 game_entry.lua
+    // - 在 caller.lua 中跨文件调用 _MgrMgr.CustomRequire("Gameplay.target")
     // - transform ^Gameplay\. 删除前缀 → "target"
-    let game_entry_src = r#"if not _CNPve then
-    _CNPve = {
+    let game_entry_src = r#"if not _MgrMgr then
+    _MgrMgr = {
         FeatureName = "NC"
     }
 end
@@ -405,7 +405,7 @@ end
 ---@customrequire param=luaPath ^Gameplay\.
 --- @param luaPath string @相对 Feature.NC.Script 的 lua 路径
 --- @return any
-function _CNPve.CNPveRequire(luaPath)
+function _MgrMgr.CustomRequire(luaPath)
     local CNPveLuaPath = string.format("%s.%s", "Misc", luaPath)
     return require(CNPveLuaPath)
 end
@@ -424,7 +424,7 @@ return target
 "#;
 
     let caller_src = r#"require("game_entry")
-local a = _CNPve.CNPveRequire("Gameplay.target")
+local a = _MgrMgr.CustomRequire("Gameplay.target")
 a.version
 "#;
 
