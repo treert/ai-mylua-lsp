@@ -136,6 +136,7 @@ impl From<&LspConfig> for DefaultsProbe {
             runtime: json!({
                 "version": c.runtime.version,
                 "topKeyword": c.runtime.top_keyword,
+                "emmyCommentParsing": emmy_comment_parsing(&c.runtime.emmy_comment_parsing),
             }),
             require: json!({ "aliases": c.require.aliases }),
             workspace: json!({
@@ -227,5 +228,13 @@ fn references_strategy(v: &mylua_lsp::config::ReferencesStrategy) -> &'static st
         Best => "best",
         Merge => "merge",
         Select => "select",
+    }
+}
+
+fn emmy_comment_parsing(v: &mylua_lsp::config::EmmyCommentParsingMode) -> &'static str {
+    use mylua_lsp::config::EmmyCommentParsingMode::*;
+    match v {
+        Strict => "strict",
+        Legacy => "legacy",
     }
 }

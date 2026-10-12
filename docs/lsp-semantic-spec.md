@@ -170,6 +170,8 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 
 `---@class`、`---@alias` 等进入工作区类型表。解析顺序：本文件 → 工作区。
 
+**注解来源只认 `---` 文档注释行**（`mylua.runtime.emmyCommentParsing` = `strict`，默认）。块注释（`--[[ ... ]]`）内容只作为 hover 描述文本收集，其中形如 `@param` 的行**不会**被解析为注解；普通 `--` 行注释同理。判据收在 `emmy::parse_emmy_comments_with` 单点：strict 模式下不带 `---` 前缀的行一律跳过——块注释内容在 `collect_preceding_comments` 里以原文（无前缀）形式收集，因此天然落进这条排除规则。`legacy` 模式（历史行为）恢复宽松解析：块注释内容转成 `--- 行` 形式参与解析、`--` 前缀行同样接受。该开关与 `tableShape.*` 一样在 `initialize` 时固定（注解在建索引时写入 `DocumentSummary`）。
+
 ### 1.5.1 Table shape 的键
 
 一张表的字段来自三种写法，**必须得到同一个结论**（否则同一次写入换个拼法就换个语义）：
@@ -321,6 +323,7 @@ Lua 5.2+ 把每个 chunk 编译为「首个 upvalue 为 `_ENV`」的函数，自
 | `debug.fileLog` | boolean | 写调试日志到 `.vscode/mylua-lsp.log` |
 | `runtime.version` | `"5.3"` \| `"5.4"` | Lua 运行时版本 |
 | `runtime.topKeyword` | boolean | 启用列 0 关键字分割（改善错误定位） |
+| `runtime.emmyCommentParsing` | `"strict"` \| `"legacy"` | 哪些注释形态解析为 EmmyLua 注解（见 §1.5，需重启） |
 | `require.aliases` | object | require 路径别名，最长前缀匹配 |
 | `workspace.include` | string[] | 索引包含的 glob 模式 |
 | `workspace.exclude` | string[] | 索引排除的 glob 模式 |

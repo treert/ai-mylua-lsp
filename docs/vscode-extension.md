@@ -41,7 +41,7 @@
 **`affectsRestartRelevantConfig` 是总闸门**：它返回 false 时连 `didChangeConfiguration` 通知都不会发出，所以某个键漏在这里不只是"不提示重启"，而是服务端**完全收不到**该变更。现同样由清单派生，仅排除 `server.autoRestartOnConfigChange`（它本身就是重启偏好）。
 
 - MyLua 配置变更后默认由扩展自动重启 LSP；设置 `mylua.server.autoRestartOnConfigChange=false` 后改为弹窗询问
-- 部分配置即使重新下发也需重启才生效（`runtime.topKeyword`、`workspace.priorityKeyword`、`tableShape.*`），原因见 [`lsp-semantic-spec.md` §1.5.1](lsp-semantic-spec.md) 与 `handlers.rs` 中 `did_change_configuration` 的注释
+- 部分配置即使重新下发也需重启才生效（`runtime.topKeyword`、`runtime.emmyCommentParsing`、`workspace.priorityKeyword`、`tableShape.*`），原因见 [`lsp-semantic-spec.md` §1.5 / §1.5.1](lsp-semantic-spec.md) 与 `handlers.rs` 中 `did_change_configuration` 的注释
 
 
 

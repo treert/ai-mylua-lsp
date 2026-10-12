@@ -161,7 +161,7 @@ Tree-sitter ERROR/MISSING 节点自动转为诊断。
 
 `narrowByConditionGuard`（bool，默认 true）不产生诊断，只抑制上表中 `undefined-global` / `unknown-field` 两类，详见下文同名小节。
 
-`@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。
+`@param` 名称不匹配诊断随 `diagnostics.enable` 开关启停，也可用 `---@diagnostic disable: param-annotation` 抑制。该诊断只校验 `---` 文档注释行里的注解（`runtime.emmyCommentParsing` 默认 `strict`）；块注释 `--[[ ... ]]` 内的 `@param` 文本不会被当作注解来源，因此不产生此类误报。`legacy` 模式可恢复历史行为，见 [`lsp-semantic-spec.md` §1.5](lsp-semantic-spec.md)。
 
 `luaFieldError` / `luaFieldWarning` 的分工取决于 table shape 是否「字段集合穷尽」（`is_closed`）：穷尽时未知字段用前者，非穷尽时用后者。哪些写法会让 shape 失去穷尽性（动态键、`setmetatable` / `rawset`、被策略丢弃的标识符型字符串键），以及静态字符串键 `{ ["foo"] = 1 }` / `t["foo"] = 1` 何时登记为字段（`tableShape.stringKeys`、`tableShape.stringKeysRequireIdentifier` 两个开关），见 [`lsp-semantic-spec.md` §1.5.1](lsp-semantic-spec.md)。
 

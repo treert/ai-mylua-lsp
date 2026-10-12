@@ -192,7 +192,9 @@ fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<Com
         return None;
     }
     // Require the current line (trim_start) to begin with `--`, covering
-    // both `---@tag` (EmmyLua canonical) and `-- @tag` (occasional).
+    // both `---@tag` (EmmyLua canonical) and `-- @tag` (occasional). In
+    // strict mode only `---` qualifies: `-- @tag` lines are not annotation
+    // sources there, so suggesting tags behind them would mislead.
     let at_pos = i - 1;
     let line_start = bytes[..at_pos]
         .iter()
@@ -201,7 +203,12 @@ fn try_emmy_tag_completion(doc: &Document, position: Position) -> Option<Vec<Com
     let prefix_to_at = std::str::from_utf8(&bytes[line_start..at_pos])
         .ok()?
         .trim_start();
-    if !prefix_to_at.starts_with("--") {
+    let required_prefix = if crate::emmy::emmy_comment_parsing_legacy() {
+        "--"
+    } else {
+        "---"
+    };
+    if !prefix_to_at.starts_with(required_prefix) {
         return None;
     }
 

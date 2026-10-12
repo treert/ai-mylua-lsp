@@ -11,6 +11,9 @@ MyLua LSP 扩展的版本变更记录。
 
 ## [Unreleased]
 
+### Changed
+- EmmyLua 注解来源收紧：默认（`mylua.runtime.emmyCommentParsing = "strict"`）只有 `---` 文档注释行会被解析为注解，与 EmmyLua 规范一致。块注释（`--[[ ... ]]`）内的 `@tag` 文本此前会被当作注解参与解析，导致紧邻函数的块注释里随手写的 `@param` 触发「`@param 'x'` does not match any Lua parameter」误报；现在块注释内容只作为 hover 描述文本展示，不再解析。普通 `--` 行注释同理。如需历史行为可切换为 `"legacy"`（该项在启动时固定，修改后需重启语言服务）。
+
 ## [1.0.4] - 2026-09-16
 
 ### Changed

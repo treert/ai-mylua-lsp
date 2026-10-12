@@ -53,6 +53,14 @@ local d = Direction.Up
 
 print(origin:length(), p.x, ev, d)
 
+
+--[[
+@param InX lala
+]]
+---@param InA number
+---@param InB number
+local function test_func_comment(InA, InB) end
+
 return {
     Vector2 = Vector2,
     Direction = Direction,

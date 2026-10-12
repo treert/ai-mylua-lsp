@@ -221,6 +221,11 @@ fn extract_block_comment_lines(text: &str) -> Option<Vec<String>> {
     if !text.starts_with("--[") {
         return None;
     }
+    // Strict mode: `--[[ ... ]]` block comments are not annotation sources
+    // (only `---` doc lines are), so there is nothing to validate here.
+    if !crate::emmy::emmy_comment_parsing_legacy() {
+        return None;
+    }
     let bytes = text.as_bytes();
     let mut i = 3;
     while i < bytes.len() && bytes[i] == b'=' {

@@ -59,6 +59,7 @@ MyLua LSP 的全部配置项。所有配置均有默认值，可在 VS Code 设�
 |------|------|--------|------|
 | `mylua.runtime.version` | string | `"5.4"` | 假定的 Lua 版本（`5.3` / `5.4`）。影响 `undefinedGlobal` 抑制所用的内置标识符集，以及 `mylua.workspace.useBundledStdlib` 加载的内置 stdlib stubs 版本（当前仅内置 5.4，请求 5.3 时回退到最新可用版本） |
 | `mylua.runtime.topKeyword` | bool | `false` | 解析器顶层关键字切分。开启后，列 0 的关键字（`if`、`while`、`for`、`function` 等）产生特殊的 `TOP_WORD_*` token 强制闭合当前块——错误定位更前置，但要求嵌套代码必须缩进。单文件可用 `---#enable top_keyword` / `---#disable top_keyword` 指令覆盖 |
+| `mylua.runtime.emmyCommentParsing` | string | `"strict"` | 哪些注释形态会被解析为 EmmyLua 注解。`strict`：只有 `---` 文档注释行是注解来源——块注释（`--[[ ... ]]`）内容仅作为 hover 描述文本展示，其中的 `@tag` 行不会被解析；普通 `--` 行注释同理，与 EmmyLua 规范（`---@tag` 行）一致。`legacy`：历史行为——块注释与普通注释里的 `@tag` 文本同样参与解析。启动时固定，修改后需重启语言服务 |
 
 ## 模块解析
 

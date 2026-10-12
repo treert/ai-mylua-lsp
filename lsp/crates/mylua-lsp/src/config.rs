@@ -92,6 +92,36 @@ pub struct RuntimeConfig {
     /// / `---#disable top_keyword` directives.
     #[serde(rename = "topKeyword")]
     pub top_keyword: bool,
+    /// Which comment forms are parsed as EmmyLua annotations.
+    ///
+    /// Pinned at `initialize` like the other summary-affecting switches —
+    /// see `emmy::set_emmy_comment_parsing_legacy`.
+    #[serde(rename = "emmyCommentParsing")]
+    pub emmy_comment_parsing: EmmyCommentParsingMode,
+}
+
+/// `mylua.runtime.emmyCommentParsing` — which comment forms are parsed as
+/// EmmyLua annotations.
+///
+/// - `Strict` (default): only `---` doc-comment lines are annotation
+///   sources. Block comment (`--[[ ... ]]`) content is collected as
+///   description text for hover but never parsed for `@tag`s; plain `--`
+///   line comments are likewise display-only. Matches the EmmyLua spec,
+///   where annotations must be written as `---@tag` lines.
+/// - `Legacy`: historical behavior — block comment content is converted to
+///   `--- line` form and parsed, and plain `--` comments starting with
+///   `@tag` are parsed too.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum EmmyCommentParsingMode {
+    Strict,
+    Legacy,
+}
+
+impl Default for EmmyCommentParsingMode {
+    fn default() -> Self {
+        Self::Strict
+    }
 }
 
 impl Default for RuntimeConfig {
@@ -104,6 +134,7 @@ impl Default for RuntimeConfig {
             // annotations that match the assumed runtime.
             version: "5.4".to_string(),
             top_keyword: false,
+            emmy_comment_parsing: EmmyCommentParsingMode::Strict,
         }
     }
 }

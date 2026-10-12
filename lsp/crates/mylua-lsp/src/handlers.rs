@@ -81,6 +81,13 @@ impl LanguageServer for Backend {
                 cfg.table_shape.string_keys,
                 cfg.table_shape.string_keys_require_identifier,
             );
+            // Same pinning rule: annotations are baked into resident
+            // summaries at build time, so the comment-source policy must not
+            // change mid-session.
+            crate::emmy::set_emmy_comment_parsing_legacy(
+                cfg.runtime.emmy_comment_parsing
+                    == crate::config::EmmyCommentParsingMode::Legacy,
+            );
             *self.config.lock().unwrap() = cfg;
         }
 
@@ -597,6 +604,9 @@ impl LanguageServer for Backend {
         // `tableShape.*` is pinned for the same reason as the parser mode:
         // it is baked into every resident `DocumentSummary` at build time,
         // and we do not re-index the workspace on a config change.
+        // `runtime.emmyCommentParsing` is pinned likewise — annotations are
+        // baked into resident summaries, so mid-session changes need a
+        // restart to take effect.
         set_priority_keywords(cfg.workspace.priority_keyword.clone());
         *self.config.lock().unwrap() = cfg;
     }

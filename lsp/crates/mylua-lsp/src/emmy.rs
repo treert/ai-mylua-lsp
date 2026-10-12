@@ -7,6 +7,7 @@
 
 use crate::syntax_kind::{kind, NodeKindExt};
 use std::fmt::{self, Write as _};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 // ===========================================================================
 // AST types (emmy.bnf Part 4 → Rust)
@@ -1158,15 +1159,51 @@ fn parse_type_list(tz: &mut Tokenizer) -> Vec<EmmyType> {
 // Annotation-level parser (emmy.bnf Part 3)
 // ===========================================================================
 
+/// `mylua.runtime.emmyCommentParsing = "legacy"` — process global, pinned at
+/// `initialize` for the same reason as the `tableShape` switches: annotations
+/// are baked into resident `DocumentSummary`s, and a mid-session change would
+/// leave the index half-converted.
+static EMMY_COMMENT_PARSING_LEGACY: AtomicBool = AtomicBool::new(false);
+
+/// Pin the annotation-source policy. Called once from `initialize` before any
+/// summary is built.
+pub fn set_emmy_comment_parsing_legacy(legacy: bool) {
+    EMMY_COMMENT_PARSING_LEGACY.store(legacy, Ordering::Relaxed);
+}
+
+/// Whether the legacy lenient policy is active (mutating this from a test
+/// would race every other test in the same binary; unit tests use
+/// [`parse_emmy_comments_with`] instead).
+pub(crate) fn emmy_comment_parsing_legacy() -> bool {
+    EMMY_COMMENT_PARSING_LEGACY.load(Ordering::Relaxed)
+}
+
 pub fn parse_emmy_comments(comment_text: &str) -> Vec<EmmyAnnotation> {
+    parse_emmy_comments_with(comment_text, emmy_comment_parsing_legacy())
+}
+
+/// The parse itself, with the policy passed in (unit-testable).
+///
+/// - Strict (default): only `---` doc-comment lines are annotation sources.
+///   Block comment content collected by [`collect_preceding_comments`] is
+///   pushed raw (no comment prefix) and therefore never parses; plain `--`
+///   lines are rejected too.
+/// - Legacy: any `--`-prefixed line whose content starts with `@tag` parses,
+///   which is how block comment text (`--[[ @param x T ]]`) historically
+///   became annotations.
+pub fn parse_emmy_comments_with(comment_text: &str, legacy: bool) -> Vec<EmmyAnnotation> {
     let mut annotations = Vec::new();
 
     for line in comment_text.lines() {
         let line = line.trim();
         let content = if let Some(rest) = line.strip_prefix("---") {
             rest.trim()
-        } else if let Some(rest) = line.strip_prefix("--") {
-            rest.trim()
+        } else if legacy {
+            if let Some(rest) = line.strip_prefix("--") {
+                rest.trim()
+            } else {
+                continue;
+            }
         } else {
             continue;
         };
@@ -1563,12 +1600,30 @@ pub(crate) fn is_comment_separator_line(text: &str) -> bool {
     text.trim_start().bytes().take_while(|b| *b == b'-').count() >= 4
 }
 
+/// Format one line of `--[[ ... ]]` block comment content for the collected
+/// comment list.
+///
+/// - Legacy: `--- {line}` — the `---` prefix makes `@tag` lines parse as
+///   annotations downstream (historical behavior).
+/// - Strict: raw `{line}` — no comment prefix, so
+///   [`parse_emmy_comments_with`] skips it; hover still displays it because
+///   `extract_doc_lines` accepts unprefixed lines as block-comment content.
+pub(crate) fn format_block_comment_line(line: &str, legacy: bool) -> String {
+    if legacy {
+        format!("--- {}", line.trim_end())
+    } else {
+        line.trim_end().to_string()
+    }
+}
+
 /// Collect comment lines immediately before a given node.
 ///
 /// Collects all consecutive preceding comment siblings:
 /// - `emmy_comment` nodes (`---@xxx` lines)
 /// - `---` line comments (Emmy doc lines)
-/// - `--[[ ... ]]` block comments (content converted to `--- line` format)
+/// - `--[[ ... ]]` block comments — legacy mode converts content to
+///   `--- line` format (making `@tag` lines parse as annotations); strict
+///   mode keeps content raw (display-only, never parsed)
 /// - `--` plain line comments (kept as-is for doc display)
 ///
 /// Pure hyphen comment separators (`----` and longer) terminate collection,
@@ -1627,7 +1682,7 @@ pub fn collect_preceding_comments<'a>(
                 if let Some(content) = extract_block_comment_content(text) {
                     let block_lines: Vec<String> = content
                         .lines()
-                        .map(|l| format!("--- {}", l.trim_end()))
+                        .map(|l| format_block_comment_line(l, emmy_comment_parsing_legacy()))
                         .collect();
                     comments.extend(block_lines.into_iter().rev());
                     next_start_row = prev.start_position().row;
@@ -3053,6 +3108,54 @@ mod tests {
     fn extract_block_comment_not_block() {
         assert_eq!(extract_block_comment_content("-- regular comment"), None);
         assert_eq!(extract_block_comment_content("--- emmy comment"), None);
+    }
+
+    // -- Annotation source policy (strict vs legacy) --
+
+    #[test]
+    fn strict_parsing_accepts_doc_comment_lines_only() {
+        // `---`-prefixed lines parse in both modes, spaced tag or not.
+        for legacy in [false, true] {
+            let anns = parse_emmy_comments_with(
+                "---@param x number\n--- @param y string\nplain text line",
+                legacy,
+            );
+            let params: Vec<&String> = anns
+                .iter()
+                .filter_map(|a| match a {
+                    EmmyAnnotation::Param { name, .. } => Some(name),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(params, vec!["x", "y"], "legacy={legacy}");
+        }
+    }
+
+    #[test]
+    fn strict_parsing_rejects_plain_comment_lines() {
+        // `-- @tag` plain comments: legacy parses them, strict does not.
+        let legacy = parse_emmy_comments_with("-- @param x number", true);
+        assert_eq!(legacy.len(), 1);
+        let strict = parse_emmy_comments_with("-- @param x number", false);
+        assert!(strict.is_empty());
+    }
+
+    #[test]
+    fn strict_block_comment_lines_never_parse() {
+        // Block comment content collected raw (no `--` prefix) is skipped in
+        // strict mode even when the line itself looks like an annotation.
+        let strict = parse_emmy_comments_with("@param InX lala\n---@param a number", false);
+        assert_eq!(strict.len(), 1);
+        // Legacy formatting (`--- ` prefix) does parse.
+        let legacy = parse_emmy_comments_with("--- @param InX lala", true);
+        assert_eq!(legacy.len(), 1);
+    }
+
+    #[test]
+    fn format_block_comment_line_by_mode() {
+        assert_eq!(format_block_comment_line("@param InX lala", true), "--- @param InX lala");
+        assert_eq!(format_block_comment_line("@param InX lala", false), "@param InX lala");
+        assert_eq!(format_block_comment_line("Misc System Library  ", false), "Misc System Library");
     }
 
     // -- Description capture: non-ASCII + separators --

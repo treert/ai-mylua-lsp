@@ -1917,7 +1917,13 @@ fn strip_doc_comment_prefix_preserving_indent(line: &str) -> Option<&str> {
         }
         return Some(rest);
     }
-    line.strip_prefix("--")
+    if let Some(rest) = line.strip_prefix("--") {
+        return Some(rest);
+    }
+    // No comment prefix: strict-mode `--[[ ... ]]` block comment content,
+    // collected raw by `collect_preceding_comments`. Display-only — it is
+    // never an annotation source.
+    Some(line)
 }
 
 fn trim_one_comment_padding_space(text: &str) -> &str {

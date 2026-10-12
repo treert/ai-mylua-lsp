@@ -2289,6 +2289,39 @@ local function f(a) return a end
 }
 
 #[test]
+fn block_comment_param_text_is_not_an_annotation_source() {
+    // Strict mode (default): `--[[ ... ]]` block comment content is
+    // description text only. `@param InX` inside must NOT produce a
+    // "does not match any Lua parameter" warning — only real `---` doc
+    // lines are validated.
+    let src = r#"--[[
+@param InX lala
+]]
+---@param InA number
+---@param InB number
+local function test_func_comment(InA, InB) end
+"#;
+    let (doc, uri, mut agg) = setup_single_file(src, "block_comment_param.lua");
+    let cfg = DiagnosticsConfig::default();
+    let diags = diagnostics::collect_semantic_diagnostics_id(
+        doc.root_node().unwrap(),
+        src.as_bytes(),
+        summary_id_by_uri(&agg, &uri),
+        &mut agg,
+        &doc.scope_tree,
+        &cfg,
+        doc.line_index(),
+    );
+    assert!(
+        diags
+            .iter()
+            .all(|d| !d.message.contains("does not match any Lua parameter")),
+        "block comment @param text must not warn in strict mode, got: {:?}",
+        diags,
+    );
+}
+
+#[test]
 fn method_self_param_annotation_reports_no_warning() {
     let src = r#"
 ---@param self T
